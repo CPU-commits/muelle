@@ -155,20 +155,20 @@ proyecto (auditfy)
 | `projects` | `id`, `slug` (único), `name`, `created_at` |
 | `stages` | `id`, `project_id`, `slug` (único por proyecto), `created_at` |
 | `apps` | `id`, `stage_id`, `slug` (único por stage), `kind` (`service`\|`compose`), `spec` (JSON, solo si es `service`), `compose_yaml` (solo si es `compose`), `deploy_timeout_s` (por defecto 300), `storage_node_id` (nodo donde viven sus volúmenes), `config_changed_at`, `last_deployed_at` |
-| `env_vars` | `id`, `owner_type` (`stage`\|`app`), `owner_id`, `key`, `value` (cifrado, siempre), `secret` (bool), `updated_at`; único (`owner_type`, `owner_id`, `key`) |
+| `env_vars` | `id`, `stage_id` o `app_id` (exactamente uno, con borrado en cascada), `key`, `value` (cifrado, siempre), `secret` (bool), `updated_at`; única la clave por dueño |
 | `domains` | `id`, `app_id`, `hostname` (único global), `target_service`, `target_port`, `proxied` (bool), `tls_mode` (`cloudflare`\|`http`), `cf_zone_id`, `cf_record_id` (nulo si muelle no maneja el registro), `status` (`pending`\|`active`\|`error`), `last_error`, `cert_issuer`, `cert_expires_at` |
 | `deploys` | `id`, `app_id`, `status` (`queued`\|`running`\|`succeeded`\|`failed`\|`superseded`), `images` (JSON `servicio → ref@digest`), `trigger` (`panel`\|`api`\|`rollback`), `actor_type` (`user`\|`token`), `actor_id`, `error`, `log` (texto, truncado a 256 KB), `created_at`, `started_at`, `finished_at` |
 | `registries` | `id`, `host` (único), `username`, `password` (cifrado) |
-| `users` | `id`, `username` (único), `password_hash`, `totp_secret` (cifrado, nulo si no tiene 2FA), `created_by`, `created_at`, `failed_logins`, `locked_until` |
+| `users` | `id`, `username` (único), `password_hash`, `totp_secret` (cifrado, nulo si no tiene 2FA), `totp_pending` (cifrado, generado pero sin confirmar), `created_by`, `created_at`, `failed_logins`, `locked_until` |
 | `invites` | `id`, `token_hash`, `created_by`, `expires_at`, `used_at` |
-| `sessions` | `id_hash`, `user_id`, `created_at`, `last_seen_at`, `expires_at`, `user_agent`, `ip` |
+| `sessions` | `id_hash`, `user_id`, `mfa_pending` (contraseña correcta, falta el código TOTP), `created_at`, `last_seen_at`, `expires_at`, `user_agent`, `ip` |
 | `api_tokens` | `id`, `name`, `token_hash`, `project_id`, `stage_id` (nulo = todo el proyecto), `created_by`, `last_used_at`, `expires_at` (opcional) |
 | `audit_events` | `id`, `actor_type`, `actor_id`, `action`, `target`, `details` (JSON, sin valores secretos), `at` |
 | `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain`, `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` |
 
 ### 5.2 Reglas
 
-1. **Slugs.** Proyecto y app: `^[a-z][a-z0-9-]{0,15}$`. Stage: `^[a-z][a-z0-9-]{0,11}$`. Servicio dentro de una app compose: `^[a-z][a-z0-9-]{0,15}$`. Como el `_` no es válido en un slug, sirve de separador: stack `proyecto_stage_app`, servicio Swarm `proyecto_stage_app_servicio`, que nunca pasa de 63 caracteres.
+1. **Slugs.** Solo `[a-z0-9-]`, empiezan con letra y no terminan en `-`. Proyecto, app y servicio de una app compose: hasta 16 caracteres (`^[a-z]([a-z0-9-]{0,14}[a-z0-9])?$`). Stage: hasta 12 (`^[a-z]([a-z0-9-]{0,10}[a-z0-9])?$`). Como el `_` no es válido en un slug, sirve de separador: stack `proyecto_stage_app`, servicio Swarm `proyecto_stage_app_servicio`, que nunca pasa de 63 caracteres.
 2. **Nombres de servicio únicos por stage.** `docker stack deploy` registra el nombre corto de cada servicio como alias en sus redes, y todas las apps de un stage comparten la red del stage. Si dos apps del mismo stage tuvieran un servicio `web`, Docker repartiría el tráfico entre ambos. En una app de formulario, el único servicio se llama igual que la app. En una app compose, se valida al guardar que ningún servicio choque con otro del stage. Entre stages distintos no hay choque, porque no comparten redes (§3.2).
 3. **Variables.** Se combinan las del stage con las de la app, y la app gana.
    - **App de formulario:** se inyectan todas como `environment` del servicio.
@@ -279,7 +279,7 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
   - `tls_mode: http` → emisor ACME por defecto.
   - Email ACME tomado de settings.
   - Nota: el token de Cloudflare queda en el `autosave.json` del volumen `muelle_caddy_config`.
-- **IP real del cliente:** `servers.trusted_proxies` con los rangos de IP de Cloudflare (lista estática dentro de muelle, que se actualiza con cada versión) y `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`. Caddy reenvía a muelle la IP real en `X-Forwarded-For`. muelle confía en ese header porque Caddy es el único otro miembro de `muelle_panel`, la única red de muelle.
+- **IP real del cliente:** `servers.trusted_proxies` con los rangos de IP de Cloudflare (lista estática dentro de muelle, que se actualiza con cada versión) y `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`. En la ruta del panel, Caddy reenvía a muelle la IP real en `X-Real-IP` (`header_up X-Real-IP {client_ip}`). muelle confía en ese header porque Caddy es el único otro miembro de `muelle_panel`, la única red de muelle.
 - Las escrituras a Caddy pasan por un mutex global. Si fallan, el panel muestra "proxy desincronizado" y se reintenta con backoff (1 s, 2 s, 4 s… hasta 60 s). Además, cada 5 minutos un proceso reenvía todo.
 - **Verificación de certificados:** cada hora, y 30 s después de crear un dominio, muelle se conecta por TLS a `muelle-caddy:443` con SNI = hostname a través de `muelle_panel`. Lee el emisor y el vencimiento del certificado servido y actualiza `cert_issuer`/`cert_expires_at`. Si el certificado es inválido o vence en menos de 14 días, el dominio pasa a `error`.
 
@@ -309,8 +309,8 @@ Todas las respuestas son JSON. Formato de error: `{"error": {"code": "string", "
 | Dominios | `GET/POST …/apps/{a}/domains`, `PATCH/DELETE …/domains/{hostname}`, `POST …/domains/{hostname}/adopt`, `POST …/domains/{hostname}/retry` |
 | Estado | `GET …/apps/{a}/status` (por servicio: réplicas deseadas y corriendo, tareas con estado y error, CPU% y RAM actuales) |
 | Logs | `GET …/apps/{a}/logs?service=<s>&tail=200&follow=1` (SSE; no se guarda nada) |
-| Administración | `/users`, `/invites`, `/tokens`, `/registries`, `/settings`, `/audit` |
-| Sesión | `POST /auth/login`, `POST /auth/totp`, `POST /auth/logout`, `POST /auth/setup`, `POST /auth/invite/{token}` |
+| Administración | `/users` (incluye `DELETE /users/{username}` y `DELETE /users/{username}/totp` para quien perdió su teléfono), `/invites`, `/tokens`, `/registries`, `/settings`, `/audit` |
+| Sesión | `POST /auth/login`, `POST /auth/totp`, `POST /auth/logout`, `POST /auth/setup`, `POST /auth/invite/{token}`, `GET /auth/me`, `POST /auth/totp/setup`, `POST /auth/totp/enable` |
 
 ### 10.1 Autenticación y permisos
 
@@ -322,6 +322,7 @@ Todas las respuestas son JSON. Formato de error: `{"error": {"code": "string", "
   - Por IP: 20 intentos cada 15 min.
   - Con TOTP, el login es en dos pasos: contraseña → código.
   - Si `require_2fa` está activo, un usuario sin TOTP solo puede configurarlo.
+  - No se puede activar `require_2fa` sin tener el propio TOTP configurado (si no, quien lo activa queda encerrado en la configuración).
 - **Invitaciones:** de un solo uso, vencen en 24 h; se guarda el hash del token.
 
 ## 11. Panel (Svelte)
