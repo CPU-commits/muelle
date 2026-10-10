@@ -262,6 +262,39 @@ func TestCompleteTOTPResetDuringValidation(t *testing.T) {
 	}
 }
 
+// Si el usuario activa otro secreto mientras se valida el código (activar no
+// cierra sesiones), el código validado contra el secreto viejo no abre sesión.
+func TestCompleteTOTPSecretChangedDuringValidation(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	g := newGate()
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.replay, f.rec, f.clock)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := uc.Execute(ctx, completeTOTP(res.Token, f.code(t, secret)))
+		done <- err
+	}()
+	<-g.entered
+	other, err := f.beginTOTP.Execute(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.enableTOTP.Execute(ctx, dto.EnableTOTPInput{UserID: u.ID, Code: f.code(t, other.Secret)}); err != nil {
+		t.Fatal(err)
+	}
+	close(g.release)
+	if err := <-done; !errors.Is(err, shared.ErrUnauthenticated) {
+		t.Fatalf("esperaba ErrUnauthenticated, got %v", err)
+	}
+	if n := f.countFullSessions(t); n != 0 {
+		t.Fatalf("sesiones completas=%d", n)
+	}
+}
+
 // Una invitación inexistente o vencida se rechaza antes de calcular el hash:
 // el endpoint es público y el hasher tiene solo 2 lugares.
 func TestAcceptInviteChecksTokenBeforeHashing(t *testing.T) {
