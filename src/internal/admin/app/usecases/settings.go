@@ -17,13 +17,13 @@ import (
 // loadSettings lee los ajustes; lo que no se guardó tiene su valor por defecto.
 func loadSettings(ctx context.Context, repo repository.SettingsRepository) (entity.Settings, error) {
 	var s entity.Settings
-	v, _, err := repo.Get(ctx, entity.KeyRequire2FA)
+	v, _, err := repo.Get(ctx, shared.SettingRequire2FA)
 	switch {
 	case errors.Is(err, sharedrepo.ErrNotFound):
 	case err != nil:
 		return s, err
 	default:
-		s.Require2FA = entity.ParseBool(string(v))
+		s.Require2FA = shared.ParseBool(string(v))
 	}
 	return s, nil
 }
@@ -76,10 +76,10 @@ func (u *PatchSettings) Execute(ctx context.Context, in dto.PatchSettingsInput) 
 					return service.ErrTOTPRequiredFirst
 				}
 			}
-			if err := u.settings.Set(ctx, entity.KeyRequire2FA, []byte(entity.FormatBool(*in.Require2FA)), false); err != nil {
+			if err := u.settings.Set(ctx, shared.SettingRequire2FA, []byte(shared.FormatBool(*in.Require2FA)), false); err != nil {
 				return err
 			}
-			u.audit.Record(ctx, "settings.update", "settings", map[string]bool{entity.KeyRequire2FA: *in.Require2FA})
+			u.audit.Record(ctx, "settings.update", "settings", map[string]bool{shared.SettingRequire2FA: *in.Require2FA})
 			return nil
 		})
 		if err != nil {

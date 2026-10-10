@@ -1,9 +1,8 @@
 package entity
 
-// Claves de la tabla settings que maneja el módulo.
+// Claves de la tabla settings que maneja el módulo. La de require_2fa, que
+// también lee identity, es shared.SettingRequire2FA (src/shared/domain/entity).
 const (
-	// KeyRequire2FA guarda "true" o "false"; identity lee este mismo formato.
-	KeyRequire2FA = "require_2fa"
 	// KeyMasterKeyCheck guarda un valor de control cifrado para detectar una clave maestra distinta.
 	KeyMasterKeyCheck = "master_key_check"
 )
@@ -15,14 +14,3 @@ const MasterKeyCheckAAD = "settings:" + KeyMasterKeyCheck
 type Settings struct {
 	Require2FA bool
 }
-
-// FormatBool es el formato en que se guarda un ajuste booleano.
-func FormatBool(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
-}
-
-// ParseBool lee un ajuste booleano guardado. Todo lo que no sea "true" es false.
-func ParseBool(v string) bool { return v == "true" }
