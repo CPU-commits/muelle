@@ -8,6 +8,7 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/repository"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
+	"github.com/CPU-commits/muelle/src/package/audit"
 	"github.com/CPU-commits/muelle/src/package/clock"
 	sharedrepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
 )
@@ -27,16 +28,19 @@ type Login struct {
 	lockout *service.LoginLockout
 	clock   clock.Clock
 	issuer  sessionIssuer
+	audit   loginAudit
 	// dummy es un hash para verificar cuando el usuario no existe, así el login
 	// tarda lo mismo y no revela qué nombres existen.
 	dummy func() (string, error)
 }
 
 func NewLogin(tx sharedrepo.Transactor, users repository.UserRepository, sessions repository.SessionRepository,
-	hasher service.PasswordHasher, limiter *service.LoginLimiter, lockout *service.LoginLockout, c clock.Clock) *Login {
+	hasher service.PasswordHasher, limiter *service.LoginLimiter, lockout *service.LoginLockout,
+	rec audit.Recorder, c clock.Clock) *Login {
 	return &Login{
 		tx: tx, users: users, hasher: hasher, limiter: limiter, lockout: lockout, clock: c,
 		issuer: sessionIssuer{sessions: sessions, clock: c},
+		audit:  loginAudit{rec: rec},
 		dummy:  sync.OnceValues(func() (string, error) { return hasher.Hash("muelle-usuario-inexistente") }),
 	}
 }
@@ -47,6 +51,7 @@ func (uc *Login) Execute(ctx context.Context, in dto.LoginInput) (dto.SessionOut
 	}
 	// Un par bloqueado no gasta el hasher, exista el usuario o no.
 	if uc.lockout.Locked(in.Username, in.IP) {
+		uc.audit.locked(ctx, in.Username, in.IP)
 		return dto.SessionOutput{}, service.ErrLocked
 	}
 	u, err := uc.users.GetByUsername(ctx, in.Username)
@@ -54,7 +59,7 @@ func (uc *Login) Execute(ctx context.Context, in dto.LoginInput) (dto.SessionOut
 		if h, err := uc.dummy(); err == nil {
 			uc.hasher.Verify(h, in.Password)
 		}
-		return dto.SessionOutput{}, uc.fail(in)
+		return dto.SessionOutput{}, uc.fail(ctx, in)
 	}
 	if err != nil {
 		return dto.SessionOutput{}, err
@@ -64,7 +69,7 @@ func (uc *Login) Execute(ctx context.Context, in dto.LoginInput) (dto.SessionOut
 		return dto.SessionOutput{}, err
 	}
 	if !ok {
-		return dto.SessionOutput{}, uc.fail(in)
+		return dto.SessionOutput{}, uc.fail(ctx, in)
 	}
 	// La decisión final se toma bajo el mutex del bloqueo: un intento que
 	// esperó al hasher mientras otros bloqueaban el par responde "bloqueado"
@@ -72,15 +77,33 @@ func (uc *Login) Execute(ctx context.Context, in dto.LoginInput) (dto.SessionOut
 	// recién cuando el código es correcto (CompleteTOTP), así los códigos
 	// malos se acumulan entre logins.
 	if !uc.lockout.Succeed(in.Username, in.IP, !u.HasTOTP()) {
+		uc.audit.locked(ctx, in.Username, in.IP)
 		return dto.SessionOutput{}, service.ErrLocked
 	}
-	return uc.issuer.issue(ctx, u, u.HasTOTP(), in.IP, in.UserAgent)
+	var out dto.SessionOutput
+	err = uc.tx.InTx(ctx, func(ctx context.Context) error {
+		var err error
+		if out, err = uc.issuer.issue(ctx, u, u.HasTOTP(), in.IP, in.UserAgent); err != nil {
+			return err
+		}
+		if !u.HasTOTP() { // con 2FA, el login se completa (y se audita) en CompleteTOTP
+			uc.audit.login(ctx, u, in.IP, false)
+		}
+		return nil
+	})
+	if err != nil {
+		return dto.SessionOutput{}, err
+	}
+	return out, nil
 }
 
-// fail registra el fallo y devuelve el error que corresponde.
-func (uc *Login) fail(in dto.LoginInput) error {
+// fail registra el fallo (en el bloqueo y en la auditoría) y devuelve el
+// error que corresponde.
+func (uc *Login) fail(ctx context.Context, in dto.LoginInput) error {
 	if uc.lockout.Fail(in.Username, in.IP) {
+		uc.audit.locked(ctx, in.Username, in.IP)
 		return service.ErrLocked
 	}
+	uc.audit.failed(ctx, in.Username, in.IP, "credentials")
 	return service.ErrInvalidCredentials
 }

@@ -44,7 +44,8 @@ func (h *handler) completeTOTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
-	if err := h.uc.Logout.Execute(r.Context(), principal(r).SessionHash); err != nil {
+	p := principal(r)
+	if err := h.uc.Logout.Execute(r.Context(), dto.LogoutInput{SessionHash: p.SessionHash, Username: p.Username}); err != nil {
 		h.k.Fail(w, err)
 		return
 	}

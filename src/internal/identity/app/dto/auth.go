@@ -39,6 +39,12 @@ type AcceptInviteInput struct {
 	UserAgent string
 }
 
+// LogoutInput cierra la sesión del Principal (SessionHash) de Username.
+type LogoutInput struct {
+	SessionHash string
+	Username    string
+}
+
 type MeOutput struct {
 	Username       string
 	TOTPEnabled    bool

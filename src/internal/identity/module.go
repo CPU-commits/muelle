@@ -71,9 +71,9 @@ func New(d Deps) *Module {
 			Token:   usecases.NewAuthenticateToken(tokens, c),
 		},
 		routes: inhttp.Usecases{
-			Login:          usecases.NewLogin(db, users, sessions, hasher, limiter, lockout, c),
-			CompleteTOTP:   usecases.NewCompleteTOTP(db, users, sessions, d.Cipher, totp, limiter, lockout, replay, c),
-			Logout:         usecases.NewLogout(sessions),
+			Login:          usecases.NewLogin(db, users, sessions, hasher, limiter, lockout, d.Audit, c),
+			CompleteTOTP:   usecases.NewCompleteTOTP(db, users, sessions, d.Cipher, totp, limiter, lockout, replay, d.Audit, c),
+			Logout:         usecases.NewLogout(sessions, d.Audit),
 			Setup:          usecases.NewSetup(db, users, invites, sessions, hasher, d.Audit, limiter, c),
 			AcceptInvite:   usecases.NewAcceptInvite(db, users, invites, sessions, hasher, d.Audit, limiter, c),
 			Me:             usecases.NewMe(users),

@@ -40,7 +40,7 @@ func TestLoginAndAuthenticateSession(t *testing.T) {
 	if _, err := f.authSession.Execute(ctx, "token-falso"); !errors.Is(err, shared.ErrUnauthenticated) {
 		t.Fatalf("esperaba ErrUnauthenticated, got %v", err)
 	}
-	if err := f.logout.Execute(ctx, p.SessionHash); err != nil {
+	if err := f.logout.Execute(ctx, dto.LogoutInput{SessionHash: p.SessionHash, Username: p.Username}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.authSession.Execute(ctx, res.Token); !errors.Is(err, shared.ErrUnauthenticated) {

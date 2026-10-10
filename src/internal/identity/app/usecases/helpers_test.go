@@ -93,9 +93,9 @@ func newFixture(t *testing.T) *fixture {
 	lockout := service.NewLoginLockout(c)
 	replay := service.NewTOTPReplayGuard(c)
 	f.rec, f.limiter, f.lockout, f.replay = rec, limiter, lockout, replay
-	f.login = NewLogin(db, f.users, f.sessions, f.hasher, limiter, lockout, c)
-	f.completeTOTP = NewCompleteTOTP(db, f.users, f.sessions, ciph, f.totp, limiter, lockout, replay, c)
-	f.logout = NewLogout(f.sessions)
+	f.login = NewLogin(db, f.users, f.sessions, f.hasher, limiter, lockout, rec, c)
+	f.completeTOTP = NewCompleteTOTP(db, f.users, f.sessions, ciph, f.totp, limiter, lockout, replay, rec, c)
+	f.logout = NewLogout(f.sessions, rec)
 	f.authSession = NewAuthenticateSession(f.users, f.sessions, settings, c)
 	f.authToken = NewAuthenticateToken(f.tokens, c)
 	f.setup = NewSetup(db, f.users, f.invites, f.sessions, f.hasher, rec, limiter, c)
