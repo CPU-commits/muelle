@@ -15,8 +15,10 @@ import (
 )
 
 // CompleteTOTP valida el código de una sesión pendiente de MFA y la cambia
-// por una sesión completa con otro token. A este paso solo llega quien sabe
-// la contraseña, así que los códigos malos no se cuentan por IP sino:
+// por una sesión completa con otro token. Cada intento cuenta en el límite
+// por IP que comparte con el login (limiter), pero a este paso solo llega
+// quien sabe la contraseña, así que los bloqueos por códigos malos no son por
+// IP sino:
 //   - por sesión pendiente (service.PendingCodeAttempts): se validan a lo más
 //     MaxPendingCodeAttempts códigos, cada uno con su intento reservado antes
 //     de validarlo; si el último es malo la sesión se borra y hay que volver a

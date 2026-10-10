@@ -1,7 +1,7 @@
 # muelle — Diseño
 
 > Deploy manager ultraligero sobre Docker Swarm: panel web + API, secretos, stages y proxy con certificados automáticos.
-> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
+> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
 > "muelle" es un nombre provisional.
 
 ## 1. Contexto y objetivo
@@ -171,7 +171,7 @@ web/                    (Fase 4) SvelteKit con adapter-static, embebido con go:e
 | Pieza | Dónde | Notas |
 |---|---|---|
 | SQLite | `shared/infra/out/sqlite` | `modernc.org/sqlite` en modo WAL, migraciones SQL embebidas (una sola carpeta, porque hay claves foráneas entre módulos), runner propio |
-| Cifrado | `shared/infra/out/crypto` detrás de `package/cipher` | AES-256-GCM con la clave maestra; nonce aleatorio por valor; AAD = `<tabla>:<dueño>:<clave>`, nunca vacía |
+| Cifrado | `shared/infra/out/crypto` detrás de `package/cipher` | AES-256-GCM con la clave maestra; nonce aleatorio por valor; AAD ligada a la fila y la columna, nunca vacía: `env:app:<id>:<key>`, `env:stage:<id>:<key>`, `users:totp:<id>`, `users:totp_pending:<id>`, `settings:<key>` (§12) |
 | Contraseñas | `identity` (puerto `PasswordHasher`) | Argon2id vía `golang.org/x/crypto/argon2` (§10.1) |
 | TOTP | `identity` (puerto `TOTP`) | `github.com/pquerna/otp` |
 | Render | `deploy/domain/service` (Fase 2) | App (formulario o compose) + variables + dominios → compose final validado, con `github.com/compose-spec/compose-go/v2`; funciones puras |
@@ -218,6 +218,8 @@ proyecto (auditfy)
 | `audit_events` | `id`, `actor_type`, `actor_id`, `action`, `target`, `details` (JSON, sin valores secretos), `at` |
 | `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain`, `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` |
 
+La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con una migración de la Fase 2, y `domains` con una de la Fase 3.
+
 ### 5.2 Reglas
 
 1. **Slugs.** Solo `[a-z0-9-]`, empiezan con letra y no terminan en `-`. Proyecto, app y servicio de una app compose: hasta 16 caracteres (`^[a-z]([a-z0-9-]{0,14}[a-z0-9])?$`). Stage: hasta 12 (`^[a-z]([a-z0-9-]{0,10}[a-z0-9])?$`). Como el `_` no es válido en un slug, sirve de separador: stack `proyecto_stage_app`, servicio Swarm `proyecto_stage_app_servicio`, que nunca pasa de 63 caracteres. Los slugs de proyecto `muelle` y `docker` están reservados: con ellos, una red de stage podría llamarse `muelle_panel` (la red privada de muelle y Caddy) o `docker_gwbridge` (la de Swarm).
@@ -230,7 +232,7 @@ proyecto (auditfy)
 4. **Cambios pendientes.** Cambiar variables (de la app o de su stage), spec o compose actualiza `config_changed_at` y no redespliega. El panel muestra "cambios pendientes" mientras `config_changed_at > last_deployed_at`. **Los dominios no pasan por el deploy:** crearlos, editarlos o borrarlos aplica de inmediato el DNS y las rutas de Caddy, porque no afectan al compose.
 5. **Digest.** Cada deploy guarda el digest exacto de cada imagen, y el compose final referencia `repo:tag@sha256:…`.
 6. **Rollback.** El deploy "actual" es el `succeeded` más reciente. El rollback toma las imágenes (con digest) del `succeeded` inmediatamente anterior y despliega con la configuración **actual** (variables, spec). Si no hay un `succeeded` anterior, responde `409`. Las variables no se versionan en la v1.
-7. **Retención.** Últimos 20 deploys por app; `audit_events` 180 días; las sesiones vencidas se limpian a diario.
+7. **Retención.** Últimos 20 deploys por app; `audit_events` 180 días; las sesiones vencidas o sin uso se borran cada hora.
 
 ## 6. Render: del modelo al compose final
 
@@ -332,7 +334,7 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
   - `tls_mode: http` → emisor ACME por defecto.
   - Email ACME tomado de settings.
   - Nota: el token de Cloudflare queda en el `autosave.json` del volumen `muelle_caddy_config`.
-- **IP real del cliente:** `servers.trusted_proxies` con los rangos de IP de Cloudflare (lista estática dentro de muelle, que se actualiza con cada versión) y `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`. En la ruta del panel, Caddy reenvía a muelle la IP real en `X-Real-IP` (`header_up X-Real-IP {client_ip}`). muelle confía en ese header porque Caddy es el único otro miembro de `muelle_panel`, la única red de muelle.
+- **IP real del cliente:** `servers.trusted_proxies` con los rangos de IP de Cloudflare (lista estática dentro de muelle, que se actualiza con cada versión) y `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`. En la ruta del panel, Caddy reenvía a muelle la IP real en `X-Real-IP` (`header_up X-Real-IP {client_ip}`). muelle confía en ese header porque Caddy es el único otro miembro de `muelle_panel`, la única red de muelle: lo acepta solo si la conexión viene de loopback o de una dirección privada (RFC 1918, ULA), y si no usa la IP de la conexión. Por eso el puerto de muelle (`MUELLE_LISTEN`, `:8080`) nunca se publica.
 - Las escrituras a Caddy pasan por un mutex global. Si fallan, el panel muestra "proxy desincronizado" y se reintenta con backoff (1 s, 2 s, 4 s… hasta 60 s). Además, cada 5 minutos un proceso reenvía todo.
 - **Verificación de certificados:** cada hora, y 30 s después de crear un dominio, muelle se conecta por TLS a `muelle-caddy:443` con SNI = hostname a través de `muelle_panel`. Lee el emisor y el vencimiento del certificado servido y actualiza `cert_issuer`/`cert_expires_at`. Si el certificado es inválido o vence en menos de 14 días, el dominio pasa a `error`.
 
@@ -352,6 +354,8 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
 
 Todas las respuestas son JSON. Formato de error: `{"error": {"code": "string", "message": "string"}}`. Los recursos se identifican por slug. Las fechas van en RFC 3339, en UTC y con a lo más milisegundos (`2026-10-10T19:36:53.77Z`), lo mismo en la respuesta de un create que en el GET: el reloj (`package/clock`) ya da la hora así, con la precisión que guarda SQLite.
 
+Un `429` lleva `Retry-After: 60` (fijo por ahora). El log de un error interno (`500`) trae el método y la ruta de la petición.
+
 Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan campos desconocidos, claves duplicadas, UTF-8 inválido y datos después del valor. El cuerpo se limita a 1 MiB.
 
 | Recurso | Endpoints |
@@ -369,15 +373,16 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 
 ### 10.1 Autenticación y permisos
 
-- **Sesión del panel:** cookie `muelle_session` (`HttpOnly`, `Secure`, `SameSite=Strict`). Se cierra tras 12 h sin uso y dura 7 días como máximo. Las peticiones que modifican algo exigen que el `Origin` coincida con `panel_domain`. Como la comparación es literal, el origen configurado tiene que estar en forma canónica: esquema y host en minúsculas, sin puerto por defecto y con las IP en su forma estándar. Si no lo está, muelle no arranca y sugiere el valor correcto. Una sesión puede hacer todo.
+- **Sesión del panel:** cookie `muelle_session` (`HttpOnly`, `Secure`, `SameSite=Strict`). Se cierra tras 12 h sin uso y dura 7 días como máximo. Las peticiones que modifican algo exigen que el `Origin` coincida con `MUELLE_PANEL_ORIGIN`, una variable de entorno, y no con el setting `panel_domain`: el origen lleva el esquema y el puerto, y así el panel funciona en `https://panel…:8443` durante la migración (§16), mientras `panel_domain` es solo el host que enruta Caddy. Como la comparación es literal, el origen configurado tiene que estar en forma canónica: esquema y host en minúsculas, sin puerto por defecto y con las IP en su forma estándar. Si no lo está, muelle no arranca y sugiere el valor correcto. Una sesión puede hacer todo.
+  - `MUELLE_SECURE_COOKIES=false` (la cookie sin `Secure`) existe solo para desarrollo por http: con un `MUELLE_PANEL_ORIGIN` https, muelle no arranca.
 - **Token de API:** `Authorization: Bearer mk_<43 caracteres base64url>` (32 bytes aleatorios). Se guarda su SHA-256 y se muestra una sola vez. Su alcance es un proyecto, o un proyecto + stage. **Solo permite:** leer proyecto/stage/app/estado/deploys/logs dentro del alcance, `GET/PUT/PATCH` de variables, crear deploys y hacer rollback. Cualquier otra operación responde `403`.
   - `GET /tokens` dice quién creó cada token (`created_by`: el username, o `null` si ese usuario se borró), para encontrar los tokens de una persona que se va.
   - **Borrar un usuario no revoca sus tokens:** un token es del proyecto, no de quien lo creó, y el CI depende de él. Al dar de baja a alguien, se revisan sus tokens en `GET /tokens` y se revocan a mano (`DELETE /tokens/{id}`) los que haga falta.
 - **Login:**
   - Argon2id con `m=19MiB, t=2, p=1`, el mínimo que recomienda OWASP. Un semáforo permite como máximo 2 hashes a la vez, para que un pico de logins no rompa el presupuesto de RAM (§1). Los parámetros van dentro del hash (formato PHC), así que se pueden subir más adelante.
   - Bloqueo progresivo de la contraseña, por usuario e IP: tras 5 contraseñas incorrectas del mismo usuario desde la misma IP (en IPv6, el mismo /64), 1 min; después se duplica hasta 1 h. Una contraseña correcta desde esa IP lo reinicia. Se aplica igual a los nombres que no existen, así un bloqueo no revela qué usuarios hay. Es por usuario e IP, y no solo por usuario, para que un atacante no pueda dejar afuera al admin desde otra IP (recomendación de OWASP).
-  - Por IP: 20 intentos cada 15 min (en IPv6, por /64).
-  - Con TOTP, el login es en dos pasos: contraseña → código. Los códigos malos no se cuentan por IP, porque a ese paso solo llega quien ya sabe la contraseña y podría usar muchas IPs:
+  - Por IP: 20 peticiones cada 15 min (en IPv6, por /64), sumando el login, el código TOTP, el setup y las invitaciones.
+  - Con TOTP, el login es en dos pasos: contraseña → código. La sesión intermedia, que solo sirve para mandar el código, dura 5 minutos. Cada código, bueno o malo, cuenta en el límite por IP de arriba, pero los bloqueos por códigos malos no son por IP, porque a ese paso solo llega quien ya sabe la contraseña y podría usar muchas IPs. Son por sesión y por usuario:
     - con una sesión pendiente se validan a lo más 5 códigos. Cada intento se reserva antes de validar el código, así los pedidos que llegan a la vez no pasan del límite. Si ninguno es correcto, la sesión se borra y hay que volver a poner la contraseña; una sesión agotada no acepta ni el código correcto, aunque falle su borrado;
     - el usuario se bloquea para el 2FA desde cualquier IP, con el mismo calendario (5 códigos malos, 1 min; se duplica hasta 1 h); solo un código correcto lo reinicia.
   - Cada código TOTP vale una sola vez (RFC 6238 §5.2): un código ya usado, también el de la activación del 2FA, se rechaza.
@@ -406,7 +411,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 
 - **muelle tiene `docker.sock`, que equivale a ser root en el host.** Por eso: tokens con alcance mínimo, sesiones estrictas, rate limiting, 2FA disponible (y exigible) e IPs permitidas opcionales.
 - **Secretos:**
-  - Se cifran con AES-256-GCM y AAD ligada a la fila, así que un valor cifrado copiado a otra fila no se puede descifrar.
+  - Se cifran con AES-256-GCM y AAD ligada a la fila y la columna, así que un valor cifrado copiado a otra fila no se puede descifrar. Las AAD son `env:app:<id>:<key>` y `env:stage:<id>:<key>` (`env_vars.value`), `users:totp:<id>` (`users.totp_secret`), `users:totp_pending:<id>` (`users.totp_pending`) y `settings:<key>` (un setting cifrado). Solo el último segmento es texto libre; una columna cifrada nueva agrega su prefijo (la lista canónica está en `shared/infra/out/crypto`).
   - La clave maestra solo vive en el secreto Swarm; nunca en SQLite ni en logs.
   - Los valores se enmascaran en los logs de deploy.
   - El compose final no se persiste.
@@ -479,7 +484,8 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - **Repositorios SQLite:** SQLite real en `t.TempDir()`, con un helper compartido que crea la base y corre las migraciones.
 - **Casos de uso:** con los repositorios SQLite reales y un reloj controlado (`package/clock`), sin mocks.
 - **HTTP:** `httptest` contra el servidor armado de verdad.
-- **Punta a punta:** el binario real con `curl` al cerrar cada fase.
+- **Punta a punta:** el binario real con `curl` al cerrar cada fase. Por ahora es manual, con los pasos del README; no hay un script ni un job de CI que lo corra.
+- **Contratos entre módulos:** como los módulos no se importan (§4.1), lo que uno lee o escribe de las tablas de otro se prueba con el contenedor completo (`shared/infra/container`).
 
 **Unitarios:**
 - `render`: golden files (`testdata/*.input.yaml` → `*.golden.yaml`) cubriendo:
@@ -537,7 +543,7 @@ Dokploy también usa Swarm, así que ambos pueden convivir en el mismo cluster. 
 Cada fase deja algo que se puede probar de punta a punta:
 
 1. **Base:** los módulos `identity`, `catalog`, `secrets` y `admin` sobre la base compartida (`shared`, `package`, `settings`, `cmd/http`). Se construye en tres etapas:
-   1. **Base compartida** (secuencial): `settings`, `package/`, `shared/domain`, SQLite con la migración completa, `crypto` y el esqueleto de `cmd/http`.
+   1. **Base compartida** (secuencial): `settings`, `package/`, `shared/domain`, SQLite con la migración inicial (las tablas de la Fase 1, §5.1; `deploys`/`registries` y `domains` llegan con migraciones de las fases 2 y 3), `crypto` y el esqueleto de `cmd/http`.
    2. **Módulos** (en paralelo): `identity`, `catalog`, `secrets` y `admin`, cada uno completo con sus tests.
    3. **Integración** (secuencial): el contenedor, `main.go`, el cron, la prueba de punta a punta, CI y el README.
 2. **Deploy:** el módulo `deploy` (`docker`, `render` y `deployer`). Apps de formulario y compose desplegables por API, con log, rollback y reconciliación.
