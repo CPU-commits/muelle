@@ -65,7 +65,7 @@ func Register(k *utils.Kit, uc UseCases) {
 func (h *Handler) listProjects(w http.ResponseWriter, r *http.Request) {
 	out, err := h.uc.ListProjects.Execute(r.Context())
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, out)
@@ -78,7 +78,7 @@ func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.uc.CreateProject.Execute(r.Context(), in)
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusCreated, out)
@@ -87,7 +87,7 @@ func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
 	out, err := h.uc.GetProject.Execute(r.Context(), r.PathValue("p"))
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, out)
@@ -100,7 +100,7 @@ func (h *Handler) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.uc.UpdateProject.Execute(r.Context(), in)
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, out)
@@ -108,7 +108,7 @@ func (h *Handler) updateProject(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) deleteProject(w http.ResponseWriter, r *http.Request) {
 	if err := h.uc.DeleteProject.Execute(r.Context(), r.PathValue("p")); err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -117,7 +117,7 @@ func (h *Handler) deleteProject(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listStages(w http.ResponseWriter, r *http.Request) {
 	out, err := h.uc.ListStages.Execute(r.Context(), r.PathValue("p"))
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, out)
@@ -130,7 +130,7 @@ func (h *Handler) createStage(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.uc.CreateStage.Execute(r.Context(), in)
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusCreated, out)
@@ -139,7 +139,7 @@ func (h *Handler) createStage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getStage(w http.ResponseWriter, r *http.Request) {
 	out, err := h.uc.GetStage.Execute(r.Context(), r.PathValue("p"), r.PathValue("s"))
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, out)
@@ -147,7 +147,7 @@ func (h *Handler) getStage(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) deleteStage(w http.ResponseWriter, r *http.Request) {
 	if err := h.uc.DeleteStage.Execute(r.Context(), r.PathValue("p"), r.PathValue("s")); err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -156,7 +156,7 @@ func (h *Handler) deleteStage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listApps(w http.ResponseWriter, r *http.Request) {
 	out, err := h.uc.ListApps.Execute(r.Context(), r.PathValue("p"), r.PathValue("s"))
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, out)
@@ -169,7 +169,7 @@ func (h *Handler) createApp(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.uc.CreateApp.Execute(r.Context(), in)
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusCreated, out)
@@ -178,7 +178,7 @@ func (h *Handler) createApp(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getApp(w http.ResponseWriter, r *http.Request) {
 	out, err := h.uc.GetApp.Execute(r.Context(), r.PathValue("p"), r.PathValue("s"), r.PathValue("a"))
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, out)
@@ -191,7 +191,7 @@ func (h *Handler) updateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.uc.UpdateApp.Execute(r.Context(), in)
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, out)
@@ -199,7 +199,7 @@ func (h *Handler) updateApp(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) deleteApp(w http.ResponseWriter, r *http.Request) {
 	if err := h.uc.DeleteApp.Execute(r.Context(), r.PathValue("p"), r.PathValue("s"), r.PathValue("a")); err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

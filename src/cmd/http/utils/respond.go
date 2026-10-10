@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
@@ -19,6 +22,10 @@ type errorDetail struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
+
+// RateLimitRetryAfter es el Retry-After de toda respuesta 429. Los errores
+// todavía no traen cuánto falta para que se libere el límite, así que es fijo.
+const RateLimitRetryAfter = 60 * time.Second
 
 // internalBody es la respuesta cuando ni siquiera se puede serializar la respuesta.
 const internalBody = `{"error":{"code":"internal","message":"error interno"}}` + "\n"
@@ -49,8 +56,12 @@ func writeJSON(log *slog.Logger, w http.ResponseWriter, status int, v any) {
 	w.Write(append(body, '\n'))
 }
 
-// writeError es WriteError con el logger del Kit.
+// writeError es WriteError con el logger del Kit. Un 429 lleva Retry-After
+// (RateLimitRetryAfter, en segundos).
 func (k *Kit) writeError(w http.ResponseWriter, status int, code, message string) {
+	if status == http.StatusTooManyRequests {
+		w.Header().Set("Retry-After", strconv.Itoa(int(RateLimitRetryAfter/time.Second)))
+	}
 	writeJSON(k.log, w, status, errorBody{Error: errorDetail{Code: code, Message: message}})
 }
 
@@ -67,9 +78,10 @@ func (k *Kit) RegisterError(target error, status int, code, message string) {
 	k.errors = append(k.errors, registeredError{target: target, status: status, code: code, message: message})
 }
 
-// Fail responde el error: *validate.Error → 422 "invalid" con ve.Error();
-// un error registrado → su status; cualquier otro → 500 "internal" y log.Error.
-func (k *Kit) Fail(w http.ResponseWriter, err error) {
+// Fail responde el error de la petición r: *validate.Error → 422 "invalid"
+// con ve.Error(); un error registrado → su status (un 429, con Retry-After);
+// cualquier otro → 500 "internal" y log.Error con el método y la ruta de r.
+func (k *Kit) Fail(w http.ResponseWriter, r *http.Request, err error) {
 	if ve, ok := errors.AsType[*validate.Error](err); ok {
 		k.writeError(w, http.StatusUnprocessableEntity, "invalid", ve.Error())
 		return
@@ -78,8 +90,18 @@ func (k *Kit) Fail(w http.ResponseWriter, err error) {
 		k.writeError(w, e.status, e.code, e.message)
 		return
 	}
-	k.log.Error("error interno", "err", err)
+	k.log.Error("error interno", "method", r.Method, "path", logPath(r), "err", err)
 	k.writeError(w, http.StatusInternalServerError, "internal", "error interno")
+}
+
+// logPath es la ruta de r para el log, sin secretos: el valor del comodín
+// {token} (el link de una invitación lo lleva en la ruta) se reemplaza por
+// "{token}".
+func logPath(r *http.Request) string {
+	if tok := r.PathValue("token"); tok != "" {
+		return strings.ReplaceAll(r.URL.Path, tok, "{token}")
+	}
+	return r.URL.Path
 }
 
 // lookup busca el último error registrado que coincide con err.

@@ -33,7 +33,7 @@ func (h *Handler) handleGetSettings(k *utils.Kit) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		out, err := h.getSettings.Execute(r.Context())
 		if err != nil {
-			k.Fail(w, err)
+			k.Fail(w, r, err)
 			return
 		}
 		utils.WriteJSON(w, http.StatusOK, out)
@@ -50,7 +50,7 @@ func (h *Handler) handlePatchSettings(k *utils.Kit) http.HandlerFunc {
 		}
 		out, err := h.patchSettings.Execute(r.Context(), in)
 		if err != nil {
-			k.Fail(w, err)
+			k.Fail(w, r, err)
 			return
 		}
 		utils.WriteJSON(w, http.StatusOK, out)
@@ -63,7 +63,7 @@ func (h *Handler) handleListAudit(k *utils.Kit) http.HandlerFunc {
 		if v := r.URL.Query().Get("limit"); v != "" {
 			n, err := strconv.Atoi(v)
 			if err != nil {
-				k.Fail(w, validate.Errorf("limit", "debe ser un número"))
+				k.Fail(w, r, validate.Errorf("limit", "debe ser un número"))
 				return
 			}
 			in.Limit = &n
@@ -71,14 +71,14 @@ func (h *Handler) handleListAudit(k *utils.Kit) http.HandlerFunc {
 		if v := r.URL.Query().Get("before"); v != "" {
 			n, err := strconv.ParseInt(v, 10, 64)
 			if err != nil {
-				k.Fail(w, validate.Errorf("before", "debe ser un id válido"))
+				k.Fail(w, r, validate.Errorf("before", "debe ser un id válido"))
 				return
 			}
 			in.Before = &n
 		}
 		events, err := h.listAudit.Execute(r.Context(), in)
 		if err != nil {
-			k.Fail(w, err)
+			k.Fail(w, r, err)
 			return
 		}
 		utils.WriteJSON(w, http.StatusOK, events)

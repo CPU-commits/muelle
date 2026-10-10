@@ -19,7 +19,7 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	s, err := h.uc.Login.Execute(r.Context(), in.Login(utils.ClientIP(r), r.UserAgent()))
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	h.setSession(w, s)
@@ -36,7 +36,7 @@ func (h *handler) completeTOTP(w http.ResponseWriter, r *http.Request) {
 		SessionHash: principal(r).SessionHash, Code: in.Code, IP: utils.ClientIP(r), UserAgent: r.UserAgent(),
 	})
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	h.setSession(w, s)
@@ -46,7 +46,7 @@ func (h *handler) completeTOTP(w http.ResponseWriter, r *http.Request) {
 func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	if err := h.uc.Logout.Execute(r.Context(), dto.LogoutInput{SessionHash: p.SessionHash, Username: p.Username}); err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	h.k.ClearSessionCookie(w)
@@ -56,7 +56,7 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 	me, err := h.uc.Me.Execute(r.Context(), principal(r))
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, toMeRes(me))
@@ -65,7 +65,7 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 func (h *handler) beginTOTPSetup(w http.ResponseWriter, r *http.Request) {
 	out, err := h.uc.BeginTOTPSetup.Execute(r.Context(), principal(r).UserID)
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, totpSetupRes{Secret: out.Secret, URL: out.URL})
@@ -77,7 +77,7 @@ func (h *handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.uc.EnableTOTP.Execute(r.Context(), dto.EnableTOTPInput{UserID: principal(r).UserID, Code: in.Code}); err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -90,7 +90,7 @@ func (h *handler) setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s, err := h.uc.Setup.Execute(r.Context(), in.AcceptInvite(utils.ClientIP(r), r.UserAgent()))
-	h.created(w, s, err)
+	h.created(w, r, s, err)
 }
 
 func (h *handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
@@ -99,13 +99,13 @@ func (h *handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s, err := h.uc.AcceptInvite.Execute(r.Context(), in.AcceptInvite(r.PathValue("token"), utils.ClientIP(r), r.UserAgent()))
-	h.created(w, s, err)
+	h.created(w, r, s, err)
 }
 
 // created responde a un usuario recién creado, con su sesión.
-func (h *handler) created(w http.ResponseWriter, s dto.SessionOutput, err error) {
+func (h *handler) created(w http.ResponseWriter, r *http.Request, s dto.SessionOutput, err error) {
 	if err != nil {
-		h.k.Fail(w, err)
+		h.k.Fail(w, r, err)
 		return
 	}
 	h.setSession(w, s)

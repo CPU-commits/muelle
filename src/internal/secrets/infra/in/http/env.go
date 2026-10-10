@@ -45,7 +45,7 @@ func (h *EnvHandler) getEnv(k *utils.Kit) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars, err := h.get.Execute(r.Context(), target(r))
 		if err != nil {
-			k.Fail(w, err)
+			k.Fail(w, r, err)
 			return
 		}
 		utils.WriteJSON(w, http.StatusOK, newEnvRes(vars))
@@ -60,7 +60,7 @@ func (h *EnvHandler) putEnv(k *utils.Kit) http.HandlerFunc {
 			return
 		}
 		if err := h.replace.Execute(r.Context(), in.DTO(target(r))); err != nil {
-			k.Fail(w, err)
+			k.Fail(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -74,7 +74,7 @@ func (h *EnvHandler) patchEnv(k *utils.Kit) http.HandlerFunc {
 			return
 		}
 		if err := h.patch.Execute(r.Context(), in.DTO(target(r))); err != nil {
-			k.Fail(w, err)
+			k.Fail(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

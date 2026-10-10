@@ -100,6 +100,9 @@ func TestLoginLockedAndRateLimited(t *testing.T) {
 	}
 	w = e.do("POST", "/api/v1/auth/login", map[string]string{"username": "nadie", "password": "x"}, viaProxy("203.0.113.9"))
 	expectCode(t, w, http.StatusTooManyRequests, "rate_limited")
+	if got := w.Header().Get("Retry-After"); got != "60" {
+		t.Fatalf("Retry-After=%q, esperaba 60", got)
+	}
 	w = e.do("POST", "/api/v1/auth/login", map[string]string{"username": "nadie", "password": "x"}, viaProxy("203.0.113.10"))
 	expectCode(t, w, http.StatusUnauthorized, "invalid_credentials")
 }

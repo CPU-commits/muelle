@@ -180,11 +180,11 @@ func (k *Kit) authenticate(a Access, next http.HandlerFunc) http.Handler {
 			}
 			p, err := k.auth.AuthenticateToken(ctx, bearer)
 			if err != nil {
-				k.Fail(w, err)
+				k.Fail(w, r, err)
 				return
 			}
 			if p.Token == nil {
-				k.Fail(w, errTokenWithoutScope)
+				k.Fail(w, r, errTokenWithoutScope)
 				return
 			}
 			write := r.Method != http.MethodGet && r.Method != http.MethodHead
@@ -209,7 +209,7 @@ func (k *Kit) authenticate(a Access, next http.HandlerFunc) http.Handler {
 		}
 		p, err := k.auth.AuthenticateSession(ctx, c.Value)
 		if err != nil {
-			k.Fail(w, err)
+			k.Fail(w, r, err)
 			return
 		}
 		switch {

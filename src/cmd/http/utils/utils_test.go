@@ -398,27 +398,74 @@ func TestFail(t *testing.T) {
 	k := NewKit(http.NewServeMux(), fakeAuth{}, true, slog.New(slog.NewTextHandler(&logs, nil)))
 	errGone := errors.New("se fue")
 	k.RegisterError(errGone, http.StatusGone, "gone", "ya no está")
+	r := httptest.NewRequest("DELETE", "/api/v1/projects/auditfy", nil)
 
 	w := httptest.NewRecorder()
-	k.Fail(w, validate.Errorf("slug", "no vale"))
+	k.Fail(w, r, validate.Errorf("slug", "no vale"))
 	if e := decodeError(t, w); w.Code != 422 || e.Error.Code != "invalid" || e.Error.Message != "slug: no vale" {
 		t.Fatalf("validación: %d %+v", w.Code, e)
 	}
 
 	w = httptest.NewRecorder()
-	k.Fail(w, fmt.Errorf("borrando: %w", errGone))
+	k.Fail(w, r, fmt.Errorf("borrando: %w", errGone))
 	if e := decodeError(t, w); w.Code != http.StatusGone || e.Error.Code != "gone" || e.Error.Message != "ya no está" {
 		t.Fatalf("registrado: %d %+v", w.Code, e)
 	}
+	if logs.Len() != 0 {
+		t.Fatalf("un error registrado no va al log: %q", logs.String())
+	}
 
 	w = httptest.NewRecorder()
-	k.Fail(w, errors.New("detalle interno: /data/muelle.db está bloqueada"))
+	k.Fail(w, r, errors.New("detalle interno: /data/muelle.db está bloqueada"))
 	e := decodeError(t, w)
 	if w.Code != 500 || e.Error.Code != "internal" || strings.Contains(e.Error.Message, "bloqueada") {
 		t.Fatalf("desconocido: %d %+v", w.Code, e)
 	}
-	if !strings.Contains(logs.String(), "bloqueada") {
-		t.Fatalf("el error interno debe quedar en el log: %q", logs.String())
+	for _, want := range []string{"bloqueada", "method=DELETE", "path=/api/v1/projects/auditfy"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("el log del error interno debe tener %q: %q", want, logs.String())
+		}
+	}
+}
+
+// El link de una invitación lleva el token en la ruta: el log de un error
+// interno no lo muestra.
+func TestFailLogOmitsPathToken(t *testing.T) {
+	var logs bytes.Buffer
+	mux := http.NewServeMux()
+	k := NewKit(mux, fakeAuth{}, true, slog.New(slog.NewTextHandler(&logs, nil)))
+	k.HandlePublic("POST /api/v1/auth/invite/{token}", func(w http.ResponseWriter, r *http.Request) {
+		k.Fail(w, r, errors.New("falló la base"))
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/auth/invite/secreto-de-la-invitacion", nil))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d", w.Code)
+	}
+	if strings.Contains(logs.String(), "secreto-de-la-invitacion") || !strings.Contains(logs.String(), "path=/api/v1/auth/invite/{token}") {
+		t.Fatalf("log=%q", logs.String())
+	}
+}
+
+// Un 429 dice cuándo reintentar (RateLimitRetryAfter, fijo); los demás errores no.
+func TestFailRetryAfter(t *testing.T) {
+	k := NewKit(http.NewServeMux(), fakeAuth{}, true, discard())
+	errLimited, errLocked := errors.New("límite"), errors.New("bloqueado")
+	k.RegisterError(errLimited, http.StatusTooManyRequests, "rate_limited", "espera")
+	k.RegisterError(errLocked, http.StatusLocked, "locked", "bloqueado")
+	r := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+
+	w := httptest.NewRecorder()
+	k.Fail(w, r, fmt.Errorf("login: %w", errLimited))
+	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "60" {
+		t.Fatalf("429: status %d, Retry-After %q", w.Code, w.Header().Get("Retry-After"))
+	}
+	for _, err := range []error{errLocked, errors.New("interno")} {
+		w = httptest.NewRecorder()
+		k.Fail(w, r, err)
+		if got := w.Header().Get("Retry-After"); got != "" {
+			t.Errorf("%v: Retry-After %q, esperaba ninguno", err, got)
+		}
 	}
 }
 
@@ -429,13 +476,14 @@ func TestFailLaterRegistrationWins(t *testing.T) {
 	k.RegisterError(base, http.StatusNotFound, "not_found", "no existe")
 	k.RegisterError(specific, http.StatusBadRequest, "specific", "específico")
 
+	r := httptest.NewRequest("GET", "/api/v1/x", nil)
 	w := httptest.NewRecorder()
-	k.Fail(w, fmt.Errorf("x: %w", specific))
+	k.Fail(w, r, fmt.Errorf("x: %w", specific))
 	if e := decodeError(t, w); w.Code != http.StatusBadRequest || e.Error.Code != "specific" {
 		t.Fatalf("el error más específico (registrado después) debe ganar: %d %+v", w.Code, e)
 	}
 	w = httptest.NewRecorder()
-	k.Fail(w, base)
+	k.Fail(w, r, base)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("base: %d", w.Code)
 	}

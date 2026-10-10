@@ -61,7 +61,7 @@ func newTestServer(t *testing.T) *Server {
 		"forbidden":       entity.ErrForbidden,
 	}
 	k.HandlePublic("GET /api/v1/fail/{code}", func(w http.ResponseWriter, r *http.Request) {
-		k.Fail(w, fmt.Errorf("envuelto: %w", common[r.PathValue("code")]))
+		k.Fail(w, r, fmt.Errorf("envuelto: %w", common[r.PathValue("code")]))
 	})
 	return s
 }
