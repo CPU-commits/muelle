@@ -164,7 +164,7 @@ func TestConcurrentCompleteTOTPConsumesOnce(t *testing.T) {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
 	g := newGate()
-	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.replay, f.rec, f.clock)
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.totpLock, f.attempts, f.replay, f.rec, f.clock)
 	code := f.code(t, secret)
 
 	errs := make(chan error, 2)
@@ -204,7 +204,7 @@ func TestTOTPReplayInParallel(t *testing.T) {
 	a, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
 	b, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
 	g := newGate()
-	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.replay, f.rec, f.clock)
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.totpLock, f.attempts, f.replay, f.rec, f.clock)
 	code := f.code(t, secret)
 
 	errs := make(chan error, 2)
@@ -242,7 +242,7 @@ func TestCompleteTOTPResetDuringValidation(t *testing.T) {
 	secret := f.enableTOTPFor(t, u.ID)
 	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
 	g := newGate()
-	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.replay, f.rec, f.clock)
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.totpLock, f.attempts, f.replay, f.rec, f.clock)
 
 	done := make(chan error, 1)
 	go func() {
@@ -271,7 +271,7 @@ func TestCompleteTOTPSecretChangedDuringValidation(t *testing.T) {
 	secret := f.enableTOTPFor(t, u.ID)
 	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
 	g := newGate()
-	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.replay, f.rec, f.clock)
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.totpLock, f.attempts, f.replay, f.rec, f.clock)
 
 	done := make(chan error, 1)
 	go func() {

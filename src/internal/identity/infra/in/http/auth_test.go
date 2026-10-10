@@ -2,6 +2,7 @@ package http_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -193,6 +194,38 @@ func TestTOTPEndToEnd(t *testing.T) {
 	again := httptestutil.SessionFrom(t, w)
 	w = e.do("POST", "/api/v1/auth/totp", map[string]string{"code": used}, httptestutil.WithSession(again))
 	expectCode(t, w, http.StatusUnauthorized, "invalid_code")
+}
+
+// La sonda de la revisión por HTTP: con la contraseña, códigos malos desde
+// muchas IPs (detrás del proxy) sobre una sola sesión pendiente. Al 5º la
+// sesión se borra; el usuario queda bloqueado para el 2FA desde cualquier IP.
+func TestTOTPBruteForceAcrossIPs(t *testing.T) {
+	e := newEnv(t)
+	session := e.login()
+	w := e.do("POST", "/api/v1/auth/totp/setup", nil, httptestutil.WithSession(session))
+	secret := httptestutil.Decode[map[string]string](t, w)["secret"]
+	httptestutil.Expect(t, e.do("POST", "/api/v1/auth/totp/enable", map[string]string{"code": e.code(secret)}, httptestutil.WithSession(session)), http.StatusNoContent)
+	e.clock.Advance(30 * time.Second)
+
+	viaProxy := func(client string) httptestutil.Opt {
+		return func(r *http.Request) {
+			r.RemoteAddr = "10.0.0.2:41000"
+			r.Header.Set("X-Real-IP", client)
+		}
+	}
+	w = e.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": testPassword})
+	pending := httptestutil.WithSession(httptestutil.SessionFrom(t, w))
+	for i := range 5 {
+		w = e.do("POST", "/api/v1/auth/totp", map[string]string{"code": e.wrongCode(secret)}, pending, viaProxy(fmt.Sprintf("2001:db8:%x::1", i+1)))
+		expectCode(t, w, http.StatusUnauthorized, "invalid_code")
+	}
+	w = e.do("POST", "/api/v1/auth/totp", map[string]string{"code": e.code(secret)}, pending, viaProxy("2001:db8:ff::1"))
+	expectCode(t, w, http.StatusUnauthorized, "unauthenticated")
+
+	w = e.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": testPassword}, viaProxy("198.51.100.7"))
+	fresh := httptestutil.WithSession(httptestutil.SessionFrom(t, w))
+	w = e.do("POST", "/api/v1/auth/totp", map[string]string{"code": e.code(secret)}, fresh, viaProxy("198.51.100.7"))
+	expectCode(t, w, http.StatusLocked, "locked")
 }
 
 func TestRequire2FABlocksUntilConfigured(t *testing.T) {

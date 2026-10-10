@@ -62,7 +62,9 @@ func New(d Deps) *Module {
 	scopes := outservice.NewScopeResolver(db)
 	settings := outservice.NewSettingsReader(db)
 	limiter := service.NewLoginLimiter(service.LoginMaxPerIP, service.LoginWindow, c) // compartido por login, código TOTP, setup e invitaciones
-	lockout := service.NewLoginLockout(c)                                             // compartido por login y código TOTP
+	lockout := service.NewLoginLockout(c)                                             // contraseña: por usuario e IP
+	totpLockout := service.NewTOTPLockout(c)                                          // código TOTP: por usuario
+	attempts := service.NewPendingCodeAttempts(c)                                     // código TOTP: por sesión pendiente
 	replay := service.NewTOTPReplayGuard(c)                                           // un código TOTP vale una sola vez
 
 	return &Module{
@@ -72,7 +74,7 @@ func New(d Deps) *Module {
 		},
 		routes: inhttp.Usecases{
 			Login:          usecases.NewLogin(db, users, sessions, hasher, limiter, lockout, d.Audit, c),
-			CompleteTOTP:   usecases.NewCompleteTOTP(db, users, sessions, d.Cipher, totp, limiter, lockout, replay, d.Audit, c),
+			CompleteTOTP:   usecases.NewCompleteTOTP(db, users, sessions, d.Cipher, totp, limiter, totpLockout, attempts, replay, d.Audit, c),
 			Logout:         usecases.NewLogout(sessions, d.Audit),
 			Setup:          usecases.NewSetup(db, users, invites, sessions, hasher, d.Audit, limiter, c),
 			AcceptInvite:   usecases.NewAcceptInvite(db, users, invites, sessions, hasher, d.Audit, limiter, c),

@@ -16,8 +16,12 @@ import (
 )
 
 // CompleteTOTP valida el código de una sesión pendiente de MFA y la cambia
-// por una sesión completa con otro token. Los códigos malos cuentan en el
-// bloqueo de login del par (usuario, IP), y solo un código correcto lo reinicia.
+// por una sesión completa con otro token. A este paso solo llega quien sabe
+// la contraseña, así que los códigos malos no se cuentan por IP sino:
+//   - por sesión pendiente: al MaxPendingCodeAttempts-ésimo código malo se
+//     borra y hay que volver a poner la contraseña;
+//   - por usuario, desde cualquier IP (service.TOTPLockout), con el
+//     calendario progresivo; solo un código correcto lo reinicia.
 type CompleteTOTP struct {
 	tx       sharedrepo.Transactor
 	users    repository.UserRepository
@@ -25,7 +29,8 @@ type CompleteTOTP struct {
 	cipher   cipher.Cipher
 	totp     service.TOTP
 	limiter  *service.LoginLimiter
-	lockout  *service.LoginLockout
+	lockout  *service.TOTPLockout
+	attempts *service.PendingCodeAttempts
 	replay   *service.TOTPReplayGuard
 	clock    clock.Clock
 	issuer   sessionIssuer
@@ -33,11 +38,11 @@ type CompleteTOTP struct {
 }
 
 func NewCompleteTOTP(tx sharedrepo.Transactor, users repository.UserRepository, sessions repository.SessionRepository,
-	c cipher.Cipher, totp service.TOTP, limiter *service.LoginLimiter, lockout *service.LoginLockout,
-	replay *service.TOTPReplayGuard, rec audit.Recorder, clk clock.Clock) *CompleteTOTP {
+	c cipher.Cipher, totp service.TOTP, limiter *service.LoginLimiter, lockout *service.TOTPLockout,
+	attempts *service.PendingCodeAttempts, replay *service.TOTPReplayGuard, rec audit.Recorder, clk clock.Clock) *CompleteTOTP {
 	return &CompleteTOTP{
 		tx: tx, users: users, sessions: sessions, cipher: c, totp: totp,
-		limiter: limiter, lockout: lockout, replay: replay, clock: clk,
+		limiter: limiter, lockout: lockout, attempts: attempts, replay: replay, clock: clk,
 		issuer: sessionIssuer{sessions: sessions, clock: clk},
 		audit:  loginAudit{rec: rec},
 	}
@@ -65,7 +70,7 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 	if err != nil {
 		return dto.SessionOutput{}, err
 	}
-	if uc.lockout.Locked(u.Username, in.IP) {
+	if uc.lockout.Locked(u.ID) {
 		uc.audit.locked(ctx, u.Username, in.IP)
 		return dto.SessionOutput{}, service.ErrLocked
 	}
@@ -82,11 +87,19 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 	}
 	step, ok := uc.totp.Validate(in.Code, string(secret), now)
 	if !ok {
-		if uc.lockout.Fail(u.Username, in.IP) {
+		// Con el usuario ya bloqueado no cambia nada (ni la cuenta de la sesión):
+		// la respuesta y el estado son los mismos que con un código correcto.
+		if wasLocked, _ := uc.lockout.Fail(u.ID); wasLocked {
 			uc.audit.locked(ctx, u.Username, in.IP)
 			return dto.SessionOutput{}, service.ErrLocked
 		}
 		uc.audit.failed(ctx, u.Username, in.IP, "code")
+		if uc.attempts.Fail(ss.IDHash, ss.ExpiresAt) {
+			// La sesión agotó sus intentos: hay que volver a poner la contraseña.
+			if err := uc.sessions.Delete(ctx, ss.IDHash); err != nil {
+				return dto.SessionOutput{}, err
+			}
+		}
 		return dto.SessionOutput{}, service.ErrInvalidCode
 	}
 
@@ -116,10 +129,10 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 		if !uc.replay.Use(u.ID, step) {
 			return service.ErrInvalidCode
 		}
-		// Bajo el mutex del bloqueo: si otro intento bloqueó el par mientras
+		// Bajo el mutex del bloqueo: si otro intento bloqueó al usuario mientras
 		// tanto, "bloqueado" sin cambiar nada (y el rollback devuelve la sesión
-		// pendiente). Si no, el código correcto reinicia los fallos.
-		if !uc.lockout.Succeed(u.Username, in.IP, true) {
+		// pendiente). Si no, el código correcto reinicia sus fallos.
+		if !uc.lockout.Succeed(u.ID) {
 			return service.ErrLocked
 		}
 		if out, err = uc.issuer.issue(ctx, cur, false, in.IP, in.UserAgent); err != nil {
@@ -139,5 +152,6 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 	if err != nil {
 		return dto.SessionOutput{}, err
 	}
+	uc.attempts.Forget(ss.IDHash)
 	return out, nil
 }

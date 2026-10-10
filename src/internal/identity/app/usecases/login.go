@@ -17,9 +17,9 @@ import (
 // 2FA abre una sesión pendiente de 5 minutos que CompleteTOTP cambia por una
 // completa.
 //
-// El bloqueo progresivo es por usuario e IP (service.LoginLockout) y se
-// aplica igual a nombres que no existen: ni la respuesta ni los tiempos
-// revelan qué usuarios hay.
+// El bloqueo progresivo de la contraseña es por usuario e IP
+// (service.LoginLockout) y se aplica igual a nombres que no existen: ni la
+// respuesta ni los tiempos revelan qué usuarios hay.
 type Login struct {
 	tx      sharedrepo.Transactor
 	users   repository.UserRepository
@@ -73,10 +73,10 @@ func (uc *Login) Execute(ctx context.Context, in dto.LoginInput) (dto.SessionOut
 	}
 	// La decisión final se toma bajo el mutex del bloqueo: un intento que
 	// esperó al hasher mientras otros bloqueaban el par responde "bloqueado"
-	// sin cambiar nada, igual que uno malo. Con 2FA los fallos se reinician
-	// recién cuando el código es correcto (CompleteTOTP), así los códigos
-	// malos se acumulan entre logins.
-	if !uc.lockout.Succeed(in.Username, in.IP, !u.HasTOTP()) {
+	// sin cambiar nada, igual que uno malo. Una contraseña correcta reinicia
+	// los fallos de la contraseña; los del código TOTP se cuentan aparte, por
+	// usuario (CompleteTOTP).
+	if !uc.lockout.Succeed(in.Username, in.IP) {
 		uc.audit.locked(ctx, in.Username, in.IP)
 		return dto.SessionOutput{}, service.ErrLocked
 	}
@@ -100,7 +100,7 @@ func (uc *Login) Execute(ctx context.Context, in dto.LoginInput) (dto.SessionOut
 // fail registra el fallo (en el bloqueo y en la auditoría) y devuelve el
 // error que corresponde.
 func (uc *Login) fail(ctx context.Context, in dto.LoginInput) error {
-	if uc.lockout.Fail(in.Username, in.IP) {
+	if wasLocked, _ := uc.lockout.Fail(in.Username, in.IP); wasLocked {
 		uc.audit.locked(ctx, in.Username, in.IP)
 		return service.ErrLocked
 	}
