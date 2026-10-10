@@ -42,17 +42,22 @@ type Container struct {
 // error que envuelve admin.ErrWrongMasterKey), arma el servidor con el
 // Authenticator de identity y registra las rutas de todos los módulos.
 //
-// La clave se lee antes de tocar DataDir, así una clave que falta no deja
-// una base vacía. Si algo falla, cierra lo que alcanzó a abrir.
+// Sin PanelOrigin o DataDir devuelve un error sin tocar nada. La clave se lee
+// antes de tocar DataDir, así una clave que falta no deja una base vacía; si
+// falta o no sirve, el error nombra MUELLE_MASTER_KEY_FILE y `muelle genkey`.
+// Si algo falla, cierra lo que alcanzó a abrir.
 func New(ctx context.Context, s settings.Settings, log *slog.Logger) (*Container, error) {
+	// Sin estos valores un módulo haría panic (identity y admin los exigen).
+	switch {
+	case s.PanelOrigin == "":
+		return nil, errors.New("container: falta PanelOrigin (MUELLE_PANEL_ORIGIN)")
+	case s.DataDir == "":
+		return nil, errors.New("container: falta DataDir (MUELLE_DATA_DIR)")
+	}
 	if log == nil {
 		log = slog.Default()
 	}
-	key, err := crypto.LoadKeyFile(s.MasterKeyFile)
-	if err != nil {
-		return nil, err
-	}
-	ciph, err := crypto.New(key)
+	ciph, err := loadCipher(s.MasterKeyFile)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +74,24 @@ func New(ctx context.Context, s settings.Settings, log *slog.Logger) (*Container
 		return nil, errors.Join(err, db.Close())
 	}
 	return c, nil
+}
+
+// loadCipher lee la clave maestra de path y arma el cifrador. Si falla, el
+// error dice de dónde se leyó y cómo crear una clave nueva.
+func loadCipher(path string) (*crypto.Cipher, error) {
+	key, err := crypto.LoadKeyFile(path)
+	if err != nil {
+		return nil, keyError(path, err)
+	}
+	ciph, err := crypto.New(key)
+	if err != nil {
+		return nil, keyError(path, err)
+	}
+	return ciph, nil
+}
+
+func keyError(path string, err error) error {
+	return fmt.Errorf("container: MUELLE_MASTER_KEY_FILE=%s: %w (en una instalación nueva, crea la clave con `muelle genkey`; si ya hay datos, hace falta la clave con la que se cifraron)", path, err)
 }
 
 func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, s settings.Settings, log *slog.Logger) (*Container, error) {
