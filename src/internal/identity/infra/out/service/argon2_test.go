@@ -68,7 +68,7 @@ func TestVerifyRejectsMalformedHashes(t *testing.T) {
 	parts := strings.Split(good, "$")
 	bad := []string{
 		"",
-		"$argon2i$v=19$m=19456,t=2,p=1$" + parts[4] + "$" + parts[5], // otra variante
+		"$argon2i$v=19$m=19456,t=2,p=1$" + parts[4] + "$" + parts[5],  // otra variante
 		"$argon2id$v=18$m=19456,t=2,p=1$" + parts[4] + "$" + parts[5], // otra versión
 		"$argon2id$v=19$m=19456,t=0,p=1$" + parts[4] + "$" + parts[5], // t=0 haría panic en argon2
 		"$argon2id$v=19$m=19456,t=2,p=0$" + parts[4] + "$" + parts[5], // p=0 haría panic en argon2

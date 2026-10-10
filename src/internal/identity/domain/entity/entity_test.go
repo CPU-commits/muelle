@@ -65,6 +65,16 @@ func TestNewSession(t *testing.T) {
 	if !utf8.ValidString(cut.UserAgent) || len(cut.UserAgent) != 255 {
 		t.Fatalf("user agent %q (%d bytes)", cut.UserAgent, len(cut.UserAgent))
 	}
+
+	// El user agent y la IP vienen de headers: se guardan siempre como UTF-8
+	// válido (json/v2 responde 500 si una respuesta tiene UTF-8 inválido).
+	dirty := NewSession("h", 7, false, t0, time.Hour, "1.2.3.4\xff"+strings.Repeat("9", 100), "curl\xff\xfe/8")
+	if dirty.UserAgent != "curl�/8" {
+		t.Fatalf("user agent %q", dirty.UserAgent)
+	}
+	if !utf8.ValidString(dirty.IP) || len(dirty.IP) > MaxIP || !strings.HasPrefix(dirty.IP, "1.2.3.4�") {
+		t.Fatalf("ip %q (%d bytes)", dirty.IP, len(dirty.IP))
+	}
 }
 
 func TestSessionExpired(t *testing.T) {
@@ -121,7 +131,7 @@ func TestNewAPIToken(t *testing.T) {
 		*tok.CreatedBy != 1 || !tok.CreatedAt.Equal(t0) || !tok.ExpiresAt.Equal(exp) || tok.LastUsedAt != nil {
 		t.Fatalf("tok=%+v err=%v", tok, err)
 	}
-	for _, bad := range []string{"", "   ", strings.Repeat("a", MaxTokenName+1), "a\nb", "​"} {
+	for _, bad := range []string{"", "   ", strings.Repeat("a", MaxTokenName+1), "a\nb", "​", "ci\xff"} {
 		_, err := NewAPIToken(bad, "h", 2, nil, nil, t0, nil)
 		if ve, ok := errors.AsType[*validate.Error](err); !ok || ve.Field != "name" {
 			t.Errorf("%q: esperaba un error de validación de name, got %v", bad, err)
