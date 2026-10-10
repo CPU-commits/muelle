@@ -27,7 +27,52 @@ func (f *fixture) enableTOTPFor(t *testing.T, userID int64) string {
 	if err := f.enableTOTP.Execute(ctx, dto.EnableTOTPInput{UserID: userID, Code: f.code(t, setup.Secret)}); err != nil {
 		t.Fatal(err)
 	}
+	// El código de la activación queda usado: el próximo login necesita el del paso siguiente.
+	f.advance(service.TOTPPeriod)
 	return setup.Secret
+}
+
+// Un código TOTP no se acepta dos veces (RFC 6238 §5.2), tampoco en otra
+// sesión pendiente; el del período siguiente sí.
+func TestTOTPCodeCannotBeReused(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	code := f.code(t, secret)
+
+	first, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(first.Token, code)); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(second.Token, code)); !errors.Is(err, service.ErrInvalidCode) {
+		t.Fatalf("el mismo código otra vez: esperaba ErrInvalidCode, got %v", err)
+	}
+	f.advance(service.TOTPPeriod)
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(second.Token, f.code(t, secret))); err != nil {
+		t.Fatalf("el código del período siguiente sirve (y la sesión pendiente sigue): %v", err)
+	}
+}
+
+// El código con que se activó el 2FA tampoco sirve para entrar.
+func TestTOTPEnableCodeCannotLogIn(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	setup, _ := f.beginTOTP.Execute(ctx, u.ID)
+	code := f.code(t, setup.Secret)
+	if err := f.enableTOTP.Execute(ctx, dto.EnableTOTPInput{UserID: u.ID, Code: code}); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, code)); !errors.Is(err, service.ErrInvalidCode) {
+		t.Fatalf("esperaba ErrInvalidCode, got %v", err)
+	}
+	f.advance(service.TOTPPeriod)
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.code(t, setup.Secret))); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestTOTPFlow(t *testing.T) {
@@ -49,6 +94,7 @@ func TestTOTPFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	secret := setup.Secret
+	f.advance(service.TOTPPeriod) // el código de la activación ya no sirve para entrar
 
 	// Con TOTP activo el login queda pendiente hasta el código.
 	res, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))

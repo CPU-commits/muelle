@@ -143,6 +143,7 @@ func TestTOTPEndToEnd(t *testing.T) {
 	expectCode(t, w, http.StatusUnauthorized, "invalid_code")
 	w = e.do("POST", "/api/v1/auth/totp/enable", map[string]string{"code": e.code(secret)}, httptestutil.WithSession(session))
 	httptestutil.Expect(t, w, http.StatusNoContent)
+	e.clock.Advance(30 * time.Second) // el código de la activación ya no sirve para entrar
 
 	// Login nuevo: queda pendiente del código.
 	w = e.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": testPassword})
@@ -178,6 +179,13 @@ func TestTOTPEndToEnd(t *testing.T) {
 	// La pendiente ya no existe.
 	w = e.do("GET", "/api/v1/auth/me", nil, httptestutil.WithSession(pending))
 	expectCode(t, w, http.StatusUnauthorized, "unauthenticated")
+
+	// El mismo código no sirve para otro login (RFC 6238 §5.2).
+	used := e.code(secret)
+	w = e.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": testPassword})
+	again := httptestutil.SessionFrom(t, w)
+	w = e.do("POST", "/api/v1/auth/totp", map[string]string{"code": used}, httptestutil.WithSession(again))
+	expectCode(t, w, http.StatusUnauthorized, "invalid_code")
 }
 
 func TestRequire2FABlocksUntilConfigured(t *testing.T) {

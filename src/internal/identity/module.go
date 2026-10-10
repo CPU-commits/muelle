@@ -59,6 +59,7 @@ func New(d Deps) *Module {
 	settings := outservice.NewSettingsReader(db)
 	limiter := service.NewLoginLimiter(service.LoginMaxPerIP, service.LoginWindow, c) // compartido por login, código TOTP, setup e invitaciones
 	lockout := service.NewLoginLockout(c)                                             // compartido por login y código TOTP
+	replay := service.NewTOTPReplayGuard(c)                                           // un código TOTP vale una sola vez
 
 	return &Module{
 		auth: inhttp.Authenticator{
@@ -67,13 +68,13 @@ func New(d Deps) *Module {
 		},
 		routes: inhttp.Usecases{
 			Login:          usecases.NewLogin(db, users, sessions, hasher, limiter, lockout, c),
-			CompleteTOTP:   usecases.NewCompleteTOTP(db, users, sessions, d.Cipher, totp, limiter, lockout, c),
+			CompleteTOTP:   usecases.NewCompleteTOTP(db, users, sessions, d.Cipher, totp, limiter, lockout, replay, c),
 			Logout:         usecases.NewLogout(sessions),
 			Setup:          usecases.NewSetup(db, users, invites, sessions, hasher, d.Audit, limiter, c),
 			AcceptInvite:   usecases.NewAcceptInvite(db, users, invites, sessions, hasher, d.Audit, limiter, c),
 			Me:             usecases.NewMe(users),
 			BeginTOTPSetup: usecases.NewBeginTOTPSetup(users, d.Cipher, totp),
-			EnableTOTP:     usecases.NewEnableTOTP(db, users, d.Cipher, totp, d.Audit, c),
+			EnableTOTP:     usecases.NewEnableTOTP(db, users, d.Cipher, totp, replay, d.Audit, c),
 			CreateInvite:   usecases.NewCreateInvite(invites, d.Audit, c),
 			ListUsers:      usecases.NewListUsers(users),
 			DeleteUser:     usecases.NewDeleteUser(db, users, d.Audit),

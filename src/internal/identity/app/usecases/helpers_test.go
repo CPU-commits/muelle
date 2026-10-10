@@ -40,6 +40,7 @@ type fixture struct {
 	rec      *sqlitedb.AuditRecorder
 	limiter  *service.LoginLimiter
 	lockout  *service.LoginLockout
+	replay   *service.TOTPReplayGuard
 
 	login        *Login
 	completeTOTP *CompleteTOTP
@@ -90,9 +91,10 @@ func newFixture(t *testing.T) *fixture {
 	limiter := service.NewLoginLimiter(service.LoginMaxPerIP, service.LoginWindow, c)
 
 	lockout := service.NewLoginLockout(c)
-	f.rec, f.limiter, f.lockout = rec, limiter, lockout
+	replay := service.NewTOTPReplayGuard(c)
+	f.rec, f.limiter, f.lockout, f.replay = rec, limiter, lockout, replay
 	f.login = NewLogin(db, f.users, f.sessions, f.hasher, limiter, lockout, c)
-	f.completeTOTP = NewCompleteTOTP(db, f.users, f.sessions, ciph, f.totp, limiter, lockout, c)
+	f.completeTOTP = NewCompleteTOTP(db, f.users, f.sessions, ciph, f.totp, limiter, lockout, replay, c)
 	f.logout = NewLogout(f.sessions)
 	f.authSession = NewAuthenticateSession(f.users, f.sessions, settings, c)
 	f.authToken = NewAuthenticateToken(f.tokens, c)
@@ -102,7 +104,7 @@ func newFixture(t *testing.T) *fixture {
 	f.createInvite = NewCreateInvite(f.invites, rec, c)
 	f.me = NewMe(f.users)
 	f.beginTOTP = NewBeginTOTPSetup(f.users, ciph, f.totp)
-	f.enableTOTP = NewEnableTOTP(db, f.users, ciph, f.totp, rec, c)
+	f.enableTOTP = NewEnableTOTP(db, f.users, ciph, f.totp, replay, rec, c)
 	f.listUsers = NewListUsers(f.users)
 	f.deleteUser = NewDeleteUser(db, f.users, rec)
 	f.resetTOTP = NewResetUserTOTP(f.users, rec)

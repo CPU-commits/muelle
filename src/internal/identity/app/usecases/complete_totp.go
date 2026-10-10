@@ -25,14 +25,17 @@ type CompleteTOTP struct {
 	totp     service.TOTP
 	limiter  *service.LoginLimiter
 	lockout  *service.LoginLockout
+	replay   *service.TOTPReplayGuard
 	clock    clock.Clock
 	issuer   sessionIssuer
 }
 
 func NewCompleteTOTP(tx sharedrepo.Transactor, users repository.UserRepository, sessions repository.SessionRepository,
-	c cipher.Cipher, totp service.TOTP, limiter *service.LoginLimiter, lockout *service.LoginLockout, clk clock.Clock) *CompleteTOTP {
+	c cipher.Cipher, totp service.TOTP, limiter *service.LoginLimiter, lockout *service.LoginLockout,
+	replay *service.TOTPReplayGuard, clk clock.Clock) *CompleteTOTP {
 	return &CompleteTOTP{
-		tx: tx, users: users, sessions: sessions, cipher: c, totp: totp, limiter: limiter, lockout: lockout, clock: clk,
+		tx: tx, users: users, sessions: sessions, cipher: c, totp: totp,
+		limiter: limiter, lockout: lockout, replay: replay, clock: clk,
 		issuer: sessionIssuer{sessions: sessions, clock: clk},
 	}
 }
@@ -73,7 +76,8 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 	if err != nil {
 		return dto.SessionOutput{}, err
 	}
-	if !uc.totp.Validate(in.Code, string(secret), now) {
+	step, ok := uc.totp.Validate(in.Code, string(secret), now)
+	if !ok {
 		if uc.lockout.Fail(u.Username, in.IP) {
 			return dto.SessionOutput{}, service.ErrLocked
 		}
@@ -100,6 +104,11 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 				return shared.ErrUnauthenticated // ya se canjeó o venció
 			}
 			return err
+		}
+		// Cada código vale una sola vez (RFC 6238 §5.2): si otra sesión ya usó
+		// este paso, se rechaza y el rollback devuelve la sesión pendiente.
+		if !uc.replay.Use(u.ID, step) {
+			return service.ErrInvalidCode
 		}
 		// Bajo el mutex del bloqueo: si otro intento bloqueó el par mientras
 		// tanto, "bloqueado" sin cambiar nada (y el rollback devuelve la sesión

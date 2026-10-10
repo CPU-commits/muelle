@@ -43,7 +43,7 @@ type gatedTOTP struct {
 	g *gate
 }
 
-func (t gatedTOTP) Validate(code, secret string, at time.Time) bool {
+func (t gatedTOTP) Validate(code, secret string, at time.Time) (int64, bool) {
 	t.g.pass()
 	return t.TOTP.Validate(code, secret, at)
 }
@@ -164,7 +164,7 @@ func TestConcurrentCompleteTOTPConsumesOnce(t *testing.T) {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
 	g := newGate()
-	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.clock)
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.replay, f.clock)
 	code := f.code(t, secret)
 
 	errs := make(chan error, 2)
@@ -194,6 +194,46 @@ func TestConcurrentCompleteTOTPConsumesOnce(t *testing.T) {
 	}
 }
 
+// Dos sesiones pendientes canjeadas a la vez con el mismo código: el código
+// solo vale una vez, así que solo una abre la sesión completa.
+func TestTOTPReplayInParallel(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	a, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	b, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	g := newGate()
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.replay, f.clock)
+	code := f.code(t, secret)
+
+	errs := make(chan error, 2)
+	for _, pending := range []string{a.Token, b.Token} {
+		go func() {
+			_, err := uc.Execute(ctx, completeTOTP(pending, code))
+			errs <- err
+		}()
+	}
+	<-g.entered
+	<-g.entered // las dos validaron el código y esperan
+	close(g.release)
+
+	var ok, invalid int
+	for range 2 {
+		switch err := <-errs; {
+		case err == nil:
+			ok++
+		case errors.Is(err, service.ErrInvalidCode):
+			invalid++
+		default:
+			t.Fatalf("error inesperado: %v", err)
+		}
+	}
+	if ok != 1 || invalid != 1 || f.countFullSessions(t) != 1 {
+		t.Fatalf("ok=%d inválidos=%d sesiones completas=%d", ok, invalid, f.countFullSessions(t))
+	}
+}
+
 // Si un admin reinicia el 2FA mientras se valida el código, no se abre la sesión.
 func TestCompleteTOTPResetDuringValidation(t *testing.T) {
 	f := newFixture(t)
@@ -202,7 +242,7 @@ func TestCompleteTOTPResetDuringValidation(t *testing.T) {
 	secret := f.enableTOTPFor(t, u.ID)
 	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
 	g := newGate()
-	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.clock)
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.replay, f.clock)
 
 	done := make(chan error, 1)
 	go func() {
@@ -322,7 +362,7 @@ func TestEnableTOTPDoesNotDropNewerPending(t *testing.T) {
 	u := f.user(t, "felipe")
 	a, _ := f.beginTOTP.Execute(ctx, u.ID)
 	g := newGate()
-	uc := NewEnableTOTP(f.db, f.users, f.cipher, gatedTOTP{f.totp, g}, f.rec, f.clock)
+	uc := NewEnableTOTP(f.db, f.users, f.cipher, gatedTOTP{f.totp, g}, f.replay, f.rec, f.clock)
 
 	done := make(chan error, 1)
 	go func() { done <- uc.Execute(ctx, dto.EnableTOTPInput{UserID: u.ID, Code: f.code(t, a.Secret)}) }()

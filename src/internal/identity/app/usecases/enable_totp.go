@@ -23,13 +23,14 @@ type EnableTOTP struct {
 	users  repository.UserRepository
 	cipher cipher.Cipher
 	totp   service.TOTP
+	replay *service.TOTPReplayGuard
 	audit  audit.Recorder
 	clock  clock.Clock
 }
 
 func NewEnableTOTP(tx sharedrepo.Transactor, users repository.UserRepository, c cipher.Cipher, totp service.TOTP,
-	rec audit.Recorder, clk clock.Clock) *EnableTOTP {
-	return &EnableTOTP{tx: tx, users: users, cipher: c, totp: totp, audit: rec, clock: clk}
+	replay *service.TOTPReplayGuard, rec audit.Recorder, clk clock.Clock) *EnableTOTP {
+	return &EnableTOTP{tx: tx, users: users, cipher: c, totp: totp, replay: replay, audit: rec, clock: clk}
 }
 
 func (uc *EnableTOTP) Execute(ctx context.Context, in dto.EnableTOTPInput) error {
@@ -45,7 +46,8 @@ func (uc *EnableTOTP) Execute(ctx context.Context, in dto.EnableTOTPInput) error
 		if err != nil {
 			return err
 		}
-		if !uc.totp.Validate(in.Code, string(secret), uc.clock.Now()) {
+		step, ok := uc.totp.Validate(in.Code, string(secret), uc.clock.Now())
+		if !ok {
 			return service.ErrInvalidCode
 		}
 		encrypted := uc.cipher.Encrypt(secret, service.TOTPSecretAAD(u.ID))
@@ -55,6 +57,8 @@ func (uc *EnableTOTP) Execute(ctx context.Context, in dto.EnableTOTPInput) error
 			}
 			return err
 		}
+		// El código de la activación queda usado: no sirve para entrar (RFC 6238 §5.2).
+		uc.replay.Set(u.ID, step)
 		uc.audit.Record(ctx, "user.totp_enable", "user:"+u.Username, nil)
 		return nil
 	})

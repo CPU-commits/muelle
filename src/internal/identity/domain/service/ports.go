@@ -19,8 +19,10 @@ type TOTP interface {
 	// Generate crea un secreto nuevo para accountName y devuelve el secreto
 	// (base32) y la URL otpauth:// para el código QR.
 	Generate(accountName string) (secret, url string, err error)
-	// Validate dice si code es válido para secret en el instante at.
-	Validate(code, secret string, at time.Time) bool
+	// Validate dice si code es válido para secret en el instante at
+	// (tolerando un período de desfase) y devuelve su paso (TOTPStep), para
+	// que TOTPReplayGuard no lo acepte dos veces.
+	Validate(code, secret string, at time.Time) (step int64, ok bool)
 }
 
 // ScopeResolver traduce el alcance de un token (slugs de catalog) a ids.

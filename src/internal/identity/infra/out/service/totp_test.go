@@ -28,25 +28,33 @@ func TestTOTPGenerateAndValidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !tp.Validate(code, secret, at) {
-		t.Fatal("el código del momento debe ser válido")
+	// Validate devuelve el paso del código, para no aceptarlo dos veces.
+	want := at.Unix() / 30
+	if step, ok := tp.Validate(code, secret, at); !ok || step != want {
+		t.Fatalf("el código del momento: step=%d ok=%v, esperaba %d", step, ok, want)
 	}
-	// Se tolera un período de 30 s de desfase, no más.
-	if !tp.Validate(code, secret, at.Add(30*time.Second)) || !tp.Validate(code, secret, at.Add(-30*time.Second)) {
-		t.Fatal("con un período de desfase debe ser válido")
+	// Se tolera un período de 30 s de desfase, no más; el paso es el del código.
+	for _, d := range []time.Duration{30 * time.Second, -30 * time.Second} {
+		if step, ok := tp.Validate(code, secret, at.Add(d)); !ok || step != want {
+			t.Fatalf("con %v de desfase: step=%d ok=%v", d, step, ok)
+		}
 	}
-	if tp.Validate(code, secret, at.Add(90*time.Second)) {
+	if _, ok := tp.Validate(code, secret, at.Add(90*time.Second)); ok {
 		t.Fatal("tres períodos después ya no es válido")
 	}
-	if tp.Validate(wrongCode(t, secret, at), secret, at) {
+	next, _ := totp.GenerateCode(secret, at.Add(30*time.Second))
+	if step, ok := tp.Validate(next, secret, at.Add(30*time.Second)); !ok || step != want+1 {
+		t.Fatalf("el código siguiente: step=%d ok=%v", step, ok)
+	}
+	if _, ok := tp.Validate(wrongCode(t, secret, at), secret, at); ok {
 		t.Fatal("un código incorrecto no es válido")
 	}
-	for _, bad := range []string{"", "12345", "1234567", "abcdef"} {
-		if tp.Validate(bad, secret, at) {
+	for _, bad := range []string{"", "12345", "1234567", "abcdef", " " + code[1:]} {
+		if _, ok := tp.Validate(bad, secret, at); ok {
 			t.Errorf("%q no debe ser válido", bad)
 		}
 	}
-	if tp.Validate(code, "no-es-base32!", at) {
+	if _, ok := tp.Validate(code, "no-es-base32!", at); ok {
 		t.Fatal("con un secreto inválido no es válido")
 	}
 }
