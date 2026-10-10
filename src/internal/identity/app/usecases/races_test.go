@@ -3,9 +3,12 @@ package usecases
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pquerna/otp/totp"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
@@ -231,6 +234,130 @@ func TestTOTPReplayInParallel(t *testing.T) {
 	}
 	if ok != 1 || invalid != 1 || f.countFullSessions(t) != 1 {
 		t.Fatalf("ok=%d inválidos=%d sesiones completas=%d", ok, invalid, f.countFullSessions(t))
+	}
+}
+
+// codeGate detiene la validación solo de un código, así otro puede pasar
+// mientras tanto.
+type codeGate struct {
+	service.TOTP
+	code string
+	g    *gate
+}
+
+func (c codeGate) Validate(code, secret string, at time.Time) (int64, bool) {
+	if code == c.code {
+		c.g.pass()
+	}
+	return c.TOTP.Validate(code, secret, at)
+}
+
+// raceTheTOTPLock deja al usuario felipe con 4 códigos malos y dos sesiones
+// pendientes. candidate pasa el chequeo de bloqueo por la primera y se
+// detiene en la validación, mientras un 5º código malo, por la segunda,
+// bloquea al usuario. Devuelve la respuesta de candidate.
+func (f *fixture) raceTheTOTPLock(t *testing.T, secret, candidate string) error {
+	t.Helper()
+	ctx := context.Background()
+	wrong := f.wrongCode(t, secret)
+	if candidate == wrong {
+		t.Fatal("candidate tiene que ser otro código: el gate lo distingue")
+	}
+	for i := range 4 {
+		res, _ := f.login.Execute(ctx, login("felipe", testPassword, "203.0.113.9"))
+		if _, err := f.completeTOTP.Execute(ctx, completeFrom(res.Token, wrong, "2001:db8::1")); !errors.Is(err, service.ErrInvalidCode) {
+			t.Fatalf("código malo %d: %v", i+1, err)
+		}
+	}
+	g := newGate()
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, codeGate{f.totp, candidate, g}, f.limiter, f.totpLock, f.attempts, f.replay, f.la, f.clock)
+	a, _ := f.login.Execute(ctx, login("felipe", testPassword, "203.0.113.9"))
+	b, _ := f.login.Execute(ctx, login("felipe", testPassword, "203.0.113.9"))
+	done := make(chan error, 1)
+	go func() {
+		_, err := uc.Execute(ctx, completeFrom(a.Token, candidate, "2001:db8::2"))
+		done <- err
+	}()
+	<-g.entered // candidate pasó el chequeo de bloqueo y se está validando
+	if _, err := uc.Execute(ctx, completeFrom(b.Token, wrong, "2001:db8::3")); !errors.Is(err, service.ErrInvalidCode) {
+		t.Fatalf("el 5º código malo: %v", err)
+	}
+	if !f.totpLock.Locked(a.UserID) {
+		t.Fatal("el 5º código malo debió bloquear al usuario")
+	}
+	close(g.release)
+	return <-done
+}
+
+// otherWrongCode devuelve un código inválido ahora y distinto de wrongCode.
+func (f *fixture) otherWrongCode(t *testing.T, secret string) string {
+	t.Helper()
+	first := f.wrongCode(t, secret)
+	valid := map[string]bool{first: true}
+	for _, d := range []time.Duration{-30 * time.Second, 0, 30 * time.Second} {
+		c, _ := totp.GenerateCode(secret, f.now().Add(d))
+		valid[c] = true
+	}
+	for i := 999999; ; i-- {
+		if c := fmt.Sprintf("%06d", i); !valid[c] {
+			return c
+		}
+	}
+}
+
+// Un código correcto que pasó el chequeo de bloqueo no abre sesión si
+// mientras se validaba otro intento bloqueó al usuario: la decisión final se
+// toma bajo el mutex del bloqueo (TOTPLockout.Succeed), y el bloqueo no se
+// reinicia.
+func TestCorrectCodeRacingTheTOTPLock(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	if err := f.raceTheTOTPLock(t, secret, f.code(t, secret)); !errors.Is(err, service.ErrLocked) {
+		t.Fatalf("un código correcto decidido después del bloqueo: esperaba ErrLocked, got %v", err)
+	}
+	if n := f.countFullSessions(t); n != 0 {
+		t.Fatalf("sesiones completas=%d", n)
+	}
+	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "198.51.100.7"))
+	if _, err := f.completeTOTP.Execute(ctx, completeFrom(res.Token, f.code(t, secret), "198.51.100.7")); !errors.Is(err, service.ErrLocked) {
+		t.Fatalf("el usuario sigue bloqueado: got %v", err)
+	}
+	f.advance(service.LockoutFor(5))
+	if _, err := f.completeTOTP.Execute(ctx, completeFrom(res.Token, f.code(t, secret), "198.51.100.7")); err != nil {
+		t.Fatalf("pasado el bloqueo, el código correcto entra: %v", err)
+	}
+}
+
+// Un código malo en la misma carrera responde lo mismo que uno correcto
+// ("bloqueado") y no cambia nada: ni se audita ni cuenta como fallo.
+func TestWrongCodeRacingTheTOTPLock(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	before := len(f.auditRows(t))
+	if err := f.raceTheTOTPLock(t, secret, f.otherWrongCode(t, secret)); !errors.Is(err, service.ErrLocked) {
+		t.Fatalf("un código malo decidido después del bloqueo: esperaba ErrLocked (como uno correcto), got %v", err)
+	}
+	var failed, locked int
+	for _, r := range f.rowsFrom(t, before) {
+		switch r.Action {
+		case "auth.login_failed":
+			failed++
+		case "auth.locked":
+			locked++
+		}
+	}
+	if failed != 5 || locked != 1 {
+		t.Fatalf("solo los 5 códigos malos de antes del bloqueo se auditan: login_failed=%d locked=%d", failed, locked)
+	}
+	// El bloqueo sigue siendo de 1 min: el código que esperaba no lo extendió.
+	f.advance(service.LockoutFor(5))
+	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "198.51.100.7"))
+	if _, err := f.completeTOTP.Execute(ctx, completeFrom(res.Token, f.code(t, secret), "198.51.100.7")); err != nil {
+		t.Fatalf("pasado el minuto, el código correcto entra: %v", err)
 	}
 }
 
