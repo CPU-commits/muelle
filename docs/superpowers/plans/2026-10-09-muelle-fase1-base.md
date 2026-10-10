@@ -1,5 +1,7 @@
 # muelle — Fase 1 (Base): Plan de implementación
 
+> **Reemplazado** por [`2026-10-10-muelle-fase1-hexagonal.md`](2026-10-10-muelle-fase1-hexagonal.md), que reorganiza la Fase 1 con la arquitectura hexagonal (§4 del spec). Este plan queda como **código de referencia**: el SQL, la lógica y los tests de cada tarea se adaptan a la nueva estructura.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Un binario `muelle serve` con la API REST de la Fase 1: usuarios (setup, invitaciones, 2FA), sesiones, tokens de API con alcance, y CRUD de proyectos, stages, apps y variables cifradas, todo persistido en SQLite.
@@ -13,7 +15,7 @@
 Cada capa solo conoce a las de abajo, y el store recibe los valores ya validados y cifrados.
 
 **Tech Stack:**
-- Go 1.26 con `net/http` de la librería estándar (patrones `MÉTODO /ruta/{param}`)
+- Go 1.27 con `net/http` de la librería estándar (patrones `MÉTODO /ruta/{param}`)
 - `modernc.org/sqlite` v1.60.1 (Go puro, sin CGO)
 - `golang.org/x/crypto` v0.58.0 (argon2id)
 - `github.com/pquerna/otp` v1.5.0 (TOTP)
@@ -39,7 +41,7 @@ muelle es un deploy manager ultraligero sobre Docker Swarm (§1). El spec divide
 ## Convenciones
 
 - **Repo:** `/home/felipe/Escritorio/dev/muelle`, rama `main`; ya tiene el commit del spec. **Todos los comandos se ejecutan desde la raíz del repo.**
-- **Go:** 1.26 (la máquina tiene go1.26.4). Sin CGO: el binario sale estático.
+- **Go:** 1.27 (la máquina tiene go1.27.1). Sin CGO: el binario sale estático.
 - **Idioma:** comentarios, mensajes de error y commits en español; identificadores en inglés.
 - **Errores:**
   - El store devuelve los sentinelas `store.ErrNotFound`, `ErrConflict`, `ErrNotEmpty`, `ErrKindMismatch` y `ErrInviteInvalid`.
@@ -105,10 +107,10 @@ Crea el módulo Go y el `.gitignore`. No hay código todavía; las dependencias 
 ```bash
 cd /home/felipe/Escritorio/dev/muelle
 go mod init github.com/CPU-commits/muelle
-go mod edit -go=1.26
+go mod edit -go=1.27
 ```
 
-Expected: `go.mod` contiene `module github.com/CPU-commits/muelle` y `go 1.26`.
+Expected: `go.mod` contiene `module github.com/CPU-commits/muelle` y `go 1.27`.
 
 - [ ] **Step 2: Crear `.gitignore`**
 

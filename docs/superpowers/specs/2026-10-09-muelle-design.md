@@ -1,7 +1,7 @@
 # muelle — Diseño
 
 > Deploy manager ultraligero sobre Docker Swarm: panel web + API, secretos, stages y proxy con certificados automáticos.
-> Fecha: 2026-10-09 · Estado: aprobado en brainstorming, pendiente de plan de implementación.
+> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
 > "muelle" es un nombre provisional.
 
 ## 1. Contexto y objetivo
@@ -114,21 +114,73 @@ Pasos:
 
 ## 4. Componentes (Go)
 
-Módulo: `github.com/CPU-commits/muelle`. Go 1.26. HTTP con la librería estándar `net/http` (patrones con método y ruta).
+Módulo: `github.com/CPU-commits/muelle`. Go 1.27. HTTP con la librería estándar `net/http` (patrones con método y ruta).
 
-| Paquete | Responsabilidad | Depende de |
+### 4.1 Arquitectura
+
+DDD con arquitectura hexagonal, con la misma estructura que Extractor (plantilla `Template_Go-DDD`). Cada módulo de `src/internal/` tiene estas capas:
+
+- `domain/`
+  - `entity`: entidades con constructores que validan.
+  - `vo`: value objects.
+  - `repository`: interfaces de repositorio con métodos explícitos.
+  - `service`: reglas de dominio y puertos hacia afuera.
+- `app/`
+  - `dto`.
+  - `usecases`: un struct por caso de uso, con sus dependencias y `Execute(ctx, dto)`.
+- `infra/in/`: adaptadores de entrada (`http`, `form`, `cron`).
+- `infra/out/`: adaptadores de salida (`repository/sqlite`, `service`).
+
+```
+main.go                 subcomandos serve y genkey (install en la Fase 5)
+src/
+├── cmd/http/           ServeMux, middleware, errores → HTTP; utils/ con el kit HTTP que usan los módulos
+├── cmd/cron/           ticker que ejecuta las tareas periódicas que registran los módulos
+├── internal/
+│   ├── identity/       usuarios, sesiones, 2FA, invitaciones, tokens de API, límites de login
+│   ├── catalog/        proyectos, stages y apps (el spec de formulario es un value object)
+│   ├── secrets/        variables cifradas de stage y app: leer enmascaradas, PUT, PATCH, mezclar
+│   ├── admin/          settings, auditoría, backup y limpieza periódica
+│   ├── deploy/         (Fase 2) render, cola de deploys, cliente de Docker, rollback, reconciliación
+│   └── ingress/        (Fase 3) dominios, Cloudflare, contenedor muelle-caddy y sus rutas
+├── shared/
+│   ├── domain/         errores comunes, Transactor, Principal y alcance de tokens, reglas de validación
+│   └── infra/
+│       ├── container/  container.New(settings): arma todo; lo usan main y los tests de integración
+│       └── out/        sqlite (conexión, migraciones, Transactor, registro de auditoría), crypto (AES-256-GCM)
+├── package/            interfaces finas: cipher, clock, audit
+└── settings/           carga y validación de MUELLE_*
+web/                    (Fase 4) SvelteKit con adapter-static, embebido con go:embed
+```
+
+**Reglas:**
+1. **Sin imports entre módulos.** Lo que un módulo necesita de otro lo pide con una interfaz en su `domain/service`. El adaptador vive en su `infra/out/service` y el contenedor lo conecta. Como todos los módulos comparten la base, ese adaptador puede leer directo las tablas del otro módulo; así cada uno se construye y se prueba solo.
+2. **`domain` no importa `infra`** ni librerías de infraestructura (SQLite, `net/http`).
+3. **Principal compartido.** `shared/domain` define `Principal` (usuario o token, con su alcance) y lo transporta en el `context`. `identity` lo produce y los demás módulos lo consultan para permisos y auditoría.
+4. **Transacciones.** Un caso de uso que necesita atomicidad usa `Transactor.InTx(ctx, fn)`. Los repositorios SQLite toman la transacción del `ctx`.
+5. **Diferencias con Extractor:**
+   - `net/http` en vez de Gin.
+   - SQLite en vez de MongoDB.
+   - El contenedor es un struct armado con `container.New`, no variables globales, para que cada test levante su propia base.
+   - Repositorios con métodos explícitos en vez de Criteria.
+   - Errores `{"error":{"code","message"}}`, sin i18n.
+   - Sin bus ni eventos de dominio en la v1.
+
+### 4.2 Piezas
+
+| Pieza | Dónde | Notas |
 |---|---|---|
-| `cmd/muelle` | Subcomandos `serve` e `install` | todos |
-| `internal/store` | SQLite (`modernc.org/sqlite`, en modo WAL), migraciones SQL embebidas con un runner propio, repositorios | — |
-| `internal/crypto` | AES-256-GCM con la clave maestra; nonce aleatorio por valor; AAD = `<tabla>:<dueño>:<clave>` | — |
-| `internal/auth` | Usuarios (argon2id vía `golang.org/x/crypto/argon2`), sesiones, invitaciones, tokens de API, TOTP (`github.com/pquerna/otp`), rate limiting de login | store, crypto |
-| `internal/render` | App (formulario o compose) + variables + dominios → compose final validado, usando `github.com/compose-spec/compose-go/v2` | — (funciones puras) |
-| `internal/deployer` | Cola por app, resolución de digests, `docker stack deploy`, espera de convergencia, log de deploy, reconciliación al arrancar | render, docker, store, proxy |
-| `internal/proxy` | Ciclo de vida del contenedor muelle-caddy (crear o recrear según imagen y puertos, conectar y desconectar redes de stage) y configuración: rutas → JSON de Caddy, `POST /load` por el socket unix, mutex global | docker |
-| `internal/dns` | Cliente mínimo propio de la API de Cloudflare (zonas y registros: listar, crear, actualizar, borrar), detrás de una interfaz | — |
-| `internal/docker` | Envoltorio del SDK oficial de Docker (moby): servicios, tareas, logs en vivo, stats, inspección de distribución | — |
-| `internal/api` | REST `/api/v1`, middlewares de autenticación (sesión o token), SSE para logs, sirve el SPA embebido | auth, store, deployer, dns, docker |
-| `web/` | SvelteKit con `adapter-static` (SPA con fallback `index.html`); se compila y se embebe con `go:embed` | — |
+| SQLite | `shared/infra/out/sqlite` | `modernc.org/sqlite` en modo WAL, migraciones SQL embebidas (una sola carpeta, porque hay claves foráneas entre módulos), runner propio |
+| Cifrado | `shared/infra/out/crypto` detrás de `package/cipher` | AES-256-GCM con la clave maestra; nonce aleatorio por valor; AAD = `<tabla>:<dueño>:<clave>`, nunca vacía |
+| Contraseñas | `identity` (puerto `PasswordHasher`) | Argon2id vía `golang.org/x/crypto/argon2` (§10.1) |
+| TOTP | `identity` (puerto `TOTP`) | `github.com/pquerna/otp` |
+| Render | `deploy/domain/service` (Fase 2) | App (formulario o compose) + variables + dominios → compose final validado, con `github.com/compose-spec/compose-go/v2`; funciones puras |
+| Deployer | `deploy/app` + worker en `deploy/infra/in` (Fase 2) | Cola por app, resolución de digests, `docker stack deploy`, espera de convergencia, log de deploy, reconciliación al arrancar |
+| Docker | `deploy/infra/out/service/docker` (Fase 2) | SDK oficial (moby): servicios, tareas, logs en vivo, stats, inspección de distribución |
+| Proxy | `ingress/infra/out/service/caddy` (Fase 3) | Ciclo de vida de muelle-caddy (crear o recrear según imagen y puertos, conectar y desconectar redes de stage) y configuración: rutas → JSON de Caddy, `POST /load` por el socket unix, mutex global |
+| DNS | `ingress/infra/out/service/cloudflare` (Fase 3) | Cliente mínimo propio de la API de Cloudflare (zonas y registros) |
+| API | `cmd/http` + `infra/in/http` de cada módulo | REST `/api/v1`, autenticación por sesión o token, SSE para logs; sirve el SPA embebido |
+| Panel | `web/` (Fase 4) | SvelteKit con `adapter-static` (SPA con fallback `index.html`), embebido con `go:embed` |
 
 Además, en el mismo repositorio:
 - `deploy/caddy/Dockerfile` — imagen de Caddy con el módulo de Cloudflare.
@@ -168,12 +220,13 @@ proyecto (auditfy)
 
 ### 5.2 Reglas
 
-1. **Slugs.** Solo `[a-z0-9-]`, empiezan con letra y no terminan en `-`. Proyecto, app y servicio de una app compose: hasta 16 caracteres (`^[a-z]([a-z0-9-]{0,14}[a-z0-9])?$`). Stage: hasta 12 (`^[a-z]([a-z0-9-]{0,10}[a-z0-9])?$`). Como el `_` no es válido en un slug, sirve de separador: stack `proyecto_stage_app`, servicio Swarm `proyecto_stage_app_servicio`, que nunca pasa de 63 caracteres.
+1. **Slugs.** Solo `[a-z0-9-]`, empiezan con letra y no terminan en `-`. Proyecto, app y servicio de una app compose: hasta 16 caracteres (`^[a-z]([a-z0-9-]{0,14}[a-z0-9])?$`). Stage: hasta 12 (`^[a-z]([a-z0-9-]{0,10}[a-z0-9])?$`). Como el `_` no es válido en un slug, sirve de separador: stack `proyecto_stage_app`, servicio Swarm `proyecto_stage_app_servicio`, que nunca pasa de 63 caracteres. Los slugs de proyecto `muelle` y `docker` están reservados: con ellos, una red de stage podría llamarse `muelle_panel` (la red privada de muelle y Caddy) o `docker_gwbridge` (la de Swarm).
 2. **Nombres de servicio únicos por stage.** `docker stack deploy` registra el nombre corto de cada servicio como alias en sus redes, y todas las apps de un stage comparten la red del stage. Si dos apps del mismo stage tuvieran un servicio `web`, Docker repartiría el tráfico entre ambos. En una app de formulario, el único servicio se llama igual que la app. En una app compose, se valida al guardar que ningún servicio choque con otro del stage. Entre stages distintos no hay choque, porque no comparten redes (§3.2).
 3. **Variables.** Se combinan las del stage con las de la app, y la app gana.
    - **App de formulario:** se inyectan todas como `environment` del servicio.
    - **App compose:** se usan para sustituir `${VAR}` dentro del YAML (sustitución nativa de `compose-go`); cada servicio declara las que necesita. Una `${VAR}` no definida y sin valor por defecto (`${VAR:-x}`) es un error de render.
    - **Variables `secret`:** el panel nunca vuelve a mostrar su valor (son de solo escritura). Las no secretas sí se muestran.
+   - **Claves:** el prefijo `COMPOSE_` está reservado, porque compose-go lee esas variables del entorno (nombre del proyecto, perfiles).
 4. **Cambios pendientes.** Cambiar variables (de la app o de su stage), spec o compose actualiza `config_changed_at` y no redespliega. El panel muestra "cambios pendientes" mientras `config_changed_at > last_deployed_at`. **Los dominios no pasan por el deploy:** crearlos, editarlos o borrarlos aplica de inmediato el DNS y las rutas de Caddy, porque no afectan al compose.
 5. **Digest.** Cada deploy guarda el digest exacto de cada imagen, y el compose final referencia `repo:tag@sha256:…`.
 6. **Rollback.** El deploy "actual" es el `succeeded` más reciente. El rollback toma las imágenes (con digest) del `succeeded` inmediatamente anterior y despliega con la configuración **actual** (variables, spec). Si no hay un `succeeded` anterior, responde `409`. Las variables no se versionan en la v1.
@@ -196,7 +249,7 @@ proyecto (auditfy)
 ```
 
 - `healthcheck.type` (Swarm ejecuta el healthcheck **dentro** del contenedor, así que el binario tiene que existir en la imagen):
-  - `http`: genera `CMD-SHELL wget -qO- http://127.0.0.1:<port><path> >/dev/null || exit 1`; requiere `wget`.
+  - `http`: genera la forma exec `["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:<port><path>"]`, sin shell; requiere `wget`. El path tampoco admite metacaracteres de shell (`&`, `;`, `|`, `$`, comillas, espacios).
   - `bun-http`: genera `CMD bun -e "fetch('http://127.0.0.1:<port><path>').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`.
   - `command`: un comando libre.
   - `none`: sin healthcheck. El panel advierte que entonces no hay garantía de cero downtime.
@@ -299,6 +352,8 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
 
 Todas las respuestas son JSON. Formato de error: `{"error": {"code": "string", "message": "string"}}`. Los recursos se identifican por slug.
 
+Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan campos desconocidos, claves duplicadas, UTF-8 inválido y datos después del valor. El cuerpo se limita a 1 MiB.
+
 | Recurso | Endpoints |
 |---|---|
 | Proyectos | `GET/POST /projects`, `GET/PATCH/DELETE /projects/{p}` |
@@ -314,10 +369,10 @@ Todas las respuestas son JSON. Formato de error: `{"error": {"code": "string", "
 
 ### 10.1 Autenticación y permisos
 
-- **Sesión del panel:** cookie `muelle_session` (`HttpOnly`, `Secure`, `SameSite=Strict`). Se cierra tras 12 h sin uso y dura 7 días como máximo. Las peticiones que modifican algo exigen que el `Origin` coincida con `panel_domain`. Una sesión puede hacer todo.
+- **Sesión del panel:** cookie `muelle_session` (`HttpOnly`, `Secure`, `SameSite=Strict`). Se cierra tras 12 h sin uso y dura 7 días como máximo. Las peticiones que modifican algo exigen que el `Origin` coincida con `panel_domain`. Como la comparación es literal, el origen configurado tiene que estar en forma canónica: esquema y host en minúsculas, sin puerto por defecto y con las IP en su forma estándar. Si no lo está, muelle no arranca y sugiere el valor correcto. Una sesión puede hacer todo.
 - **Token de API:** `Authorization: Bearer mk_<43 caracteres base64url>` (32 bytes aleatorios). Se guarda su SHA-256 y se muestra una sola vez. Su alcance es un proyecto, o un proyecto + stage. **Solo permite:** leer proyecto/stage/app/estado/deploys/logs dentro del alcance, `GET/PUT/PATCH` de variables, crear deploys y hacer rollback. Cualquier otra operación responde `403`.
 - **Login:**
-  - Argon2id con `m=64MiB, t=3, p=2`.
+  - Argon2id con `m=19MiB, t=2, p=1`, el mínimo que recomienda OWASP. Un semáforo permite como máximo 2 hashes a la vez, para que un pico de logins no rompa el presupuesto de RAM (§1). Los parámetros van dentro del hash (formato PHC), así que se pueden subir más adelante.
   - Bloqueo progresivo por usuario: tras 5 fallos, 1 min; después se duplica hasta 1 h.
   - Por IP: 20 intentos cada 15 min.
   - Con TOTP, el login es en dos pasos: contraseña → código.
@@ -349,6 +404,8 @@ Todas las respuestas son JSON. Formato de error: `{"error": {"code": "string", "
   - `details` de la auditoría nunca incluye valores.
 - **Limitación aceptada:** quien tenga acceso a Docker en el host puede ver las variables con `docker inspect`. Esa persona ya es root.
 - **Clave maestra:** se imprime en la instalación y se puede volver a leer con `docker exec` en el contenedor de muelle (`/run/secrets/muelle_master_key`). Si se pierde junto con el secreto Swarm, los secretos no se pueden recuperar.
+- **Verificación de la clave:** en el primer arranque muelle guarda en `settings` un valor de control cifrado con la clave maestra. En cada arranque lo descifra, y si falla no arranca ("clave maestra incorrecta"). Así, recrear el secreto Swarm con otra clave no mezcla datos cifrados con dos claves.
+- **Ids no reutilizables:** las tablas cuyos ids forman parte de la AAD (`stages`, `apps`, `users`) usan `AUTOINCREMENT`, para que un valor cifrado sacado de un backup no descifre en una fila nueva con el mismo id.
 - **Respaldo de muelle:** a diario, `VACUUM INTO /data/backups/muelle-<fecha>.db`, guardando los últimos 7.
 - **Redes:** ver §3.2. Cada stage está aislado en su red; solo Caddy toca varias. La admin API de Caddy solo es accesible por el socket unix.
 
@@ -408,6 +465,13 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 
 ## 15. Testing
 
+**Por capa:**
+- **Dominio:** tests unitarios puros (entidades, value objects, reglas).
+- **Repositorios SQLite:** SQLite real en `t.TempDir()`, con un helper compartido que crea la base y corre las migraciones.
+- **Casos de uso:** con los repositorios SQLite reales y un reloj controlado (`package/clock`), sin mocks.
+- **HTTP:** `httptest` contra el servidor armado de verdad.
+- **Punta a punta:** el binario real con `curl` al cerrar cada fase.
+
 **Unitarios:**
 - `render`: golden files (`testdata/*.input.yaml` → `*.golden.yaml`) cubriendo:
   - inyección de la red del stage, logging, update_config y etiquetas
@@ -422,7 +486,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
   - bloqueo progresivo
   - vencimiento de sesiones e invitaciones
   - flujo de TOTP
-- `store`/reglas: mezcla de variables, validación de slugs, servicios duplicados dentro de un stage, cálculo de "cambios pendientes", retención.
+- repositorios y reglas: mezcla de variables, validación de slugs, servicios duplicados dentro de un stage, cálculo de "cambios pendientes", retención.
 - `dns`: contra un servidor HTTP falso: búsqueda de zona por sufijo, conflicto/adopción, borrar solo lo propio.
 
 **Integración** (`//go:build integration`; en CI con `docker swarm init` en el runner):
@@ -463,8 +527,11 @@ Dokploy también usa Swarm, así que ambos pueden convivir en el mismo cluster. 
 
 Cada fase deja algo que se puede probar de punta a punta:
 
-1. **Base:** `store` (migraciones), `crypto`, `auth` (usuarios, sesiones, tokens) y el esqueleto de `api` con proyectos, stages, apps y variables.
-2. **Deploy:** `docker`, `render` y `deployer`. Apps de formulario y compose desplegables por API, con log, rollback y reconciliación.
-3. **Proxy y DNS:** el contenedor muelle-caddy, las rutas, `dns` de Cloudflare, la verificación de certificados, el estado y los logs en vivo.
+1. **Base:** los módulos `identity`, `catalog`, `secrets` y `admin` sobre la base compartida (`shared`, `package`, `settings`, `cmd/http`). Se construye en tres etapas:
+   1. **Base compartida** (secuencial): `settings`, `package/`, `shared/domain`, SQLite con la migración completa, `crypto` y el esqueleto de `cmd/http`.
+   2. **Módulos** (en paralelo): `identity`, `catalog`, `secrets` y `admin`, cada uno completo con sus tests.
+   3. **Integración** (secuencial): el contenedor, `main.go`, el cron, la prueba de punta a punta, CI y el README.
+2. **Deploy:** el módulo `deploy` (`docker`, `render` y `deployer`). Apps de formulario y compose desplegables por API, con log, rollback y reconciliación.
+3. **Proxy y DNS:** el módulo `ingress`: el contenedor muelle-caddy, las rutas, `dns` de Cloudflare, la verificación de certificados, el estado y los logs en vivo.
 4. **Panel:** el SPA de Svelte sobre la API ya existente.
 5. **Distribución:** `install`, las imágenes (muelle y Caddy) y la GitHub Action. Después, la migración de auditfy.
