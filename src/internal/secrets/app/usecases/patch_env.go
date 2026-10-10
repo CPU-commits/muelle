@@ -31,6 +31,11 @@ func NewPatchEnv(tx repository.Transactor, owners service.OwnerResolver, repo se
 }
 
 func (u *PatchEnv) Execute(ctx context.Context, in dto.PatchEnv) error {
+	// Un PATCH vacío (incluido un body null) no cambiaría nada, pero marcaría
+	// las apps con cambios pendientes: se rechaza.
+	if len(in.Set) == 0 && len(in.Unset) == 0 {
+		return validate.Errorf("set", "indica al menos una variable en set o unset")
+	}
 	for _, k := range in.Unset {
 		if err := validate.EnvKey("unset", k); err != nil {
 			return err

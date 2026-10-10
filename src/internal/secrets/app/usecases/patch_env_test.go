@@ -57,7 +57,11 @@ func TestPatchEnvValidation(t *testing.T) {
 		in    dto.PatchEnv
 		field string
 	}{
+		// Un body null o {} no puede pasar por un PATCH que no hace nada.
+		{"sin set ni unset", dto.PatchEnv{}, "set"},
+		{"set y unset vacíos", dto.PatchEnv{Set: map[string]string{}, Unset: []string{}}, "set"},
 		{"set y unset a la vez", dto.PatchEnv{Set: map[string]string{"A": "1"}, Unset: []string{"A"}}, "unset"},
+		{"valor que no es UTF-8", dto.PatchEnv{Set: map[string]string{"A": "\xff"}}, "set"},
 		{"unset inválido", dto.PatchEnv{Unset: []string{"bad-key"}}, "unset"},
 		{"set inválido", dto.PatchEnv{Set: map[string]string{"1BAD": "x"}}, "set"},
 		{"set con prefijo COMPOSE_", dto.PatchEnv{Set: map[string]string{"COMPOSE_FILE": "x"}}, "set"},
@@ -154,13 +158,13 @@ func TestPatchEnvAuditsKeysOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: stageTarget}); err != nil {
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: stageTarget, Unset: []string{"NOPE"}}); err != nil {
 		t.Fatal(err)
 	}
 	events := f.auditEvents(t)
 	want := []auditRow{
 		{"system", "env.patch", "app:auditfy/staging/api", `{"set":["API_KEY","LOG_LEVEL"],"unset":["JWT_KEY","Z"]}`},
-		{"system", "env.patch", "stage:auditfy/staging", `{"set":[],"unset":[]}`},
+		{"system", "env.patch", "stage:auditfy/staging", `{"set":[],"unset":["NOPE"]}`},
 	}
 	if len(events) != len(want) {
 		t.Fatalf("events=%+v", events)

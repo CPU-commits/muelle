@@ -73,6 +73,8 @@ func TestReplaceEnvValidation(t *testing.T) {
 		{"clave con guion", map[string]string{"bad-key": "x"}},
 		{"prefijo COMPOSE_", map[string]string{"COMPOSE_PROFILES": "x"}},
 		{"valor grande", map[string]string{"BIG": strings.Repeat("x", entity.MaxValueBytes+1)}},
+		{"valor que no es UTF-8", map[string]string{"A": "\xff"}},
+		{"valor con NUL", map[string]string{"A": "a\x00b"}},
 	}
 	for _, c := range cases {
 		err := f.replace.Execute(ctx, dto.ReplaceEnv{Target: appTarget, Vars: c.vars})

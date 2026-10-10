@@ -59,7 +59,9 @@ func (r *EnvRepository) List(ctx context.Context, o entity.Owner) ([]entity.Encr
 	return out, rows.Err()
 }
 
-// Replace corre en su propia transacción, o en la del ctx si ya hay una.
+// Replace corre en su propia transacción, o en la del ctx si ya hay una. No hay
+// savepoints: dentro de otra transacción, quien llama tiene que devolver el
+// error para que se revierta todo.
 func (r *EnvRepository) Replace(ctx context.Context, o entity.Owner, vars []entity.EncryptedEnvVar) error {
 	cond, id, err := where(o)
 	if err != nil {
@@ -78,7 +80,8 @@ func (r *EnvRepository) Replace(ctx context.Context, o entity.Owner, vars []enti
 	})
 }
 
-// Patch corre en su propia transacción, o en la del ctx si ya hay una.
+// Patch corre en su propia transacción, o en la del ctx si ya hay una (sin
+// savepoints, como Replace).
 func (r *EnvRepository) Patch(ctx context.Context, o entity.Owner, set []entity.EncryptedEnvVar, unset []string) error {
 	cond, id, err := where(o)
 	if err != nil {
