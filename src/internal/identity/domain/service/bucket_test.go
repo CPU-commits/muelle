@@ -37,8 +37,10 @@ func TestTokenBucket(t *testing.T) {
 	}
 }
 
+// 2 por segundo son a lo más unos 31 millones de filas en los 180 días de
+// retención de la auditoría (con 20 por segundo eran unos 39 GB).
 func TestAuditBucketDefaults(t *testing.T) {
-	if AuditEventsPerSecond != 20 || AuditBurst != 200 {
+	if AuditEventsPerSecond != 2 || AuditBurst != 100 {
 		t.Fatalf("rate=%v burst=%v", AuditEventsPerSecond, AuditBurst)
 	}
 }

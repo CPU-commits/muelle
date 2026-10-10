@@ -9,10 +9,13 @@ import (
 
 // Límite global de los eventos de auditoría que puede provocar cualquiera sin
 // autenticarse (auth.login_failed y auth.locked del paso de la contraseña):
-// sin él, muchas IPs podrían llenar el disco con filas de auditoría.
+// sin él, muchas IPs podrían llenar el disco con filas de auditoría. Con 2
+// por segundo, una avalancha sostenida deja a lo más unos 31 millones de
+// filas en los 180 días de retención; lo descartado se resume en una fila
+// por minuto (auth.audit_dropped).
 const (
-	AuditEventsPerSecond = 20
-	AuditBurst           = 200
+	AuditEventsPerSecond = 2
+	AuditBurst           = 100
 )
 
 // TokenBucket es un balde de tokens: permite una ráfaga de burst y después

@@ -32,14 +32,17 @@ const (
 //   - auth.login_failed: contraseña o código incorrectos (reason: credentials | code).
 //   - auth.locked: un fallo dejó bloqueado el par (usuario, IP) o el 2FA del usuario.
 //   - auth.logout: se cerró la sesión.
+//   - auth.audit_dropped: se descartaron eventos por el límite (count: cuántos).
 //
 // Los del paso de la contraseña (auth.login_failed y auth.locked con reason
 // credentials) los puede provocar cualquiera sin autenticarse, así que pasan
 // por un balde global (bucket); los que sobran se descartan, para que muchas
-// IPs no llenen el disco. Los descartes se avisan en el log a lo más una vez
-// por auditDropWarnEvery: el primero enseguida, y lo que se acumula después,
-// al vencer el intervalo, aunque la avalancha haya terminado y no llegue
-// ningún evento más. Los del paso del código (reason
+// IPs no llenen el disco. Los descartes se avisan a lo más una vez por
+// auditDropWarnEvery, en el log y con una fila auth.audit_dropped con la
+// cuenta (así el volumen queda acotado y el ataque se ve igual): el primero
+// enseguida, y lo que se acumula después, al vencer el intervalo, aunque la
+// avalancha haya terminado y no llegue ningún evento más. Los del paso del
+// código (reason
 // code) se registran siempre: solo llega a ese paso quien sabe la contraseña,
 // el bloqueo por usuario ya los acota (unos 33 códigos malos por día y
 // usuario), y una avalancha de contraseñas malas que vacía el balde no puede
@@ -168,9 +171,12 @@ func (a *LoginAudit) schedule(now time.Time) {
 	a.after(a.lastWarn.Add(auditDropWarnEvery).Sub(now), a.flush)
 }
 
-// warn avisa n eventos descartados desde since.
+// warn avisa n eventos descartados desde since: en el log y con una fila de
+// auditoría del sistema (fuera de cualquier transacción y sin el Principal
+// del pedido que la disparó).
 func (a *LoginAudit) warn(n int, since time.Time) {
 	a.log.Warn("auditoría: se descartaron eventos de login sin autenticar por exceso", "descartados", n, "desde", since)
+	a.rec.Record(context.Background(), "auth.audit_dropped", "auth", map[string]int{"count": n})
 }
 
 // login registra la sesión nueva a nombre del usuario.

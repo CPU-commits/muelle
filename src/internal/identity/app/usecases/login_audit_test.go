@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -150,9 +151,25 @@ func TestLoginAuditTOTPLockedOnlyOnTransition(t *testing.T) {
 	}
 }
 
+// droppedRows devuelve los details de las filas auth.audit_dropped, y revisa
+// que sean del sistema y con target auth.
+func droppedRows(t *testing.T, rows []auditRow) []string {
+	t.Helper()
+	var out []string
+	for _, r := range rows {
+		if r.Action == "auth.audit_dropped" {
+			expectRow(t, r, "auth.audit_dropped", "auth", r.Details, nil)
+			out = append(out, r.Details)
+		}
+	}
+	return out
+}
+
 // Los eventos que puede provocar cualquiera sin autenticarse pasan por un
-// balde global: los que sobran se descartan, con un aviso en el log a lo más
-// una vez por intervalo. Los eventos de un usuario autenticado no se limitan.
+// balde global: los que sobran se descartan, y se avisan a lo más una vez por
+// intervalo, en el log y con una fila auth.audit_dropped con la cuenta (así
+// el volumen queda acotado y el ataque se ve igual). Los eventos de un
+// usuario autenticado no se limitan.
 func TestUnauthenticatedAuditIsThrottled(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -164,8 +181,12 @@ func TestUnauthenticatedAuditIsThrottled(t *testing.T) {
 	for i := range 10 {
 		uc.Execute(ctx, login(fmt.Sprintf("nadie%d", i), "x", "1.1.1.1"))
 	}
-	if n := len(f.auditRows(t)); n != 3 {
-		t.Fatalf("filas=%d, esperaba solo las 3 de la ráfaga", n)
+	rows := f.auditRows(t)
+	if len(rows) != 4 || rows[2].Action != "auth.login_failed" || rows[3].Action != "auth.audit_dropped" {
+		t.Fatalf("esperaba las 3 de la ráfaga y el resumen del primer descarte: %+v", rows)
+	}
+	if got := droppedRows(t, rows); !slices.Equal(got, []string{`{"count":1}`}) {
+		t.Fatalf("resúmenes=%v", got)
 	}
 	if n := strings.Count(logs.String(), "descartados"); n != 1 {
 		t.Fatalf("avisos=%d, esperaba 1: %s", n, logs.String())
@@ -176,15 +197,19 @@ func TestUnauthenticatedAuditIsThrottled(t *testing.T) {
 
 	// Pasado el intervalo, el siguiente descarte avisa con la cuenta acumulada.
 	f.advance(auditDropWarnEvery + time.Second) // también recarga el balde (3 tokens)
+	before := len(f.auditRows(t))
 	for i := range 4 {
 		uc.Execute(ctx, login(fmt.Sprintf("otro%d", i), "x", "2.2.2.2"))
 	}
 	if n := strings.Count(logs.String(), "descartados"); n != 2 || !strings.Contains(logs.String(), "descartados=7") {
 		t.Fatalf("avisos: %s", logs.String())
 	}
+	if rows := f.rowsFrom(t, before); len(rows) != 4 || !slices.Equal(droppedRows(t, rows), []string{`{"count":7}`}) {
+		t.Fatalf("esperaba 3 fallos y el resumen de los 7 descartados: %+v", rows)
+	}
 
 	// Con el balde vacío, un login correcto se audita igual.
-	before := len(f.auditRows(t))
+	before = len(f.auditRows(t))
 	if _, err := uc.Execute(ctx, login("felipe", testPassword, "3.3.3.3")); err != nil {
 		t.Fatal(err)
 	}
@@ -260,6 +285,11 @@ func TestAuditDropsReportedAfterFloodEnds(t *testing.T) {
 	if warnings() != 5 || !strings.HasSuffix(strings.TrimSpace(logs.String()), "descartados=1 desde="+f.now().Add(-auditDropWarnEvery).Format("2006-01-02T15:04:05.000Z07:00")) {
 		t.Fatalf("el último pendiente sale al minuto: %s", logs.String())
 	}
+	// Cada aviso deja también su fila en la auditoría.
+	want := []string{`{"count":1}`, `{"count":499}`, `{"count":1}`, `{"count":2}`, `{"count":1}`}
+	if got := droppedRows(t, f.auditRows(t)); !slices.Equal(got, want) {
+		t.Fatalf("resúmenes=%v, esperaba %v", got, want)
+	}
 }
 
 // Con el reloj del sistema, el aviso del final de la avalancha lo programa un
@@ -267,7 +297,8 @@ func TestAuditDropsReportedAfterFloodEnds(t *testing.T) {
 func TestAuditDropTimerWithSystemClock(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var logs lockedBuffer
-		la := NewLoginAudit(&memRecorder{}, service.NewTokenBucket(1, 1, clock.System{}), slog.New(slog.NewTextHandler(&logs, nil)), clock.System{})
+		rec := &memRecorder{}
+		la := NewLoginAudit(rec, service.NewTokenBucket(1, 1, clock.System{}), slog.New(slog.NewTextHandler(&logs, nil)), clock.System{})
 		ctx := context.Background()
 		for range 11 { // 1 pasa y 10 se descartan: el primero se avisa enseguida
 			la.failed(ctx, "a", "1.1.1.1", "credentials")
@@ -279,6 +310,13 @@ func TestAuditDropTimerWithSystemClock(t *testing.T) {
 		synctest.Wait()
 		if !strings.Contains(logs.String(), "descartados=9 ") {
 			t.Fatalf("al minuto se avisan los 9 que quedaban: %s", logs.String())
+		}
+		var counts []int
+		for _, e := range rec.of("auth.audit_dropped") {
+			counts = append(counts, e.details.(map[string]int)["count"])
+		}
+		if !slices.Equal(counts, []int{1, 9}) {
+			t.Fatalf("resúmenes=%v", counts)
 		}
 	})
 }
