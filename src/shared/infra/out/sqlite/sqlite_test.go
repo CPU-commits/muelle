@@ -524,13 +524,16 @@ func TestOpenFileMode(t *testing.T) {
 }
 
 // path va dentro de una URI file:, así que "?" o "#" cambiarían sus opciones
-// (ej. "?_pragma=foreign_keys(0)"), y ":memory:" no es un archivo.
+// (ej. "?_pragma=foreign_keys(0)"), SQLite decodifica los "%XX" (a%41.db
+// abriría aA.db, que quedaría sin el chmod), y ":memory:" no es un archivo.
 func TestOpenRejectsSpecialPaths(t *testing.T) {
 	dir := t.TempDir()
 	for _, p := range []string{
 		":memory:",
 		filepath.Join(dir, "muelle.db?_pragma=foreign_keys(0)"),
 		filepath.Join(dir, "muelle#x.db"),
+		filepath.Join(dir, "a%41.db"),
+		filepath.Join(dir, "100%.db"),
 	} {
 		d, err := Open(p)
 		if err == nil {

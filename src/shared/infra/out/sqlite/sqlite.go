@@ -59,10 +59,11 @@ type txKey struct{ d *DB }
 // nuevos con los permisos de la base.
 //
 // path va dentro de una URI file:, así que rechaza ":memory:" y las rutas con
-// "?" o "#", que cambiarían las opciones de la conexión.
+// "?" o "#", que cambiarían las opciones de la conexión, o con "%", que
+// SQLite decodificaría (a%41.db abriría aA.db, sin los permisos de arriba).
 func Open(path string) (*DB, error) {
-	if path == ":memory:" || strings.ContainsAny(path, "?#") {
-		return nil, fmt.Errorf("sqlite: la ruta %q no sirve: tiene que ser un archivo, sin '?' ni '#'", path)
+	if path == ":memory:" || strings.ContainsAny(path, "?#%") {
+		return nil, fmt.Errorf("sqlite: la ruta %q no sirve: tiene que ser un archivo, sin '?', '#' ni '%%'", path)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
