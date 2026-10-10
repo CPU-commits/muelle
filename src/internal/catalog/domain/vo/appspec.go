@@ -1,13 +1,18 @@
-// Package appspec define y valida el spec de una app de formulario (§6.1 del spec).
-package appspec
+// Package vo tiene los objetos de valor del catálogo. AppSpec define y valida el spec de una app de formulario (§6.1 del spec).
+package vo
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/distribution/reference"
 
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
@@ -19,7 +24,7 @@ const (
 	HealthNone    = "none"
 )
 
-type Spec struct {
+type AppSpec struct {
 	Image       string       `json:"image"`
 	Port        int          `json:"port"`
 	Replicas    *int         `json:"replicas"`
@@ -45,43 +50,70 @@ type Volume struct {
 }
 
 type Resources struct {
-	MemoryMB int     `json:"memory_mb,omitempty"`
-	CPUs     float64 `json:"cpus,omitempty"`
+	MemoryMB int     `json:"memory_mb,omitzero"`
+	CPUs     float64 `json:"cpus,omitzero"`
 }
 
-// La ruta del healthcheck termina dentro de un comando de shell o de JS,
-// así que solo se aceptan caracteres que no necesitan escape.
-var healthPathRe = regexp.MustCompile(`^/[A-Za-z0-9._~/?&=%+-]*$`)
+// La ruta del healthcheck termina dentro de un comando de shell o de JS, así
+// que solo se aceptan caracteres que no necesitan escape. Quedan fuera & ; | $
+// comillas, comilla invertida y espacios. En la Fase 2 el healthcheck http se
+// genera en forma exec, sin shell (§6.1 del spec).
+var healthPathRe = regexp.MustCompile(`^/[A-Za-z0-9._~/?=%+-]*$`)
 
-// Parse decodifica el JSON (rechazando campos desconocidos), aplica los valores
-// por defecto y valida. Lo que devuelve está listo para guardarse con JSON().
-func Parse(raw []byte) (Spec, error) {
+// mountRe limita las rutas de montaje a caracteres que no necesitan escape
+// (sin ":" que agregaría opciones como ":ro", ni saltos de línea ni "$").
+var mountRe = regexp.MustCompile(`^/[A-Za-z0-9._/-]{1,255}$`)
+
+// ParseAppSpec decodifica el JSON de forma estricta (json/v2: rechaza campos
+// desconocidos, claves duplicadas, UTF-8 inválido, datos después del valor y
+// mayúsculas distintas en las claves), aplica los valores por defecto y valida.
+// Lo que devuelve está listo para guardarse con JSON().
+func ParseAppSpec(raw []byte) (AppSpec, error) {
 	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
-		return Spec{}, validate.Errorf("spec", "es obligatorio")
+		return AppSpec{}, validate.Errorf("spec", "es obligatorio")
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	var s Spec
-	if err := dec.Decode(&s); err != nil {
-		return Spec{}, validate.Errorf("spec", "JSON inválido: %v", err)
+	var s AppSpec
+	if err := jsonv2.Unmarshal(raw, &s, jsonv2.RejectUnknownMembers(true)); err != nil {
+		return AppSpec{}, validate.Errorf("spec", "%s", jsonErrorMessage(err))
 	}
 	s.normalize()
 	if err := s.Validate(); err != nil {
-		return Spec{}, err
+		return AppSpec{}, err
 	}
 	return s, nil
 }
 
+// jsonErrorMessage describe el fallo sin exponer tipos internos de Go.
+func jsonErrorMessage(err error) string {
+	if se, ok := errors.AsType[*jsonv2.SemanticError](err); ok {
+		field := strings.Join(slices.Collect(se.JSONPointer.Tokens()), ".")
+		switch {
+		case errors.Is(se.Err, jsonv2.ErrUnknownName):
+			return fmt.Sprintf("JSON inválido: el campo %q no existe", field)
+		case field != "":
+			return fmt.Sprintf("JSON inválido: el campo %q tiene un valor incorrecto", field)
+		}
+		return "JSON inválido: no tiene la forma esperada"
+	}
+	if se, ok := errors.AsType[*jsontext.SyntacticError](err); ok {
+		if errors.Is(se.Err, jsontext.ErrDuplicateName) {
+			return fmt.Sprintf("JSON inválido: el campo %q está repetido", strings.Join(slices.Collect(se.JSONPointer.Tokens()), "."))
+		}
+		return fmt.Sprintf("JSON inválido cerca del byte %d", se.ByteOffset)
+	}
+	return "JSON inválido"
+}
+
 // JSON serializa el spec normalizado para guardarlo.
-func (s Spec) JSON() json.RawMessage {
-	b, err := json.Marshal(s)
+func (s AppSpec) JSON() []byte {
+	b, err := jsonv2.Marshal(s)
 	if err != nil {
-		panic(err) // Spec solo tiene tipos serializables
+		panic(err) // AppSpec solo tiene tipos serializables
 	}
 	return b
 }
 
-func (s *Spec) normalize() {
+func (s *AppSpec) normalize() {
 	if s.Replicas == nil {
 		one := 1
 		s.Replicas = &one
@@ -112,9 +144,9 @@ func (s *Spec) normalize() {
 	}
 }
 
-func (s Spec) Validate() error {
-	if s.Image == "" || len(s.Image) > 512 || strings.ContainsAny(s.Image, " \t\r\n") {
-		return validate.Errorf("image", "es obligatoria, sin espacios y de hasta 512 caracteres")
+func (s AppSpec) Validate() error {
+	if err := validateImage(s.Image); err != nil {
+		return err
 	}
 	if s.Port < 1 || s.Port > 65535 {
 		return validate.Errorf("port", "debe estar entre 1 y 65535")
@@ -135,7 +167,7 @@ func (s Spec) Validate() error {
 		if r.MemoryMB != 0 && (r.MemoryMB < 16 || r.MemoryMB > 1<<20) {
 			return validate.Errorf("resources.memory_mb", "debe estar entre 16 y 1048576")
 		}
-		if r.CPUs != 0 && (r.CPUs < 0.01 || r.CPUs > 256) {
+		if r.CPUs != 0 && !(r.CPUs >= 0.01 && r.CPUs <= 256) {
 			return validate.Errorf("resources.cpus", "debe estar entre 0.01 y 256")
 		}
 	}
@@ -151,10 +183,13 @@ func (h *Healthcheck) validate() error {
 		if h.Path != "" || len(h.Command) > 0 {
 			return validate.Errorf("healthcheck", "con type none no lleva path ni command")
 		}
+		if h.IntervalS != 0 || h.TimeoutS != 0 || h.Retries != 0 || h.StartPeriodS != 0 {
+			return validate.Errorf("healthcheck", "con type none no lleva intervalos, timeouts ni reintentos")
+		}
 		return nil
 	case HealthHTTP, HealthBunHTTP:
 		if !healthPathRe.MatchString(h.Path) || len(h.Path) > 256 {
-			return validate.Errorf("healthcheck.path", "debe empezar con / y usar solo letras, números y ._~/?&=%%+-")
+			return validate.Errorf("healthcheck.path", "debe empezar con / y usar solo letras, números y ._~/?=%%+-")
 		}
 		if len(h.Command) > 0 {
 			return validate.Errorf("healthcheck.command", "solo aplica a type command")
@@ -176,8 +211,8 @@ func (h *Healthcheck) validate() error {
 		return validate.Errorf("healthcheck.timeout_s", "debe estar entre 1 y 600")
 	case h.Retries < 1 || h.Retries > 20:
 		return validate.Errorf("healthcheck.retries", "debe estar entre 1 y 20")
-	case h.StartPeriodS < 0 || h.StartPeriodS > 3600:
-		return validate.Errorf("healthcheck.start_period_s", "debe estar entre 0 y 3600")
+	case h.StartPeriodS < 1 || h.StartPeriodS > 3600:
+		return validate.Errorf("healthcheck.start_period_s", "debe estar entre 1 y 3600")
 	}
 	return nil
 }
@@ -193,8 +228,8 @@ func validateVolumes(vols []Volume) error {
 		if err := validate.VolumeName(field+".name", v.Name); err != nil {
 			return err
 		}
-		if !strings.HasPrefix(v.Mount, "/") || path.Clean(v.Mount) != v.Mount || v.Mount == "/" {
-			return validate.Errorf(field+".mount", "debe ser una ruta absoluta limpia distinta de /")
+		if !mountRe.MatchString(v.Mount) || path.Clean(v.Mount) != v.Mount {
+			return validate.Errorf(field+".mount", "debe ser una ruta absoluta limpia distinta de /, de hasta 256 caracteres, con solo letras, números y ._/-")
 		}
 		if names[v.Name] {
 			return validate.Errorf(field+".name", "%q está repetido", v.Name)
@@ -204,6 +239,23 @@ func validateVolumes(vols []Volume) error {
 		}
 		names[v.Name] = true
 		mounts[v.Mount] = true
+	}
+	return nil
+}
+
+// validateImage acepta solo referencias de imagen Docker bien formadas
+// (nombre en minúsculas, tag y digest opcionales).
+func validateImage(img string) error {
+	if img == "" || len(img) > 512 {
+		return validate.Errorf("image", "es obligatoria y de hasta 512 caracteres")
+	}
+	// Defensa extra: una imagen que empieza con "-" o lleva "$" nunca debe
+	// llegar a un comando aunque la librería la aceptara.
+	if strings.HasPrefix(img, "-") || strings.Contains(img, "$") {
+		return validate.Errorf("image", "no es una referencia de imagen válida")
+	}
+	if _, err := reference.ParseNormalizedNamed(img); err != nil {
+		return validate.Errorf("image", "no es una referencia de imagen válida (%v)", err)
 	}
 	return nil
 }
