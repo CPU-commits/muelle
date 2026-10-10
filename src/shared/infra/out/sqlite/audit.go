@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"log/slog"
 
@@ -29,7 +30,8 @@ func NewAuditRecorder(db *DB, c clock.Clock, log *slog.Logger) *AuditRecorder {
 
 // Record guarda el evento con Conn(ctx), así que dentro de un InTx que hace
 // rollback el evento tampoco queda. details se guarda como JSON con las claves
-// de los map ordenadas; nil (o un valor que da null) se guarda como {}.
+// de los map ordenadas; nil (o un valor que da null) se guarda como {}. Los
+// bytes de UTF-8 inválido en un string se guardan como U+FFFD.
 func (r *AuditRecorder) Record(ctx context.Context, action, target string, details any) {
 	actorType, actorID := entity.ActorSystem, (*int64)(nil)
 	if p, ok := entity.PrincipalFrom(ctx); ok {
@@ -38,7 +40,7 @@ func (r *AuditRecorder) Record(ctx context.Context, action, target string, detai
 
 	raw := "{}"
 	if details != nil {
-		b, err := jsonv2.Marshal(details, jsonv2.Deterministic(true))
+		b, err := jsonv2.Marshal(details, jsonv2.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 		switch {
 		case err != nil:
 			r.log.Error("auditoría: details no es JSON válido", "action", action, "err", err)

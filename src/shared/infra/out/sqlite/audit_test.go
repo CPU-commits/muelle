@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -104,6 +105,21 @@ func TestAuditDetails(t *testing.T) {
 	})
 	if r := lastAudit(t, d); r.Details != `{"a":[],"b":[],"c":[],"set":["A"],"unset":["B"]}` {
 		t.Fatalf("details=%s", r.Details)
+	}
+}
+
+// Un string con UTF-8 inválido (ej. un nombre que vino de Docker) no se pierde
+// como {}: los bytes inválidos se guardan como U+FFFD.
+func TestAuditDetailsInvalidUTF8(t *testing.T) {
+	d, rec, _ := newTestRecorder(t)
+	rec.Record(context.Background(), "app.update", "app:a/s/x", map[string]string{"name": "a\xffb"})
+	r := lastAudit(t, d)
+	var got map[string]string
+	if err := json.Unmarshal([]byte(r.Details), &got); err != nil {
+		t.Fatalf("details=%q no es JSON: %v", r.Details, err)
+	}
+	if got["name"] != "a\uFFFDb" {
+		t.Fatalf("details=%s, esperaba name=%q", r.Details, "a\uFFFDb")
 	}
 }
 

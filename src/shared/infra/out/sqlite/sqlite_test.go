@@ -4,10 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/CPU-commits/muelle/src/shared/domain/repository"
 )
 
 // newTestDB es igual a sqlitetest.New, que no se puede importar desde aquí (ciclo).
@@ -147,6 +153,75 @@ func TestInTxNested(t *testing.T) {
 	}
 }
 
+// Un InTx anidado no tiene savepoints: si el interno devuelve un error y el
+// externo lo ignora, lo que escribió el interno se confirma igual.
+func TestInTxNestedSwallowedErrorStillCommits(t *testing.T) {
+	d := newTestDB(t)
+	boom := errors.New("boom")
+	err := d.InTx(context.Background(), func(outer context.Context) error {
+		if err := insertProject(outer, d, "externo"); err != nil {
+			return err
+		}
+		innerErr := d.InTx(outer, func(inner context.Context) error {
+			if err := insertProject(inner, d, "interno"); err != nil {
+				return err
+			}
+			return boom
+		})
+		if !errors.Is(innerErr, boom) {
+			t.Errorf("el InTx interno devolvió %v", innerErr)
+		}
+		return nil // el externo se traga el error del interno
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countProjects(t, d); n != 2 {
+		t.Fatalf("hay %d proyectos: sin savepoints, lo del interno se confirma con el externo", n)
+	}
+}
+
+// Un ctx que sobrevive a su transacción (ej. una goroutine con
+// context.WithoutCancel) sigue funcionando: Conn vuelve a la base.
+func TestConnAfterTxFinishes(t *testing.T) {
+	d := newTestDB(t)
+	boom := errors.New("boom")
+	for _, fail := range []bool{false, true} {
+		var leaked context.Context
+		err := d.InTx(context.Background(), func(ctx context.Context) error {
+			leaked = context.WithoutCancel(ctx)
+			if fail {
+				return boom
+			}
+			return nil
+		})
+		if fail != errors.Is(err, boom) {
+			t.Fatalf("fail=%v: InTx devolvió %v", fail, err)
+		}
+
+		before := countProjects(t, d)
+		done := make(chan error)
+		go func() { done <- insertProject(leaked, d, fmt.Sprintf("goroutine-%v", fail)) }()
+		if err := <-done; err != nil {
+			t.Fatalf("fail=%v: escribir con el ctx de una transacción terminada: %v", fail, err)
+		}
+		if _, ok := d.Conn(leaked).(*sql.DB); !ok {
+			t.Fatalf("fail=%v: Conn con una transacción terminada es %T, esperaba la *sql.DB", fail, d.Conn(leaked))
+		}
+
+		// Un InTx con ese ctx abre una transacción nueva en vez de reutilizar la terminada.
+		err = d.InTx(leaked, func(ctx context.Context) error {
+			return insertProject(ctx, d, fmt.Sprintf("tx-nueva-%v", fail))
+		})
+		if err != nil {
+			t.Fatalf("fail=%v: InTx con el ctx de una transacción terminada: %v", fail, err)
+		}
+		if n := countProjects(t, d); n != before+2 {
+			t.Fatalf("fail=%v: hay %d proyectos, esperaba %d", fail, n, before+2)
+		}
+	}
+}
+
 func TestInTxRollsBackOnPanic(t *testing.T) {
 	d := newTestDB(t)
 	func() {
@@ -223,8 +298,9 @@ func TestAutoincrementDoesNotReuseIDs(t *testing.T) {
 		t.Fatalf("ids %d, %d y luego %d: el id del borrado se reutilizó", first, second, third)
 	}
 
-	// Lo mismo vale para stages y apps, cuyos ids también van en la AAD.
-	for _, table := range []string{"users", "stages", "apps"} {
+	// Lo mismo vale para stages y apps, cuyos ids también van en la AAD, y
+	// para api_tokens, cuyo id queda en la auditoría (actor_id) y en DELETE /tokens/{id}.
+	for _, table := range []string{"users", "stages", "apps", "api_tokens"} {
 		var sqlText string
 		if err := d.Conn(ctx).QueryRowContext(ctx,
 			`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&sqlText); err != nil {
@@ -264,6 +340,104 @@ func TestIsUniqueAndForeignKey(t *testing.T) {
 	if IsUnique(nil) || IsForeignKey(nil) || IsUnique(errors.New("x")) || IsForeignKey(sql.ErrNoRows) {
 		t.Fatal("un error que no es de SQLite no es de restricción")
 	}
+}
+
+// ON DELETE RESTRICT no da SQLITE_CONSTRAINT_FOREIGNKEY (787) sino
+// SQLITE_CONSTRAINT_TRIGGER (1811) con el mensaje de clave foránea.
+func TestIsForeignKeyRestrict(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+	if err := insertProject(ctx, d, "auditfy"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Conn(ctx).ExecContext(ctx,
+		`INSERT INTO stages (project_id, slug, created_at) SELECT id, 'staging', 0 FROM projects`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := d.Conn(ctx).ExecContext(ctx, `DELETE FROM projects WHERE slug = 'auditfy'`)
+	if err == nil {
+		t.Fatal("RESTRICT debió impedir borrar un proyecto con stages")
+	}
+	if errorCode(err) != sqlite3.SQLITE_CONSTRAINT_TRIGGER {
+		t.Fatalf("borrar con RESTRICT: código %d, esperaba 1811 (si cambió, revisar IsForeignKey)", errorCode(err))
+	}
+	if !IsForeignKey(err) || IsUnique(err) {
+		t.Fatalf("borrar con RESTRICT: IsForeignKey=%v IsUnique=%v err=%v (código %d)", IsForeignKey(err), IsUnique(err), err, errorCode(err))
+	}
+
+	// Otro error de trigger (1811) no es de clave foránea.
+	if _, err := d.Conn(ctx).ExecContext(ctx,
+		`CREATE TRIGGER settings_ro BEFORE INSERT ON settings BEGIN SELECT RAISE(ABORT, 'prohibido'); END`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = d.Conn(ctx).ExecContext(ctx, `INSERT INTO settings (key, value) VALUES ('a', 'x')`)
+	if errorCode(err) != sqlite3.SQLITE_CONSTRAINT_TRIGGER || IsForeignKey(err) {
+		t.Fatalf("un RAISE de un trigger no es de clave foránea: IsForeignKey=%v err=%v (código %d)", IsForeignKey(err), err, errorCode(err))
+	}
+}
+
+func TestNotFound(t *testing.T) {
+	if NotFound(nil) != nil {
+		t.Fatal("NotFound(nil) debe ser nil")
+	}
+	other := errors.New("disco lleno")
+	if NotFound(other) != other {
+		t.Fatal("NotFound debe devolver tal cual un error que no es sql.ErrNoRows")
+	}
+	if !errors.Is(NotFound(fmt.Errorf("leyendo: %w", sql.ErrNoRows)), repository.ErrNotFound) {
+		t.Fatal("un sql.ErrNoRows envuelto también es ErrNotFound")
+	}
+
+	d := newTestDB(t)
+	ctx := context.Background()
+	var slug string
+	err := NotFound(d.Conn(ctx).QueryRowContext(ctx, `SELECT slug FROM projects WHERE id = 42`).Scan(&slug))
+	if !errors.Is(err, repository.ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("NotFound(sin filas) = %v, esperaba repository.ErrNotFound", err)
+	}
+}
+
+// La base guarda hashes de contraseñas y secretos cifrados: solo la lee su dueño.
+func TestOpenFileMode(t *testing.T) {
+	dir := t.TempDir()
+	check := func(name, path string) {
+		t.Helper()
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("%s: permisos %o, esperaba 600", name, perm)
+		}
+	}
+
+	fresh := filepath.Join(dir, "nueva.db")
+	d, err := Open(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	check("base nueva", fresh)
+	if err := d.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	check("base nueva después de escribir", fresh)
+	// En modo WAL, SQLite crea el -wal con los permisos de la base.
+	check("WAL", fresh+"-wal")
+
+	existing := filepath.Join(dir, "existente.db")
+	if err := os.WriteFile(existing, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(existing, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d2, err := Open(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d2.Close()
+	check("base existente", existing)
 }
 
 func TestTimeHelpers(t *testing.T) {

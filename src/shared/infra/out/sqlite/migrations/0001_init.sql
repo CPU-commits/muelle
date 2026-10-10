@@ -1,6 +1,7 @@
 -- Todas las marcas de tiempo son milisegundos Unix (UTC).
 -- stages, apps y users usan AUTOINCREMENT porque sus ids forman parte de la
--- AAD de valores cifrados: un id no se reutiliza (§12 del spec).
+-- AAD de valores cifrados: un id no se reutiliza (§12 del spec). api_tokens
+-- también, porque su id queda en la auditoría (actor_id) y en DELETE /tokens/{id}.
 
 CREATE TABLE projects (
   id         INTEGER PRIMARY KEY,
@@ -82,7 +83,7 @@ CREATE TABLE sessions (
 CREATE INDEX sessions_user ON sessions(user_id);
 
 CREATE TABLE api_tokens (
-  id           INTEGER PRIMARY KEY,
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
   name         TEXT    NOT NULL,
   token_hash   TEXT    NOT NULL UNIQUE,
   project_id   INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
