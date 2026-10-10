@@ -3,6 +3,7 @@
 package service
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"time"
 
@@ -31,12 +32,41 @@ type MaskedVar struct {
 	UpdatedAt time.Time
 }
 
+// ciphertextOverhead es lo que el cifrado agrega a cada valor guardado. Sale
+// del formato de shared/infra/out/crypto (AES-256-GCM): nonce de 12 bytes
+// adelante y tag de 16 bytes al final, así que len(cifrado) = len(valor) + 28.
+// TestCiphertextOverheadMatchesCrypto lo verifica contra el cifrado real; si
+// el formato cambia, cambia esta constante.
+const ciphertextOverhead = 12 + 16
+
 // EnvCrypto cifra y descifra las variables de un dueño.
 type EnvCrypto struct {
 	c cipher.Cipher
 }
 
 func NewEnvCrypto(c cipher.Cipher) *EnvCrypto { return &EnvCrypto{c: c} }
+
+// StoredSize es el Size en claro (clave + valor) de una variable guardada,
+// medido sin descifrarla. Así medir no descifra con el lock de escritura
+// tomado, y una fila rota no impide medir las demás.
+func (e *EnvCrypto) StoredSize(r entity.EncryptedEnvVar) int {
+	return len(r.Key) + max(len(r.Ciphertext)-ciphertextOverhead, 0)
+}
+
+// Unchanged dice si guardar v sobre la variable guardada stored no cambiaría
+// nada: mismo secret y mismo valor. Descifra solo esa fila. Si no descifra,
+// cuenta como cambiada, para que sobrescribirla la arregle.
+func (e *EnvCrypto) Unchanged(o entity.Owner, stored entity.EncryptedEnvVar, v entity.EnvVar) bool {
+	if stored.Secret != v.Secret || e.StoredSize(stored) != v.Size() {
+		return false
+	}
+	plain, err := e.c.Decrypt(stored.Ciphertext, AAD(o, stored.Key))
+	if err != nil {
+		return false
+	}
+	// Comparación en tiempo constante: el valor guardado puede ser un secreto.
+	return subtle.ConstantTimeCompare(plain, v.Value) == 1
+}
 
 // Seal cifra los valores de vars con la AAD de o.
 func (e *EnvCrypto) Seal(o entity.Owner, vars []entity.EnvVar) ([]entity.EncryptedEnvVar, error) {

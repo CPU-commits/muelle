@@ -129,6 +129,62 @@ func TestMaskHidesSecrets(t *testing.T) {
 	}
 }
 
+// ciphertextOverhead es lo que agrega el cifrado real de shared/infra/out/crypto.
+func TestCiphertextOverheadMatchesCrypto(t *testing.T) {
+	c, _ := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
+	for _, n := range []int{0, 1, 100, entity.MaxValueBytes} {
+		if got := len(c.Encrypt(make([]byte, n), "env:app:1:K")) - n; got != ciphertextOverhead {
+			t.Fatalf("con %d bytes, el cifrado agrega %d, ciphertextOverhead es %d", n, got, ciphertextOverhead)
+		}
+	}
+}
+
+// StoredSize mide una variable guardada sin descifrarla, y da lo mismo que Size en claro.
+func TestStoredSize(t *testing.T) {
+	e := newCrypto(t)
+	o := entity.AppOwner(3)
+	for _, n := range []int{0, 1, 100, entity.MaxValueBytes} {
+		v := entity.EnvVar{Key: "KEY", Value: bytes.Repeat([]byte{'x'}, n), Secret: true}
+		sealed, err := e.Seal(o, []entity.EnvVar{v})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := e.StoredSize(sealed[0]); got != v.Size() {
+			t.Errorf("valor de %d bytes: StoredSize=%d, Size=%d", n, got, v.Size())
+		}
+	}
+	// Un cifrado más corto que el overhead (una fila rota) cuenta solo la clave.
+	if got := e.StoredSize(entity.EncryptedEnvVar{Key: "KEY", Ciphertext: []byte("corto")}); got != 3 {
+		t.Errorf("cifrado corto: %d", got)
+	}
+}
+
+func TestUnchanged(t *testing.T) {
+	e := newCrypto(t)
+	o := entity.AppOwner(3)
+	stored, _ := e.Seal(o, []entity.EnvVar{{Key: "K", Value: []byte("v"), Secret: true}})
+	cases := []struct {
+		name  string
+		owner entity.Owner
+		row   entity.EncryptedEnvVar
+		v     entity.EnvVar
+		want  bool
+	}{
+		{"mismo valor y mismo secret", o, stored[0], entity.EnvVar{Key: "K", Value: []byte("v"), Secret: true}, true},
+		{"otro valor", o, stored[0], entity.EnvVar{Key: "K", Value: []byte("w"), Secret: true}, false},
+		{"valor más largo", o, stored[0], entity.EnvVar{Key: "K", Value: []byte("vv"), Secret: true}, false},
+		{"solo cambia secret", o, stored[0], entity.EnvVar{Key: "K", Value: []byte("v"), Secret: false}, false},
+		// Una fila que no descifra cuenta como cambiada: sobrescribirla la arregla.
+		{"fila que no descifra", entity.AppOwner(4), stored[0], entity.EnvVar{Key: "K", Value: []byte("v"), Secret: true}, false},
+		{"fila rota", o, entity.EncryptedEnvVar{Key: "K", Ciphertext: []byte("basura"), Secret: true}, entity.EnvVar{Key: "K", Value: []byte("v"), Secret: true}, false},
+	}
+	for _, c := range cases {
+		if got := e.Unchanged(c.owner, c.row, c.v); got != c.want {
+			t.Errorf("%s: Unchanged=%v", c.name, got)
+		}
+	}
+}
+
 // Mask ni siquiera descifra los secretos: un secreto que no descifra no hace fallar la lectura.
 func TestMaskNeverDecryptsSecrets(t *testing.T) {
 	e := newCrypto(t)

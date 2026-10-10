@@ -169,17 +169,31 @@ func TestSizeAndCheckLimits(t *testing.T) {
 	}
 }
 
-func TestApplyPatch(t *testing.T) {
+func TestPatchTotals(t *testing.T) {
 	v := func(k, val string) EnvVar { return EnvVar{Key: k, Value: []byte(val)} }
-	current := []EnvVar{v("A", "1"), v("B", "2"), v("C", "3")}
-	got := ApplyPatch(current, []EnvVar{v("D", "4"), v("B", "20")}, []string{"C", "Z"})
-	if len(got) != 3 || got[0].Key != "A" || got[1].Key != "B" || string(got[1].Value) != "20" || got[2].Key != "D" {
-		t.Fatalf("got=%+v", got)
+	// current es clave → bytes (clave + valor) de lo que el dueño ya tiene.
+	current := map[string]int{"A": 2, "B": 2, "C": 2}
+	// Queda A (2), B reemplazada (1+2) y D nueva (1+1); C y Z se borran.
+	count, size := PatchTotals(current, []EnvVar{v("D", "4"), v("B", "20")}, []string{"C", "Z"})
+	if count != 3 || size != 2+3+2 {
+		t.Fatalf("count=%d size=%d", count, size)
 	}
-	if string(current[1].Value) != "2" || len(current) != 3 {
-		t.Fatalf("ApplyPatch no modifica current: %+v", current)
+	if len(current) != 3 || current["B"] != 2 {
+		t.Fatalf("PatchTotals no modifica current: %v", current)
 	}
-	if got := ApplyPatch(nil, nil, []string{"A"}); got == nil || len(got) != 0 {
-		t.Fatalf("sin variables da un slice vacío: %#v", got)
+	if count, size := PatchTotals(nil, nil, []string{"A"}); count != 0 || size != 0 {
+		t.Fatalf("sin variables: %d %d", count, size)
+	}
+}
+
+func TestCheckTotals(t *testing.T) {
+	if err := CheckTotals("set", MaxVars, MaxOwnerBytes); err != nil {
+		t.Errorf("justo en los límites: %v", err)
+	}
+	if err := CheckTotals("set", MaxVars+1, 0); validationField(t, err) != "set" {
+		t.Errorf("variables de más: %v", err)
+	}
+	if err := CheckTotals("vars", 1, MaxOwnerBytes+1); validationField(t, err) != "vars" {
+		t.Errorf("bytes de más: %v", err)
 	}
 }

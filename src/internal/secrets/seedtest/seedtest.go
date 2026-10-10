@@ -61,6 +61,34 @@ func ProjectID(t testing.TB, db *sqlite.DB, slug string) int64 {
 	return id
 }
 
+// StageID devuelve el id del stage project/stage.
+func StageID(t testing.TB, db *sqlite.DB, project, stage string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var id int64
+	err := db.Conn(ctx).QueryRowContext(ctx,
+		`SELECT s.id FROM stages s JOIN projects p ON p.id = s.project_id WHERE p.slug = ? AND s.slug = ?`,
+		project, stage).Scan(&id)
+	if err != nil {
+		t.Fatalf("seedtest: stage %s/%s: %v", project, stage, err)
+	}
+	return id
+}
+
+// AppID devuelve el id de la app project/stage/app.
+func AppID(t testing.TB, db *sqlite.DB, project, stage, app string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var id int64
+	err := db.Conn(ctx).QueryRowContext(ctx,
+		`SELECT a.id FROM apps a JOIN stages s ON s.id = a.stage_id JOIN projects p ON p.id = s.project_id
+		 WHERE p.slug = ? AND s.slug = ? AND a.slug = ?`, project, stage, app).Scan(&id)
+	if err != nil {
+		t.Fatalf("seedtest: app %s/%s/%s: %v", project, stage, app, err)
+	}
+	return id
+}
+
 // Auditfy crea el proyecto auditfy con el stage staging y su app api.
 func Auditfy(t testing.TB, db *sqlite.DB) (stageID, appID int64) {
 	t.Helper()

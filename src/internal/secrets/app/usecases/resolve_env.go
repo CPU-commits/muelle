@@ -29,6 +29,7 @@ func NewResolveEnv(tx repository.Transactor, owners service.OwnerResolver, repo 
 // entre una y otra no deje una mezcla que nunca existió.
 func (u *ResolveEnv) Execute(ctx context.Context, in dto.ResolveEnv) (map[string]string, error) {
 	var out map[string]string
+	// InTx (BEGIN IMMEDIATE) aunque solo lee: es para leer una foto consistente.
 	err := u.tx.InTx(ctx, func(ctx context.Context) error {
 		app := entity.AppOwner(in.AppID)
 		stage, err := u.owners.StageOfApp(ctx, in.AppID)

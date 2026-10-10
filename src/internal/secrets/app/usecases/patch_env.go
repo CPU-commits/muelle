@@ -2,7 +2,6 @@ package usecases
 
 import (
 	"context"
-	"slices"
 
 	"github.com/CPU-commits/muelle/src/internal/secrets/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/secrets/domain/entity"
@@ -71,24 +70,39 @@ func (u *PatchEnv) Execute(ctx context.Context, in dto.PatchEnv) error {
 		if err != nil {
 			return err
 		}
-		// Borrar solo claves que no existen no cambia ninguna fila: no hay
-		// nada que marcar ni que auditar.
-		if len(set) == 0 && !hasAnyKey(current, unset) {
+		stored := make(map[string]entity.EncryptedEnvVar, len(current))
+		for _, r := range current {
+			stored[r.Key] = r
+		}
+		// Una entrada de set con el mismo valor y el mismo secret que la
+		// guardada no es un cambio y no se reescribe. Solo se descifran las
+		// claves de set que ya existen; una que no descifra cuenta como cambiada.
+		changed := make([]entity.EnvVar, 0, len(set))
+		for _, v := range set {
+			if r, ok := stored[v.Key]; ok && u.crypto.Unchanged(owner, r, v) {
+				continue
+			}
+			changed = append(changed, v)
+		}
+		// Si nada cambia (todo set igual y unset de claves que no existen),
+		// no hay nada que escribir, marcar ni auditar.
+		if len(changed) == 0 && !hasAnyKey(stored, unset) {
 			return nil
 		}
-		// Los límites cuentan lo que el dueño ya tiene. Solo se pueden superar
-		// agregando; borrar siempre se permite, aunque el dueño ya esté pasado.
-		if len(set) > 0 {
-			// Los valores guardados se descifran solo para medirlos, en memoria.
-			plain, err := u.crypto.Open(owner, current)
-			if err != nil {
-				return err
+		// Los límites cuentan lo que el dueño ya tiene, medido sin descifrar.
+		// Solo se pueden superar agregando; borrar siempre se permite, aunque
+		// el dueño ya esté pasado.
+		if len(changed) > 0 {
+			sizes := make(map[string]int, len(current))
+			for _, r := range current {
+				sizes[r.Key] = u.crypto.StoredSize(r)
 			}
-			if err := entity.CheckLimits("set", entity.ApplyPatch(plain, set, unset)); err != nil {
+			count, size := entity.PatchTotals(sizes, changed, unset)
+			if err := entity.CheckTotals("set", count, size); err != nil {
 				return err
 			}
 		}
-		sealed, err := u.crypto.Seal(owner, set)
+		sealed, err := u.crypto.Seal(owner, changed)
 		if err != nil {
 			return err
 		}
@@ -98,15 +112,16 @@ func (u *PatchEnv) Execute(ctx context.Context, in dto.PatchEnv) error {
 		if err := u.marker.Mark(ctx, owner, now); err != nil {
 			return err
 		}
+		// La auditoría lista las claves pedidas, también las que no cambiaron.
 		u.audit.Record(ctx, "env.patch", auditTarget(in.Target), map[string][]string{"set": keysOf(set), "unset": unset})
 		return nil
 	})
 }
 
-// hasAnyKey dice si alguna de keys está en current.
-func hasAnyKey(current []entity.EncryptedEnvVar, keys []string) bool {
-	for _, v := range current {
-		if slices.Contains(keys, v.Key) {
+// hasAnyKey dice si alguna de keys está guardada.
+func hasAnyKey(stored map[string]entity.EncryptedEnvVar, keys []string) bool {
+	for _, k := range keys {
+		if _, ok := stored[k]; ok {
 			return true
 		}
 	}

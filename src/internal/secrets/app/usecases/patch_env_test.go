@@ -194,6 +194,92 @@ func TestPatchEnvNoopSkipsMarkAndAudit(t *testing.T) {
 	}
 }
 
+// Una entrada de set con el mismo valor y el mismo secret que la guardada no
+// es un cambio: no se reescribe, y si no cambia nada más, no se marca ni se audita.
+func TestPatchEnvUnchangedSet(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	o := entity.AppOwner(f.appID)
+	if err := f.replace.Execute(ctx, dto.ReplaceEnv{Target: appTarget, Vars: map[string]string{"A": "1", "B": "2"}}); err != nil {
+		t.Fatal(err)
+	}
+	putAt := f.clock.Now()
+	f.clock.Advance(time.Minute)
+
+	// Mismo valor y secret (true por defecto, como en el PUT).
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Todo igual, más un unset de una clave que no existe: tampoco cambia nada.
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"A": "1", "B": "2"}, Unset: []string{"NOPE"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !seedtest.ConfigChangedAt(t, f.db, f.appID).Equal(putAt) {
+		t.Fatal("un PATCH sin cambios no marca la app")
+	}
+	if events := f.auditEvents(t); len(events) != 1 {
+		t.Fatalf("un PATCH sin cambios no se audita: %+v", events)
+	}
+	rows, _ := f.repo.List(ctx, o)
+	if !rows[0].UpdatedAt.Equal(putAt) || !rows[1].UpdatedAt.Equal(putAt) {
+		t.Fatalf("una variable sin cambios no se reescribe: %+v", rows)
+	}
+
+	// Cambiar solo secret sí es un cambio.
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"A": "1"}, Secret: ptr(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if !seedtest.ConfigChangedAt(t, f.db, f.appID).Equal(f.clock.Now()) {
+		t.Fatal("cambiar secret marca la app")
+	}
+	vars, _ := f.get.Execute(ctx, appTarget)
+	if vars[0].Key != "A" || vars[0].Secret || vars[0].Value == nil || *vars[0].Value != "1" || !vars[0].UpdatedAt.Equal(f.clock.Now()) {
+		t.Fatalf("A=%+v", vars[0])
+	}
+
+	// En un PATCH mixto solo se reescribe lo que cambia; la auditoría lista lo pedido.
+	changedSecretAt := f.clock.Now()
+	f.clock.Advance(time.Minute)
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"A": "1", "B": "3"}, Secret: ptr(false)}); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = f.repo.List(ctx, o)
+	if !rows[0].UpdatedAt.Equal(changedSecretAt) || !rows[1].UpdatedAt.Equal(f.clock.Now()) {
+		t.Fatalf("A no cambió y B sí: %+v", rows)
+	}
+	if got := f.plain(t, o); !maps.Equal(got, map[string]string{"A": "1", "B": "3"}) {
+		t.Fatalf("got=%v", got)
+	}
+	events := f.auditEvents(t)
+	if len(events) != 3 || events[2].details != `{"set":["A","B"],"unset":[]}` {
+		t.Fatalf("events=%+v", events)
+	}
+}
+
+// Una fila que no descifra no bloquea los PATCH del dueño: medir no descifra,
+// y sobrescribirla la arregla (no descifrar cuenta como cambio).
+func TestPatchEnvBrokenRowDoesNotBlock(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	o := entity.AppOwner(f.appID)
+	// BROKEN se cifró con la AAD del stage y se guardó en la app: no descifra.
+	sealed, _ := f.patch.crypto.Seal(entity.StageOwner(f.stageID), []entity.EnvVar{{Key: "BROKEN", Value: []byte("x"), Secret: true, UpdatedAt: seedtest.T0}})
+	if err := f.repo.Replace(ctx, o, sealed); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"OTHER": "y"}}); err != nil {
+		t.Fatalf("agregar otra variable: %v", err)
+	}
+	// El mismo valor que tenía: si "no descifra" contara como "sin cambios", quedaría rota.
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"BROKEN": "x"}}); err != nil {
+		t.Fatalf("sobrescribir la rota: %v", err)
+	}
+	if got := f.plain(t, o); !maps.Equal(got, map[string]string{"BROKEN": "x", "OTHER": "y"}) {
+		t.Fatalf("got=%v", got)
+	}
+}
+
 func TestPatchEnvNotFound(t *testing.T) {
 	f := newFixture(t)
 	err := f.patch.Execute(context.Background(), dto.PatchEnv{Target: dto.EnvTarget{Project: "auditfy", Stage: "nope"}, Set: map[string]string{"A": "1"}})

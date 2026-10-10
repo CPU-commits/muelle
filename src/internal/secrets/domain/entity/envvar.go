@@ -14,8 +14,10 @@ const (
 	MaxVars       = 500      // variables por dueño
 	MaxValueBytes = 64 << 10 // bytes por valor
 	// MaxOwnerBytes es el total por dueño (claves + valores). Sin él, 500
-	// valores de 64 KiB darían un GET de 32 MB y un entorno que supera el
-	// ARG_MAX de Linux al desplegar.
+	// valores de 64 KiB darían un GET de 32 MB. No alcanza por sí solo para
+	// el ARG_MAX de Linux: una app recibe la mezcla de su stage y la suya
+	// (hasta 2 MiB), así que el deploy (Fase 2) tiene que revisar el tamaño
+	// de la mezcla antes de entregarla.
 	MaxOwnerBytes = 1 << 20
 )
 
@@ -98,35 +100,40 @@ func TotalSize(vars []EnvVar) int {
 	return n
 }
 
-// CheckLimits revisa que las variables con que queda un dueño no superen
-// MaxVars ni MaxOwnerBytes.
-func CheckLimits(field string, vars []EnvVar) error {
-	if err := CheckCount(field, len(vars)); err != nil {
+// CheckTotals revisa que un dueño que queda con count variables que suman
+// size bytes (claves + valores) no supere MaxVars ni MaxOwnerBytes.
+func CheckTotals(field string, count, size int) error {
+	if err := CheckCount(field, count); err != nil {
 		return err
 	}
-	if TotalSize(vars) > MaxOwnerBytes {
+	if size > MaxOwnerBytes {
 		return validate.Errorf(field, "las variables suman más de 1 MiB (claves y valores)")
 	}
 	return nil
 }
 
-// ApplyPatch devuelve, ordenadas por clave, las variables con que queda un
-// dueño que tiene current después de agregar o reemplazar set y borrar unset.
-// No modifica current.
-func ApplyPatch(current, set []EnvVar, unset []string) []EnvVar {
-	byKey := make(map[string]EnvVar, len(current)+len(set))
-	for _, v := range current {
-		byKey[v.Key] = v
+// CheckLimits revisa los límites de un dueño que queda con vars.
+func CheckLimits(field string, vars []EnvVar) error {
+	return CheckTotals(field, len(vars), TotalSize(vars))
+}
+
+// PatchTotals devuelve cuántas variables y cuántos bytes (claves + valores)
+// le quedan a un dueño después de agregar o reemplazar set y borrar unset.
+// current es clave → bytes de lo que ya tiene, así que no hace falta
+// descifrar lo guardado para medirlo. No modifica current.
+func PatchTotals(current map[string]int, set []EnvVar, unset []string) (count, size int) {
+	sizes := maps.Clone(current)
+	if sizes == nil {
+		sizes = map[string]int{}
 	}
 	for _, k := range unset {
-		delete(byKey, k)
+		delete(sizes, k)
 	}
 	for _, v := range set {
-		byKey[v.Key] = v
+		sizes[v.Key] = v.Size()
 	}
-	out := make([]EnvVar, 0, len(byKey))
-	for _, k := range slices.Sorted(maps.Keys(byKey)) {
-		out = append(out, byKey[k])
+	for _, n := range sizes {
+		size += n
 	}
-	return out
+	return len(sizes), size
 }
