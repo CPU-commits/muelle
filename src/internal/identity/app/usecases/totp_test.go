@@ -45,8 +45,16 @@ func TestTOTPCodeCannotBeReused(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	for f.la.bucket.Allow() { // con el balde vacío, el código repetido se audita igual
+	}
+	before := len(f.auditRows(t))
 	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(second.Token, code)); !errors.Is(err, service.ErrInvalidCode) {
 		t.Fatalf("el mismo código otra vez: esperaba ErrInvalidCode, got %v", err)
+	}
+	if rows := f.rowsFrom(t, before); len(rows) != 1 {
+		t.Fatalf("el código repetido deja un auth.login_failed: %+v", rows)
+	} else {
+		expectRow(t, rows[0], "auth.login_failed", "user:felipe", `{"ip":"1.1.1.1","reason":"code"}`, nil)
 	}
 	f.advance(service.TOTPPeriod)
 	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(second.Token, f.code(t, secret))); err != nil {

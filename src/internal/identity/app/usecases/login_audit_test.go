@@ -208,12 +208,20 @@ func TestUnauthenticatedAuditIsThrottled(t *testing.T) {
 		t.Fatalf("esperaba 3 fallos y el resumen de los 7 descartados: %+v", rows)
 	}
 
-	// Con el balde vacío, un login correcto se audita igual.
+	// Con el balde vacío, un login correcto y su logout se auditan igual.
 	before = len(f.auditRows(t))
-	if _, err := uc.Execute(ctx, login("felipe", testPassword, "3.3.3.3")); err != nil {
+	res, err := uc.Execute(ctx, login("felipe", testPassword, "3.3.3.3"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if rows := f.rowsFrom(t, before); len(rows) != 1 || rows[0].Action != "auth.login" {
+	p, err := f.authSession.Execute(ctx, res.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewLogout(f.sessions, la).Execute(shared.WithPrincipal(ctx, p), dto.LogoutInput{SessionHash: p.SessionHash, Username: p.Username}); err != nil {
+		t.Fatal(err)
+	}
+	if rows := f.rowsFrom(t, before); len(rows) != 2 || rows[0].Action != "auth.login" || rows[1].Action != "auth.logout" {
 		t.Fatalf("audit=%+v", rows)
 	}
 }

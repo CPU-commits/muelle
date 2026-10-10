@@ -101,6 +101,11 @@ func TestQueuedLoginRechecksLockout(t *testing.T) {
 		if n := f.countSessions(t); n != 0 {
 			t.Fatalf("%q: no debió abrirse ninguna sesión: %d", password, n)
 		}
+		// Tampoco se audita: un intento rechazado porque el par ya estaba
+		// bloqueado no deja auth.login_failed ni otro auth.locked.
+		if rows := f.auditRows(t); len(rows) != 0 {
+			t.Fatalf("%q: el intento rechazado no se audita: %+v", password, rows)
+		}
 		// El bloqueo sigue siendo de 1 min: el intento en espera no lo extendió.
 		f.advance(service.LockoutFor(5))
 		if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); err != nil {

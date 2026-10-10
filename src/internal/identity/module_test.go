@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -193,5 +195,62 @@ func TestResetUserTOTPSharesCodeLockWithLogin(t *testing.T) {
 	code, _ := codes(other, c.Now())
 	if err := complete(pending(), code); err != nil {
 		t.Fatalf("después del reinicio entra enseguida con el secreto nuevo: %v", err)
+	}
+}
+
+// countActions cuenta las filas de auditoría por acción, y devuelve los
+// details de las auth.audit_dropped.
+func countActions(t *testing.T, db *sqlitedb.DB) (map[string]int, []string) {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := db.Conn(ctx).QueryContext(ctx, `SELECT action, details FROM audit_events ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	n := map[string]int{}
+	var dropped []string
+	for rows.Next() {
+		var action, details string
+		if err := rows.Scan(&action, &details); err != nil {
+			t.Fatal(err)
+		}
+		n[action]++
+		if action == "auth.audit_dropped" {
+			dropped = append(dropped, details)
+		}
+	}
+	return n, dropped
+}
+
+// El módulo pone el balde de la auditoría delante de los fallos de
+// contraseña: una avalancha de AuditBurst+1 contraseñas malas (cada una desde
+// su IP, de usuarios inventados) deja AuditBurst filas y el resumen del
+// descarte; el login correcto que sigue se audita igual.
+func TestModuleAuditBucketDropsPasswordFailuresNotLogins(t *testing.T) {
+	c := clock.NewManual(time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC))
+	m, db := newModule(t, c)
+	ctx := context.Background()
+	moduleUser(t, db, "felipe", c.Now())
+
+	var wg sync.WaitGroup
+	for i := range service.AuditBurst + 1 {
+		wg.Go(func() {
+			in := dto.LoginInput{Username: fmt.Sprintf("nadie%d", i), Password: "x", IP: fmt.Sprintf("2001:db8:%x::1", i+1)}
+			if _, err := m.routes.Login.Execute(ctx, in); !errors.Is(err, service.ErrInvalidCredentials) {
+				t.Errorf("login %d: %v", i, err)
+			}
+		})
+	}
+	wg.Wait()
+	n, dropped := countActions(t, db)
+	if n["auth.login_failed"] != service.AuditBurst || !slices.Equal(dropped, []string{`{"count":1}`}) {
+		t.Fatalf("login_failed=%d (esperaba %d) resúmenes=%v", n["auth.login_failed"], service.AuditBurst, dropped)
+	}
+	if _, err := m.routes.Login.Execute(ctx, dto.LoginInput{Username: "felipe", Password: testPassword, IP: "198.51.100.7"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := countActions(t, db); n["auth.login"] != 1 {
+		t.Fatalf("con el balde vacío el login se audita: %v", n)
 	}
 }
