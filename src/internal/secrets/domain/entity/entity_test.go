@@ -59,6 +59,18 @@ func TestNewEnvVar(t *testing.T) {
 	if _, err := NewEnvVar("set", "BIG", []byte(strings.Repeat("x", MaxValueBytes+1)), true, at); validationField(t, err) != "set" {
 		t.Errorf("valor grande: %v", err)
 	}
+
+	// Texto UTF-8 válido y sin NUL, sea secreta o no.
+	for _, value := range []string{"\xff", "ok\xc3", "\xed\xa0\x80", "a\x00b"} {
+		for _, secret := range []bool{true, false} {
+			if _, err := NewEnvVar("vars", "BAD", []byte(value), secret, at); validationField(t, err) != "vars" {
+				t.Errorf("valor %q (secret=%v): %v", value, secret, err)
+			}
+		}
+	}
+	if _, err := NewEnvVar("vars", "UNICODE", []byte("ñandú 🚀\t\n"), false, at); err != nil {
+		t.Errorf("UTF-8 válido con tab y salto de línea: %v", err)
+	}
 }
 
 func TestNewEnvVarsSortsAndValidates(t *testing.T) {
@@ -79,6 +91,9 @@ func TestNewEnvVarsSortsAndValidates(t *testing.T) {
 	}
 	if _, err := NewEnvVars("set", map[string]string{"OK": "x", "bad-key": "y"}, true, at); validationField(t, err) != "set" {
 		t.Errorf("clave inválida: %v", err)
+	}
+	if _, err := NewEnvVars("set", map[string]string{"OK": "x", "BAD": "\xff"}, true, at); validationField(t, err) != "set" {
+		t.Errorf("valor inválido: %v", err)
 	}
 }
 

@@ -1,8 +1,10 @@
 package entity
 
 import (
+	"bytes"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
@@ -30,14 +32,24 @@ type EncryptedEnvVar struct {
 	UpdatedAt  time.Time
 }
 
-// NewEnvVar valida la clave y el tamaño del valor. field es el campo del
-// cuerpo donde viene la variable ("vars" o "set"), para que el error lo nombre.
+// NewEnvVar valida la clave y el valor. field es el campo del cuerpo donde
+// viene la variable ("vars" o "set"), para que el error lo nombre.
+//
+// El valor tiene que ser texto UTF-8 válido y sin NUL: las respuestas JSON no
+// pueden llevar UTF-8 inválido (GET fallaría con un 500), y el entorno de un
+// proceso no puede llevar NUL (el deploy no podría entregarla).
 func NewEnvVar(field, key string, value []byte, secret bool, at time.Time) (EnvVar, error) {
 	if err := validate.EnvKey(field, key); err != nil {
 		return EnvVar{}, err
 	}
 	if len(value) > MaxValueBytes {
 		return EnvVar{}, validate.Errorf(field, "el valor de %q supera 64 KiB", key)
+	}
+	if !utf8.Valid(value) {
+		return EnvVar{}, validate.Errorf(field, "el valor de %q no es UTF-8 válido", key)
+	}
+	if bytes.IndexByte(value, 0) >= 0 {
+		return EnvVar{}, validate.Errorf(field, "el valor de %q no puede contener el carácter NUL", key)
 	}
 	return EnvVar{Key: key, Value: value, Secret: secret, UpdatedAt: at}, nil
 }
