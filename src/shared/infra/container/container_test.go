@@ -8,9 +8,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/CPU-commits/muelle/src/cmd/cron"
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
 	"github.com/CPU-commits/muelle/src/internal/admin"
 	"github.com/CPU-commits/muelle/src/settings"
@@ -82,6 +84,57 @@ func TestNew(t *testing.T) {
 	httptestutil.Expect(t, w, http.StatusUnauthorized)
 	if code := httptestutil.ErrorCode(t, w); code != "unauthenticated" {
 		t.Fatalf("code=%s", code)
+	}
+}
+
+// Las rutas de admin están registradas: GET /api/v1/settings con sesión responde 200.
+func TestAdminRoutesWired(t *testing.T) {
+	e := api{t: t, c: newTestContainer(t)}
+	s := e.setup()
+	w := e.do("GET", "/api/v1/settings", nil, s)
+	httptestutil.Expect(t, w, http.StatusOK)
+	if m := httptestutil.Decode[map[string]any](t, w); len(m) == 0 {
+		t.Fatalf("settings vacío: %s", w.Body.String())
+	}
+}
+
+// identity recibe PanelOrigin: el link de una invitación empieza con él.
+func TestInviteURLUsesPanelOrigin(t *testing.T) {
+	s := testSettings(t)
+	c, err := New(context.Background(), s, testLogger(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	e := api{t: t, c: c}
+
+	w := e.do("POST", "/api/v1/invites", nil, e.setup())
+	httptestutil.Expect(t, w, http.StatusCreated)
+	url, _ := httptestutil.Decode[map[string]any](t, w)["url"].(string)
+	if prefix := s.PanelOrigin + "/invite/"; !strings.HasPrefix(url, prefix) || len(url) == len(prefix) {
+		t.Fatalf("url=%q, esperaba %s<token>", url, prefix)
+	}
+}
+
+// admin recibe DataDir: el job "backup diario" deja la copia en <DataDir>/backups.
+func TestBackupJobWritesUnderDataDir(t *testing.T) {
+	s := testSettings(t)
+	c, err := New(context.Background(), s, testLogger(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+
+	i := slices.IndexFunc(c.Jobs, func(j cron.Job) bool { return j.Name == "backup diario" })
+	if i < 0 {
+		t.Fatal(`falta el job "backup diario" en c.Jobs`)
+	}
+	if err := c.Jobs[i].Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(s.DataDir, "backups", "muelle-*.db"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("backups en %s: %v (err=%v)", filepath.Join(s.DataDir, "backups"), files, err)
 	}
 }
 
