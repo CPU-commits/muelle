@@ -30,9 +30,13 @@ const (
 	// presupuesto de memoria (§1 del spec).
 	maxConcurrent = 2
 
-	// maxMemory acota la memoria que puede pedir un hash guardado (1 GiB),
-	// para que un valor corrupto en la base no agote la RAM.
-	maxMemory = 1 << 20 // KiB
+	// Límites de un hash guardado: uno corrupto o adulterado en la base no
+	// puede agotar la RAM ni la CPU, ni debilitar la comparación con una clave
+	// o un salt cortos. Fuera de estos rangos el hash es inválido.
+	maxMemory  = 256 * 1024 // KiB (256 MiB)
+	maxTime    = 10
+	minKeyLen  = 16
+	minSaltLen = 8
 )
 
 var errBadHash = errors.New("identity: hash de contraseña con formato inválido")
@@ -74,15 +78,15 @@ func (h *Argon2Hasher) Verify(encoded, password string) (bool, error) {
 	var memory, time uint32
 	var threads uint8
 	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &time, &threads); err != nil ||
-		time < 1 || threads < 1 || memory > maxMemory {
+		time < 1 || time > maxTime || threads < 1 || memory > maxMemory {
 		return false, errBadHash
 	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil || len(salt) == 0 {
+	if err != nil || len(salt) < minSaltLen {
 		return false, errBadHash
 	}
 	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil || len(want) == 0 {
+	if err != nil || len(want) < minKeyLen {
 		return false, errBadHash
 	}
 	got := h.derive([]byte(password), salt, time, memory, threads, uint32(len(want)))

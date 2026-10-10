@@ -83,6 +83,34 @@ func TestVerifyRejectsMalformedHashes(t *testing.T) {
 	}
 }
 
+// Un hash guardado con parámetros fuera de rango (corrupto o adulterado) es
+// inválido: no puede pedir 1 GiB de RAM, mil pasadas ni una clave corta.
+func TestVerifyRejectsOutOfRangeParams(t *testing.T) {
+	h := NewArgon2Hasher()
+	b64 := base64.RawStdEncoding.EncodeToString
+	salt16, salt7 := b64([]byte("0123456789abcdef")), b64([]byte("0123456"))
+	key32, key15 := b64(make([]byte, 32)), b64(make([]byte, 15))
+	bad := map[string]string{
+		"clave de 15 bytes": "$argon2id$v=19$m=19456,t=2,p=1$" + salt16 + "$" + key15,
+		"salt de 7 bytes":   "$argon2id$v=19$m=19456,t=2,p=1$" + salt7 + "$" + key32,
+		"t=11":              "$argon2id$v=19$m=19456,t=11,p=1$" + salt16 + "$" + key32,
+		"m=256 MiB + 1 KiB": "$argon2id$v=19$m=262145,t=2,p=1$" + salt16 + "$" + key32,
+	}
+	for name, encoded := range bad {
+		if ok, err := h.Verify(encoded, "x"); err == nil || ok {
+			t.Errorf("%s: esperaba error, got ok=%v err=%v", name, ok, err)
+		}
+	}
+	// En los bordes sigue siendo válido (con una clave que no coincide).
+	for _, edge := range []string{
+		"$argon2id$v=19$m=19456,t=10,p=1$" + b64([]byte("01234567")) + "$" + b64(make([]byte, 16)),
+	} {
+		if _, err := h.Verify(edge, "x"); err != nil {
+			t.Errorf("%s: no debió ser inválido: %v", edge, err)
+		}
+	}
+}
+
 // TestHasherAllowsAtMostTwoAtOnce: Hash y Verify comparten un semáforo de
 // capacidad 2, para que un pico de logins no rompa el presupuesto de RAM (§10.1).
 func TestHasherAllowsAtMostTwoAtOnce(t *testing.T) {
