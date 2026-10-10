@@ -175,7 +175,10 @@ func serve(log *slog.Logger) error {
 //   - ReadTimeout: la petición entera, cuerpo incluido, en 30 s (los cuerpos
 //     son JSON de 1 MiB como mucho). Un cliente que manda un byte a la vez ya
 //     no ocupa la conexión para siempre.
-//   - IdleTimeout: una conexión keep-alive sin peticiones se cierra a los 120 s.
+//   - IdleTimeout: una conexión keep-alive sin peticiones se cierra a los 3 min.
+//     Tiene que ser mayor que el keepalive de Caddy hacia muelle (2 min por
+//     defecto): si muelle cerrara primero, Caddy podría reusar una conexión
+//     recién cerrada y responder 502 a una petición que no se puede reintentar.
 //   - MaxHeaderBytes: 64 KiB de headers, en vez del 1 MiB por defecto.
 //
 // No hay WriteTimeout global: los streams SSE de la Fase 2 duran lo que el
@@ -186,7 +189,7 @@ func newHTTPServer(h http.Handler, log *slog.Logger) *http.Server {
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		IdleTimeout:       3 * time.Minute,
 		MaxHeaderBytes:    64 << 10,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}

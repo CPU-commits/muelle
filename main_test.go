@@ -29,7 +29,7 @@ func TestNewHTTPServer(t *testing.T) {
 	if srv.ReadTimeout != 30*time.Second {
 		t.Errorf("ReadTimeout=%s", srv.ReadTimeout)
 	}
-	if srv.IdleTimeout != 120*time.Second {
+	if srv.IdleTimeout != 3*time.Minute {
 		t.Errorf("IdleTimeout=%s", srv.IdleTimeout)
 	}
 	// Sin WriteTimeout global: los streams SSE (Fase 2) ponen su propio plazo.
