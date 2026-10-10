@@ -27,11 +27,15 @@ type Deps struct {
 	Clock  clock.Clock
 	Audit  audit.Recorder
 	Log    *slog.Logger
+	// PanelOrigin es el origen del panel (settings.PanelOrigin), con el que se
+	// arman los links de las invitaciones (<PanelOrigin>/invite/<token>).
+	PanelOrigin string
 }
 
 type Module struct {
 	auth        inhttp.Authenticator
 	routes      inhttp.Usecases
+	panelOrigin string
 	cleanup     *usecases.CleanupSessions
 	ensureSetup *usecases.EnsureSetupInvite
 	log         *slog.Logger
@@ -83,6 +87,7 @@ func New(d Deps) *Module {
 			ListTokens:     usecases.NewListTokens(tokens),
 			DeleteToken:    usecases.NewDeleteToken(tokens, d.Audit),
 		},
+		panelOrigin: d.PanelOrigin,
 		cleanup:     usecases.NewCleanupSessions(sessions, c),
 		ensureSetup: usecases.NewEnsureSetupInvite(db, users, invites, c),
 		log:         d.Log,
@@ -94,7 +99,7 @@ func New(d Deps) *Module {
 func (m *Module) Authenticator() utils.Authenticator { return m.auth }
 
 // RegisterRoutes registra los errores y las rutas /auth, /users, /invites y /tokens.
-func (m *Module) RegisterRoutes(k *utils.Kit) { inhttp.RegisterRoutes(k, m.routes) }
+func (m *Module) RegisterRoutes(k *utils.Kit) { inhttp.RegisterRoutes(k, m.routes, m.panelOrigin) }
 
 // Jobs devuelve las tareas periódicas: "sesiones vencidas", cada hora.
 func (m *Module) Jobs() []cron.Job {

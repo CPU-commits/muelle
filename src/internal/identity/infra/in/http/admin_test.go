@@ -46,6 +46,17 @@ func TestInviteFlow(t *testing.T) {
 	}
 }
 
+// El link de la invitación sale de Deps.PanelOrigin, no del header Origin de
+// la petición.
+func TestInviteURLUsesConfiguredOrigin(t *testing.T) {
+	e := newEnvFull(t, "https://muelle.example", nil)
+	w := e.do("POST", "/api/v1/invites", nil, httptestutil.WithSession(e.login()))
+	httptestutil.Expect(t, w, http.StatusCreated)
+	if url := httptestutil.Decode[map[string]any](t, w)["url"].(string); !strings.HasPrefix(url, "https://muelle.example/invite/") {
+		t.Fatalf("url=%s", url)
+	}
+}
+
 func TestAcceptInviteNameTaken(t *testing.T) {
 	e := newEnv(t)
 	s := httptestutil.WithSession(e.login())

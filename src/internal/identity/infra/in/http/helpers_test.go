@@ -43,6 +43,13 @@ func newEnv(t *testing.T) *env {
 // newEnvWith registra además las rutas de extra (para simular rutas de otros módulos).
 func newEnvWith(t *testing.T, extra func(k *utils.Kit)) *env {
 	t.Helper()
+	return newEnvFull(t, httptestutil.PanelOrigin, extra)
+}
+
+// newEnvFull arma el módulo con panelOrigin en Deps (el cliente de prueba
+// siempre manda el Origin de httptestutil).
+func newEnvFull(t *testing.T, panelOrigin string, extra func(k *utils.Kit)) *env {
+	t.Helper()
 	db := sqlitetest.New(t)
 	c := clock.NewManual(time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC))
 	ciph, err := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
@@ -50,7 +57,8 @@ func newEnvWith(t *testing.T, extra func(k *utils.Kit)) *env {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(t.Output(), nil))
-	m := identity.New(identity.Deps{DB: db, Cipher: ciph, Clock: c, Audit: sqlitedb.NewAuditRecorder(db, c, log), Log: log})
+	m := identity.New(identity.Deps{DB: db, Cipher: ciph, Clock: c, Audit: sqlitedb.NewAuditRecorder(db, c, log), Log: log,
+		PanelOrigin: panelOrigin})
 	client := httptestutil.New(t, m.Authenticator(), func(k *utils.Kit) {
 		m.RegisterRoutes(k)
 		if extra != nil {

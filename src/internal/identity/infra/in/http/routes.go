@@ -29,14 +29,16 @@ type Usecases struct {
 }
 
 type handler struct {
-	k  *utils.Kit
-	uc Usecases
+	k           *utils.Kit
+	uc          Usecases
+	panelOrigin string
 }
 
 // RegisterRoutes registra los errores y las rutas de identity en el Kit.
-func RegisterRoutes(k *utils.Kit, uc Usecases) {
+// panelOrigin es el origen del panel, para los links de las invitaciones.
+func RegisterRoutes(k *utils.Kit, uc Usecases, panelOrigin string) {
 	registerErrors(k)
-	h := &handler{k: k, uc: uc}
+	h := &handler{k: k, uc: uc, panelOrigin: panelOrigin}
 
 	// Sesión (§10 del spec).
 	k.HandlePublic("POST /api/v1/auth/login", h.login)

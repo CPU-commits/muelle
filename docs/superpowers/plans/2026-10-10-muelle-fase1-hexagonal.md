@@ -811,11 +811,12 @@ func Run(ctx context.Context, jobs []Job, log *slog.Logger)
 package identity
 
 type Deps struct {
-	DB     *sqlite.DB
-	Cipher cipher.Cipher
-	Clock  clock.Clock
-	Audit  audit.Recorder
-	Log    *slog.Logger
+	DB          *sqlite.DB
+	Cipher      cipher.Cipher
+	Clock       clock.Clock
+	Audit       audit.Recorder
+	Log         *slog.Logger
+	PanelOrigin string // settings.PanelOrigin: links de las invitaciones (<PanelOrigin>/invite/<token>)
 }
 
 func New(d Deps) *Module

@@ -48,10 +48,7 @@ func (h *handler) createInvite(w http.ResponseWriter, r *http.Request) {
 		h.k.Fail(w, err)
 		return
 	}
-	// El link usa el Origin de la petición: cmd/http rechaza (403 bad_origin)
-	// todo POST sin Bearer cuyo Origin no sea exactamente el del panel, y esta
-	// ruta no acepta tokens, así que aquí Origin siempre es el del panel.
-	url := r.Header.Get("Origin") + "/invite/" + inv.Token
+	url := h.panelOrigin + "/invite/" + inv.Token
 	utils.WriteJSON(w, http.StatusCreated, inviteRes{URL: url, ExpiresAt: inv.ExpiresAt.UTC()})
 }
 
