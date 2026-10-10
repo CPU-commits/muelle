@@ -158,3 +158,34 @@ func TestValidateRejectsNaNCPUs(t *testing.T) {
 		t.Fatal("NaN no es un valor de CPU válido")
 	}
 }
+
+func TestStoredJSONIsExact(t *testing.T) {
+	const none = `{"image":"redis:7","port":6379,"replicas":1,"command":[],"healthcheck":{"type":"none"},"volumes":[],"resources":null}`
+	cases := map[string]struct{ raw, want string }{
+		"sin healthcheck": {`{"image":"redis:7","port":6379}`, none},
+		"none explícito":  {`{"image":"redis:7","port":6379,"healthcheck":{"type":"none"}}`, none},
+	}
+	for name, c := range cases {
+		s, err := ParseAppSpec([]byte(c.raw))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := string(s.JSON()); got != c.want {
+			t.Errorf("%s:\n got %s\nwant %s", name, got, c.want)
+		}
+	}
+}
+
+func TestImageErrorIsInSpanish(t *testing.T) {
+	_, err := ParseAppSpec([]byte(`{"image":"Ghcr.io/Foo/Bar:Latest","port":80}`))
+	var ve *validate.Error
+	if !errors.As(err, &ve) {
+		t.Fatal(err)
+	}
+	if strings.Contains(ve.Message, "invalid") || strings.Contains(ve.Message, "reference format") {
+		t.Fatalf("el mensaje no debe traer texto de la librería: %q", ve.Message)
+	}
+	if !strings.Contains(ve.Message, "referencia") {
+		t.Fatalf("mensaje = %q", ve.Message)
+	}
+}

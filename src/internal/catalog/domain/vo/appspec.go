@@ -25,9 +25,12 @@ const (
 )
 
 type AppSpec struct {
-	Image       string       `json:"image"`
-	Port        int          `json:"port"`
-	Replicas    *int         `json:"replicas"`
+	Image    string `json:"image"`
+	Port     int    `json:"port"`
+	Replicas *int   `json:"replicas"`
+	// Command y healthcheck.command aceptan "$" y saltos de línea a propósito
+	// (son argumentos, no una ruta). El renderizador de compose de la Fase 2
+	// debe escapar "$" como "$$", o compose lo interpolaría.
 	Command     []string     `json:"command"`
 	Healthcheck *Healthcheck `json:"healthcheck"`
 	Volumes     []Volume     `json:"volumes"`
@@ -38,10 +41,10 @@ type Healthcheck struct {
 	Type         string   `json:"type"`
 	Path         string   `json:"path,omitempty"`
 	Command      []string `json:"command,omitempty"`
-	IntervalS    int      `json:"interval_s,omitempty"`
-	TimeoutS     int      `json:"timeout_s,omitempty"`
-	Retries      int      `json:"retries,omitempty"`
-	StartPeriodS int      `json:"start_period_s,omitempty"`
+	IntervalS    int      `json:"interval_s,omitzero"`
+	TimeoutS     int      `json:"timeout_s,omitzero"`
+	Retries      int      `json:"retries,omitzero"`
+	StartPeriodS int      `json:"start_period_s,omitzero"`
 }
 
 type Volume struct {
@@ -254,8 +257,8 @@ func validateImage(img string) error {
 	if strings.HasPrefix(img, "-") || strings.Contains(img, "$") {
 		return validate.Errorf("image", "no es una referencia de imagen válida")
 	}
-	if _, err := reference.ParseNormalizedNamed(img); err != nil {
-		return validate.Errorf("image", "no es una referencia de imagen válida (%v)", err)
+	if _, err := reference.ParseNormalizedNamed(img); err != nil { // el texto de err está en inglés: no se muestra
+		return validate.Errorf("image", "la imagen no es una referencia válida de Docker (registro/repositorio[:tag][@sha256:…], en minúsculas)")
 	}
 	return nil
 }
