@@ -3,6 +3,7 @@ package secrets
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -45,13 +46,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	clk := clock.NewManual(seedtest.T0.Add(time.Hour))
 	log := slog.New(slog.NewTextHandler(t.Output(), nil))
-	stageID, _ := seedtest.Auditfy(t, db)
-	var projectID int64
-	if err := db.Conn(context.Background()).QueryRowContext(context.Background(),
-		`SELECT project_id FROM stages WHERE id = ?`, stageID).Scan(&projectID); err != nil {
-		t.Fatal(err)
-	}
-	seedtest.App(t, db, seedtest.Stage(t, db, projectID, "production"), "api")
+	seedtest.Auditfy(t, db)
+	seedtest.App(t, db, seedtest.Stage(t, db, seedtest.ProjectID(t, db, "auditfy"), "production"), "api")
 	seedtest.Stage(t, db, seedtest.Project(t, db, "otro"), "staging")
 
 	m := New(Deps{DB: db, Cipher: c, Clock: clk, Audit: sqlite.NewAuditRecorder(db, clk, log), Log: log})
@@ -256,6 +252,90 @@ func TestEnvAPINullBodyKeepsVars(t *testing.T) {
 	}
 	if events := e.audit(t); len(events) != 1 {
 		t.Fatalf("solo el primer PUT se audita: %+v", events)
+	}
+}
+
+// Un valor que no descifra (copiado a otra fila, otra clave maestra o
+// alterado) da un 500 genérico: ni el valor ni el error interno llegan al cliente.
+func TestEnvAPIDecryptFailure(t *testing.T) {
+	e := newTestEnv(t)
+	c := e.client
+	ctx := context.Background()
+	httptestutil.Expect(t, c.Do("PUT", appEnv, map[string]any{"vars": map[string]string{"DATABASE_URL": "postgres://x"}, "secret": false}, session), http.StatusNoContent)
+
+	// Mover la fila de la app a su stage: la AAD ya no coincide.
+	var stageID int64
+	if err := e.db.Conn(ctx).QueryRowContext(ctx,
+		`SELECT s.id FROM stages s JOIN projects p ON p.id = s.project_id WHERE p.slug = 'auditfy' AND s.slug = 'staging'`).Scan(&stageID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Conn(ctx).ExecContext(ctx, `UPDATE env_vars SET stage_id = ?, app_id = NULL WHERE key = 'DATABASE_URL'`, stageID); err != nil {
+		t.Fatal(err)
+	}
+
+	w := c.Do("GET", stageEnv, nil, session)
+	if w.Code != http.StatusInternalServerError || httptestutil.ErrorCode(t, w) != "internal" {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	for _, leak := range []string{"postgres://x", "DATABASE_URL", "descifr"} {
+		if strings.Contains(w.Body.String(), leak) {
+			t.Fatalf("la respuesta filtró %q: %s", leak, w.Body.String())
+		}
+	}
+	// La app quedó sin variables y se sigue leyendo bien.
+	w = c.Do("GET", appEnv, nil, session)
+	httptestutil.Expect(t, w, http.StatusOK)
+	if got := strings.TrimSpace(w.Body.String()); got != `{"vars":[]}` {
+		t.Fatalf("app: %s", got)
+	}
+}
+
+// Los límites también se ven por la API: unset de más, y el total de 1 MiB
+// por dueño acumulado con varios PATCH, cada uno bajo el límite del cuerpo.
+func TestEnvAPILimits(t *testing.T) {
+	e := newTestEnv(t)
+	c := e.client
+	unset := make([]string, 501)
+	for i := range unset {
+		unset[i] = fmt.Sprintf("K%d", i)
+	}
+	w := c.Do("PATCH", appEnv, map[string]any{"unset": unset}, session)
+	if w.Code != http.StatusUnprocessableEntity || httptestutil.ErrorCode(t, w) != "invalid" || !strings.Contains(w.Body.String(), "unset") {
+		t.Fatalf("unset de más: %d %s", w.Code, w.Body.String())
+	}
+
+	big := strings.Repeat("x", 64<<10)
+	vars := map[string]string{}
+	for i := range 15 {
+		vars[fmt.Sprintf("K%02d", i)] = big
+	}
+	httptestutil.Expect(t, c.Do("PUT", appEnv, map[string]any{"vars": vars}, session), http.StatusNoContent)
+	w = c.Do("PATCH", appEnv, map[string]any{"set": map[string]string{"MORE": big}}, session)
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "1 MiB") {
+		t.Fatalf("superar 1 MiB por dueño: %d %s", w.Code, w.Body.String())
+	}
+	if events := e.audit(t); len(events) != 1 {
+		t.Fatalf("solo el PUT se audita: %+v", events)
+	}
+}
+
+// Un PATCH que solo borra claves que no existen responde 204, pero no marca
+// apps ni deja auditoría.
+func TestEnvAPINoopPatch(t *testing.T) {
+	e := newTestEnv(t)
+	c := e.client
+	ctx := context.Background()
+	var appID int64
+	if err := e.db.Conn(ctx).QueryRowContext(ctx, `SELECT id FROM apps WHERE slug = 'api' ORDER BY id LIMIT 1`).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	httptestutil.Expect(t, c.Do("PATCH", stageEnv, map[string]any{"unset": []string{"NOPE"}}, session), http.StatusNoContent)
+	httptestutil.Expect(t, c.Do("PATCH", appEnv, map[string]any{"unset": []string{"NOPE"}}, session), http.StatusNoContent)
+	if !seedtest.ConfigChangedAt(t, e.db, appID).Equal(seedtest.T0) {
+		t.Fatal("un PATCH sin cambios no marca la app")
+	}
+	if events := e.audit(t); len(events) != 0 {
+		t.Fatalf("un PATCH sin cambios no se audita: %+v", events)
 	}
 }
 
