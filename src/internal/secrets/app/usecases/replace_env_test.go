@@ -100,6 +100,37 @@ func TestReplaceEnvValidation(t *testing.T) {
 	}
 }
 
+// Las variables de un dueño suman como máximo 1 MiB (claves y valores).
+func TestReplaceEnvTotalSize(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	big := strings.Repeat("x", entity.MaxValueBytes)
+	vars := map[string]string{}
+	total := 0
+	for i := range 15 {
+		k := fmt.Sprintf("K%02d", i)
+		vars[k] = big
+		total += len(k) + len(big)
+	}
+	vars["REST"] = strings.Repeat("x", entity.MaxOwnerBytes-total-len("REST"))
+	if err := f.replace.Execute(ctx, dto.ReplaceEnv{Target: appTarget, Vars: vars}); err != nil {
+		t.Fatalf("justo 1 MiB debería caber: %v", err)
+	}
+	vars["REST"] += "x"
+	if err := f.replace.Execute(ctx, dto.ReplaceEnv{Target: appTarget, Vars: vars}); validationField(t, err) != "vars" {
+		t.Errorf("un byte de más: %v", err)
+	}
+	// Un PUT reemplaza todo: lo que ya había no cuenta.
+	if err := f.replace.Execute(ctx, dto.ReplaceEnv{Target: appTarget, Vars: map[string]string{"A": big}}); err != nil {
+		t.Errorf("reemplazar 1 MiB por 64 KiB: %v", err)
+	}
+	// No depende de lo guardado, así que se revisa antes de buscar al dueño.
+	missing := dto.EnvTarget{Project: "auditfy", Stage: "staging", App: "nope"}
+	if err := f.replace.Execute(ctx, dto.ReplaceEnv{Target: missing, Vars: vars}); validationField(t, err) != "vars" {
+		t.Errorf("dueño inexistente con 1 MiB de más: %v", err)
+	}
+}
+
 func TestReplaceEnvNotFound(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

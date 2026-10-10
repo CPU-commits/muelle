@@ -42,6 +42,11 @@ func (u *ReplaceEnv) Execute(ctx context.Context, in dto.ReplaceEnv) error {
 	if err != nil {
 		return err
 	}
+	// Un PUT reemplaza todo el set, así que sus límites no dependen de lo
+	// guardado: se revisan antes de tomar el lock de escritura.
+	if err := entity.CheckLimits("vars", vars); err != nil {
+		return err
+	}
 	// Las variables, la marca de cambios pendientes y la auditoría van juntas:
 	// si una falla, no queda ninguna.
 	return u.tx.InTx(ctx, func(ctx context.Context) error {

@@ -24,7 +24,7 @@ type PatchEnv struct {
 }
 
 // ResolveEnv pide las variables que recibe una app al desplegarse (Fase 2).
+// El stage sale de la propia app.
 type ResolveEnv struct {
-	StageID int64
-	AppID   int64
+	AppID int64
 }

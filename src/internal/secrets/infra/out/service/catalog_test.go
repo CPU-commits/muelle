@@ -35,10 +35,18 @@ func TestOwnerResolver(t *testing.T) {
 		t.Fatalf("app de otro proyecto: %+v %v", o, err)
 	}
 
+	// worker solo existe en otro/staging, y production solo en otro: los
+	// slugs se buscan bajo su proyecto y su stage, no en cualquier lado.
+	seedtest.App(t, db, otherStage, "worker")
+	seedtest.Stage(t, db, otherProject, "production")
+
 	notFound := []struct {
 		name string
 		fn   func() (entity.Owner, error)
 	}{
+		{"app que solo existe en otro proyecto", func() (entity.Owner, error) { return r.App(ctx, "auditfy", "staging", "worker") }},
+		{"stage que solo existe en otro proyecto", func() (entity.Owner, error) { return r.Stage(ctx, "auditfy", "production") }},
+		{"app de otro stage", func() (entity.Owner, error) { return r.App(ctx, "otro", "production", "api") }},
 		{"proyecto inexistente", func() (entity.Owner, error) { return r.Stage(ctx, "nope", "staging") }},
 		{"stage inexistente", func() (entity.Owner, error) { return r.Stage(ctx, "auditfy", "nope") }},
 		{"app inexistente", func() (entity.Owner, error) { return r.App(ctx, "auditfy", "staging", "nope") }},
@@ -49,6 +57,25 @@ func TestOwnerResolver(t *testing.T) {
 		if o, err := c.fn(); !errors.Is(err, repository.ErrNotFound) {
 			t.Errorf("%s: %+v %v", c.name, o, err)
 		}
+	}
+}
+
+func TestOwnerResolverStageOfApp(t *testing.T) {
+	db := sqlitetest.New(t)
+	r := NewOwnerResolver(db)
+	ctx := context.Background()
+	stageID, appID := seedtest.Auditfy(t, db)
+	production := seedtest.Stage(t, db, seedtest.ProjectID(t, db, "auditfy"), "production")
+	prodApp := seedtest.App(t, db, production, "api")
+
+	if o, err := r.StageOfApp(ctx, appID); err != nil || o != entity.StageOwner(stageID) {
+		t.Fatalf("staging/api: %+v %v", o, err)
+	}
+	if o, err := r.StageOfApp(ctx, prodApp); err != nil || o != entity.StageOwner(production) {
+		t.Fatalf("production/api: %+v %v", o, err)
+	}
+	if o, err := r.StageOfApp(ctx, 999); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("app inexistente: %+v %v", o, err)
 	}
 }
 

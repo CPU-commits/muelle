@@ -2,6 +2,7 @@ package usecases
 
 import (
 	"context"
+	"slices"
 
 	"github.com/CPU-commits/muelle/src/internal/secrets/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/secrets/domain/entity"
@@ -31,10 +32,18 @@ func NewPatchEnv(tx repository.Transactor, owners service.OwnerResolver, repo se
 }
 
 func (u *PatchEnv) Execute(ctx context.Context, in dto.PatchEnv) error {
-	// Un PATCH vacío (incluido un body null) no cambiaría nada, pero marcaría
-	// las apps con cambios pendientes: se rechaza.
+	// Un PATCH vacío ({}, o set y unset vacíos) no pide nada: se rechaza.
 	if len(in.Set) == 0 && len(in.Unset) == 0 {
 		return validate.Errorf("set", "indica al menos una variable en set o unset")
+	}
+	// El tamaño de la petición se revisa antes que cada clave y antes de tocar
+	// la base: un cuerpo de 1 MiB puede traer 100k claves en unset, que serían
+	// 100k DELETE con el lock de escritura tomado y 1 MiB en la auditoría.
+	if len(in.Unset) > entity.MaxVars {
+		return validate.Errorf("unset", "máximo %d claves", entity.MaxVars)
+	}
+	if err := entity.CheckCount("set", len(in.Set)); err != nil {
+		return err
 	}
 	for _, k := range in.Unset {
 		if err := validate.EnvKey("unset", k); err != nil {
@@ -51,8 +60,8 @@ func (u *PatchEnv) Execute(ctx context.Context, in dto.PatchEnv) error {
 	}
 	unset := sortedUnique(in.Unset)
 
-	// El conteo, las variables, la marca de cambios pendientes y la auditoría
-	// van en la misma transacción: si una falla, no queda ninguna.
+	// Los límites, las variables, la marca de cambios pendientes y la
+	// auditoría van en la misma transacción: si una falla, no queda ninguna.
 	return u.tx.InTx(ctx, func(ctx context.Context) error {
 		owner, err := resolveOwner(ctx, u.owners, in.Target)
 		if err != nil {
@@ -62,8 +71,22 @@ func (u *PatchEnv) Execute(ctx context.Context, in dto.PatchEnv) error {
 		if err != nil {
 			return err
 		}
-		if err := entity.CheckCount("set", patchedCount(current, set, unset)); err != nil {
-			return err
+		// Borrar solo claves que no existen no cambia ninguna fila: no hay
+		// nada que marcar ni que auditar.
+		if len(set) == 0 && !hasAnyKey(current, unset) {
+			return nil
+		}
+		// Los límites cuentan lo que el dueño ya tiene. Solo se pueden superar
+		// agregando; borrar siempre se permite, aunque el dueño ya esté pasado.
+		if len(set) > 0 {
+			// Los valores guardados se descifran solo para medirlos, en memoria.
+			plain, err := u.crypto.Open(owner, current)
+			if err != nil {
+				return err
+			}
+			if err := entity.CheckLimits("set", entity.ApplyPatch(plain, set, unset)); err != nil {
+				return err
+			}
 		}
 		sealed, err := u.crypto.Seal(owner, set)
 		if err != nil {
@@ -80,17 +103,12 @@ func (u *PatchEnv) Execute(ctx context.Context, in dto.PatchEnv) error {
 	})
 }
 
-// patchedCount es cuántas variables quedan después del patch.
-func patchedCount(current []entity.EncryptedEnvVar, set []entity.EnvVar, unset []string) int {
-	total := make(map[string]bool, len(current)+len(set))
+// hasAnyKey dice si alguna de keys está en current.
+func hasAnyKey(current []entity.EncryptedEnvVar, keys []string) bool {
 	for _, v := range current {
-		total[v.Key] = true
+		if slices.Contains(keys, v.Key) {
+			return true
+		}
 	}
-	for _, v := range set {
-		total[v.Key] = true
-	}
-	for _, k := range unset {
-		delete(total, k)
-	}
-	return len(total)
+	return false
 }

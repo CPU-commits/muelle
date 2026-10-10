@@ -96,6 +96,104 @@ func TestPatchEnvValidation(t *testing.T) {
 	}
 }
 
+// unset y set tienen un máximo de MaxVars claves, que se revisa antes de
+// tocar la base: así un PATCH de 1 MiB con 100k claves en unset no hace 100k
+// DELETE con el lock de escritura tomado ni deja 1 MiB en la auditoría.
+func TestPatchEnvLimitsBeforeTransaction(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	// Un dueño inexistente daría 404 si la revisión fuera dentro de la transacción.
+	missing := dto.EnvTarget{Project: "auditfy", Stage: "staging", App: "nope"}
+
+	unset := make([]string, entity.MaxVars+1)
+	for i := range unset {
+		unset[i] = fmt.Sprintf("K%d", i)
+	}
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: missing, Unset: unset}); validationField(t, err) != "unset" {
+		t.Errorf("unset de más: %v", err)
+	}
+	set := map[string]string{}
+	for i := range entity.MaxVars + 1 {
+		set[fmt.Sprintf("K%d", i)] = "x"
+	}
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: missing, Set: set}); validationField(t, err) != "set" {
+		t.Errorf("set de más: %v", err)
+	}
+
+	// Justo MaxVars claves en unset sí pasa.
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: missing, Unset: unset[:entity.MaxVars]}); !errors.Is(err, repository.ErrNotFound) {
+		t.Errorf("%d claves en unset deberían pasar la validación: %v", entity.MaxVars, err)
+	}
+	if events := f.auditEvents(t); len(events) != 0 {
+		t.Fatalf("events=%+v", events)
+	}
+}
+
+// Las variables de un dueño suman como máximo 1 MiB (claves y valores),
+// contando las que ya tiene.
+func TestPatchEnvTotalSize(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	big := strings.Repeat("x", entity.MaxValueBytes)
+	vars := map[string]string{}
+	total := 0
+	for i := range 15 {
+		k := fmt.Sprintf("K%02d", i)
+		vars[k] = big
+		total += len(k) + len(big)
+	}
+	if err := f.replace.Execute(ctx, dto.ReplaceEnv{Target: appTarget, Vars: vars}); err != nil {
+		t.Fatal(err)
+	}
+	rest := strings.Repeat("x", entity.MaxOwnerBytes-total-len("REST"))
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"REST": rest}}); err != nil {
+		t.Fatalf("justo 1 MiB debería caber: %v", err)
+	}
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"X": "1"}}); validationField(t, err) != "set" {
+		t.Errorf("un byte de más: %v", err)
+	}
+	// Reemplazar una variable no cuenta dos veces, y lo que se borra deja lugar.
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"K00": big[1:], "Y": ""}}); err != nil {
+		t.Errorf("reemplazar por un valor un byte más corto y agregar una de 1 byte: %v", err)
+	}
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"X": "1"}, Unset: []string{"K01"}}); err != nil {
+		t.Errorf("borrar una y agregar otra chica: %v", err)
+	}
+	got := f.plain(t, entity.AppOwner(f.appID))
+	if _, ok := got["K01"]; ok || got["X"] != "1" || len(got["K00"]) != entity.MaxValueBytes-1 {
+		t.Fatalf("quedaron %d variables", len(got))
+	}
+	// Un dueño no limita a otro.
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: stageTarget, Set: map[string]string{"REST": rest}}); err != nil {
+		t.Errorf("el stage tiene su propio límite: %v", err)
+	}
+}
+
+// Un PATCH que no cambia ninguna fila (solo borra claves que no existen)
+// responde bien, pero no marca apps ni se audita.
+func TestPatchEnvNoopSkipsMarkAndAudit(t *testing.T) {
+	// Con un ChangeMarker que falla, llamar a Mark haría fallar el PATCH.
+	f := newFixtureWithMarker(t, failingMarker{err: errors.New("Mark no se debía llamar")})
+	ctx := context.Background()
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: stageTarget, Unset: []string{"NOPE", "TAMPOCO"}}); err != nil {
+		t.Fatalf("got %v", err)
+	}
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Unset: []string{"NOPE"}}); err != nil {
+		t.Fatalf("got %v", err)
+	}
+	if !seedtest.ConfigChangedAt(t, f.db, f.appID).Equal(seedtest.T0) {
+		t.Fatal("un PATCH sin cambios no marca la app")
+	}
+	if events := f.auditEvents(t); len(events) != 0 {
+		t.Fatalf("un PATCH sin cambios no se audita: %+v", events)
+	}
+	// Aunque no cambie nada, un dueño inexistente sigue siendo 404.
+	err := f.patch.Execute(ctx, dto.PatchEnv{Target: dto.EnvTarget{Project: "auditfy", Stage: "nope"}, Unset: []string{"NOPE"}})
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestPatchEnvNotFound(t *testing.T) {
 	f := newFixture(t)
 	err := f.patch.Execute(context.Background(), dto.PatchEnv{Target: dto.EnvTarget{Project: "auditfy", Stage: "nope"}, Set: map[string]string{"A": "1"}})
@@ -109,7 +207,7 @@ func TestPatchStageMarksAllItsApps(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	worker := seedtest.App(t, f.db, f.stageID, "worker")
-	production := seedtest.Stage(t, f.db, 1, "production")
+	production := seedtest.Stage(t, f.db, seedtest.ProjectID(t, f.db, "auditfy"), "production")
 	otherApp := seedtest.App(t, f.db, production, "api")
 
 	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: stageTarget, Set: map[string]string{"NATS": "nats:4222"}, Secret: ptr(false)}); err != nil {
@@ -158,13 +256,18 @@ func TestPatchEnvAuditsKeysOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Un PATCH que solo borra claves que no existen no cambia nada y no se audita.
 	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: stageTarget, Unset: []string{"NOPE"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Si borra al menos una que existe, se audita con las claves pedidas.
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Unset: []string{"NOPE", "API_KEY"}}); err != nil {
 		t.Fatal(err)
 	}
 	events := f.auditEvents(t)
 	want := []auditRow{
 		{"system", "env.patch", "app:auditfy/staging/api", `{"set":["API_KEY","LOG_LEVEL"],"unset":["JWT_KEY","Z"]}`},
-		{"system", "env.patch", "stage:auditfy/staging", `{"set":[],"unset":["NOPE"]}`},
+		{"system", "env.patch", "app:auditfy/staging/api", `{"set":[],"unset":["API_KEY","NOPE"]}`},
 	}
 	if len(events) != len(want) {
 		t.Fatalf("events=%+v", events)

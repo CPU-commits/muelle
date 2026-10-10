@@ -44,6 +44,15 @@ func (r *OwnerResolver) App(ctx context.Context, project, stage, app string) (en
 	return entity.AppOwner(id), nil
 }
 
+func (r *OwnerResolver) StageOfApp(ctx context.Context, appID int64) (entity.Owner, error) {
+	var stageID int64
+	err := r.db.Conn(ctx).QueryRowContext(ctx, `SELECT stage_id FROM apps WHERE id = ?`, appID).Scan(&stageID)
+	if err != nil {
+		return entity.Owner{}, sqlitedb.NotFound(err)
+	}
+	return entity.StageOwner(stageID), nil
+}
+
 // ChangeMarker actualiza apps.config_changed_at.
 type ChangeMarker struct {
 	db *sqlitedb.DB

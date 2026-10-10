@@ -50,6 +50,17 @@ func App(t testing.TB, db *sqlite.DB, stageID int64, slug string) int64 {
 		stageID, slug, sqlite.Millis(T0), sqlite.Millis(T0))
 }
 
+// ProjectID devuelve el id del proyecto con ese slug.
+func ProjectID(t testing.TB, db *sqlite.DB, slug string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var id int64
+	if err := db.Conn(ctx).QueryRowContext(ctx, `SELECT id FROM projects WHERE slug = ?`, slug).Scan(&id); err != nil {
+		t.Fatalf("seedtest: proyecto %s: %v", slug, err)
+	}
+	return id
+}
+
 // Auditfy crea el proyecto auditfy con el stage staging y su app api.
 func Auditfy(t testing.TB, db *sqlite.DB) (stageID, appID int64) {
 	t.Helper()

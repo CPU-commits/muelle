@@ -68,7 +68,7 @@ func newFixtureWithMarker(t *testing.T, marker service.ChangeMarker) *fixture {
 		get:     NewGetEnv(owners, repo, ec),
 		replace: NewReplaceEnv(db, owners, repo, marker, ec, clk, rec),
 		patch:   NewPatchEnv(db, owners, repo, marker, ec, clk, rec),
-		resolve: NewResolveEnv(repo, ec),
+		resolve: NewResolveEnv(db, owners, repo, ec),
 		stageID: stageID,
 		appID:   appID,
 	}

@@ -13,6 +13,8 @@ import (
 type OwnerResolver interface {
 	Stage(ctx context.Context, project, stage string) (entity.Owner, error)
 	App(ctx context.Context, project, stage, app string) (entity.Owner, error)
+	// StageOfApp devuelve el stage al que pertenece la app (apps.stage_id).
+	StageOfApp(ctx context.Context, appID int64) (entity.Owner, error)
 }
 
 // ChangeMarker marca con cambios pendientes las apps afectadas por un cambio
