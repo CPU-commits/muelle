@@ -65,8 +65,10 @@ func NewKit(mux *http.ServeMux, auth Authenticator, secureCookies bool, log *slo
 //
 // El alcance de un token se verifica con los comodines {p} y {s} de la ruta,
 // así que una ruta AccessToken tiene que nombrarlos exactamente así: hace
-// panic al registrarla si no tiene {p}, si tiene /stages/ sin {s}, si tiene
-// /apps/ sin {a} o si termina en "/" (abarcaría cualquier ruta debajo).
+// panic al registrarla si no tiene {p}, si tiene un comodín de varios
+// segmentos ({x...}), si tiene /stages/ sin {s}, si tiene /apps/ sin {a} o
+// si termina en "/". Los dos casos que abarcan cualquier ruta debajo se
+// tragarían un /stages/<otro> sin que {s} lo vea.
 func (k *Kit) Handle(pattern string, a Access, h http.HandlerFunc) {
 	if a == AccessToken {
 		checkTokenPattern(pattern)
@@ -85,6 +87,8 @@ func checkTokenPattern(pattern string) {
 	switch {
 	case !strings.Contains(path, "{p}"):
 		problem = "no tiene el comodín {p}"
+	case strings.Contains(path, "...}"):
+		problem = "tiene un comodín de varios segmentos ({x...}) que abarcaría cualquier ruta debajo"
 	case strings.Contains(path, "/stages/") && !strings.Contains(path, "{s}"):
 		problem = "tiene /stages/ sin el comodín {s}"
 	case strings.Contains(path, "/apps/") && !strings.Contains(path, "{a}"):

@@ -13,6 +13,11 @@ import (
 // conexión viene de loopback o de una red privada y el header es una IP sin
 // zona; la devuelve en forma canónica. Si no, usa la IP de RemoteAddr: desde
 // una IP pública el header lo escribe el propio cliente.
+//
+// Caddy llega por la red overlay de Swarm, así que su pool de direcciones
+// tiene que ser privado (RFC 1918 o ULA fc00::/7, como el pool por defecto
+// 10.0.0.0/8 de Docker). Con un pool público (--default-addr-pool), el header
+// de Caddy se ignora y todas las peticiones parecen venir de Caddy.
 func ClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

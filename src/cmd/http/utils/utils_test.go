@@ -241,6 +241,11 @@ func TestHandleTokenPatternGuard(t *testing.T) {
 		"GET /api/v1/projects/{p}/stages/{s}/apps/{app}/x": "{a}",
 		"GET /api/v1/projects/{p}/":                        "/",
 		"/api/v1/projects/{p}/stages/{s}/":                 "/",
+		// Un comodín de varios segmentos se traga /stages/{s}: con
+		// {p}/{rest...}, un token de staging leería /stages/production/env.
+		"GET /api/v1/projects/{p}/{rest...}":                     "...}",
+		"GET /api/v1/projects/{p}/stages/{s}/{x...}":             "...}",
+		"GET /api/v1/projects/{p}/stages/{s}/apps/{a}/{path...}": "...}",
 	}
 	for pattern, want := range bad {
 		msg := register(pattern, AccessToken)

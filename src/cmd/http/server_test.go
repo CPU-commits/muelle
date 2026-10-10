@@ -182,6 +182,25 @@ func TestCommonErrors(t *testing.T) {
 	}
 }
 
+// Un método que la ruta no acepta responde 405 en JSON, con el header Allow del mux.
+func TestMethodNotAllowedIsJSON(t *testing.T) {
+	s := newTestServer(t)
+	w := do(s, "GET", "/api/v1/projects/auditfy/env", "")
+	if w.Code != http.StatusMethodNotAllowed || w.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("%d %v %s", w.Code, w.Header(), w.Body.String())
+	}
+	if got := strings.TrimSpace(w.Body.String()); got != `{"error":{"code":"method_not_allowed","message":"método no permitido"}}` {
+		t.Fatalf("body=%s", got)
+	}
+	if allow := w.Header().Get("Allow"); allow != "PUT" {
+		t.Fatalf("Allow=%q, esperaba PUT", allow)
+	}
+	// Los headers de seguridad siguen puestos.
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("headers: %v", w.Header())
+	}
+}
+
 // Una ruta que no existe responde el mismo JSON de error que el resto de la API.
 func TestUnmatchedRouteIsJSON(t *testing.T) {
 	s := newTestServer(t)
