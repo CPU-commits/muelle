@@ -8,8 +8,8 @@ import (
 )
 
 // Límite global de los eventos de auditoría que puede provocar cualquiera sin
-// autenticarse (auth.login_failed, auth.locked): sin él, muchas IPs podrían
-// llenar el disco con filas de auditoría.
+// autenticarse (auth.login_failed y auth.locked del paso de la contraseña):
+// sin él, muchas IPs podrían llenar el disco con filas de auditoría.
 const (
 	AuditEventsPerSecond = 20
 	AuditBurst           = 200

@@ -3,7 +3,9 @@ package usecases
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -185,6 +187,51 @@ func TestUnauthenticatedAuditIsThrottled(t *testing.T) {
 	}
 	if rows := f.rowsFrom(t, before); len(rows) != 1 || rows[0].Action != "auth.login" {
 		t.Fatalf("audit=%+v", rows)
+	}
+}
+
+// Los fallos del código TOTP solo los provoca quien sabe la contraseña, y el
+// bloqueo por usuario ya los acota: se auditan siempre, sin pasar por el
+// balde. Una avalancha de contraseñas malas que lo vacía no esconde un ataque
+// al 2FA.
+func TestCodeFailuresAuditedWithBucketDrained(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	la := NewLoginAudit(f.rec, service.NewTokenBucket(1, 3, f.clock), slog.New(slog.NewTextHandler(io.Discard, nil)), f.clock)
+	loginUC := NewLogin(f.db, f.users, f.sessions, f.hasher, f.limiter, f.lockout, la, f.clock)
+	complete := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, f.totp, f.limiter, f.totpLock, f.attempts, f.replay, la, f.clock)
+
+	// La avalancha: contraseñas malas de usuarios inventados vacían el balde.
+	for i := range 10 {
+		loginUC.Execute(ctx, login(fmt.Sprintf("nadie%d", i), "x", fmt.Sprintf("2001:db8:%x::1", i+1)))
+	}
+	before := len(f.auditRows(t))
+	// El ataque al 2FA: 5 códigos malos, cada uno con su sesión pendiente y su IP.
+	for i := range 5 {
+		ip := fmt.Sprintf("203.0.113.%d", i+1)
+		res, err := loginUC.Execute(ctx, login("felipe", testPassword, ip))
+		if err != nil || !res.MFARequired {
+			t.Fatalf("login %d: res=%+v err=%v", i+1, res, err)
+		}
+		if _, err := complete.Execute(ctx, completeFrom(res.Token, f.wrongCode(t, secret), ip)); !errors.Is(err, service.ErrInvalidCode) {
+			t.Fatalf("código malo %d: got %v", i+1, err)
+		}
+	}
+	var failed, locked int
+	for _, r := range f.rowsFrom(t, before) {
+		switch {
+		case r.Action == "auth.login_failed" && strings.Contains(r.Details, `"reason":"code"`):
+			failed++
+		case r.Action == "auth.locked" && strings.Contains(r.Details, `"reason":"code"`):
+			locked++
+		default:
+			t.Fatalf("fila inesperada: %+v", r)
+		}
+	}
+	if failed != 5 || locked != 1 {
+		t.Fatalf("con el balde vacío: login_failed(code)=%d/5 locked(code)=%d/1", failed, locked)
 	}
 }
 

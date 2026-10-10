@@ -33,9 +33,14 @@ const (
 //   - auth.locked: un fallo dejó bloqueado el par (usuario, IP) o el 2FA del usuario.
 //   - auth.logout: se cerró la sesión.
 //
-// auth.login_failed y auth.locked los puede provocar cualquiera sin
-// autenticarse, así que pasan por un balde global (bucket); los que sobran se
-// descartan con un aviso en el log, para que muchas IPs no llenen el disco.
+// Los del paso de la contraseña (auth.login_failed y auth.locked con reason
+// credentials) los puede provocar cualquiera sin autenticarse, así que pasan
+// por un balde global (bucket); los que sobran se descartan con un aviso en el
+// log, para que muchas IPs no llenen el disco. Los del paso del código (reason
+// code) se registran siempre: solo llega a ese paso quien sabe la contraseña,
+// el bloqueo por usuario ya los acota (unos 33 códigos malos por día y
+// usuario), y una avalancha de contraseñas malas que vacía el balde no puede
+// esconder un ataque al 2FA.
 type LoginAudit struct {
 	rec    audit.Recorder
 	bucket *service.TokenBucket
@@ -51,14 +56,31 @@ func NewLoginAudit(rec audit.Recorder, bucket *service.TokenBucket, log *slog.Lo
 	return &LoginAudit{rec: rec, bucket: bucket, log: log, clock: c}
 }
 
+// reasonCode es el motivo de los fallos del paso del código TOTP, al que solo
+// llega quien sabe la contraseña (el de la contraseña es credentials).
+const reasonCode = "code"
+
+// failed registra una contraseña (reason credentials) o un código (reason
+// code) incorrectos.
 func (a *LoginAudit) failed(ctx context.Context, username, ip, reason string) {
-	a.unauthenticated(ctx, "auth.login_failed", username, map[string]string{"ip": auditText(ip), "reason": reason})
+	a.attempt(ctx, "auth.login_failed", username, ip, reason)
 }
 
 // locked se llama solo cuando un fallo deja bloqueado el par (usuario, IP) o
 // el 2FA del usuario, no en cada intento rechazado mientras dura el bloqueo.
 func (a *LoginAudit) locked(ctx context.Context, username, ip, reason string) {
-	a.unauthenticated(ctx, "auth.locked", username, map[string]string{"ip": auditText(ip), "reason": reason})
+	a.attempt(ctx, "auth.locked", username, ip, reason)
+}
+
+// attempt registra un evento de un intento fallido: los del código, siempre;
+// los de la contraseña (o cualquier otro motivo), si el balde lo permite.
+func (a *LoginAudit) attempt(ctx context.Context, action, username, ip, reason string) {
+	details := map[string]string{"ip": auditText(ip), "reason": reason}
+	if reason == reasonCode {
+		a.rec.Record(ctx, action, auditUser(username), details)
+		return
+	}
+	a.unauthenticated(ctx, action, username, details)
 }
 
 // unauthenticated registra un evento que puede provocar cualquiera, si el
