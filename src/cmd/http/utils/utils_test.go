@@ -214,9 +214,9 @@ func TestHandlePutsPrincipalInContext(t *testing.T) {
 	}
 }
 
-// El alcance de un token se verifica con los comodines {p} y {s}: una ruta
-// AccessToken que no los tiene dejaría pasar cualquier token, así que el Kit
-// la rechaza al registrarla.
+// El alcance de un token se verifica con los comodines {p}, {s} y {a}: una
+// ruta AccessToken que no los tiene en su lugar dejaría pasar a un token de un
+// stage a otro, así que el Kit la rechaza al registrarla.
 func TestHandleTokenPatternGuard(t *testing.T) {
 	ok := func(http.ResponseWriter, *http.Request) {}
 	register := func(pattern string, a Access) (msg string) {
@@ -230,22 +230,38 @@ func TestHandleTokenPatternGuard(t *testing.T) {
 		return ""
 	}
 
+	const prefix = "no empieza con /api/v1/projects/{p}"
 	bad := map[string]string{
-		"GET /api/v1/projects":                             "{p}",
-		"GET /api/v1/tokens/{id}":                          "{p}",
-		"GET /api/v1/projects/{project}":                   "{p}",
-		"GET /api/v1/projects/{p...}":                      "{p}",
-		"GET /api/v1/projects/{p}/stages/x/env":            "{s}",
-		"GET /api/v1/projects/{p}/stages/{stage}/env":      "{s}",
-		"GET /api/v1/projects/{p}/stages/{s}/apps/x":       "{a}",
-		"GET /api/v1/projects/{p}/stages/{s}/apps/{app}/x": "{a}",
-		"GET /api/v1/projects/{p}/":                        "/",
-		"/api/v1/projects/{p}/stages/{s}/":                 "/",
-		// Un comodín de varios segmentos se traga /stages/{s}: con
-		// {p}/{rest...}, un token de staging leería /stages/production/env.
-		"GET /api/v1/projects/{p}/{rest...}":                     "...}",
-		"GET /api/v1/projects/{p}/stages/{s}/{x...}":             "...}",
-		"GET /api/v1/projects/{p}/stages/{s}/apps/{a}/{path...}": "...}",
+		// Sin /api/v1/projects/{p} al principio.
+		"GET /api/v1/projects":                "no empieza con",
+		"GET /api/v1/tokens/{id}":             prefix,
+		"GET /api/v1/projects/{project}":      prefix,
+		"GET /api/v1/projects/{p...}":         prefix,
+		"GET /api/v1/projects/{x}/env/{p}":    prefix,
+		"GET /api/v2/projects/{p}":            prefix,
+		"GET example.com/api/v1/projects/{x}": prefix,
+		// Un literal de colección seguido de otra cosa que su comodín.
+		"GET /api/v1/projects/{p}/stages/x/env":            `/stages/ seguido de "x" en vez de {s}`,
+		"GET /api/v1/projects/{p}/stages/{stage}/env":      `/stages/ seguido de "{stage}" en vez de {s}`,
+		"GET /api/v1/projects/{p}/stages/{x}/env/{s}":      `/stages/ seguido de "{x}" en vez de {s}`,
+		"GET /api/v1/projects/{p}/st%61ges/{x}/env":        `/stages/ seguido de "{x}" en vez de {s}`,
+		"GET /api/v1/projects/{p}/stages/%7Bs%7D/env":      `/stages/ seguido de "%7Bs%7D" en vez de {s}`,
+		"GET /api/v1/projects/{p}/stages/{s}/apps/x":       `/apps/ seguido de "x" en vez de {a}`,
+		"GET /api/v1/projects/{p}/stages/{s}/apps/{app}/x": `/apps/ seguido de "{app}" en vez de {a}`,
+		// Comodines que no son de alcance (incluidos los de varios segmentos,
+		// que se tragarían un /stages/<otro>).
+		"GET /api/v1/projects/{p}/stage/{x}/env":                  "comodín {x}; solo se permiten {p}, {s} y {a}",
+		"POST /api/v1/projects/{p}/stages/{s}/promote/{dst}":      "comodín {dst}",
+		"GET /api/v1/projects/{p}/{rest...}":                      "comodín {rest...}",
+		"GET /api/v1/projects/{p}/stages/{s}/{x...}":              "comodín {x...}",
+		"GET /api/v1/projects/{p}/stages/{s}/apps/{a}/{path...}":  "comodín {path...}",
+		"GET /api/v1/projects/{p}/env/{s}":                        "{s} fuera de su lugar: va justo después de /stages/",
+		"GET /api/v1/projects/{p}/stages/{s}/env/{a}":             "{a} fuera de su lugar: va justo después de /apps/",
+		"GET /api/v1/projects/{p}/stages/{s}/apps/{a}/stages/{s}": "repite el comodín {s}",
+		"GET /api/v1/projects/{p}/apps/{a}":                       "{a} sin {s}",
+		// Abarcan cualquier ruta debajo.
+		"GET /api/v1/projects/{p}/":        `termina en "/"`,
+		"/api/v1/projects/{p}/stages/{s}/": `termina en "/"`,
 	}
 	for pattern, want := range bad {
 		msg := register(pattern, AccessToken)
@@ -254,18 +270,31 @@ func TestHandleTokenPatternGuard(t *testing.T) {
 			continue
 		}
 		if !strings.Contains(msg, pattern) || !strings.Contains(msg, want) || !strings.Contains(msg, "AccessToken") {
-			t.Errorf("%q: el panic %q debe nombrar la ruta, AccessToken y %s", pattern, msg, want)
+			t.Errorf("%q: el panic %q debe nombrar la ruta, AccessToken y %q", pattern, msg, want)
 		}
 	}
 
 	good := []string{
+		// Las rutas AccessToken de catalog.
 		"GET /api/v1/projects/{p}",
 		"GET /api/v1/projects/{p}/stages",
 		"GET /api/v1/projects/{p}/stages/{s}",
-		"PUT /api/v1/projects/{p}/stages/{s}/env",
 		"GET /api/v1/projects/{p}/stages/{s}/apps",
+		"GET /api/v1/projects/{p}/stages/{s}/apps/{a}",
+		// Las de secrets.
+		"GET /api/v1/projects/{p}/stages/{s}/env",
+		"PUT /api/v1/projects/{p}/stages/{s}/env",
+		"PATCH /api/v1/projects/{p}/stages/{s}/env",
+		"GET /api/v1/projects/{p}/stages/{s}/apps/{a}/env",
+		"PUT /api/v1/projects/{p}/stages/{s}/apps/{a}/env",
 		"PATCH /api/v1/projects/{p}/stages/{s}/apps/{a}/env",
+		// Sin método, con host, con espacios y tabs, escapes y {$}, como los acepta el mux.
 		"/api/v1/projects/{p}/env",
+		"GET example.com/api/v1/projects/{p}",
+		"GET\t /api/v1/projects/{p}",
+		"GET /api/v1/pr%6Fjects/{p}/st%61ges/{s}/env",
+		"GET /api/v1/projects/{p}/{$}",
+		"GET /api/v1/projects/{p}/stages/{$}",
 	}
 	for _, pattern := range good {
 		if msg := register(pattern, AccessToken); msg != "" {

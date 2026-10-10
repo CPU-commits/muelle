@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -63,12 +64,9 @@ func NewKit(mux *http.ServeMux, auth Authenticator, secureCookies bool, log *slo
 // Handle registra un endpoint autenticado con el nivel de acceso a.
 // El Principal queda en el ctx (entity.PrincipalFrom).
 //
-// El alcance de un token se verifica con los comodines {p} y {s} de la ruta,
-// así que una ruta AccessToken tiene que nombrarlos exactamente así: hace
-// panic al registrarla si no tiene {p}, si tiene un comodín de varios
-// segmentos ({x...}), si tiene /stages/ sin {s}, si tiene /apps/ sin {a} o
-// si termina en "/". Los dos casos que abarcan cualquier ruta debajo se
-// tragarían un /stages/<otro> sin que {s} lo vea.
+// El alcance de un token se verifica con los comodines {p}, {s} y {a} de la
+// ruta, así que una ruta AccessToken tiene que tenerlos en su lugar. Si no, hace
+// panic al registrarla (ver checkTokenPattern).
 func (k *Kit) Handle(pattern string, a Access, h http.HandlerFunc) {
 	if a == AccessToken {
 		checkTokenPattern(pattern)
@@ -76,29 +74,91 @@ func (k *Kit) Handle(pattern string, a Access, h http.HandlerFunc) {
 	k.mux.Handle(pattern, k.authenticate(a, h))
 }
 
+// scopeWildcards asocia cada comodín de alcance al literal que va justo antes,
+// y collectionWildcards al revés.
+var (
+	scopeWildcards      = map[string]string{"{p}": "projects", "{s}": "stages", "{a}": "apps"}
+	collectionWildcards = map[string]string{"projects": "{p}", "stages": "{s}", "apps": "{a}"}
+)
+
 // checkTokenPattern hace panic si pattern no sirve para verificar el alcance
 // de un token. Es un error de programación, como un patrón inválido del mux.
 func checkTokenPattern(pattern string) {
-	path := pattern
-	if i := strings.IndexByte(pattern, '/'); i >= 0 {
-		path = pattern[i:] // sin el método ni el host
+	if problem := tokenPatternProblem(pattern); problem != "" {
+		panic(fmt.Sprintf("utils: la ruta %q usa AccessToken pero %s; sin eso no se puede verificar el alcance del token", pattern, problem))
 	}
-	var problem string
-	switch {
-	case !strings.Contains(path, "{p}"):
-		problem = "no tiene el comodín {p}"
-	case strings.Contains(path, "...}"):
-		problem = "tiene un comodín de varios segmentos ({x...}) que abarcaría cualquier ruta debajo"
-	case strings.Contains(path, "/stages/") && !strings.Contains(path, "{s}"):
-		problem = "tiene /stages/ sin el comodín {s}"
-	case strings.Contains(path, "/apps/") && !strings.Contains(path, "{a}"):
-		problem = "tiene /apps/ sin el comodín {a}"
-	case strings.HasSuffix(path, "/"):
-		problem = `termina en "/" y abarcaría cualquier ruta debajo`
-	default:
-		return
+}
+
+// tokenPatternProblem revisa la ruta segmento por segmento, como la lee el mux:
+//   - empieza con /api/v1/projects/{p} y no termina en "/";
+//   - los únicos comodines son {p}, {s} y {a} (además de {$} al final), cada
+//     uno una vez y justo después de projects, stages y apps;
+//   - projects, stages y apps, si no son el último segmento, van seguidos de
+//     su comodín, y {a} solo aparece después de {s};
+//   - los literales se comparan decodificados (st%61ges es stages para el mux).
+func tokenPatternProblem(pattern string) string {
+	// Como el mux: el método va hasta el primer espacio o tab, y el host hasta la primera "/".
+	rest := pattern
+	if i := strings.IndexAny(pattern, " \t"); i >= 0 {
+		rest = strings.TrimLeft(pattern[i+1:], " \t")
 	}
-	panic(fmt.Sprintf("utils: la ruta %q usa AccessToken pero %s; sin eso no se puede verificar el alcance del token", pattern, problem))
+	i := strings.IndexByte(rest, '/')
+	if i < 0 {
+		return "no empieza con /api/v1/projects/{p}"
+	}
+	path := rest[i:]
+	if strings.HasSuffix(path, "/") {
+		return `termina en "/" y abarcaría cualquier ruta debajo`
+	}
+
+	type segment struct {
+		raw, s string // s es el literal decodificado, o el comodín tal cual
+		wild   bool
+	}
+	var segs []segment
+	for _, raw := range strings.Split(path[1:], "/") {
+		seg := segment{raw: raw, s: raw, wild: strings.Contains(raw, "{")}
+		if !seg.wild {
+			if u, err := url.PathUnescape(raw); err == nil {
+				seg.s = u
+			}
+		}
+		segs = append(segs, seg)
+	}
+	literal := func(i int, s string) bool { return i >= 0 && i < len(segs) && !segs[i].wild && segs[i].s == s }
+	if !literal(0, "api") || !literal(1, "v1") || !literal(2, "projects") || len(segs) < 4 || !segs[3].wild || segs[3].s != "{p}" {
+		return "no empieza con /api/v1/projects/{p}"
+	}
+
+	seen := map[string]bool{}
+	for i, seg := range segs {
+		if seg.wild {
+			if seg.s == "{$}" {
+				continue // el mux exige que sea el último
+			}
+			before, ok := scopeWildcards[seg.s]
+			switch {
+			case !ok:
+				return fmt.Sprintf("tiene el comodín %s; solo se permiten {p}, {s} y {a}", seg.s)
+			case seen[seg.s]:
+				return fmt.Sprintf("repite el comodín %s", seg.s)
+			case !literal(i-1, before):
+				return fmt.Sprintf("tiene %s fuera de su lugar: va justo después de /%s/", seg.s, before)
+			case seg.s == "{a}" && !seen["{s}"]:
+				return "tiene {a} sin {s} antes: las apps están dentro de un stage"
+			}
+			seen[seg.s] = true
+			continue
+		}
+		want, ok := collectionWildcards[seg.s]
+		if !ok || i+1 == len(segs) {
+			continue // un literal cualquiera, o la colección al final (listar)
+		}
+		if next := segs[i+1]; !next.wild || (next.s != want && next.s != "{$}") {
+			return fmt.Sprintf("tiene /%s/ seguido de %q en vez de %s", seg.s, next.raw, want)
+		}
+	}
+	return ""
 }
 
 // HandlePublic registra un endpoint sin autenticación (login, setup, aceptar invitación).

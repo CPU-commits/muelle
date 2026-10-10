@@ -5,7 +5,6 @@ package http
 import (
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
@@ -77,13 +76,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // notMatched responde en JSON lo que el mux respondería en texto plano. Corre
-// el handler del mux contra un recorder solo para saber si es un 405 y con
-// qué métodos.
+// el handler del mux contra un statusRecorder solo para saber si es un 405 y
+// con qué métodos.
 func (s *Server) notMatched(w http.ResponseWriter, r *http.Request, h http.Handler) {
-	rec := httptest.NewRecorder()
+	rec := &statusRecorder{header: http.Header{}}
 	h.ServeHTTP(rec, r)
-	if rec.Code == http.StatusMethodNotAllowed {
-		if allow := rec.Header().Get("Allow"); allow != "" {
+	if rec.status == http.StatusMethodNotAllowed {
+		if allow := rec.header.Get("Allow"); allow != "" {
 			w.Header().Set("Allow", allow)
 		}
 		utils.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "método no permitido")
@@ -106,4 +105,24 @@ func (s *Server) originAllowed(r *http.Request) bool {
 	}
 	// Con PanelOrigin vacío (mal configurado) no pasa ninguna.
 	return s.origin != "" && r.Header.Get("Origin") == s.origin
+}
+
+// statusRecorder es un http.ResponseWriter que guarda el status y los headers
+// y descarta el body.
+type statusRecorder struct {
+	header http.Header
+	status int
+}
+
+func (r *statusRecorder) Header() http.Header { return r.header }
+
+func (r *statusRecorder) WriteHeader(status int) {
+	if r.status == 0 {
+		r.status = status
+	}
+}
+
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	r.WriteHeader(http.StatusOK)
+	return len(b), nil
 }
