@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
@@ -132,8 +131,10 @@ func TestTOTPFlow(t *testing.T) {
 	}
 }
 
-// Los códigos TOTP malos se acumulan entre logins: una contraseña correcta no
-// reinicia el contador si falta el código, así no se puede probar códigos sin fin.
+// Los códigos TOTP malos se acumulan entre logins, por usuario: una
+// contraseña correcta no reinicia esa cuenta, así no se puede probar códigos
+// sin fin abriendo sesiones pendientes nuevas. El paso de la contraseña no
+// se bloquea por los códigos; el del código sí.
 func TestTOTPFailuresLockAcrossLogins(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -149,34 +150,34 @@ func TestTOTPFailuresLockAcrossLogins(t *testing.T) {
 			t.Fatalf("código %d: got %v", i, err)
 		}
 	}
-	if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); !errors.Is(err, service.ErrLocked) {
-		t.Fatalf("esperaba ErrLocked, got %v", err)
+	res, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	if err != nil || !res.MFARequired {
+		t.Fatalf("la contraseña sigue sirviendo: res=%+v err=%v", res, err)
+	}
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.code(t, secret))); !errors.Is(err, service.ErrLocked) {
+		t.Fatalf("el código queda bloqueado: got %v", err)
 	}
 
 	// Pasado el bloqueo, la contraseña correcta sola no reinicia los fallos:
 	// un código malo más (el 6º fallo) bloquea 2 min.
 	f.advance(service.LockoutFor(5))
-	res, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
-	if err != nil || !res.MFARequired {
-		t.Fatalf("res=%+v err=%v", res, err)
-	}
+	res, _ = f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
 	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.wrongCode(t, secret))); !errors.Is(err, service.ErrInvalidCode) {
 		t.Fatalf("6º fallo: got %v", err)
 	}
-	if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); !errors.Is(err, service.ErrLocked) {
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.code(t, secret))); !errors.Is(err, service.ErrLocked) {
 		t.Fatalf("la contraseña sola no debió reiniciar los fallos: got %v", err)
 	}
 
 	// El código correcto sí los reinicia: después, un código malo no bloquea.
 	f.advance(service.LockoutFor(6))
-	res, _ = f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
 	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.code(t, secret))); err != nil {
 		t.Fatal(err)
 	}
-	f.advance(30 * time.Second) // un código ya usado no se acepta de nuevo
+	f.advance(service.TOTPPeriod) // un código ya usado no se acepta de nuevo
 	res, _ = f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
 	f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.wrongCode(t, secret)))
-	if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); err != nil {
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.code(t, secret))); err != nil {
 		t.Fatalf("tras el código correcto, un fallo no bloquea: %v", err)
 	}
 }

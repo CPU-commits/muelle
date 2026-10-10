@@ -373,9 +373,14 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 - **Token de API:** `Authorization: Bearer mk_<43 caracteres base64url>` (32 bytes aleatorios). Se guarda su SHA-256 y se muestra una sola vez. Su alcance es un proyecto, o un proyecto + stage. **Solo permite:** leer proyecto/stage/app/estado/deploys/logs dentro del alcance, `GET/PUT/PATCH` de variables, crear deploys y hacer rollback. Cualquier otra operación responde `403`.
 - **Login:**
   - Argon2id con `m=19MiB, t=2, p=1`, el mínimo que recomienda OWASP. Un semáforo permite como máximo 2 hashes a la vez, para que un pico de logins no rompa el presupuesto de RAM (§1). Los parámetros van dentro del hash (formato PHC), así que se pueden subir más adelante.
-  - Bloqueo progresivo por usuario e IP: tras 5 fallos del mismo usuario desde la misma IP (en IPv6, el mismo /64), 1 min; después se duplica hasta 1 h. Un login correcto desde esa IP lo reinicia; con 2FA, solo el código correcto. Vive en memoria, con un mapa acotado. Se aplica igual a los nombres que no existen, así un bloqueo no revela qué usuarios hay. Es por usuario e IP, y no solo por usuario, para que un atacante no pueda dejar afuera al admin desde otra IP (recomendación de OWASP).
+  - Bloqueo progresivo de la contraseña, por usuario e IP: tras 5 contraseñas incorrectas del mismo usuario desde la misma IP (en IPv6, el mismo /64), 1 min; después se duplica hasta 1 h. Una contraseña correcta desde esa IP lo reinicia. Se aplica igual a los nombres que no existen, así un bloqueo no revela qué usuarios hay. Es por usuario e IP, y no solo por usuario, para que un atacante no pueda dejar afuera al admin desde otra IP (recomendación de OWASP).
   - Por IP: 20 intentos cada 15 min (en IPv6, por /64).
-  - Con TOTP, el login es en dos pasos: contraseña → código.
+  - Con TOTP, el login es en dos pasos: contraseña → código. Los códigos malos no se cuentan por IP, porque a ese paso solo llega quien ya sabe la contraseña y podría usar muchas IPs:
+    - una sesión pendiente se borra a los 5 códigos malos, y hay que volver a poner la contraseña;
+    - el usuario se bloquea para el 2FA desde cualquier IP, con el mismo calendario (5 códigos malos, 1 min; se duplica hasta 1 h); solo un código correcto lo reinicia.
+  - Cada código TOTP vale una sola vez (RFC 6238 §5.2): un código ya usado, también el de la activación del 2FA, se rechaza.
+  - Los bloqueos, el límite por IP, los contadores de códigos malos (por sesión y por usuario) y los códigos TOTP ya usados viven en memoria, en mapas acotados: se reinician cuando muelle se reinicia.
+  - La auditoría registra los logins (`auth.login`, `auth.logout`), los fallos (`auth.login_failed`) y cada vez que algo queda bloqueado (`auth.locked`), sin contraseñas ni códigos. Los eventos que puede provocar alguien sin autenticarse tienen un límite global (20 por segundo, ráfaga de 200); los que sobran se descartan con un aviso en el log.
   - Si `require_2fa` está activo, un usuario sin TOTP solo puede configurarlo.
   - No se puede activar `require_2fa` sin tener el propio TOTP configurado (si no, quien lo activa queda encerrado en la configuración).
 - **Invitaciones:** de un solo uso, vencen en 24 h; se guarda el hash del token.

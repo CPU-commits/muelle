@@ -56,7 +56,7 @@ func (l *LoginLimiter) Allow(ip string) bool {
 }
 
 // makeRoom se llama con el mapa lleno: borra las ventanas vencidas y, si no
-// alcanza, desaloja ventanas vigentes hasta dejar un cuarto libre, así el
+// alcanza, desaloja las que vencen antes hasta dejar un cuarto libre, así el
 // barrido no se repite en cada IP nueva. Desalojar solo puede devolverle
 // intentos a una IP; el bloqueo por usuario sigue protegiendo las cuentas.
 func (l *LoginLimiter) makeRoom(now time.Time) {
@@ -65,11 +65,5 @@ func (l *LoginLimiter) makeRoom(now time.Time) {
 			delete(l.hits, k)
 		}
 	}
-	target := l.maxIPs * 3 / 4
-	for k := range l.hits {
-		if len(l.hits) <= target {
-			break
-		}
-		delete(l.hits, k)
-	}
+	evictSoonest(l.hits, l.maxIPs*3/4, func(w ipWindow) time.Time { return w.start.Add(l.window) })
 }

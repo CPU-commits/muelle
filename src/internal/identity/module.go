@@ -62,8 +62,11 @@ func New(d Deps) *Module {
 	scopes := outservice.NewScopeResolver(db)
 	settings := outservice.NewSettingsReader(db)
 	limiter := service.NewLoginLimiter(service.LoginMaxPerIP, service.LoginWindow, c) // compartido por login, código TOTP, setup e invitaciones
-	lockout := service.NewLoginLockout(c)                                             // compartido por login y código TOTP
-	replay := service.NewTOTPReplayGuard(c)                                           // un código TOTP vale una sola vez
+	lockout := service.NewLoginLockout(c)                                             // contraseña: por usuario e IP
+	totpLockout := service.NewTOTPLockout(c)                                          // código TOTP: por usuario
+	attempts := service.NewPendingCodeAttempts(c)                                     // código TOTP: por sesión pendiente
+	loginAudit := usecases.NewLoginAudit(d.Audit, service.NewTokenBucket(service.AuditEventsPerSecond, service.AuditBurst, c), d.Log, c)
+	replay := service.NewTOTPReplayGuard(c) // un código TOTP vale una sola vez
 
 	return &Module{
 		auth: inhttp.Authenticator{
@@ -71,9 +74,9 @@ func New(d Deps) *Module {
 			Token:   usecases.NewAuthenticateToken(tokens, c),
 		},
 		routes: inhttp.Usecases{
-			Login:          usecases.NewLogin(db, users, sessions, hasher, limiter, lockout, d.Audit, c),
-			CompleteTOTP:   usecases.NewCompleteTOTP(db, users, sessions, d.Cipher, totp, limiter, lockout, replay, d.Audit, c),
-			Logout:         usecases.NewLogout(sessions, d.Audit),
+			Login:          usecases.NewLogin(db, users, sessions, hasher, limiter, lockout, loginAudit, c),
+			CompleteTOTP:   usecases.NewCompleteTOTP(db, users, sessions, d.Cipher, totp, limiter, totpLockout, attempts, replay, loginAudit, c),
+			Logout:         usecases.NewLogout(sessions, loginAudit),
 			Setup:          usecases.NewSetup(db, users, invites, sessions, hasher, d.Audit, limiter, c),
 			AcceptInvite:   usecases.NewAcceptInvite(db, users, invites, sessions, hasher, d.Audit, limiter, c),
 			Me:             usecases.NewMe(users),

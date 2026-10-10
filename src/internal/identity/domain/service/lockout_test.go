@@ -19,8 +19,8 @@ func newLockout() (*LoginLockout, *clock.Manual) {
 func TestLockoutSchedule(t *testing.T) {
 	l, c := newLockout()
 	for n := 1; n <= 12; n++ {
-		if l.Fail("felipe", "1.1.1.1") {
-			t.Fatalf("fallo %d: el par no estaba bloqueado", n)
+		if wasLocked, locked := l.Fail("felipe", "1.1.1.1"); wasLocked || locked != (LockoutFor(n) > 0) {
+			t.Fatalf("fallo %d: wasLocked=%v locked=%v", n, wasLocked, locked)
 		}
 		d := LockoutFor(n)
 		if d == 0 {
@@ -50,10 +50,10 @@ func TestLockoutNoChangeWhileLocked(t *testing.T) {
 	for range 5 {
 		l.Fail("felipe", "1.1.1.1")
 	}
-	if !l.Fail("felipe", "1.1.1.1") {
-		t.Fatal("Fail con el par bloqueado devuelve true")
+	if wasLocked, _ := l.Fail("felipe", "1.1.1.1"); !wasLocked {
+		t.Fatal("Fail con el par bloqueado devuelve wasLocked")
 	}
-	if l.Succeed("felipe", "1.1.1.1", true) {
+	if l.Succeed("felipe", "1.1.1.1") {
 		t.Fatal("Succeed con el par bloqueado devuelve false")
 	}
 	// El bloqueo sigue siendo de 1 min (el fallo de arriba no lo extendió)...
@@ -75,23 +75,14 @@ func TestLockoutSucceedResets(t *testing.T) {
 		l.Fail("felipe", "1.1.1.1")
 	}
 	c.Advance(time.Minute)
-	// Sin reset (login con 2FA, falta el código) los fallos siguen.
-	if !l.Succeed("felipe", "1.1.1.1", false) {
+	if !l.Succeed("felipe", "1.1.1.1") {
 		t.Fatal("sin bloqueo vigente, Succeed devuelve true")
-	}
-	l.Fail("felipe", "1.1.1.1")
-	if !l.Locked("felipe", "1.1.1.1") {
-		t.Fatal("sin reset, el 6º fallo bloquea")
-	}
-	c.Advance(2 * time.Minute)
-	if !l.Succeed("felipe", "1.1.1.1", true) {
-		t.Fatal("Succeed devuelve true")
 	}
 	for range 4 {
 		l.Fail("felipe", "1.1.1.1")
 	}
 	if l.Locked("felipe", "1.1.1.1") {
-		t.Fatal("tras el reset, 4 fallos no bloquean")
+		t.Fatal("tras el acierto, 4 fallos no bloquean")
 	}
 }
 
@@ -125,10 +116,29 @@ func TestLockoutKey(t *testing.T) {
 	// Un usuario larguísimo se recorta: no ocupa memoria sin límite.
 	long := strings.Repeat("a", 10000)
 	l.Fail(long+"x", "1.1.1.1")
-	for k := range l.entries {
+	for k := range l.l.entries {
 		if len(k) > maxIPKey+1+maxUsernameKey {
 			t.Fatalf("clave de %d bytes", len(k))
 		}
+	}
+}
+
+// Con el mapa lleno de bloqueos, se desalojan los que vencen antes: un
+// bloqueo largo sobrevive a una avalancha de claves nuevas.
+func TestLockoutLongLockSurvivesFlood(t *testing.T) {
+	l, c := newLockout()
+	l.l.maxKeys = 8
+	long := lockoutKey("admin", "203.0.113.9")
+	l.l.entries[long] = lockEntry{failures: 11, lockedUntil: c.Now().Add(time.Hour), lastFailure: c.Now()}
+	for i := range 200 {
+		ip := fmt.Sprintf("10.0.%d.%d", i/250, i%250)
+		for range 5 {
+			l.Fail("nadie", ip) // cada una queda bloqueada 1 min
+		}
+		c.Advance(time.Second)
+	}
+	if !l.Locked("admin", "203.0.113.9") {
+		t.Fatal("el bloqueo de 1 h no debió desalojarse")
 	}
 }
 
@@ -137,14 +147,14 @@ func TestLockoutKey(t *testing.T) {
 // lo último que se desaloja.
 func TestLockoutIsBounded(t *testing.T) {
 	l, c := newLockout()
-	l.maxKeys = 8
+	l.l.maxKeys = 8
 	for range 5 {
 		l.Fail("admin", "203.0.113.9") // bloqueado
 	}
 	for i := range 100 {
 		l.Fail("nadie", fmt.Sprintf("10.0.0.%d", i))
-		if n := len(l.entries); n > l.maxKeys {
-			t.Fatalf("el mapa creció a %d entradas (máximo %d)", n, l.maxKeys)
+		if n := len(l.l.entries); n > l.l.maxKeys {
+			t.Fatalf("el mapa creció a %d entradas (máximo %d)", n, l.l.maxKeys)
 		}
 	}
 	if !l.Locked("admin", "203.0.113.9") {
@@ -156,7 +166,7 @@ func TestLockoutIsBounded(t *testing.T) {
 	c.Advance(lockoutForget)
 	l.Fail("nuevo", "192.0.2.1")
 	l.Fail("nuevo", "192.0.2.2")
-	if _, ok := l.entries[lockoutKey("admin", "203.0.113.9")]; ok || len(l.entries) > 2 {
-		t.Fatalf("quedaron %d entradas (admin: %v), esperaba solo las nuevas", len(l.entries), ok)
+	if _, ok := l.l.entries[lockoutKey("admin", "203.0.113.9")]; ok || len(l.l.entries) > 2 {
+		t.Fatalf("quedaron %d entradas (admin: %v), esperaba solo las nuevas", len(l.l.entries), ok)
 	}
 }
