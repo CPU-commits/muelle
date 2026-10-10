@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -27,23 +28,61 @@ func TestRunsEveryInterval(t *testing.T) {
 			n.Add(1)
 			return nil
 		}}}, discard())
-		if got := n.Load(); got < 2 {
-			t.Fatalf("el job corrió %d veces en 50 ms, esperaba al menos 2", got)
+		// Al arrancar y a los 10, 20, 30 y 40 ms (a los 50 puede ganar la cancelación).
+		if got := n.Load(); got < 5 || got > 6 {
+			t.Fatalf("el job corrió %d veces en 50 ms, esperaba 5 o 6", got)
 		}
 	})
 }
 
-func TestFirstRunAfterEvery(t *testing.T) {
+// Cada job corre una vez al arrancar: si muelle se reinicia más seguido que
+// Every, igual corre (ej. el backup horario).
+func TestRunsAtStart(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var n atomic.Int32
+		start := time.Now()
+		var runs []time.Duration
 		ctx, cancel := context.WithTimeout(context.Background(), 59*time.Minute)
 		defer cancel()
 		Run(ctx, []Job{{Name: "horaria", Every: time.Hour, Run: func(context.Context) error {
+			runs = append(runs, time.Since(start))
+			return nil
+		}}}, discard())
+		if len(runs) != 1 || runs[0] != 0 {
+			t.Fatalf("en 59 minutos el job horario debe correr una vez, al arrancar; corrió en %v", runs)
+		}
+	})
+}
+
+// Después de la ejecución inicial sigue cada Every desde el arranque.
+func TestRunsAtStartThenEvery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var runs []time.Duration
+		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Minute)
+		defer cancel()
+		Run(ctx, []Job{{Name: "horaria", Every: time.Hour, Run: func(context.Context) error {
+			runs = append(runs, time.Since(start))
+			return nil
+		}}}, discard())
+		want := []time.Duration{0, time.Hour, 2 * time.Hour}
+		if !slices.Equal(runs, want) {
+			t.Fatalf("corrió en %v, esperaba %v", runs, want)
+		}
+	})
+}
+
+// Con el ctx ya cancelado no se empieza ninguna ejecución.
+func TestRunWithCanceledContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var n atomic.Int32
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		Run(ctx, []Job{{Name: "x", Every: time.Millisecond, Run: func(context.Context) error {
 			n.Add(1)
 			return nil
 		}}}, discard())
 		if got := n.Load(); got != 0 {
-			t.Fatalf("el job no debe correr antes de Every, corrió %d veces", got)
+			t.Fatalf("con el ctx cancelado el job corrió %d veces", got)
 		}
 	})
 }
@@ -102,7 +141,8 @@ func TestJobsRunIndependently(t *testing.T) {
 				return nil
 			}},
 		}, discard())
-		if f, s := fast.Load(), slow.Load(); f < 9 || s < 2 {
+		// Al arrancar y cada 10 ms el rápido; al arrancar, a los 30, 60 y 90 ms el lento.
+		if f, s := fast.Load(), slow.Load(); f < 10 || s < 4 {
 			t.Fatalf("rápido=%d lento=%d", f, s)
 		}
 	})
