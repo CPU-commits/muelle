@@ -169,7 +169,7 @@ func TestLoginFailureSurvivesCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for range 5 {
-		if err := f.login.failures.register(ctx, u.ID); err != nil {
+		if _, err := f.login.failures.register(ctx, u.ID); err != nil {
 			t.Fatal(err)
 		}
 	}

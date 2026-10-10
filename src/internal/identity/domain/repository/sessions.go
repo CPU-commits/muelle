@@ -14,6 +14,10 @@ type SessionRepository interface {
 	Touch(ctx context.Context, idHash string, at time.Time) error
 	// Delete no falla si la sesión ya no existe.
 	Delete(ctx context.Context, idHash string) error
+	// ConsumePending borra la sesión si es pendiente de MFA y no venció en
+	// now. Si no había una así devuelve ErrNotFound: cada sesión pendiente se
+	// canjea una sola vez.
+	ConsumePending(ctx context.Context, idHash string, now time.Time) error
 	// DeleteExpired borra las sesiones vencidas en now y las completas que
 	// llevan más de idle sin uso. Devuelve cuántas borró.
 	DeleteExpired(ctx context.Context, now time.Time, idle time.Duration) (int64, error)

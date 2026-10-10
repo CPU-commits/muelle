@@ -4,6 +4,7 @@ package usecases
 
 import (
 	"context"
+	"errors"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/entity"
@@ -42,22 +43,37 @@ type loginFailures struct {
 	clock clock.Clock
 }
 
-// register suma un fallo y, si corresponde, bloquea al usuario. Se confirma
-// en su propia transacción y sin la cancelación del request (un cliente que
-// corta la conexión no deshace el fallo). Quien llama devuelve el error de
-// dominio después, fuera de la transacción: InTx deshace todo si fn
-// devuelve un error. No se debe llamar dentro de otro InTx que pueda fallar.
-func (f loginFailures) register(ctx context.Context, userID int64) error {
-	return f.tx.InTx(context.WithoutCancel(ctx), func(ctx context.Context) error {
+// register suma un fallo y, si corresponde, bloquea al usuario. Devuelve si
+// el usuario ya estaba bloqueado antes de este fallo: un intento que esperó
+// al hasher pudo pasar el chequeo de bloqueo antes de que otro lo
+// estableciera, y entonces hay que responder "bloqueado" igual que si la
+// contraseña fuera correcta, para no revelarla.
+//
+// Se confirma en su propia transacción y sin la cancelación del request (un
+// cliente que corta la conexión no deshace el fallo). Quien llama devuelve
+// el error de dominio después, fuera de la transacción: InTx deshace todo si
+// fn devuelve un error. No se debe llamar dentro de otro InTx que pueda fallar.
+func (f loginFailures) register(ctx context.Context, userID int64) (wasLocked bool, err error) {
+	err = f.tx.InTx(context.WithoutCancel(ctx), func(ctx context.Context) error {
+		u, err := f.users.GetByID(ctx, userID)
+		if errors.Is(err, sharedrepo.ErrNotFound) {
+			return nil // lo borraron mientras tanto: no hay a quién bloquear
+		}
+		if err != nil {
+			return err
+		}
+		now := f.clock.Now()
+		wasLocked = u.LockedAt(now)
 		n, err := f.users.IncrementFailedLogins(ctx, userID)
 		if err != nil {
 			return err
 		}
 		if d := service.LockoutFor(n); d > 0 {
-			return f.users.SetLockedUntil(ctx, userID, f.clock.Now().Add(d))
+			return f.users.SetLockedUntil(ctx, userID, now.Add(d))
 		}
 		return nil
 	})
+	return wasLocked, err
 }
 
 // reset borra los fallos tras un login completo. No escribe si no hay nada que borrar.

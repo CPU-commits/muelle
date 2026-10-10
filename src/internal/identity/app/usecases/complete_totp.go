@@ -1,6 +1,7 @@
 package usecases
 
 import (
+	"bytes"
 	"context"
 	"errors"
 
@@ -73,22 +74,45 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 		return dto.SessionOutput{}, err
 	}
 	if !uc.totp.Validate(in.Code, string(secret), now) {
-		if err := uc.failures.register(ctx, u.ID); err != nil {
+		wasLocked, err := uc.failures.register(ctx, u.ID)
+		if err != nil {
 			return dto.SessionOutput{}, err
+		}
+		if wasLocked {
+			return dto.SessionOutput{}, service.ErrLocked
 		}
 		return dto.SessionOutput{}, service.ErrInvalidCode
 	}
 
+	// El canje se decide de nuevo dentro de la transacción (BEGIN IMMEDIATE),
+	// con el estado actual: dos canjes a la vez de la misma sesión, un
+	// bloqueo o un reinicio del 2FA mientras se validaba el código no abren sesión.
 	var out dto.SessionOutput
 	err = uc.tx.InTx(ctx, func(ctx context.Context) error {
-		if err := uc.failures.reset(ctx, u); err != nil {
+		now := uc.clock.Now()
+		cur, err := uc.users.GetByID(ctx, u.ID)
+		if errors.Is(err, sharedrepo.ErrNotFound) {
+			return shared.ErrUnauthenticated
+		}
+		if err != nil {
 			return err
 		}
-		if err := uc.sessions.Delete(ctx, ss.IDHash); err != nil {
+		if cur.LockedAt(now) {
+			return service.ErrLocked
+		}
+		if !bytes.Equal(cur.TOTPSecret, u.TOTPSecret) {
+			return shared.ErrUnauthenticated // el código se validó contra un secreto que ya no está activo
+		}
+		if err := uc.sessions.ConsumePending(ctx, ss.IDHash, now); err != nil {
+			if errors.Is(err, sharedrepo.ErrNotFound) {
+				return shared.ErrUnauthenticated // ya se canjeó o venció
+			}
 			return err
 		}
-		var err error
-		out, err = uc.issuer.issue(ctx, u, false, in.IP, in.UserAgent)
+		if err := uc.failures.reset(ctx, cur); err != nil {
+			return err
+		}
+		out, err = uc.issuer.issue(ctx, cur, false, in.IP, in.UserAgent)
 		return err
 	})
 	if err != nil {

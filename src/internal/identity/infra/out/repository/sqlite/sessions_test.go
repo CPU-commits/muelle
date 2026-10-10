@@ -83,6 +83,32 @@ func TestDeleteExpiredKeepsLiveSessions(t *testing.T) {
 	}
 }
 
+// ConsumePending borra la sesión pendiente una sola vez: así dos CompleteTOTP
+// a la vez no pueden canjear la misma sesión.
+func TestConsumePending(t *testing.T) {
+	r := newRepos(t)
+	ctx := context.Background()
+	u := r.user(t, "felipe", nil)
+	r.sessions.Create(ctx, entity.NewSession("pendiente", u.ID, true, t0, 5*time.Minute, "", ""))
+	r.sessions.Create(ctx, entity.NewSession("completa", u.ID, false, t0, time.Hour, "", ""))
+
+	if err := r.sessions.ConsumePending(ctx, "completa", t0); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("una sesión completa no se consume: got %v", err)
+	}
+	if err := r.sessions.ConsumePending(ctx, "pendiente", t0.Add(5*time.Minute)); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("una pendiente vencida no se consume: got %v", err)
+	}
+	if err := r.sessions.ConsumePending(ctx, "pendiente", t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.sessions.ConsumePending(ctx, "pendiente", t0.Add(time.Minute)); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("la segunda vez: esperaba ErrNotFound, got %v", err)
+	}
+	if _, err := r.sessions.Get(ctx, "completa"); err != nil {
+		t.Fatalf("la sesión completa sigue: %v", err)
+	}
+}
+
 func TestDeleteUserCascadesSessions(t *testing.T) {
 	r := newRepos(t)
 	ctx := context.Background()

@@ -20,9 +20,10 @@ type Setup struct {
 }
 
 func NewSetup(tx sharedrepo.Transactor, users repository.UserRepository, invites repository.InviteRepository,
-	sessions repository.SessionRepository, hasher service.PasswordHasher, rec audit.Recorder, c clock.Clock) *Setup {
+	sessions repository.SessionRepository, hasher service.PasswordHasher, rec audit.Recorder,
+	limiter *service.LoginLimiter, c clock.Clock) *Setup {
 	return &Setup{users: users, acceptor: inviteAcceptor{
-		tx: tx, users: users, invites: invites, hasher: hasher, audit: rec, clock: c,
+		tx: tx, users: users, invites: invites, hasher: hasher, audit: rec, limiter: limiter, clock: c,
 		issuer: sessionIssuer{sessions: sessions, clock: c},
 	}}
 }

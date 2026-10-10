@@ -35,21 +35,31 @@ type inviteAcceptor struct {
 	invites repository.InviteRepository
 	hasher  service.PasswordHasher
 	audit   audit.Recorder
+	limiter *service.LoginLimiter
 	clock   clock.Clock
 	issuer  sessionIssuer
 }
 
-// accept valida los datos y calcula el hash fuera de la transacción (es
-// lento y la transacción tiene el lock de escritura). Después, en una sola
-// transacción: corre check (si no es nil), revisa la invitación, crea el
-// usuario, marca la invitación como usada, abre la sesión y audita. Si algo
-// falla no queda nada: con un nombre tomado (ErrConflict) la invitación
-// sigue disponible.
+// accept crea el usuario de la invitación. Como el endpoint es público, antes
+// de calcular el hash (lento, y el hasher tiene solo 2 lugares) cuenta el
+// intento contra el límite por IP, valida los datos y revisa que la
+// invitación sirva. El hash se calcula fuera de la transacción, que tiene el
+// lock de escritura. Después, en una sola transacción: corre check (si no es
+// nil), vuelve a revisar la invitación, crea el usuario, marca la invitación
+// como usada, abre la sesión y audita. Si algo falla no queda nada: con un
+// nombre tomado (ErrConflict) la invitación sigue disponible.
 func (a inviteAcceptor) accept(ctx context.Context, in dto.AcceptInviteInput, check func(ctx context.Context) error) (dto.SessionOutput, error) {
+	if !a.limiter.Allow(in.IP) {
+		return dto.SessionOutput{}, service.ErrRateLimited
+	}
 	if err := validate.Username(in.Username); err != nil {
 		return dto.SessionOutput{}, err
 	}
 	if err := validate.Password(in.Password); err != nil {
+		return dto.SessionOutput{}, err
+	}
+	tokenHash := service.HashToken(in.Token)
+	if _, err := a.usableInvite(ctx, tokenHash); err != nil {
 		return dto.SessionOutput{}, err
 	}
 	hash, err := a.hasher.Hash(in.Password)
@@ -64,17 +74,11 @@ func (a inviteAcceptor) accept(ctx context.Context, in dto.AcceptInviteInput, ch
 				return err
 			}
 		}
-		inv, err := a.invites.GetByTokenHash(ctx, service.HashToken(in.Token))
-		if errors.Is(err, sharedrepo.ErrNotFound) {
-			return service.ErrInviteInvalid
-		}
+		inv, err := a.usableInvite(ctx, tokenHash)
 		if err != nil {
 			return err
 		}
 		now := a.clock.Now()
-		if !inv.Usable(now) {
-			return service.ErrInviteInvalid
-		}
 		u, err := entity.NewUser(in.Username, hash, inv.CreatedBy, now)
 		if err != nil {
 			return err
@@ -100,4 +104,20 @@ func (a inviteAcceptor) accept(ctx context.Context, in dto.AcceptInviteInput, ch
 		return dto.SessionOutput{}, err
 	}
 	return out, nil
+}
+
+// usableInvite devuelve la invitación si existe y todavía se puede aceptar;
+// si no, ErrInviteInvalid.
+func (a inviteAcceptor) usableInvite(ctx context.Context, tokenHash string) (entity.Invite, error) {
+	inv, err := a.invites.GetByTokenHash(ctx, tokenHash)
+	if errors.Is(err, sharedrepo.ErrNotFound) {
+		return entity.Invite{}, service.ErrInviteInvalid
+	}
+	if err != nil {
+		return entity.Invite{}, err
+	}
+	if !inv.Usable(a.clock.Now()) {
+		return entity.Invite{}, service.ErrInviteInvalid
+	}
+	return inv, nil
 }

@@ -24,7 +24,7 @@ func (h *handler) listUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) deleteUser(w http.ResponseWriter, r *http.Request) {
-	in := dto.DeleteUserInput{Username: r.PathValue("username"), ActorUsername: principal(r).Username}
+	in := dto.DeleteUserInput{Username: r.PathValue("username"), ActorID: principal(r).UserID}
 	if err := h.uc.DeleteUser.Execute(r.Context(), in); err != nil {
 		h.k.Fail(w, err)
 		return

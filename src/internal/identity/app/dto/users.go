@@ -9,8 +9,8 @@ type UserOutput struct {
 }
 
 type DeleteUserInput struct {
-	Username      string // a quién se borra
-	ActorUsername string // quién lo pide: no puede borrarse a sí mismo
+	Username string // a quién se borra
+	ActorID  int64  // quién lo pide: tiene que seguir existiendo y no puede borrarse a sí mismo
 }
 
 type CreateInviteInput struct {

@@ -36,6 +36,8 @@ type fixture struct {
 	tokens   *sqliterepo.TokenRepository
 	hasher   *outservice.Argon2Hasher
 	totp     outservice.TOTP
+	rec      *sqlitedb.AuditRecorder
+	limiter  *service.LoginLimiter
 
 	login        *Login
 	completeTOTP *CompleteTOTP
@@ -77,20 +79,21 @@ func newFixture(t *testing.T) *fixture {
 	scopes := outservice.NewScopeResolver(db)
 	limiter := service.NewLoginLimiter(service.LoginMaxPerIP, service.LoginWindow, c)
 
+	f.rec, f.limiter = rec, limiter
 	f.login = NewLogin(db, f.users, f.sessions, f.hasher, limiter, c)
 	f.completeTOTP = NewCompleteTOTP(db, f.users, f.sessions, ciph, f.totp, limiter, c)
 	f.logout = NewLogout(f.sessions)
 	f.authSession = NewAuthenticateSession(f.users, f.sessions, settings, c)
 	f.authToken = NewAuthenticateToken(f.tokens, c)
-	f.setup = NewSetup(db, f.users, f.invites, f.sessions, f.hasher, rec, c)
-	f.acceptInvite = NewAcceptInvite(db, f.users, f.invites, f.sessions, f.hasher, rec, c)
+	f.setup = NewSetup(db, f.users, f.invites, f.sessions, f.hasher, rec, limiter, c)
+	f.acceptInvite = NewAcceptInvite(db, f.users, f.invites, f.sessions, f.hasher, rec, limiter, c)
 	f.ensureSetup = NewEnsureSetupInvite(db, f.users, f.invites, c)
 	f.createInvite = NewCreateInvite(f.invites, rec, c)
 	f.me = NewMe(f.users)
 	f.beginTOTP = NewBeginTOTPSetup(f.users, ciph, f.totp)
-	f.enableTOTP = NewEnableTOTP(f.users, ciph, f.totp, rec, c)
+	f.enableTOTP = NewEnableTOTP(db, f.users, ciph, f.totp, rec, c)
 	f.listUsers = NewListUsers(f.users)
-	f.deleteUser = NewDeleteUser(f.users, rec)
+	f.deleteUser = NewDeleteUser(db, f.users, rec)
 	f.resetTOTP = NewResetUserTOTP(f.users, rec)
 	f.createToken = NewCreateToken(db, f.tokens, scopes, rec, c)
 	f.listTokens = NewListTokens(f.tokens)

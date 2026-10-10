@@ -16,6 +16,7 @@ import (
 // 2FA abre una sesión pendiente de 5 minutos que CompleteTOTP cambia por una
 // completa.
 type Login struct {
+	tx       sharedrepo.Transactor
 	users    repository.UserRepository
 	hasher   service.PasswordHasher
 	limiter  *service.LoginLimiter
@@ -30,7 +31,7 @@ type Login struct {
 func NewLogin(tx sharedrepo.Transactor, users repository.UserRepository, sessions repository.SessionRepository,
 	hasher service.PasswordHasher, limiter *service.LoginLimiter, c clock.Clock) *Login {
 	return &Login{
-		users: users, hasher: hasher, limiter: limiter, clock: c,
+		tx: tx, users: users, hasher: hasher, limiter: limiter, clock: c,
 		failures: loginFailures{tx: tx, users: users, clock: c},
 		issuer:   sessionIssuer{sessions: sessions, clock: c},
 		dummy:    sync.OnceValues(func() (string, error) { return hasher.Hash("muelle-usuario-inexistente") }),
@@ -51,6 +52,9 @@ func (uc *Login) Execute(ctx context.Context, in dto.LoginInput) (dto.SessionOut
 	if err != nil {
 		return dto.SessionOutput{}, err
 	}
+	// Atajo: un usuario bloqueado no gasta el hasher. Abajo se vuelve a
+	// revisar, porque Verify puede esperar al semáforo mientras otros
+	// intentos bloquean al usuario.
 	if u.LockedAt(uc.clock.Now()) {
 		return dto.SessionOutput{}, service.ErrLocked
 	}
@@ -59,17 +63,42 @@ func (uc *Login) Execute(ctx context.Context, in dto.LoginInput) (dto.SessionOut
 		return dto.SessionOutput{}, err
 	}
 	if !ok {
-		if err := uc.failures.register(ctx, u.ID); err != nil {
+		wasLocked, err := uc.failures.register(ctx, u.ID)
+		if err != nil {
 			return dto.SessionOutput{}, err
+		}
+		if wasLocked {
+			return dto.SessionOutput{}, service.ErrLocked
 		}
 		return dto.SessionOutput{}, service.ErrInvalidCredentials
 	}
-	// Con 2FA, los fallos se reinician recién cuando el código es correcto
-	// (CompleteTOTP): así los códigos malos se acumulan entre logins.
-	if !u.HasTOTP() {
-		if err := uc.failures.reset(ctx, u); err != nil {
-			return dto.SessionOutput{}, err
+
+	// La decisión final se toma con el estado actual del usuario y en una
+	// transacción (BEGIN IMMEDIATE), así no se cruza con el registro de un fallo.
+	var out dto.SessionOutput
+	err = uc.tx.InTx(ctx, func(ctx context.Context) error {
+		cur, err := uc.users.GetByID(ctx, u.ID)
+		if errors.Is(err, sharedrepo.ErrNotFound) {
+			return service.ErrInvalidCredentials
 		}
+		if err != nil {
+			return err
+		}
+		if cur.LockedAt(uc.clock.Now()) {
+			return service.ErrLocked
+		}
+		// Con 2FA, los fallos se reinician recién cuando el código es correcto
+		// (CompleteTOTP): así los códigos malos se acumulan entre logins.
+		if !cur.HasTOTP() {
+			if err := uc.failures.reset(ctx, cur); err != nil {
+				return err
+			}
+		}
+		out, err = uc.issuer.issue(ctx, cur, cur.HasTOTP(), in.IP, in.UserAgent)
+		return err
+	})
+	if err != nil {
+		return dto.SessionOutput{}, err
 	}
-	return uc.issuer.issue(ctx, u, u.HasTOTP(), in.IP, in.UserAgent)
+	return out, nil
 }

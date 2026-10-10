@@ -45,7 +45,7 @@ func TestDeleteUserAndResetTOTP(t *testing.T) {
 	ctx := withUser(admin)
 	before := len(f.auditRows(t)) // user.totp_enable de la preparación
 
-	if err := f.deleteUser.Execute(ctx, dto.DeleteUserInput{Username: "admin", ActorUsername: "admin"}); !errors.Is(err, service.ErrCannotDeleteSelf) {
+	if err := f.deleteUser.Execute(ctx, dto.DeleteUserInput{Username: "admin", ActorID: admin.ID}); !errors.Is(err, service.ErrCannotDeleteSelf) {
 		t.Fatalf("esperaba ErrCannotDeleteSelf, got %v", err)
 	}
 	if err := f.resetTOTP.Execute(ctx, "ana"); err != nil {
@@ -57,10 +57,10 @@ func TestDeleteUserAndResetTOTP(t *testing.T) {
 	if err := f.resetTOTP.Execute(ctx, "nadie"); !errors.Is(err, sharedrepo.ErrNotFound) {
 		t.Fatalf("esperaba ErrNotFound, got %v", err)
 	}
-	if err := f.deleteUser.Execute(ctx, dto.DeleteUserInput{Username: "ana", ActorUsername: "admin"}); err != nil {
+	if err := f.deleteUser.Execute(ctx, dto.DeleteUserInput{Username: "ana", ActorID: admin.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.deleteUser.Execute(ctx, dto.DeleteUserInput{Username: "ana", ActorUsername: "admin"}); !errors.Is(err, sharedrepo.ErrNotFound) {
+	if err := f.deleteUser.Execute(ctx, dto.DeleteUserInput{Username: "ana", ActorID: admin.ID}); !errors.Is(err, sharedrepo.ErrNotFound) {
 		t.Fatalf("esperaba ErrNotFound, got %v", err)
 	}
 
@@ -79,10 +79,10 @@ func TestDeleteUserAndResetTOTP(t *testing.T) {
 func TestDeleteUserDeletesSessions(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	f.user(t, "admin")
+	admin := f.user(t, "admin")
 	f.user(t, "ana")
 	res, _ := f.login.Execute(ctx, login("ana", testPassword, "1.1.1.1"))
-	if err := f.deleteUser.Execute(ctx, dto.DeleteUserInput{Username: "ana", ActorUsername: "admin"}); err != nil {
+	if err := f.deleteUser.Execute(ctx, dto.DeleteUserInput{Username: "ana", ActorID: admin.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.authSession.Execute(ctx, res.Token); !errors.Is(err, shared.ErrUnauthenticated) {
