@@ -7,17 +7,14 @@ import (
 	"github.com/CPU-commits/muelle/src/package/clock"
 )
 
-// La IP sale de X-Real-IP, así que puede ser cualquier texto: el mapa tiene
-// un tamaño máximo y las claves un largo máximo, para que no se pueda llenar
-// la memoria con IPs inventadas.
-const (
-	maxTrackedIPs = 10000
-	maxIPKey      = 64 // una IPv6 con zona cabe de sobra
-)
+// maxTrackedIPs: la IP sale de X-Real-IP, así que puede ser cualquier texto;
+// el mapa tiene un tamaño máximo (y ipKey un largo máximo) para que no se
+// pueda llenar la memoria con IPs inventadas.
+const maxTrackedIPs = 10000
 
 // LoginLimiter cuenta intentos de login por IP en ventanas fijas
-// (LoginMaxPerIP cada LoginWindow en producción). Es seguro usarlo desde
-// varias goroutines.
+// (LoginMaxPerIP cada LoginWindow en producción). Una IPv6 cuenta por su /64
+// (ipKey). Es seguro usarlo desde varias goroutines.
 type LoginLimiter struct {
 	mu     sync.Mutex
 	max    int
@@ -38,9 +35,7 @@ func NewLoginLimiter(max int, window time.Duration, c clock.Clock) *LoginLimiter
 
 // Allow registra un intento desde ip y dice si está permitido.
 func (l *LoginLimiter) Allow(ip string) bool {
-	if len(ip) > maxIPKey {
-		ip = ip[:maxIPKey]
-	}
+	ip = ipKey(ip)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.clock.Now()

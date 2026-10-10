@@ -105,6 +105,41 @@ func TestLoginLimiterCapsKeyLength(t *testing.T) {
 	}
 }
 
+// ipKey agrupa una IPv4 sola y una IPv6 por su /64: un cliente IPv6 suele
+// tener un /64 entero y podría rotar direcciones para saltarse los límites.
+func TestIPKey(t *testing.T) {
+	cases := map[string]string{
+		"203.0.113.9":            "203.0.113.9",
+		"::ffff:203.0.113.9":     "203.0.113.9",
+		"2001:db8:1:2:3:4:5:6":   "2001:db8:1:2::/64",
+		"2001:db8:1:2:ffff::1":   "2001:db8:1:2::/64",
+		"2001:db8:1:3::1":        "2001:db8:1:3::/64",
+		"fe80::1%eth0":           "fe80::/64",
+		"sin-puerto":             "sin-puerto",
+		strings.Repeat("x", 100): strings.Repeat("x", maxIPKey),
+		"":                       "",
+	}
+	for ip, want := range cases {
+		if got := ipKey(ip); got != want {
+			t.Errorf("ipKey(%q) = %q, esperaba %q", ip, got, want)
+		}
+	}
+}
+
+func TestLoginLimiterGroupsIPv6By64(t *testing.T) {
+	c := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	l := NewLoginLimiter(1, 15*time.Minute, c)
+	if !l.Allow("2001:db8:1:2::1") {
+		t.Fatal("primer intento rechazado")
+	}
+	if l.Allow("2001:db8:1:2::ffff") {
+		t.Fatal("otra dirección del mismo /64 comparte el límite")
+	}
+	if !l.Allow("2001:db8:1:3::1") {
+		t.Fatal("otro /64 no se ve afectado")
+	}
+}
+
 func TestLoginLimiterDefaults(t *testing.T) {
 	if LoginMaxPerIP != 20 || LoginWindow != 15*time.Minute {
 		t.Fatalf("el spec pide 20 intentos cada 15 min: %d / %v", LoginMaxPerIP, LoginWindow)
