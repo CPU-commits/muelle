@@ -94,13 +94,32 @@ func EnvKey(field, key string) error {
 	return nil
 }
 
-// hangulFillers son letras Hangul que se ven como un espacio vacío.
-var hangulFillers = map[rune]bool{0x115F: true, 0x1160: true, 0x3164: true, 0xFFA0: true}
+// blankLooking son caracteres que se ven en blanco y no caen en las
+// categorías que Name ya rechaza. Algunos también son
+// Other_Default_Ignorable_Code_Point; se listan igual para que quede explícito.
+var blankLooking = map[rune]bool{
+	0x034F: true, // combining grapheme joiner
+	0x115F: true, // relleno inicial Hangul
+	0x1160: true, // relleno medial Hangul
+	0x17B4: true, // vocal khmer invisible
+	0x17B5: true, // vocal khmer invisible
+	0x2800: true, // braille en blanco
+	0x3164: true, // relleno Hangul
+	0xFFA0: true, // relleno Hangul de ancho medio
+}
+
+// invisibleTables son las categorías y propiedades Unicode de caracteres
+// invisibles: formato (U+200B, U+202E…), separadores de línea y de párrafo
+// (U+2028, U+2029), ignorables por defecto y selectores de variación.
+var invisibleTables = []*unicode.RangeTable{
+	unicode.Cf, unicode.Zl, unicode.Zp,
+	unicode.Other_Default_Ignorable_Code_Point, unicode.Variation_Selector,
+}
 
 // Name valida un texto libre obligatorio (nombres de proyectos, tokens).
-// Rechaza el UTF-8 inválido, los caracteres de control y de formato
-// (invisibles, como U+200B o U+202E), los separadores de línea y de párrafo
-// (U+2028 y U+2029) y los rellenos Hangul, que se ven en blanco.
+// Rechaza el UTF-8 inválido, los caracteres de control y los invisibles o que
+// se ven en blanco (invisibleTables y blankLooking). Los selectores de
+// variación también quedan fuera, así que un emoji con U+FE0F no pasa.
 func Name(field, s string, max int) error {
 	if !utf8.ValidString(s) {
 		return Errorf(field, "no es UTF-8 válido")
@@ -112,7 +131,7 @@ func Name(field, s string, max int) error {
 		return Errorf(field, "no puede superar %d caracteres", max)
 	}
 	for _, r := range s {
-		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) || hangulFillers[r] {
+		if unicode.IsControl(r) || unicode.In(r, invisibleTables...) || blankLooking[r] {
 			return Errorf(field, "no puede contener caracteres de control ni invisibles")
 		}
 	}

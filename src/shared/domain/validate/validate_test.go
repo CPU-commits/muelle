@@ -171,19 +171,31 @@ func TestName(t *testing.T) {
 	if Name("name", "Auditfy", 64) != nil || Name("name", "  ", 64) == nil || Name("name", strings.Repeat("x", 65), 64) == nil {
 		t.Error("Name")
 	}
-	if err := Name("name", "Proyecto ñandú", 64); err != nil {
-		t.Errorf("Name con acentos debió pasar: %v", err)
+	for _, ok := range []string{"Proyecto ñandú", "API de pagos (v2)", "Café \u2615", "日本語のプロジェクト", "한국어 프로젝트"} {
+		if err := Name("name", ok, 64); err != nil {
+			t.Errorf("Name(%q) debió pasar: %v", ok, err)
+		}
 	}
 	invisible := []string{
 		"\x00", "a\nb", "a\tb",
-		"\u200b",    // espacio de ancho cero (Cf)
-		"\u202eabc", // invierte el texto (Cf)
-		"a\u2028b",  // separador de línea (Zl)
-		"a\u2029b",  // separador de párrafo (Zp)
-		"\u3164",    // relleno Hangul
-		"a\u115fb",  // relleno inicial Hangul
-		"a\u1160b",  // relleno medial Hangul
-		"\uffa0",    // relleno Hangul de ancho medio
+		"\u200b",       // espacio de ancho cero (Cf)
+		"\u202eabc",    // invierte el texto (Cf)
+		"a\u2028b",     // separador de línea (Zl)
+		"a\u2029b",     // separador de párrafo (Zp)
+		"\u3164",       // relleno Hangul
+		"a\u115fb",     // relleno inicial Hangul
+		"a\u1160b",     // relleno medial Hangul
+		"\uffa0",       // relleno Hangul de ancho medio
+		"\u2800",       // braille en blanco
+		"a\u034fb",     // combining grapheme joiner
+		"a\u17b4b",     // vocal khmer invisible
+		"a\u17b5b",     // vocal khmer invisible
+		"a\u2065b",     // ignorable por defecto (Other_Default_Ignorable_Code_Point)
+		"a\ufff0b",     // ignorable por defecto
+		"a\U000e0002b", // ignorable por defecto
+		"a\ufe0fb",     // selector de variación
+		"a\u180bb",     // selector de variación mongol
+		"a\U000e0100b", // selector de variación suplementario
 	}
 	for _, s := range invisible {
 		err := Name("name", s, 64)
