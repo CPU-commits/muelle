@@ -98,9 +98,53 @@ func TestQueuedLoginRechecksLockout(t *testing.T) {
 	if n := f.countSessions(t); n != 0 {
 		t.Fatalf("no debió abrirse ninguna sesión: %d", n)
 	}
-	// El intento malo igual cuenta.
-	if got := f.reload(t, u.ID); got.FailedLogins != 1 {
+	// Con el usuario ya bloqueado, el intento malo no escribe nada (igual que el bueno).
+	if got := f.reload(t, u.ID); got.FailedLogins != 0 {
 		t.Fatalf("failed_logins=%d", got.FailedLogins)
+	}
+}
+
+// Tampoco el estado que queda puede revelar la contraseña: con 4 fallos, un
+// candidato espera en el hasher mientras un 5º intento malo bloquea al
+// usuario 1 min. Sea el candidato correcto o no, después quedan los mismos
+// fallos y el mismo vencimiento del bloqueo (si el malo lo extendiera a 2
+// min, una prueba al minuto revelaría cuál era).
+func TestQueuedLoginLeavesSameLockState(t *testing.T) {
+	type state struct {
+		failed int
+		until  time.Time
+		probe  error
+	}
+	run := func(candidate string) state {
+		f := newFixture(t)
+		ctx := context.Background()
+		u := f.user(t, "felipe")
+		for range 4 {
+			f.login.Execute(ctx, login("felipe", "contraseña-mala!!", "1.1.1.1"))
+		}
+		g := newGate()
+		uc := NewLogin(f.db, f.users, f.sessions, gatedHasher{f.hasher, g}, f.limiter, f.clock)
+		done := make(chan error, 1)
+		go func() {
+			_, err := uc.Execute(ctx, login("felipe", candidate, "2.2.2.2"))
+			done <- err
+		}()
+		<-g.entered
+		if _, err := f.login.Execute(ctx, login("felipe", "otra-mala-más!!", "3.3.3.3")); !errors.Is(err, service.ErrInvalidCredentials) {
+			t.Fatalf("5º fallo: %v", err)
+		}
+		g.release <- struct{}{}
+		if err := <-done; !errors.Is(err, service.ErrLocked) {
+			t.Fatalf("%q: esperaba ErrLocked, got %v", candidate, err)
+		}
+		cur := f.reload(t, u.ID)
+		f.advance(service.LockoutFor(5))
+		_, probe := f.login.Execute(ctx, login("felipe", "sonda-incorrecta!", "4.4.4.4"))
+		return state{failed: cur.FailedLogins, until: *cur.LockedUntil, probe: probe}
+	}
+	good, bad := run(testPassword), run("contraseña-mala!!")
+	if good.failed != 5 || bad.failed != 5 || !good.until.Equal(bad.until) || !errors.Is(good.probe, bad.probe) {
+		t.Fatalf("correcta=%+v incorrecta=%+v", good, bad)
 	}
 }
 
@@ -287,7 +331,11 @@ func TestEnableTOTPDoesNotDropNewerPending(t *testing.T) {
 		}
 		bc <- b
 	}()
-	time.Sleep(50 * time.Millisecond) // B intenta guardar su secreto mientras se valida A
+	// B intenta guardar su secreto mientras se valida A. No hay forma de ver
+	// que B espera el lock de SQLite, así que se le da un momento: con el
+	// arreglo el test pasa sea cual sea el orden, y sin él (B escribe antes de
+	// que se active A) falla.
+	time.Sleep(50 * time.Millisecond)
 	close(g.release)
 	if err := <-done; err != nil {
 		t.Fatal(err)

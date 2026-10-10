@@ -44,10 +44,12 @@ type loginFailures struct {
 }
 
 // register suma un fallo y, si corresponde, bloquea al usuario. Devuelve si
-// el usuario ya estaba bloqueado antes de este fallo: un intento que esperó
-// al hasher pudo pasar el chequeo de bloqueo antes de que otro lo
-// estableciera, y entonces hay que responder "bloqueado" igual que si la
-// contraseña fuera correcta, para no revelarla.
+// el usuario ya estaba bloqueado: un intento que esperó al hasher pudo pasar
+// el chequeo de bloqueo antes de que otro lo estableciera. En ese caso no
+// escribe nada y quien llama responde "bloqueado", exactamente igual que con
+// la contraseña correcta (Login tampoco escribe nada entonces): ni la
+// respuesta ni el estado que queda (fallos, vencimiento del bloqueo)
+// revelan si el intento era correcto.
 //
 // Se confirma en su propia transacción y sin la cancelación del request (un
 // cliente que corta la conexión no deshace el fallo). Quien llama devuelve
@@ -63,7 +65,9 @@ func (f loginFailures) register(ctx context.Context, userID int64) (wasLocked bo
 			return err
 		}
 		now := f.clock.Now()
-		wasLocked = u.LockedAt(now)
+		if wasLocked = u.LockedAt(now); wasLocked {
+			return nil
+		}
 		n, err := f.users.IncrementFailedLogins(ctx, userID)
 		if err != nil {
 			return err
