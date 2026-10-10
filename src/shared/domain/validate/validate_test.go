@@ -212,3 +212,32 @@ func TestName(t *testing.T) {
 		}
 	}
 }
+
+// Los modificadores invisibles de emoji siguen rechazados, pero con un mensaje
+// que explica qué hacer: los teclados de los celulares los agregan solos.
+func TestNameEmojiModifierMessage(t *testing.T) {
+	for _, s := range []string{
+		"Proyecto \u2764\ufe0f",             // corazón con VS16
+		"a\ufe0eb",                          // VS15
+		"\U0001f469\u200d\U0001f4bb equipo", // mujer + ZWJ + computador
+	} {
+		err := Name("name", s, 64)
+		var ve *Error
+		if !errors.As(err, &ve) || ve.Field != "name" {
+			t.Errorf("Name(%q) = %v, esperaba que lo rechazara", s, err)
+			continue
+		}
+		want := "contiene un modificador invisible de emoji (U+FE0F/U+200D); usa el emoji sin modificador, p. ej. \u2764 en vez de \u2764\ufe0f"
+		if ve.Message != want {
+			t.Errorf("Name(%q): mensaje %q, esperaba %q", s, ve.Message, want)
+		}
+	}
+	// Los demás invisibles mantienen su mensaje.
+	for _, s := range []string{"a\u200bb", "a\ufe00b", "\u2800"} {
+		err := Name("name", s, 64)
+		var ve *Error
+		if !errors.As(err, &ve) || strings.Contains(ve.Message, "emoji") {
+			t.Errorf("Name(%q) = %v, esperaba el mensaje general de invisibles", s, err)
+		}
+	}
+}

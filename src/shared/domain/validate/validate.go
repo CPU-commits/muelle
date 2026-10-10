@@ -116,10 +116,16 @@ var invisibleTables = []*unicode.RangeTable{
 	unicode.Other_Default_Ignorable_Code_Point, unicode.Variation_Selector,
 }
 
+// emojiModifiers son los invisibles que los teclados agregan a los emoji: los
+// selectores de presentación (U+FE0E texto, U+FE0F emoji) y el ZWJ (U+200D)
+// que une varios emoji en uno. Se rechazan como el resto, con un mensaje propio.
+var emojiModifiers = map[rune]bool{0xFE0E: true, 0xFE0F: true, 0x200D: true}
+
 // Name valida un texto libre obligatorio (nombres de proyectos, tokens).
 // Rechaza el UTF-8 inválido, los caracteres de control y los invisibles o que
 // se ven en blanco (invisibleTables y blankLooking). Los selectores de
-// variación también quedan fuera, así que un emoji con U+FE0F no pasa.
+// variación y el ZWJ también quedan fuera, así que un emoji con U+FE0F no
+// pasa; para esos el mensaje explica cómo escribirlo sin el modificador.
 func Name(field, s string, max int) error {
 	if !utf8.ValidString(s) {
 		return Errorf(field, "no es UTF-8 válido")
@@ -131,6 +137,9 @@ func Name(field, s string, max int) error {
 		return Errorf(field, "no puede superar %d caracteres", max)
 	}
 	for _, r := range s {
+		if emojiModifiers[r] {
+			return Errorf(field, "contiene un modificador invisible de emoji (U+FE0F/U+200D); usa el emoji sin modificador, p. ej. \u2764 en vez de \u2764\ufe0f")
+		}
 		if unicode.IsControl(r) || unicode.In(r, invisibleTables...) || blankLooking[r] {
 			return Errorf(field, "no puede contener caracteres de control ni invisibles")
 		}
