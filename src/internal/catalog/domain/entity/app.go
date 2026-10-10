@@ -1,9 +1,11 @@
 package entity
 
 import (
+	"errors"
 	"strings"
 	"time"
 
+	"github.com/CPU-commits/muelle/src/internal/catalog/domain/vo"
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
 
@@ -14,6 +16,11 @@ const (
 	KindService Kind = "service"
 	KindCompose Kind = "compose"
 )
+
+// ErrWrongKind: el cambio no corresponde al tipo de la app (el spec de una
+// compose o el compose de una de formulario). El caso de uso lo traduce a
+// service.ErrKindMismatch.
+var ErrWrongKind = errors.New("el cambio no corresponde al tipo de app")
 
 const (
 	DefaultDeployTimeoutS = 300
@@ -40,14 +47,18 @@ type App struct {
 	CreatedAt       time.Time
 }
 
-// NewServiceApp crea una app de formulario. spec es el JSON ya normalizado de un vo.AppSpec.
+// NewServiceApp crea una app de formulario. Valida el spec y guarda su JSON
+// normalizado, así que un spec sin validar no llega a la base.
 // timeoutS 0 usa DefaultDeployTimeoutS.
-func NewServiceApp(stage Stage, slug string, spec []byte, timeoutS int, now time.Time) (App, error) {
+func NewServiceApp(stage Stage, slug string, spec vo.AppSpec, timeoutS int, now time.Time) (App, error) {
+	if err := spec.Validate(); err != nil {
+		return App{}, err
+	}
 	a, err := newApp(stage, slug, KindService, timeoutS, now)
 	if err != nil {
 		return App{}, err
 	}
-	a.Spec = spec
+	a.Spec = spec.JSON()
 	return a, nil
 }
 
@@ -98,16 +109,26 @@ func ValidateDeployTimeout(s int) error {
 	return nil
 }
 
-// ChangeSpec reemplaza el spec (JSON normalizado) y marca cambios pendientes.
-// Quien lo llama verifica antes que la app sea KindService.
-func (a *App) ChangeSpec(spec []byte, now time.Time) {
-	a.Spec = spec
+// ChangeSpec valida y reemplaza el spec, y marca cambios pendientes.
+// ErrWrongKind si la app no es KindService.
+func (a *App) ChangeSpec(spec vo.AppSpec, now time.Time) error {
+	if a.Kind != KindService {
+		return ErrWrongKind
+	}
+	if err := spec.Validate(); err != nil {
+		return err
+	}
+	a.Spec = spec.JSON()
 	a.ConfigChangedAt = now
+	return nil
 }
 
 // ChangeCompose reemplaza el compose y marca cambios pendientes.
-// Quien lo llama verifica antes que la app sea KindCompose.
+// ErrWrongKind si la app no es KindCompose.
 func (a *App) ChangeCompose(yaml string, now time.Time) error {
+	if a.Kind != KindCompose {
+		return ErrWrongKind
+	}
 	if err := ValidateCompose(yaml); err != nil {
 		return err
 	}

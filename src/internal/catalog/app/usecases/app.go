@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/jsontext"
+	"errors"
 
 	"github.com/CPU-commits/muelle/src/internal/catalog/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/entity"
@@ -18,6 +19,14 @@ func hasJSON(v jsontext.Value) bool {
 	return len(t) > 0 && string(t) != "null"
 }
 
+// kindMismatch traduce el error de tipo de la entidad al del módulo.
+func kindMismatch(err error) error {
+	if errors.Is(err, entity.ErrWrongKind) {
+		return service.ErrKindMismatch
+	}
+	return err
+}
+
 type CreateApp struct{ d Deps }
 
 func NewCreateApp(d Deps) *CreateApp { return &CreateApp{d} }
@@ -28,17 +37,16 @@ func (uc *CreateApp) Execute(ctx context.Context, in dto.CreateAppInput) (dto.Ap
 	if err := validate.AppSlug(in.Slug); err != nil {
 		return dto.AppOutput{}, err
 	}
-	var specJSON []byte
+	var spec vo.AppSpec
 	switch entity.Kind(in.Kind) {
 	case entity.KindService:
 		if in.ComposeYAML != nil {
 			return dto.AppOutput{}, validate.Errorf("compose_yaml", "no aplica a apps de tipo service")
 		}
-		spec, err := vo.ParseAppSpec(in.Spec)
-		if err != nil {
+		var err error
+		if spec, err = vo.ParseAppSpec(in.Spec); err != nil {
 			return dto.AppOutput{}, err
 		}
-		specJSON = spec.JSON()
 	case entity.KindCompose:
 		if hasJSON(in.Spec) {
 			return dto.AppOutput{}, validate.Errorf("spec", "no aplica a apps de tipo compose")
@@ -57,21 +65,26 @@ func (uc *CreateApp) Execute(ctx context.Context, in dto.CreateAppInput) (dto.Ap
 		timeout = *in.DeployTimeoutS
 	}
 
-	stage, err := uc.d.Stages.Get(ctx, in.Project, in.Stage)
-	if err != nil {
-		return dto.AppOutput{}, err
-	}
-	now := uc.d.Clock.Now()
+	// La lectura del stage y el insert van en una transacción; si el stage se
+	// borra en paralelo, el insert da ErrNotFound y no un error interno.
 	var app entity.App
-	if entity.Kind(in.Kind) == entity.KindService {
-		app, err = entity.NewServiceApp(stage, in.Slug, specJSON, timeout, now)
-	} else {
-		app, err = entity.NewComposeApp(stage, in.Slug, *in.ComposeYAML, timeout, now)
-	}
+	err := uc.d.Tx.InTx(ctx, func(ctx context.Context) error {
+		stage, err := uc.d.Stages.Get(ctx, in.Project, in.Stage)
+		if err != nil {
+			return err
+		}
+		now := uc.d.Clock.Now()
+		if entity.Kind(in.Kind) == entity.KindService {
+			app, err = entity.NewServiceApp(stage, in.Slug, spec, timeout, now)
+		} else {
+			app, err = entity.NewComposeApp(stage, in.Slug, *in.ComposeYAML, timeout, now)
+		}
+		if err != nil {
+			return err
+		}
+		return uc.d.Apps.Create(ctx, &app)
+	})
 	if err != nil {
-		return dto.AppOutput{}, err
-	}
-	if err := uc.d.Apps.Create(ctx, &app); err != nil {
 		return dto.AppOutput{}, err
 	}
 	uc.d.Audit.Record(ctx, "app.create", appTarget(app.ProjectSlug, app.StageSlug, app.Slug),
@@ -120,13 +133,13 @@ func NewUpdateApp(d Deps) *UpdateApp { return &UpdateApp{d} }
 // Un campo que no corresponde al tipo de la app da ErrKindMismatch.
 func (uc *UpdateApp) Execute(ctx context.Context, in dto.UpdateAppInput) (dto.AppOutput, error) {
 	var fields []string
-	var specJSON []byte
+	var spec *vo.AppSpec
 	if hasJSON(in.Spec) {
-		spec, err := vo.ParseAppSpec(in.Spec)
+		parsed, err := vo.ParseAppSpec(in.Spec)
 		if err != nil {
 			return dto.AppOutput{}, err
 		}
-		specJSON = spec.JSON()
+		spec = &parsed
 		fields = append(fields, "spec")
 	}
 	if in.ComposeYAML != nil {
@@ -152,18 +165,14 @@ func (uc *UpdateApp) Execute(ctx context.Context, in dto.UpdateAppInput) (dto.Ap
 			return nil
 		}
 		now := uc.d.Clock.Now()
-		if specJSON != nil {
-			if app.Kind != entity.KindService {
-				return service.ErrKindMismatch
+		if spec != nil {
+			if err := app.ChangeSpec(*spec, now); err != nil {
+				return kindMismatch(err)
 			}
-			app.ChangeSpec(specJSON, now)
 		}
 		if in.ComposeYAML != nil {
-			if app.Kind != entity.KindCompose {
-				return service.ErrKindMismatch
-			}
 			if err := app.ChangeCompose(*in.ComposeYAML, now); err != nil {
-				return err
+				return kindMismatch(err)
 			}
 		}
 		if in.DeployTimeoutS != nil {

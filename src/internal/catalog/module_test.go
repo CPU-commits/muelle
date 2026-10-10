@@ -295,6 +295,53 @@ func TestTokenAccess(t *testing.T) {
 	httptestutil.Expect(t, c.Do("GET", appsPath+"/api", nil, s), http.StatusOK)
 }
 
+// §10.1: un token de un stage lee solo ese stage, también en la lista; uno del proyecto los ve todos.
+func TestStageListIsFilteredByTokenScope(t *testing.T) {
+	e := newEnv(t)
+	e.seedStage(t)
+	httptestutil.Expect(t, e.c.Do("POST", "/api/v1/projects/auditfy/stages", map[string]string{"slug": "production"}, s), http.StatusCreated)
+
+	slugs := func(tok string) []string {
+		t.Helper()
+		w := e.c.Do("GET", "/api/v1/projects/auditfy/stages", nil, httptestutil.WithBearer(tok))
+		httptestutil.Expect(t, w, http.StatusOK)
+		var out []string
+		for _, st := range httptestutil.Decode[[]map[string]any](t, w) {
+			out = append(out, st["slug"].(string))
+		}
+		return out
+	}
+	if got := slugs(tokStaging); len(got) != 1 || got[0] != "staging" {
+		t.Fatalf("un token de staging ve %v", got)
+	}
+	if got := slugs(tokAll); len(got) != 2 {
+		t.Fatalf("un token de proyecto ve %v", got)
+	}
+	w := e.c.Do("GET", "/api/v1/projects/auditfy/stages", nil, s)
+	if got := httptestutil.Decode[[]map[string]any](t, w); len(got) != 2 {
+		t.Fatalf("una sesión ve %v", got)
+	}
+}
+
+func TestPatchComposeSucceeds(t *testing.T) {
+	e := newEnv(t)
+	e.seedStage(t)
+	httptestutil.Expect(t, e.c.Do("POST", appsPath, map[string]any{"slug": "nats", "kind": "compose", "compose_yaml": "a: 1"}, s), http.StatusCreated)
+
+	w := e.c.Do("PATCH", appsPath+"/nats", map[string]any{"compose_yaml": "services: {}\n", "deploy_timeout_s": 90}, s)
+	httptestutil.Expect(t, w, http.StatusOK)
+	app := httptestutil.Decode[map[string]any](t, w)
+	if app["compose_yaml"] != "services: {}\n" || app["deploy_timeout_s"] != float64(90) || app["kind"] != "compose" {
+		t.Fatalf("app=%v", app)
+	}
+	w = e.c.Do("GET", appsPath+"/nats", nil, s)
+	if got := httptestutil.Decode[map[string]any](t, w); got["compose_yaml"] != "services: {}\n" {
+		t.Fatalf("got=%v", got)
+	}
+	// Y un compose vacío sigue siendo 422.
+	httptestutil.Expect(t, e.c.Do("PATCH", appsPath+"/nats", map[string]any{"compose_yaml": " "}, s), http.StatusUnprocessableEntity)
+}
+
 func TestSessionRequired(t *testing.T) {
 	e := newEnv(t)
 	for _, path := range []string{"/api/v1/projects", "/api/v1/projects/auditfy", appsPath} {

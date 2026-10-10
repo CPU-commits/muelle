@@ -24,6 +24,9 @@ func (r *StageRepository) Create(ctx context.Context, s *entity.Stage) error {
 	res, err := r.db.Conn(ctx).ExecContext(ctx,
 		`INSERT INTO stages (project_id, slug, created_at) VALUES (?, ?, ?)`,
 		s.ProjectID, s.Slug, sqlitedb.Millis(s.CreatedAt))
+	if isForeignKey(err) {
+		return srepo.ErrNotFound // el proyecto se borró en paralelo
+	}
 	if sqlitedb.IsUnique(err) {
 		return srepo.ErrConflict
 	}

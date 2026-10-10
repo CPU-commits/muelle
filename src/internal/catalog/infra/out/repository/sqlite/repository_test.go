@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/entity"
+	"github.com/CPU-commits/muelle/src/internal/catalog/domain/vo"
 	srepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
 	sqlitedb "github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/sqlite/sqlitetest"
@@ -25,6 +26,15 @@ func newRepos(t *testing.T) repos {
 	t.Helper()
 	db := sqlitetest.New(t)
 	return repos{db, NewProjectRepository(db), NewStageRepository(db), NewAppRepository(db)}
+}
+
+func specOf(t *testing.T, image string) vo.AppSpec {
+	t.Helper()
+	s, err := vo.ParseAppSpec([]byte(`{"image":"` + image + `","port":80}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
 func (r repos) project(t *testing.T, slug, name string) entity.Project {
@@ -53,7 +63,7 @@ func (r repos) stage(t *testing.T, p entity.Project, slug string) entity.Stage {
 
 func (r repos) serviceApp(t *testing.T, s entity.Stage, slug string) entity.App {
 	t.Helper()
-	a, err := entity.NewServiceApp(s, slug, []byte(`{"image":"x"}`), 0, t0)
+	a, err := entity.NewServiceApp(s, slug, specOf(t, "x"), 0, t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +174,20 @@ func TestStagesCRUD(t *testing.T) {
 	}
 }
 
+// Si el padre se borra entre la lectura y el insert, el resultado es ErrNotFound (404), no un 500.
+func TestCreateWithMissingParentIsNotFound(t *testing.T) {
+	r := newRepos(t)
+	ctx := context.Background()
+	s := entity.Stage{ProjectID: 999, ProjectSlug: "x", Slug: "staging", CreatedAt: t0}
+	if err := r.stages.Create(ctx, &s); !errors.Is(err, srepo.ErrNotFound) {
+		t.Fatalf("stage: esperaba ErrNotFound, got %v", err)
+	}
+	a, _ := entity.NewServiceApp(entity.Stage{ID: 999, ProjectSlug: "x", Slug: "y"}, "api", specOf(t, "x"), 0, t0)
+	if err := r.apps.Create(ctx, &a); !errors.Is(err, srepo.ErrNotFound) {
+		t.Fatalf("app: esperaba ErrNotFound, got %v", err)
+	}
+}
+
 func TestDeleteProjectWithStagesFails(t *testing.T) {
 	r := newRepos(t)
 	p := r.project(t, "auditfy", "Auditfy")
@@ -183,12 +207,12 @@ func TestAppsCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != api.ID || got.Kind != entity.KindService || string(got.Spec) != `{"image":"x"}` ||
+	if got.ID != api.ID || got.Kind != entity.KindService || string(got.Spec) != string(specOf(t, "x").JSON()) ||
 		got.DeployTimeoutS != entity.DefaultDeployTimeoutS || got.ProjectSlug != "auditfy" ||
 		got.StageSlug != "staging" || got.LastDeployedAt != nil || got.ComposeYAML != "" {
 		t.Fatalf("got=%+v", got)
 	}
-	dup, _ := entity.NewServiceApp(s, "api", []byte(`{}`), 0, t0)
+	dup, _ := entity.NewServiceApp(s, "api", specOf(t, "x"), 0, t0)
 	if err := r.apps.Create(ctx, &dup); !errors.Is(err, srepo.ErrConflict) {
 		t.Fatalf("esperaba ErrConflict, got %v", err)
 	}
@@ -212,7 +236,9 @@ func TestAppsCRUD(t *testing.T) {
 
 	// Update guarda spec, timeout y config_changed_at.
 	t1 := t0.Add(time.Minute)
-	got.ChangeSpec([]byte(`{"image":"y"}`), t1)
+	if err := got.ChangeSpec(specOf(t, "y"), t1); err != nil {
+		t.Fatal(err)
+	}
 	if err := got.SetDeployTimeout(120); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +246,7 @@ func TestAppsCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, _ := r.apps.Get(ctx, "auditfy", "staging", "api")
-	if string(again.Spec) != `{"image":"y"}` || again.DeployTimeoutS != 120 || !again.ConfigChangedAt.Equal(t1) {
+	if string(again.Spec) != string(specOf(t, "y").JSON()) || again.DeployTimeoutS != 120 || !again.ConfigChangedAt.Equal(t1) {
 		t.Fatalf("again=%+v", again)
 	}
 	if err := r.apps.Update(ctx, entity.App{ID: 999, Kind: entity.KindCompose, ComposeYAML: "a"}); !errors.Is(err, srepo.ErrNotFound) {
@@ -242,7 +268,7 @@ func TestLastDeployedAtRoundTrip(t *testing.T) {
 	r := newRepos(t)
 	ctx := context.Background()
 	s := r.stage(t, r.project(t, "auditfy", "Auditfy"), "staging")
-	a, _ := entity.NewServiceApp(s, "api", []byte(`{}`), 0, t0)
+	a, _ := entity.NewServiceApp(s, "api", specOf(t, "x"), 0, t0)
 	deployed := t0.Add(time.Hour)
 	a.LastDeployedAt = &deployed
 	if err := r.apps.Create(ctx, &a); err != nil {

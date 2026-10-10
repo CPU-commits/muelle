@@ -421,6 +421,100 @@ func TestPendingChangesAfterDeploy(t *testing.T) {
 	}
 }
 
+func (e *env) auditDetails(action string) string {
+	e.t.Helper()
+	var d string
+	err := e.db.Conn(context.Background()).QueryRowContext(context.Background(),
+		`SELECT details FROM audit_events WHERE action = ? ORDER BY id DESC LIMIT 1`, action).Scan(&d)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return d
+}
+
+func TestAuditDetails(t *testing.T) {
+	e := newEnv(t)
+	e.seedStage()
+	ctx := e.ctx()
+	e.createService("api", "x")
+	yaml := "a: 1"
+	NewCreateApp(e.d).Execute(ctx, dto.CreateAppInput{Project: "auditfy", Stage: "staging", Slug: "nats", Kind: "compose", ComposeYAML: &yaml})
+	if got := e.auditDetails("app.create"); got != `{"kind":"compose"}` {
+		t.Errorf("app.create details = %s", got)
+	}
+
+	timeout := 90
+	y2 := "b: 2"
+	_, err := NewUpdateApp(e.d).Execute(ctx, dto.UpdateAppInput{Project: "auditfy", Stage: "staging", Slug: "nats",
+		ComposeYAML: &y2, DeployTimeoutS: &timeout})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.auditDetails("app.update"); got != `{"fields":["compose_yaml","deploy_timeout_s"]}` {
+		t.Errorf("app.update details = %s", got)
+	}
+	_, err = NewUpdateApp(e.d).Execute(ctx, dto.UpdateAppInput{Project: "auditfy", Stage: "staging", Slug: "api",
+		Spec: jsontext.Value(`{"image":"y","port":80}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.auditDetails("app.update"); got != `{"fields":["spec"]}` {
+		t.Errorf("app.update details = %s", got)
+	}
+	// Los valores nunca van en los details: solo los nombres de los campos.
+	if strings.Contains(e.auditDetails("app.update"), "image") {
+		t.Error("details no debe incluir el contenido del spec")
+	}
+}
+
+func TestUpdateComposeSucceeds(t *testing.T) {
+	e := newEnv(t)
+	e.seedStage()
+	ctx := e.ctx()
+	yaml := "a: 1"
+	created, _ := NewCreateApp(e.d).Execute(ctx, dto.CreateAppInput{Project: "auditfy", Stage: "staging", Slug: "nats", Kind: "compose", ComposeYAML: &yaml})
+
+	e.clock.Advance(time.Minute)
+	next := "services: {}\n"
+	out, err := NewUpdateApp(e.d).Execute(ctx, dto.UpdateAppInput{Project: "auditfy", Stage: "staging", Slug: "nats", ComposeYAML: &next})
+	if err != nil || out.ComposeYAML != next || !out.ConfigChangedAt.After(created.ConfigChangedAt) {
+		t.Fatalf("out=%+v err=%v", out, err)
+	}
+	got, _ := NewGetApp(e.d).Execute(ctx, "auditfy", "staging", "nats")
+	if got.ComposeYAML != next {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+// Un token limitado a un stage solo ve ese stage en la lista; uno del proyecto los ve todos.
+func TestListStagesFiltersStageScopedTokens(t *testing.T) {
+	e := newEnv(t)
+	e.seedStage()
+	NewCreateStage(e.d).Execute(e.ctx(), dto.CreateStageInput{Project: "auditfy", Slug: "production"})
+
+	asToken := func(stage string) context.Context {
+		return entity.WithPrincipal(context.Background(), entity.Principal{
+			Token: &entity.TokenScope{ID: 1, ProjectSlug: "auditfy", StageSlug: stage}})
+	}
+	list, err := NewListStages(e.d).Execute(asToken("staging"), "auditfy")
+	if err != nil || len(list) != 1 || list[0].Slug != "staging" {
+		t.Fatalf("list=%+v err=%v", list, err)
+	}
+	list, _ = NewListStages(e.d).Execute(asToken(""), "auditfy")
+	if len(list) != 2 {
+		t.Fatalf("un token de proyecto ve todos: %+v", list)
+	}
+	list, _ = NewListStages(e.d).Execute(e.ctx(), "auditfy")
+	if len(list) != 2 {
+		t.Fatalf("una sesión ve todos: %+v", list)
+	}
+	// Un token de otro stage del que no existe: lista vacía, no nil.
+	list, _ = NewListStages(e.d).Execute(asToken("qa"), "auditfy")
+	if list == nil || len(list) != 0 {
+		t.Fatalf("list=%#v", list)
+	}
+}
+
 func TestAuditTrail(t *testing.T) {
 	e := newEnv(t)
 	ctx := e.ctx()

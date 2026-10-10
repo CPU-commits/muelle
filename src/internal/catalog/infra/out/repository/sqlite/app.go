@@ -45,6 +45,9 @@ func (r *AppRepository) Create(ctx context.Context, a *entity.App) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.StageID, a.Slug, string(a.Kind), spec, compose, a.DeployTimeoutS,
 		sqlitedb.Millis(a.ConfigChangedAt), sqlitedb.NullMillis(a.LastDeployedAt), sqlitedb.Millis(a.CreatedAt))
+	if isForeignKey(err) {
+		return srepo.ErrNotFound // el stage se borró en paralelo
+	}
 	if sqlitedb.IsUnique(err) {
 		return srepo.ErrConflict
 	}
