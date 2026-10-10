@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
@@ -189,21 +188,28 @@ func TestUnauthenticatedAuditIsThrottled(t *testing.T) {
 	}
 }
 
-// El nombre del login puede ser cualquier texto: en la auditoría va como
-// UTF-8 válido y recortado a 64 bytes.
-func TestLoginAuditSanitizesUsername(t *testing.T) {
+// Si alguien escribe su contraseña en el campo del usuario, no queda en la
+// auditoría: un nombre que no es un usuario válido se guarda como <inválido>.
+func TestLoginAuditHidesInvalidUsernames(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	name := "\xff" + strings.Repeat("ñ", 100)
-	f.login.Execute(ctx, login(name, "x", "1.1.1.1"))
+	for _, name := range []string{"mi contraseña secreta", "Felipe", "\xff" + strings.Repeat("ñ", 100), ""} {
+		f.login.Execute(ctx, login(name, "x", "1.1.1.1"))
+	}
+	f.login.Execute(ctx, login("nadie", "x", "1.1.1.1"))
 	rows := f.auditRows(t)
-	if len(rows) != 1 || rows[0].Action != "auth.login_failed" {
+	if len(rows) != 5 {
 		t.Fatalf("audit=%+v", rows)
 	}
-	target, ok := strings.CutPrefix(rows[0].Target, "user:")
-	if !ok || !utf8.ValidString(target) || len(target) > 64 || !strings.HasPrefix(target, "�ñ") {
-		t.Fatalf("target=%q (%d bytes)", rows[0].Target, len(target))
+	for _, r := range rows[:4] {
+		if r.Action != "auth.login_failed" || r.Target != "user:<inválido>" {
+			t.Fatalf("fila=%+v", r)
+		}
 	}
+	if rows[4].Target != "user:nadie" {
+		t.Fatalf("un nombre válido que no existe se guarda tal cual: %+v", rows[4])
+	}
+	f.expectNoSecrets(t, "contraseña secreta")
 }
 
 // expectNoSecrets revisa que ninguna fila de auditoría contenga contraseñas,

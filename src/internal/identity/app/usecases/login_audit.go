@@ -12,6 +12,7 @@ import (
 	"github.com/CPU-commits/muelle/src/package/audit"
 	"github.com/CPU-commits/muelle/src/package/clock"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
+	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
 
 const (
@@ -24,7 +25,8 @@ const (
 )
 
 // LoginAudit registra los eventos de login. Nunca guarda contraseñas, códigos
-// ni secretos: solo el nombre que se intentó, la IP y el motivo.
+// ni secretos: solo el nombre que se intentó (o <inválido> si no es un nombre
+// de usuario válido), la IP y el motivo.
 //
 //   - auth.login: se abrió una sesión completa (mfa: si fue con el código TOTP).
 //   - auth.login_failed: contraseña o código incorrectos (reason: credentials | code).
@@ -93,7 +95,16 @@ func (a *LoginAudit) logout(ctx context.Context, username string) {
 	a.rec.Record(ctx, "auth.logout", auditUser(username), nil)
 }
 
-func auditUser(username string) string { return "user:" + auditText(username) }
+// invalidUsername reemplaza en la auditoría un nombre que no es un usuario
+// válido: suele ser una contraseña escrita en el campo equivocado.
+const invalidUsername = "<inválido>"
+
+func auditUser(username string) string {
+	if validate.Username(username) != nil {
+		return "user:" + invalidUsername
+	}
+	return "user:" + auditText(username)
+}
 
 // auditText deja s como UTF-8 válido (json/v2 no serializa otra cosa) y lo
 // recorta a maxAuditName bytes sin cortar un carácter por la mitad.
