@@ -8,7 +8,6 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/repository"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
-	"github.com/CPU-commits/muelle/src/package/audit"
 	"github.com/CPU-commits/muelle/src/package/cipher"
 	"github.com/CPU-commits/muelle/src/package/clock"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
@@ -34,17 +33,17 @@ type CompleteTOTP struct {
 	replay   *service.TOTPReplayGuard
 	clock    clock.Clock
 	issuer   sessionIssuer
-	audit    loginAudit
+	audit    *LoginAudit
 }
 
 func NewCompleteTOTP(tx sharedrepo.Transactor, users repository.UserRepository, sessions repository.SessionRepository,
 	c cipher.Cipher, totp service.TOTP, limiter *service.LoginLimiter, lockout *service.TOTPLockout,
-	attempts *service.PendingCodeAttempts, replay *service.TOTPReplayGuard, rec audit.Recorder, clk clock.Clock) *CompleteTOTP {
+	attempts *service.PendingCodeAttempts, replay *service.TOTPReplayGuard, la *LoginAudit, clk clock.Clock) *CompleteTOTP {
 	return &CompleteTOTP{
 		tx: tx, users: users, sessions: sessions, cipher: c, totp: totp,
 		limiter: limiter, lockout: lockout, attempts: attempts, replay: replay, clock: clk,
 		issuer: sessionIssuer{sessions: sessions, clock: clk},
-		audit:  loginAudit{rec: rec},
+		audit:  la,
 	}
 }
 
@@ -71,7 +70,6 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 		return dto.SessionOutput{}, err
 	}
 	if uc.lockout.Locked(u.ID) {
-		uc.audit.locked(ctx, u.Username, in.IP)
 		return dto.SessionOutput{}, service.ErrLocked
 	}
 	if !u.HasTOTP() {
@@ -89,11 +87,14 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 	if !ok {
 		// Con el usuario ya bloqueado no cambia nada (ni la cuenta de la sesión):
 		// la respuesta y el estado son los mismos que con un código correcto.
-		if wasLocked, _ := uc.lockout.Fail(u.ID); wasLocked {
-			uc.audit.locked(ctx, u.Username, in.IP)
+		wasLocked, locked := uc.lockout.Fail(u.ID)
+		if wasLocked {
 			return dto.SessionOutput{}, service.ErrLocked
 		}
 		uc.audit.failed(ctx, u.Username, in.IP, "code")
+		if locked {
+			uc.audit.locked(ctx, u.Username, in.IP, "code")
+		}
 		if uc.attempts.Fail(ss.IDHash, ss.ExpiresAt) {
 			// La sesión agotó sus intentos: hay que volver a poner la contraseña.
 			if err := uc.sessions.Delete(ctx, ss.IDHash); err != nil {
@@ -141,13 +142,10 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 		uc.audit.login(ctx, cur, in.IP, true)
 		return nil
 	})
-	// Lo que se decidió dentro de la transacción se audita afuera: con el
-	// rollback, un evento registrado adentro se perdería.
-	switch {
-	case errors.Is(err, service.ErrLocked):
-		uc.audit.locked(ctx, u.Username, in.IP)
-	case errors.Is(err, service.ErrInvalidCode):
-		uc.audit.failed(ctx, u.Username, in.IP, "code") // código ya usado
+	// Un código ya usado se decide dentro de la transacción; se audita afuera
+	// porque con el rollback un evento registrado adentro se perdería.
+	if errors.Is(err, service.ErrInvalidCode) {
+		uc.audit.failed(ctx, u.Username, in.IP, "code")
 	}
 	if err != nil {
 		return dto.SessionOutput{}, err

@@ -1,13 +1,17 @@
 package usecases
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
+	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 )
 
@@ -44,17 +48,26 @@ func TestLoginAudit(t *testing.T) {
 	expectRow(t, rows[0], "auth.login_failed", "user:felipe", `{"ip":"1.1.1.1","reason":"credentials"}`, nil)
 	expectRow(t, rows[1], "auth.login_failed", "user:nadie", `{"ip":"1.1.1.1","reason":"credentials"}`, nil)
 
-	// Bloqueado: cada intento rechazado sin verificar queda como auth.locked.
-	for range 4 {
+	// El fallo que bloquea deja también auth.locked; los intentos rechazados
+	// mientras dura el bloqueo no dejan nada.
+	for range 3 {
 		f.login.Execute(ctx, login("felipe", "contraseña-mala!!", "1.1.1.1"))
 	}
 	before := len(f.auditRows(t))
-	f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	f.login.Execute(ctx, login("felipe", "contraseña-mala!!", "1.1.1.1"))
 	rows = f.rowsFrom(t, before)
-	if len(rows) != 1 {
+	if len(rows) != 2 {
 		t.Fatalf("audit=%+v", rows)
 	}
-	expectRow(t, rows[0], "auth.locked", "user:felipe", `{"ip":"1.1.1.1"}`, nil)
+	expectRow(t, rows[0], "auth.login_failed", "user:felipe", `{"ip":"1.1.1.1","reason":"credentials"}`, nil)
+	expectRow(t, rows[1], "auth.locked", "user:felipe", `{"ip":"1.1.1.1","reason":"credentials"}`, nil)
+	before = len(f.auditRows(t))
+	for range 10 {
+		f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	}
+	if rows := f.rowsFrom(t, before); len(rows) != 0 {
+		t.Fatalf("los intentos rechazados no se auditan: %+v", rows)
+	}
 
 	// Login correcto y logout: el actor es el usuario.
 	f.advance(time.Minute)
@@ -97,6 +110,83 @@ func TestLoginAuditWithTOTP(t *testing.T) {
 	expectRow(t, rows[0], "auth.login_failed", "user:felipe", `{"ip":"1.1.1.1","reason":"code"}`, nil)
 	expectRow(t, rows[1], "auth.login", "user:felipe", `{"ip":"1.1.1.1","mfa":true}`, &u.ID)
 	f.expectNoSecrets(t, testPassword, wrong, good, secret)
+}
+
+// Con 2FA, el 5º código malo deja auth.locked (motivo code) una sola vez.
+func TestLoginAuditTOTPLockedOnlyOnTransition(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	before := len(f.auditRows(t))
+	for range 5 {
+		res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+		f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.wrongCode(t, secret)))
+	}
+	for range 5 {
+		res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+		f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.code(t, secret)))
+	}
+	var failed, locked int
+	for _, r := range f.rowsFrom(t, before) {
+		switch r.Action {
+		case "auth.login_failed":
+			failed++
+		case "auth.locked":
+			locked++
+			if r.Details != `{"ip":"1.1.1.1","reason":"code"}` {
+				t.Fatalf("fila=%+v", r)
+			}
+		default:
+			t.Fatalf("fila inesperada: %+v", r)
+		}
+	}
+	if failed != 5 || locked != 1 {
+		t.Fatalf("login_failed=%d locked=%d", failed, locked)
+	}
+}
+
+// Los eventos que puede provocar cualquiera sin autenticarse pasan por un
+// balde global: los que sobran se descartan, con un aviso en el log a lo más
+// una vez por intervalo. Los eventos de un usuario autenticado no se limitan.
+func TestUnauthenticatedAuditIsThrottled(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.user(t, "felipe")
+	var logs bytes.Buffer
+	la := NewLoginAudit(f.rec, service.NewTokenBucket(1, 3, f.clock), slog.New(slog.NewTextHandler(&logs, nil)), f.clock)
+	uc := NewLogin(f.db, f.users, f.sessions, f.hasher, f.limiter, f.lockout, la, f.clock)
+
+	for i := range 10 {
+		uc.Execute(ctx, login(fmt.Sprintf("nadie%d", i), "x", "1.1.1.1"))
+	}
+	if n := len(f.auditRows(t)); n != 3 {
+		t.Fatalf("filas=%d, esperaba solo las 3 de la ráfaga", n)
+	}
+	if n := strings.Count(logs.String(), "descartados"); n != 1 {
+		t.Fatalf("avisos=%d, esperaba 1: %s", n, logs.String())
+	}
+	if !strings.Contains(logs.String(), "descartados=1") {
+		t.Fatalf("el primer aviso sale con el primer descarte: %s", logs.String())
+	}
+
+	// Pasado el intervalo, el siguiente descarte avisa con la cuenta acumulada.
+	f.advance(auditDropWarnEvery + time.Second) // también recarga el balde (3 tokens)
+	for i := range 4 {
+		uc.Execute(ctx, login(fmt.Sprintf("otro%d", i), "x", "2.2.2.2"))
+	}
+	if n := strings.Count(logs.String(), "descartados"); n != 2 || !strings.Contains(logs.String(), "descartados=7") {
+		t.Fatalf("avisos: %s", logs.String())
+	}
+
+	// Con el balde vacío, un login correcto se audita igual.
+	before := len(f.auditRows(t))
+	if _, err := uc.Execute(ctx, login("felipe", testPassword, "3.3.3.3")); err != nil {
+		t.Fatal(err)
+	}
+	if rows := f.rowsFrom(t, before); len(rows) != 1 || rows[0].Action != "auth.login" {
+		t.Fatalf("audit=%+v", rows)
+	}
 }
 
 // El nombre del login puede ser cualquier texto: en la auditoría va como

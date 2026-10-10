@@ -38,6 +38,7 @@ type fixture struct {
 	hasher   *outservice.Argon2Hasher
 	totp     outservice.TOTP
 	rec      *sqlitedb.AuditRecorder
+	la       *LoginAudit
 	limiter  *service.LoginLimiter
 	lockout  *service.LoginLockout
 	totpLock *service.TOTPLockout
@@ -97,9 +98,11 @@ func newFixture(t *testing.T) *fixture {
 	f.totpLock, f.attempts = totpLock, attempts
 	replay := service.NewTOTPReplayGuard(c)
 	f.rec, f.limiter, f.lockout, f.replay = rec, limiter, lockout, replay
-	f.login = NewLogin(db, f.users, f.sessions, f.hasher, limiter, lockout, rec, c)
-	f.completeTOTP = NewCompleteTOTP(db, f.users, f.sessions, ciph, f.totp, limiter, totpLock, attempts, replay, rec, c)
-	f.logout = NewLogout(f.sessions, rec)
+	la := NewLoginAudit(rec, service.NewTokenBucket(service.AuditEventsPerSecond, service.AuditBurst, c), slog.New(slog.NewTextHandler(io.Discard, nil)), c)
+	f.la = la
+	f.login = NewLogin(db, f.users, f.sessions, f.hasher, limiter, lockout, la, c)
+	f.completeTOTP = NewCompleteTOTP(db, f.users, f.sessions, ciph, f.totp, limiter, totpLock, attempts, replay, la, c)
+	f.logout = NewLogout(f.sessions, la)
 	f.authSession = NewAuthenticateSession(f.users, f.sessions, settings, c)
 	f.authToken = NewAuthenticateToken(f.tokens, c)
 	f.setup = NewSetup(db, f.users, f.invites, f.sessions, f.hasher, rec, limiter, c)

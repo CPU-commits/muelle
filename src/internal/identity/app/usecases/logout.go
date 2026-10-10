@@ -5,18 +5,17 @@ import (
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/repository"
-	"github.com/CPU-commits/muelle/src/package/audit"
 )
 
 // Logout cierra la sesión. Recibe el hash de la sesión del Principal, así no
 // hace falta volver a leer la cookie.
 type Logout struct {
 	sessions repository.SessionRepository
-	audit    loginAudit
+	audit    *LoginAudit
 }
 
-func NewLogout(sessions repository.SessionRepository, rec audit.Recorder) *Logout {
-	return &Logout{sessions: sessions, audit: loginAudit{rec: rec}}
+func NewLogout(sessions repository.SessionRepository, la *LoginAudit) *Logout {
+	return &Logout{sessions: sessions, audit: la}
 }
 
 func (uc *Logout) Execute(ctx context.Context, in dto.LogoutInput) error {
