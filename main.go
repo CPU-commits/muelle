@@ -33,11 +33,12 @@ comandos:
 const (
 	// memoryLimit es el límite blando de memoria de serve si GOMEMLIMIT no
 	// está definido. Argon2id usa 19 MiB por hash, hasta 2 a la vez: cerca
-	// del límite el GC trabaja más seguido, y una ráfaga de logins deja el
-	// RSS en ~60 MB en vez de ~100 MB, lo que permite que muelle + Caddy
-	// quepan en los 100 MB del §1 del spec. El RSS de reposo (< 40 MB)
-	// vuelve después del GC que el runtime fuerza cada 2 min. Es blando: si
-	// de verdad hace falta más memoria, el runtime la usa en vez de fallar.
+	// del límite el GC trabaja más seguido y acota el pico de una ráfaga de
+	// logins. Después, el hasher de identity devuelve esa memoria al sistema
+	// 5 s después del último hash, así que el RSS vuelve al de reposo
+	// (< 40 MB, §1 del spec) sin esperar al GC que el runtime fuerza cada
+	// 2 min. Es blando: si de verdad hace falta más memoria, el runtime la usa
+	// en vez de fallar.
 	memoryLimit = 64 << 20
 
 	// shutdownTimeout es lo que se espera a las peticiones en curso al
