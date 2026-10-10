@@ -70,6 +70,9 @@ export default defineConfig(({ mode }) => {
 						name: 'server',
 						environment: 'node',
 						env: { VITE_API_URL: 'http://localhost' },
+						// Node 25+ trae localStorage/sessionStorage experimentales y avisa al
+						// tocarlos sin archivo. Acá sobran: los tests de node no tienen navegador.
+						execArgv: ['--no-experimental-webstorage'],
 						include: ['src/**/*.{test,spec}.{js,ts}'],
 						exclude: ['src/**/*.svelte.{test,spec}.{js,ts}'],
 					},
