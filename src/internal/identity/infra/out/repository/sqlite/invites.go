@@ -37,7 +37,7 @@ func (r *InviteRepository) GetByTokenHash(ctx context.Context, tokenHash string)
 		`SELECT id, token_hash, created_by, expires_at, used_at FROM invites WHERE token_hash = ?`, tokenHash).
 		Scan(&inv.ID, &inv.TokenHash, &createdBy, &expires, &used)
 	if err != nil {
-		return entity.Invite{}, notFound(err)
+		return entity.Invite{}, sqlitedb.NotFound(err)
 	}
 	inv.CreatedBy = fromNullInt(createdBy)
 	inv.ExpiresAt = sqlitedb.Time(expires)

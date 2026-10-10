@@ -38,7 +38,7 @@ func (r *SessionRepository) Get(ctx context.Context, idHash string) (entity.Sess
 		 FROM sessions WHERE id_hash = ?`, idHash).
 		Scan(&s.IDHash, &s.UserID, &s.MFAPending, &created, &seen, &expires, &s.UserAgent, &s.IP)
 	if err != nil {
-		return entity.Session{}, notFound(err)
+		return entity.Session{}, sqlitedb.NotFound(err)
 	}
 	s.CreatedAt, s.LastSeenAt, s.ExpiresAt = sqlitedb.Time(created), sqlitedb.Time(seen), sqlitedb.Time(expires)
 	return s, nil

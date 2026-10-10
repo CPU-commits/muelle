@@ -45,12 +45,12 @@ func (r *TokenRepository) Create(ctx context.Context, t entity.APIToken) (entity
 		return entity.APIToken{}, err
 	}
 	saved, err := scanToken(r.db.Conn(ctx).QueryRowContext(ctx, tokenSelect+` WHERE t.id = ?`, id))
-	return saved, notFound(err)
+	return saved, sqlitedb.NotFound(err)
 }
 
 func (r *TokenRepository) GetByHash(ctx context.Context, tokenHash string) (entity.APIToken, error) {
 	t, err := scanToken(r.db.Conn(ctx).QueryRowContext(ctx, tokenSelect+` WHERE t.token_hash = ?`, tokenHash))
-	return t, notFound(err)
+	return t, sqlitedb.NotFound(err)
 }
 
 func (r *TokenRepository) List(ctx context.Context) ([]entity.APIToken, error) {

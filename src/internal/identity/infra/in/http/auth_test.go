@@ -79,13 +79,21 @@ func TestLoginLockedAndRateLimited(t *testing.T) {
 	w := e.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": testPassword})
 	expectCode(t, w, http.StatusLocked, "locked")
 
-	// 20 intentos por IP cada 15 min: van 6, y X-Real-IP es la IP del cliente.
-	ip := func(r *http.Request) { r.Header.Set("X-Real-IP", "203.0.113.9") }
-	for range 20 {
-		e.do("POST", "/api/v1/auth/login", map[string]string{"username": "nadie", "password": "x"}, ip)
+	// 20 intentos por IP cada 15 min. Detrás de Caddy (RemoteAddr privada)
+	// la IP del cliente es la de X-Real-IP, así que cada cliente tiene su cuenta.
+	viaProxy := func(client string) httptestutil.Opt {
+		return func(r *http.Request) {
+			r.RemoteAddr = "10.0.0.2:41000"
+			r.Header.Set("X-Real-IP", client)
+		}
 	}
-	w = e.do("POST", "/api/v1/auth/login", map[string]string{"username": "nadie", "password": "x"}, ip)
+	for range 20 {
+		e.do("POST", "/api/v1/auth/login", map[string]string{"username": "nadie", "password": "x"}, viaProxy("203.0.113.9"))
+	}
+	w = e.do("POST", "/api/v1/auth/login", map[string]string{"username": "nadie", "password": "x"}, viaProxy("203.0.113.9"))
 	expectCode(t, w, http.StatusTooManyRequests, "rate_limited")
+	w = e.do("POST", "/api/v1/auth/login", map[string]string{"username": "nadie", "password": "x"}, viaProxy("203.0.113.10"))
+	expectCode(t, w, http.StatusUnauthorized, "invalid_credentials")
 }
 
 func TestCSRFOriginCheck(t *testing.T) {

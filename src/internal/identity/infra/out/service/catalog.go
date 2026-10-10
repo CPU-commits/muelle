@@ -2,11 +2,8 @@ package service
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
-	"github.com/CPU-commits/muelle/src/shared/domain/repository"
 	sqlitedb "github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
 )
 
@@ -25,7 +22,7 @@ func (r *ScopeResolver) Resolve(ctx context.Context, project, stage string) (int
 	var projectID int64
 	err := conn.QueryRowContext(ctx, `SELECT id FROM projects WHERE slug = ?`, project).Scan(&projectID)
 	if err != nil {
-		return 0, nil, notFound(err)
+		return 0, nil, sqlitedb.NotFound(err)
 	}
 	if stage == "" {
 		return projectID, nil, nil
@@ -33,14 +30,7 @@ func (r *ScopeResolver) Resolve(ctx context.Context, project, stage string) (int
 	var stageID int64
 	err = conn.QueryRowContext(ctx, `SELECT id FROM stages WHERE project_id = ? AND slug = ?`, projectID, stage).Scan(&stageID)
 	if err != nil {
-		return 0, nil, notFound(err)
+		return 0, nil, sqlitedb.NotFound(err)
 	}
 	return projectID, &stageID, nil
-}
-
-func notFound(err error) error {
-	if errors.Is(err, sql.ErrNoRows) {
-		return repository.ErrNotFound
-	}
-	return err
 }

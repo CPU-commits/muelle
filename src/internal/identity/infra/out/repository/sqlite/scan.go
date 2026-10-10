@@ -5,7 +5,6 @@ package sqlite
 
 import (
 	"database/sql"
-	"errors"
 
 	"github.com/CPU-commits/muelle/src/shared/domain/repository"
 )
@@ -13,14 +12,6 @@ import (
 // scanner es lo común entre *sql.Row y *sql.Rows.
 type scanner interface {
 	Scan(dest ...any) error
-}
-
-// notFound traduce sql.ErrNoRows a repository.ErrNotFound.
-func notFound(err error) error {
-	if errors.Is(err, sql.ErrNoRows) {
-		return repository.ErrNotFound
-	}
-	return err
 }
 
 // affectedOne devuelve ErrNotFound si la sentencia no tocó ninguna fila.

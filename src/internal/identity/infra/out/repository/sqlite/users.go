@@ -41,12 +41,12 @@ func (r *UserRepository) Create(ctx context.Context, u entity.User) (entity.User
 
 func (r *UserRepository) GetByID(ctx context.Context, id int64) (entity.User, error) {
 	u, err := scanUser(r.db.Conn(ctx).QueryRowContext(ctx, userSelect+` WHERE id = ?`, id))
-	return u, notFound(err)
+	return u, sqlitedb.NotFound(err)
 }
 
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (entity.User, error) {
 	u, err := scanUser(r.db.Conn(ctx).QueryRowContext(ctx, userSelect+` WHERE username = ?`, username))
-	return u, notFound(err)
+	return u, sqlitedb.NotFound(err)
 }
 
 func (r *UserRepository) List(ctx context.Context) ([]entity.User, error) {
@@ -81,7 +81,7 @@ func (r *UserRepository) IncrementFailedLogins(ctx context.Context, id int64) (i
 	var n int
 	err := r.db.Conn(ctx).QueryRowContext(ctx,
 		`UPDATE users SET failed_logins = failed_logins + 1 WHERE id = ? RETURNING failed_logins`, id).Scan(&n)
-	return n, notFound(err)
+	return n, sqlitedb.NotFound(err)
 }
 
 func (r *UserRepository) SetLockedUntil(ctx context.Context, id int64, until time.Time) error {
