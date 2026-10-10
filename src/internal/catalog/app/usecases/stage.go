@@ -48,14 +48,11 @@ func (uc *ListStages) Execute(ctx context.Context, project string) ([]dto.StageO
 	if err != nil {
 		return nil, err
 	}
-	// Un token limitado a un stage solo ve ese stage (§10.1 del spec).
-	onlyStage := ""
-	if pr, ok := sharedentity.PrincipalFrom(ctx); ok && pr.Token != nil {
-		onlyStage = pr.Token.StageSlug
-	}
+	// Un token limitado a un stage solo ve ese stage (§10.1 del spec): una sola regla, Principal.Allows.
+	pr, hasPrincipal := sharedentity.PrincipalFrom(ctx)
 	out := make([]dto.StageOutput, 0, len(ss))
 	for _, s := range ss {
-		if onlyStage != "" && s.Slug != onlyStage {
+		if hasPrincipal && !pr.Allows(project, s.Slug, false) {
 			continue
 		}
 		out = append(out, dto.StageFrom(s))

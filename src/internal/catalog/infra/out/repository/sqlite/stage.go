@@ -24,7 +24,9 @@ func (r *StageRepository) Create(ctx context.Context, s *entity.Stage) error {
 	res, err := r.db.Conn(ctx).ExecContext(ctx,
 		`INSERT INTO stages (project_id, slug, created_at) VALUES (?, ?, ?)`,
 		s.ProjectID, s.Slug, sqlitedb.Millis(s.CreatedAt))
-	if isForeignKey(err) {
+	if sqlitedb.IsForeignKey(err) {
+		// Mapear cualquier error de clave foránea a ErrNotFound es correcto solo
+		// mientras el insert tenga una única FK (project_id).
 		return srepo.ErrNotFound // el proyecto se borró en paralelo
 	}
 	if sqlitedb.IsUnique(err) {
@@ -40,7 +42,7 @@ func (r *StageRepository) Create(ctx context.Context, s *entity.Stage) error {
 func (r *StageRepository) Get(ctx context.Context, projectSlug, slug string) (entity.Stage, error) {
 	row := r.db.Conn(ctx).QueryRowContext(ctx, stageSelect+` WHERE p.slug = ? AND s.slug = ?`, projectSlug, slug)
 	s, err := scanStage(row)
-	return s, notFound(err)
+	return s, sqlitedb.NotFound(err)
 }
 
 func (r *StageRepository) ListByProject(ctx context.Context, projectID int64) ([]entity.Stage, error) {
@@ -69,7 +71,7 @@ func (r *StageRepository) CountByProject(ctx context.Context, projectID int64) (
 // Delete devuelve ErrNotEmpty si el stage tiene apps (clave foránea RESTRICT).
 func (r *StageRepository) Delete(ctx context.Context, id int64) error {
 	res, err := r.db.Conn(ctx).ExecContext(ctx, `DELETE FROM stages WHERE id = ?`, id)
-	if isForeignKey(err) {
+	if sqlitedb.IsForeignKey(err) {
 		return srepo.ErrNotEmpty
 	}
 	if err != nil {

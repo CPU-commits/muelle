@@ -69,6 +69,17 @@ func (e *env) createService(slug, image string) dto.AppOutput {
 	return out
 }
 
+func (e *env) createCompose(slug, yaml string) dto.AppOutput {
+	e.t.Helper()
+	out, err := NewCreateApp(e.d).Execute(e.ctx(), dto.CreateAppInput{
+		Project: "auditfy", Stage: "staging", Slug: slug, Kind: "compose", ComposeYAML: &yaml,
+	})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return out
+}
+
 // audit devuelve las acciones registradas, de la más reciente a la más antigua.
 func (e *env) audit() []string {
 	e.t.Helper()
@@ -301,7 +312,7 @@ func TestUpdateApp(t *testing.T) {
 	ctx := e.ctx()
 	api := e.createService("api", "x:1")
 	yaml := "a: 1"
-	NewCreateApp(e.d).Execute(ctx, dto.CreateAppInput{Project: "auditfy", Stage: "staging", Slug: "nats", Kind: "compose", ComposeYAML: &yaml})
+	e.createCompose("nats", yaml)
 
 	key := dto.UpdateAppInput{Project: "auditfy", Stage: "staging", Slug: "api"}
 
@@ -373,7 +384,7 @@ func TestListGetDeleteApp(t *testing.T) {
 	ctx := e.ctx()
 	e.createService("api", "x:1")
 	yaml := "a: 1"
-	NewCreateApp(e.d).Execute(ctx, dto.CreateAppInput{Project: "auditfy", Stage: "staging", Slug: "nats", Kind: "compose", ComposeYAML: &yaml})
+	e.createCompose("nats", yaml)
 
 	list, err := NewListApps(e.d).Execute(ctx, "auditfy", "staging")
 	if err != nil || len(list) != 2 || list[0].Slug != "api" {
@@ -438,7 +449,7 @@ func TestAuditDetails(t *testing.T) {
 	ctx := e.ctx()
 	e.createService("api", "x")
 	yaml := "a: 1"
-	NewCreateApp(e.d).Execute(ctx, dto.CreateAppInput{Project: "auditfy", Stage: "staging", Slug: "nats", Kind: "compose", ComposeYAML: &yaml})
+	e.createCompose("nats", yaml)
 	if got := e.auditDetails("app.create"); got != `{"kind":"compose"}` {
 		t.Errorf("app.create details = %s", got)
 	}
@@ -472,7 +483,7 @@ func TestUpdateComposeSucceeds(t *testing.T) {
 	e.seedStage()
 	ctx := e.ctx()
 	yaml := "a: 1"
-	created, _ := NewCreateApp(e.d).Execute(ctx, dto.CreateAppInput{Project: "auditfy", Stage: "staging", Slug: "nats", Kind: "compose", ComposeYAML: &yaml})
+	created := e.createCompose("nats", yaml)
 
 	e.clock.Advance(time.Minute)
 	next := "services: {}\n"

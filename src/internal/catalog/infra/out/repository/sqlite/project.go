@@ -4,9 +4,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
-	"errors"
-	"strings"
 
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/repository"
@@ -24,21 +21,6 @@ func NewProjectRepository(db *sqlitedb.DB) *ProjectRepository { return &ProjectR
 
 // scanner lo cumplen *sql.Row y *sql.Rows.
 type scanner interface{ Scan(dest ...any) error }
-
-// notFound traduce sql.ErrNoRows a repository.ErrNotFound.
-func notFound(err error) error {
-	if errors.Is(err, sql.ErrNoRows) {
-		return srepo.ErrNotFound
-	}
-	return err
-}
-
-// isForeignKey detecta la violación de una clave foránea. Con ON DELETE
-// RESTRICT SQLite devuelve el código extendido 1811, que sqlitedb.IsForeignKey
-// (solo 787) no cubre, así que también se mira el mensaje.
-func isForeignKey(err error) bool {
-	return err != nil && (sqlitedb.IsForeignKey(err) || strings.Contains(err.Error(), "FOREIGN KEY constraint failed"))
-}
 
 func (r *ProjectRepository) Create(ctx context.Context, p *entity.Project) error {
 	res, err := r.db.Conn(ctx).ExecContext(ctx,
@@ -58,7 +40,7 @@ func (r *ProjectRepository) GetBySlug(ctx context.Context, slug string) (entity.
 	row := r.db.Conn(ctx).QueryRowContext(ctx,
 		`SELECT id, slug, name, created_at FROM projects WHERE slug = ?`, slug)
 	p, err := scanProject(row)
-	return p, notFound(err)
+	return p, sqlitedb.NotFound(err)
 }
 
 func (r *ProjectRepository) List(ctx context.Context) ([]entity.Project, error) {
@@ -94,7 +76,7 @@ func (r *ProjectRepository) Update(ctx context.Context, p entity.Project) error 
 // RESTRICT lo garantiza aunque el caso de uso no lo haya comprobado.
 func (r *ProjectRepository) Delete(ctx context.Context, id int64) error {
 	res, err := r.db.Conn(ctx).ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
-	if isForeignKey(err) {
+	if sqlitedb.IsForeignKey(err) {
 		return srepo.ErrNotEmpty
 	}
 	if err != nil {

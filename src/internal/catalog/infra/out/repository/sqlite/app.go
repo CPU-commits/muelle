@@ -45,7 +45,9 @@ func (r *AppRepository) Create(ctx context.Context, a *entity.App) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.StageID, a.Slug, string(a.Kind), spec, compose, a.DeployTimeoutS,
 		sqlitedb.Millis(a.ConfigChangedAt), sqlitedb.NullMillis(a.LastDeployedAt), sqlitedb.Millis(a.CreatedAt))
-	if isForeignKey(err) {
+	if sqlitedb.IsForeignKey(err) {
+		// Mapear cualquier error de clave foránea a ErrNotFound es correcto solo
+		// mientras el insert tenga una única FK (stage_id).
 		return srepo.ErrNotFound // el stage se borró en paralelo
 	}
 	if sqlitedb.IsUnique(err) {
@@ -62,7 +64,7 @@ func (r *AppRepository) Get(ctx context.Context, projectSlug, stageSlug, slug st
 	row := r.db.Conn(ctx).QueryRowContext(ctx,
 		appSelect+` WHERE p.slug = ? AND s.slug = ? AND a.slug = ?`, projectSlug, stageSlug, slug)
 	a, err := scanApp(row)
-	return a, notFound(err)
+	return a, sqlitedb.NotFound(err)
 }
 
 func (r *AppRepository) ListByStage(ctx context.Context, stageID int64) ([]entity.App, error) {
