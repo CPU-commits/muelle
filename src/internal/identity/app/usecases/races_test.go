@@ -273,7 +273,8 @@ func TestAcceptInviteChecksTokenBeforeHashing(t *testing.T) {
 	if _, err := uc.Execute(ctx, accept("inventado", "ana", testPassword)); !errors.Is(err, service.ErrInviteInvalid) {
 		t.Fatalf("got %v", err)
 	}
-	f.invite(t, "vieja", nil, time.Hour)
+	admin := f.user(t, "admin")
+	f.invite(t, "vieja", &admin.ID, time.Hour)
 	f.advance(2 * time.Hour)
 	if _, err := uc.Execute(ctx, accept("vieja", "ana", testPassword)); !errors.Is(err, service.ErrInviteInvalid) {
 		t.Fatalf("got %v", err)
@@ -281,7 +282,7 @@ func TestAcceptInviteChecksTokenBeforeHashing(t *testing.T) {
 	if n := hashes.Load(); n != 0 {
 		t.Fatalf("%d hashes para invitaciones inválidas", n)
 	}
-	f.invite(t, "buena", nil, time.Hour)
+	f.invite(t, "buena", &admin.ID, time.Hour)
 	if _, err := uc.Execute(ctx, accept("buena", "ana", testPassword)); err != nil {
 		t.Fatal(err)
 	}

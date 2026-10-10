@@ -28,8 +28,9 @@ func newInvite(ctx context.Context, invites repository.InviteRepository, now tim
 }
 
 // inviteAcceptor crea un usuario a partir de una invitación. Lo usan
-// AcceptInvite y Setup.
+// AcceptInvite (invitaciones de usuarios) y Setup (el link del sistema, system).
 type inviteAcceptor struct {
+	system  bool // acepta solo el link de setup del sistema; si no, solo invitaciones de usuarios
 	tx      sharedrepo.Transactor
 	users   repository.UserRepository
 	invites repository.InviteRepository
@@ -106,8 +107,8 @@ func (a inviteAcceptor) accept(ctx context.Context, in dto.AcceptInviteInput, ch
 	return out, nil
 }
 
-// usableInvite devuelve la invitación si existe y todavía se puede aceptar;
-// si no, ErrInviteInvalid.
+// usableInvite devuelve la invitación si existe, es del tipo que acepta este
+// caso de uso y todavía se puede aceptar; si no, ErrInviteInvalid.
 func (a inviteAcceptor) usableInvite(ctx context.Context, tokenHash string) (entity.Invite, error) {
 	inv, err := a.invites.GetByTokenHash(ctx, tokenHash)
 	if errors.Is(err, sharedrepo.ErrNotFound) {
@@ -116,7 +117,7 @@ func (a inviteAcceptor) usableInvite(ctx context.Context, tokenHash string) (ent
 	if err != nil {
 		return entity.Invite{}, err
 	}
-	if !inv.Usable(a.clock.Now()) {
+	if inv.IsSystem() != a.system || !inv.Usable(a.clock.Now()) {
 		return entity.Invite{}, service.ErrInviteInvalid
 	}
 	return inv, nil

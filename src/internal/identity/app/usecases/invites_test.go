@@ -41,10 +41,10 @@ func TestInvitesAndSetup(t *testing.T) {
 	if !created || token2 == token {
 		t.Fatalf("token2=%q created=%v", token2, created)
 	}
-	if _, err := f.acceptInvite.Execute(ctx, accept(token, "felipe", testPassword)); !errors.Is(err, service.ErrInviteInvalid) {
+	if _, err := f.setup.Execute(ctx, accept(token, "felipe", testPassword)); !errors.Is(err, service.ErrInviteInvalid) {
 		t.Fatalf("el link viejo debió invalidarse, got %v", err)
 	}
-	res, err := f.acceptInvite.Execute(ctx, accept(token2, "felipe", testPassword))
+	res, err := f.setup.Execute(ctx, accept(token2, "felipe", testPassword))
 	if err != nil || res.Token == "" || res.UserID == 0 || res.Username != "felipe" || res.MFARequired {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
@@ -99,9 +99,9 @@ func TestAcceptInvite(t *testing.T) {
 func TestAcceptInviteExpiredOrNameTaken(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	f.user(t, "felipe")
-	f.invite(t, "vieja", nil, time.Hour)
-	f.invite(t, "nueva", nil, 48*time.Hour)
+	felipe := f.user(t, "felipe")
+	f.invite(t, "vieja", &felipe.ID, time.Hour)
+	f.invite(t, "nueva", &felipe.ID, 48*time.Hour)
 
 	// Nombre tomado: falla y la invitación sigue disponible, sin sesión ni auditoría.
 	if _, err := f.acceptInvite.Execute(ctx, accept("nueva", "felipe", testPassword)); !errors.Is(err, sharedrepo.ErrConflict) {
@@ -123,7 +123,8 @@ func TestAcceptInviteExpiredOrNameTaken(t *testing.T) {
 func TestAcceptInviteValidates(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	f.invite(t, "inv", nil, time.Hour)
+	admin := f.user(t, "admin")
+	f.invite(t, "inv", &admin.ID, time.Hour)
 	cases := []struct {
 		username, password, field string
 	}{
@@ -144,7 +145,8 @@ func TestAcceptInviteValidates(t *testing.T) {
 func TestAcceptInviteAudit(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	f.invite(t, "inv", nil, time.Hour)
+	admin := f.user(t, "admin")
+	f.invite(t, "inv", &admin.ID, time.Hour)
 	res, err := f.acceptInvite.Execute(ctx, accept("inv", "ana", testPassword))
 	if err != nil {
 		t.Fatal(err)
@@ -197,6 +199,32 @@ func TestCreateInviteAudit(t *testing.T) {
 	rows := f.auditRows(t)
 	if len(rows) != 1 || rows[0].Action != "invite.create" || rows[0].Target != "user:felipe" || *rows[0].ActorID != felipe.ID {
 		t.Fatalf("audit=%+v", rows)
+	}
+}
+
+// El link de setup del sistema solo sirve para POST /auth/setup, y una
+// invitación de un usuario solo para POST /auth/invite/{token}.
+func TestAcceptInviteRejectsSetupLink(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	token, _, _ := f.ensureSetup.Execute(ctx)
+	if _, err := f.acceptInvite.Execute(ctx, accept(token, "felipe", testPassword)); !errors.Is(err, service.ErrInviteInvalid) {
+		t.Fatalf("esperaba ErrInviteInvalid, got %v", err)
+	}
+	if _, err := f.setup.Execute(ctx, accept(token, "felipe", testPassword)); err != nil {
+		t.Fatalf("el link de setup sigue disponible para el setup: %v", err)
+	}
+}
+
+func TestSetupRequiresSystemInvite(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	felipe := f.user(t, "felipe")
+	f.invite(t, "de-felipe", &felipe.ID, time.Hour)
+	// Sin usuarios pero con una invitación de usuario (borrado con foreign_keys=OFF).
+	f.rawExec(t, "DELETE FROM users WHERE id = ?", felipe.ID)
+	if _, err := f.setup.Execute(ctx, accept("de-felipe", "ana", testPassword)); !errors.Is(err, service.ErrInviteInvalid) {
+		t.Fatalf("esperaba ErrInviteInvalid, got %v", err)
 	}
 }
 

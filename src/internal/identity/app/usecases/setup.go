@@ -23,7 +23,8 @@ func NewSetup(tx sharedrepo.Transactor, users repository.UserRepository, invites
 	sessions repository.SessionRepository, hasher service.PasswordHasher, rec audit.Recorder,
 	limiter *service.LoginLimiter, c clock.Clock) *Setup {
 	return &Setup{users: users, acceptor: inviteAcceptor{
-		tx: tx, users: users, invites: invites, hasher: hasher, audit: rec, limiter: limiter, clock: c,
+		system: true,
+		tx:     tx, users: users, invites: invites, hasher: hasher, audit: rec, limiter: limiter, clock: c,
 		issuer: sessionIssuer{sessions: sessions, clock: c},
 	}}
 }

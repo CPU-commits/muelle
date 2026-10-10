@@ -37,6 +37,13 @@ func TestSetupCreatesFirstUser(t *testing.T) {
 	expectCode(t, w, http.StatusConflict, "already_set_up")
 }
 
+func TestSetupLinkIsNotAnInvite(t *testing.T) {
+	e := newEnv(t)
+	token, _, _ := e.mod.EnsureSetupInvite(context.Background())
+	w := e.do("POST", "/api/v1/auth/invite/"+token, map[string]string{"username": "felipe", "password": testPassword})
+	expectCode(t, w, http.StatusBadRequest, "invalid_invite")
+}
+
 func TestSetupWithBadToken(t *testing.T) {
 	e := newEnv(t)
 	w := e.do("POST", "/api/v1/auth/setup", map[string]string{"token": "inventado", "username": "felipe", "password": testPassword})
