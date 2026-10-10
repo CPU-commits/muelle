@@ -9,7 +9,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
+	"sync"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 
@@ -37,22 +40,36 @@ const (
 	maxTime    = 10
 	minKeyLen  = 16
 	minSaltLen = 8
+
+	// freeOSMemoryAfter: la memoria de los hashes se devuelve al sistema este
+	// tiempo después del último. Sin esto, tras una ráfaga de logins el
+	// proceso queda en ~55-60 MB unos 3,5 min (hasta el GC forzado y el
+	// scavenger del runtime), y el presupuesto en reposo es < 40 MB (§1).
+	freeOSMemoryAfter = 5 * time.Second
 )
 
 var errBadHash = errors.New("identity: hash de contraseña con formato inválido")
 
 // Argon2Hasher implementa service.PasswordHasher con argon2id en formato PHC.
-// Hash y Verify comparten un semáforo de capacidad maxConcurrent.
+// Hash y Verify comparten un semáforo de capacidad maxConcurrent. Cada hash
+// usa argonMemory de RAM; freeOSMemoryAfter después del último, un solo
+// temporizador la devuelve al sistema (debug.FreeOSMemory), fuera del pedido.
 type Argon2Hasher struct {
 	sem chan struct{}
 	// key es argon2.IDKey; los tests lo reemplazan para medir la concurrencia.
 	key func(password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) []byte
+	// release es debug.FreeOSMemory; los tests la reemplazan para contar
+	// las liberaciones sin correr el GC.
+	release func()
+
+	mu    sync.Mutex
+	timer *time.Timer // el de la liberación: se rearma con cada hash
 }
 
 var _ service.PasswordHasher = (*Argon2Hasher)(nil)
 
 func NewArgon2Hasher() *Argon2Hasher {
-	return &Argon2Hasher{sem: make(chan struct{}, maxConcurrent), key: argon2.IDKey}
+	return &Argon2Hasher{sem: make(chan struct{}, maxConcurrent), key: argon2.IDKey, release: debug.FreeOSMemory}
 }
 
 // Hash devuelve $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>.
@@ -95,6 +112,22 @@ func (h *Argon2Hasher) Verify(encoded, password string) (bool, error) {
 
 func (h *Argon2Hasher) derive(password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) []byte {
 	h.sem <- struct{}{}
-	defer func() { <-h.sem }()
+	defer func() {
+		<-h.sem
+		h.scheduleRelease()
+	}()
 	return h.key(password, salt, time, memory, threads, keyLen)
+}
+
+// scheduleRelease (re)arma el temporizador de la liberación para dentro de
+// freeOSMemoryAfter: así corre una vez, después del último hash de una
+// ráfaga, en la goroutine del temporizador y no en la del pedido.
+func (h *Argon2Hasher) scheduleRelease() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.timer == nil {
+		h.timer = time.AfterFunc(freeOSMemoryAfter, func() { h.release() })
+		return
+	}
+	h.timer.Reset(freeOSMemoryAfter) // si ya corrió, la vuelve a programar
 }

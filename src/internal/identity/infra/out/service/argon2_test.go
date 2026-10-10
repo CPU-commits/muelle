@@ -3,10 +3,13 @@ package service
 import (
 	"encoding/base64"
 	"fmt"
+	"reflect"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/crypto/argon2"
@@ -168,5 +171,88 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatal("la condición no se cumplió a tiempo")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// fakeHasher arma, dentro de la burbuja de synctest, un hasher con una
+// derivación instantánea y una liberación de memoria que solo se cuenta.
+func fakeHasher(releases *atomic.Int32) *Argon2Hasher {
+	h := NewArgon2Hasher()
+	h.key = func(password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) []byte {
+		return make([]byte, keyLen)
+	}
+	h.release = func() { releases.Add(1) }
+	return h
+}
+
+// Después de una ráfaga de hashes, la memoria de argon2id se devuelve al
+// sistema una sola vez, freeOSMemoryAfter después del último: nunca en el
+// pedido, y no una vez por hash.
+func TestHasherReleasesMemoryOnceAfterBurst(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var releases atomic.Int32
+		h := fakeHasher(&releases)
+		stored, _ := h.Hash("contraseña")
+		if releases.Load() != 0 {
+			t.Fatal("la liberación no corre en el pedido")
+		}
+		var wg sync.WaitGroup
+		for range 3 { // más hashes dentro de la ventana, también a la vez
+			time.Sleep(2 * time.Second)
+			for range 2 {
+				wg.Go(func() { h.Verify(stored, "contraseña") })
+			}
+			wg.Wait()
+		}
+		// El último hash fue a los 6 s: la liberación toca a los 11 s.
+		time.Sleep(freeOSMemoryAfter - time.Millisecond)
+		synctest.Wait()
+		if n := releases.Load(); n != 0 {
+			t.Fatalf("antes de la ventana desde el último hash: %d liberaciones", n)
+		}
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		if n := releases.Load(); n != 1 {
+			t.Fatalf("al cerrar la ventana: %d liberaciones, esperaba 1", n)
+		}
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if n := releases.Load(); n != 1 {
+			t.Fatalf("sin hashes nuevos no se repite: %d liberaciones", n)
+		}
+	})
+}
+
+// Un hash después de una liberación vuelve a armar el temporizador.
+func TestHasherRearmsReleaseAfterHash(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var releases atomic.Int32
+		h := fakeHasher(&releases)
+		h.Hash("contraseña")
+		time.Sleep(freeOSMemoryAfter)
+		synctest.Wait()
+		if n := releases.Load(); n != 1 {
+			t.Fatalf("primera liberación: %d", n)
+		}
+		time.Sleep(time.Minute)
+		h.Hash("contraseña")
+		time.Sleep(freeOSMemoryAfter - time.Millisecond)
+		synctest.Wait()
+		if n := releases.Load(); n != 1 {
+			t.Fatalf("antes de la ventana: %d liberaciones", n)
+		}
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		if n := releases.Load(); n != 2 {
+			t.Fatalf("el hash nuevo volvió a armar la liberación: %d, esperaba 2", n)
+		}
+	})
+}
+
+// Sin reemplazar nada, la liberación es debug.FreeOSMemory.
+func TestHasherReleasesWithFreeOSMemory(t *testing.T) {
+	h := NewArgon2Hasher()
+	if h.release == nil || reflect.ValueOf(h.release).Pointer() != reflect.ValueOf(debug.FreeOSMemory).Pointer() {
+		t.Fatal("la liberación por defecto es debug.FreeOSMemory")
 	}
 }
