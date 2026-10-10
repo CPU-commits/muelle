@@ -1,0 +1,19 @@
+# Package Managers
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+
+# Generados
+/build
+/.svelte-kit
+src/shared/ui/i18n/paraglide
+static/mockServiceWorker.js
+# inlang genera .meta.json y README.md al compilar y los ignora en git; solo
+# settings.json se escribe a mano. Sin esto, prettier falla en un clon fresco.
+project.inlang/*
+!project.inlang/settings.json
+
+# Miscellaneous
+/static/

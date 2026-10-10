@@ -7,3 +7,12 @@
 .env
 *.key
 muelle_master_key
+
+# Panel web (web/). `build/*` y no `build`: la Fase 4 versiona web/build/.keep
+# para que el //go:embed compile sin el panel construido.
+web/node_modules/
+web/.svelte-kit/
+web/build/*
+web/test-results/
+web/playwright-report/
+web/src/shared/ui/i18n/paraglide/

@@ -1,0 +1,5 @@
+# pnpm 11: los build scripts de las dependencias estan bloqueados por defecto.
+# esbuild (lo usa Vite) y msw (instala el service worker) los necesitan.
+allowBuilds:
+    esbuild: true
+    msw: true
