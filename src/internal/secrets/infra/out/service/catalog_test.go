@@ -88,7 +88,7 @@ func TestChangeMarker(t *testing.T) {
 	if err := m.Mark(ctx, entity.StageOwner(empty), t2); err != nil {
 		t.Errorf("stage sin apps: got %v", err)
 	}
-	if err := m.Mark(ctx, entity.Owner{}, t2); err == nil {
+	if err := m.Mark(ctx, entity.Owner{}, t2); !errors.Is(err, entity.ErrInvalidOwner) {
 		t.Error("Mark con un dueño vacío debería fallar")
 	}
 }

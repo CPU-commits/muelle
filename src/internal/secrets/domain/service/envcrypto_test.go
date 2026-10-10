@@ -93,13 +93,13 @@ func TestSealBindsOwnerAndKey(t *testing.T) {
 
 func TestSealAndOpenRejectInvalidOwner(t *testing.T) {
 	e := newCrypto(t)
-	if _, err := e.Seal(entity.Owner{}, envVars(t, map[string]string{"K": "v"}, true)); err == nil {
+	if _, err := e.Seal(entity.Owner{}, envVars(t, map[string]string{"K": "v"}, true)); !errors.Is(err, entity.ErrInvalidOwner) {
 		t.Error("Seal con un dueño vacío debería fallar")
 	}
-	if _, err := e.Open(entity.Owner{}, []entity.EncryptedEnvVar{{Key: "K"}}); err == nil {
+	if _, err := e.Open(entity.Owner{}, []entity.EncryptedEnvVar{{Key: "K"}}); !errors.Is(err, entity.ErrInvalidOwner) {
 		t.Error("Open con un dueño vacío debería fallar")
 	}
-	if _, err := e.Mask(entity.Owner{}, nil); err == nil {
+	if _, err := e.Mask(entity.Owner{}, nil); !errors.Is(err, entity.ErrInvalidOwner) {
 		t.Error("Mask con un dueño vacío debería fallar")
 	}
 }

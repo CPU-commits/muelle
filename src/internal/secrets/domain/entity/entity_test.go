@@ -2,6 +2,8 @@ package entity
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -103,5 +105,81 @@ func TestCheckCount(t *testing.T) {
 	}
 	if err := CheckCount("set", MaxVars+1); validationField(t, err) != "set" {
 		t.Errorf("superar MaxVars: %v", err)
+	}
+}
+
+func TestOwnerCheck(t *testing.T) {
+	if err := AppOwner(3).Check(); err != nil {
+		t.Errorf("AppOwner(3): %v", err)
+	}
+	if err := StageOwner(4).Check(); err != nil {
+		t.Errorf("StageOwner(4): %v", err)
+	}
+	for _, o := range []Owner{{}, {Kind: "project", ID: 1}, AppOwner(0)} {
+		if err := o.Check(); !errors.Is(err, ErrInvalidOwner) {
+			t.Errorf("%+v: got %v", o, err)
+		}
+	}
+}
+
+// bigVars arma 15 variables de 64 KiB, y la que falta para llegar justo a MaxOwnerBytes.
+func bigVars(t *testing.T) (vars []EnvVar, rest EnvVar) {
+	t.Helper()
+	big := []byte(strings.Repeat("x", MaxValueBytes))
+	for i := range 15 {
+		vars = append(vars, EnvVar{Key: fmt.Sprintf("K%02d", i), Value: big})
+	}
+	restLen := MaxOwnerBytes - TotalSize(vars) - len("REST")
+	if restLen <= 0 || restLen > MaxValueBytes {
+		t.Fatalf("restLen=%d", restLen)
+	}
+	return vars, EnvVar{Key: "REST", Value: []byte(strings.Repeat("x", restLen))}
+}
+
+func TestSizeAndCheckLimits(t *testing.T) {
+	if got := (EnvVar{Key: "ABC", Value: []byte("12345")}).Size(); got != 8 {
+		t.Errorf("Size = %d, esperaba 8 (clave + valor)", got)
+	}
+	if got := TotalSize(nil); got != 0 {
+		t.Errorf("TotalSize(nil) = %d", got)
+	}
+
+	vars, rest := bigVars(t)
+	full := append(slices.Clone(vars), rest)
+	if TotalSize(full) != MaxOwnerBytes {
+		t.Fatalf("TotalSize = %d", TotalSize(full))
+	}
+	if err := CheckLimits("vars", full); err != nil {
+		t.Errorf("justo %d bytes deberían caber: %v", MaxOwnerBytes, err)
+	}
+	rest.Value = append(rest.Value, 'x')
+	if err := CheckLimits("set", append(slices.Clone(vars), rest)); validationField(t, err) != "set" {
+		t.Errorf("un byte de más: %v", err)
+	}
+
+	many := make([]EnvVar, MaxVars+1)
+	for i := range many {
+		many[i] = EnvVar{Key: fmt.Sprintf("K%d", i)}
+	}
+	if err := CheckLimits("vars", many); validationField(t, err) != "vars" {
+		t.Errorf("superar MaxVars: %v", err)
+	}
+	if err := CheckLimits("vars", many[:MaxVars]); err != nil {
+		t.Errorf("%d variables deberían caber: %v", MaxVars, err)
+	}
+}
+
+func TestApplyPatch(t *testing.T) {
+	v := func(k, val string) EnvVar { return EnvVar{Key: k, Value: []byte(val)} }
+	current := []EnvVar{v("A", "1"), v("B", "2"), v("C", "3")}
+	got := ApplyPatch(current, []EnvVar{v("D", "4"), v("B", "20")}, []string{"C", "Z"})
+	if len(got) != 3 || got[0].Key != "A" || got[1].Key != "B" || string(got[1].Value) != "20" || got[2].Key != "D" {
+		t.Fatalf("got=%+v", got)
+	}
+	if string(current[1].Value) != "2" || len(current) != 3 {
+		t.Fatalf("ApplyPatch no modifica current: %+v", current)
+	}
+	if got := ApplyPatch(nil, nil, []string{"A"}); got == nil || len(got) != 0 {
+		t.Fatalf("sin variables da un slice vacío: %#v", got)
 	}
 }

@@ -5,9 +5,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/secrets/domain/entity"
@@ -15,8 +12,6 @@ import (
 	"github.com/CPU-commits/muelle/src/shared/domain/repository"
 	sqlitedb "github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
 )
-
-var errInvalidOwner = errors.New("secrets: dueño de variables inválido")
 
 // OwnerResolver traduce slugs a ids de stages y apps.
 type OwnerResolver struct {
@@ -33,7 +28,7 @@ func (r *OwnerResolver) Stage(ctx context.Context, project, stage string) (entit
 		`SELECT s.id FROM stages s JOIN projects p ON p.id = s.project_id
 		 WHERE p.slug = ? AND s.slug = ?`, project, stage).Scan(&id)
 	if err != nil {
-		return entity.Owner{}, notFound(err)
+		return entity.Owner{}, sqlitedb.NotFound(err)
 	}
 	return entity.StageOwner(id), nil
 }
@@ -44,16 +39,9 @@ func (r *OwnerResolver) App(ctx context.Context, project, stage, app string) (en
 		`SELECT a.id FROM apps a JOIN stages s ON s.id = a.stage_id JOIN projects p ON p.id = s.project_id
 		 WHERE p.slug = ? AND s.slug = ? AND a.slug = ?`, project, stage, app).Scan(&id)
 	if err != nil {
-		return entity.Owner{}, notFound(err)
+		return entity.Owner{}, sqlitedb.NotFound(err)
 	}
 	return entity.AppOwner(id), nil
-}
-
-func notFound(err error) error {
-	if errors.Is(err, sql.ErrNoRows) {
-		return repository.ErrNotFound
-	}
-	return err
 }
 
 // ChangeMarker actualiza apps.config_changed_at.
@@ -68,8 +56,8 @@ func NewChangeMarker(db *sqlitedb.DB) *ChangeMarker { return &ChangeMarker{db: d
 // Mark marca la app, o todas las apps del stage. Una app inexistente da
 // repository.ErrNotFound; un stage sin apps no tiene nada que marcar.
 func (m *ChangeMarker) Mark(ctx context.Context, o entity.Owner, at time.Time) error {
-	if !o.Valid() {
-		return fmt.Errorf("%w: %+v", errInvalidOwner, o)
+	if err := o.Check(); err != nil {
+		return err
 	}
 	conn := m.db.Conn(ctx)
 	if o.Kind == entity.OwnerStage {

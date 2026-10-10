@@ -2,6 +2,7 @@ package entity
 
 import (
 	"bytes"
+	"maps"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -12,6 +13,10 @@ import (
 const (
 	MaxVars       = 500      // variables por dueño
 	MaxValueBytes = 64 << 10 // bytes por valor
+	// MaxOwnerBytes es el total por dueño (claves + valores). Sin él, 500
+	// valores de 64 KiB darían un GET de 32 MB y un entorno que supera el
+	// ARG_MAX de Linux al desplegar.
+	MaxOwnerBytes = 1 << 20
 )
 
 // EnvVar es una variable con su valor en claro. El valor en claro solo vive
@@ -79,4 +84,49 @@ func CheckCount(field string, n int) error {
 		return validate.Errorf(field, "máximo %d variables", MaxVars)
 	}
 	return nil
+}
+
+// Size es lo que ocupa la variable en el entorno: clave + valor, en bytes.
+func (v EnvVar) Size() int { return len(v.Key) + len(v.Value) }
+
+// TotalSize suma el Size de vars.
+func TotalSize(vars []EnvVar) int {
+	n := 0
+	for _, v := range vars {
+		n += v.Size()
+	}
+	return n
+}
+
+// CheckLimits revisa que las variables con que queda un dueño no superen
+// MaxVars ni MaxOwnerBytes.
+func CheckLimits(field string, vars []EnvVar) error {
+	if err := CheckCount(field, len(vars)); err != nil {
+		return err
+	}
+	if TotalSize(vars) > MaxOwnerBytes {
+		return validate.Errorf(field, "las variables suman más de 1 MiB (claves y valores)")
+	}
+	return nil
+}
+
+// ApplyPatch devuelve, ordenadas por clave, las variables con que queda un
+// dueño que tiene current después de agregar o reemplazar set y borrar unset.
+// No modifica current.
+func ApplyPatch(current, set []EnvVar, unset []string) []EnvVar {
+	byKey := make(map[string]EnvVar, len(current)+len(set))
+	for _, v := range current {
+		byKey[v.Key] = v
+	}
+	for _, k := range unset {
+		delete(byKey, k)
+	}
+	for _, v := range set {
+		byKey[v.Key] = v
+	}
+	out := make([]EnvVar, 0, len(byKey))
+	for _, k := range slices.Sorted(maps.Keys(byKey)) {
+		out = append(out, byKey[k])
+	}
+	return out
 }

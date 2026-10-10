@@ -3,7 +3,6 @@
 package service
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -11,11 +10,15 @@ import (
 	"github.com/CPU-commits/muelle/src/package/cipher"
 )
 
-// errInvalidOwner es un error de programación: un dueño sin resolver.
-var errInvalidOwner = errors.New("secrets: dueño de variables inválido")
-
 // AAD liga cada valor cifrado a su dueño y su clave (§12 del spec):
 // env:app:<id>:<clave> o env:stage:<id>:<clave>.
+//
+// El flag secret no forma parte de la AAD, porque el formato lo fija el spec
+// (y la lista canónica de shared/infra/out/crypto). Pasar una variable de
+// secreta a no secreta, para que GET muestre su valor, exige escribir
+// directamente en el archivo de la base, y quien puede hacerlo ya es root (§12):
+// tiene la clave maestra en el mismo host. Por la API, secret solo cambia
+// reescribiendo el valor (PUT o PATCH), que nunca revela el anterior.
 func AAD(o entity.Owner, key string) string {
 	return fmt.Sprintf("env:%s:%d:%s", o.Kind, o.ID, key)
 }
@@ -37,8 +40,8 @@ func NewEnvCrypto(c cipher.Cipher) *EnvCrypto { return &EnvCrypto{c: c} }
 
 // Seal cifra los valores de vars con la AAD de o.
 func (e *EnvCrypto) Seal(o entity.Owner, vars []entity.EnvVar) ([]entity.EncryptedEnvVar, error) {
-	if !o.Valid() {
-		return nil, fmt.Errorf("%w: %+v", errInvalidOwner, o)
+	if err := o.Check(); err != nil {
+		return nil, err
 	}
 	out := make([]entity.EncryptedEnvVar, 0, len(vars))
 	for _, v := range vars {
@@ -55,8 +58,8 @@ func (e *EnvCrypto) Seal(o entity.Owner, vars []entity.EnvVar) ([]entity.Encrypt
 // Open descifra todas las variables de o, secretas o no. Lo usa la mezcla
 // para el deploy; la API nunca recibe estos valores (usa Mask).
 func (e *EnvCrypto) Open(o entity.Owner, rows []entity.EncryptedEnvVar) ([]entity.EnvVar, error) {
-	if !o.Valid() {
-		return nil, fmt.Errorf("%w: %+v", errInvalidOwner, o)
+	if err := o.Check(); err != nil {
+		return nil, err
 	}
 	out := make([]entity.EnvVar, 0, len(rows))
 	for _, r := range rows {
@@ -72,8 +75,8 @@ func (e *EnvCrypto) Open(o entity.Owner, rows []entity.EncryptedEnvVar) ([]entit
 // Mask devuelve las variables como las ve la API: descifra solo las que no
 // son secretas. El valor de una secreta ni siquiera se descifra.
 func (e *EnvCrypto) Mask(o entity.Owner, rows []entity.EncryptedEnvVar) ([]MaskedVar, error) {
-	if !o.Valid() {
-		return nil, fmt.Errorf("%w: %+v", errInvalidOwner, o)
+	if err := o.Check(); err != nil {
+		return nil, err
 	}
 	out := make([]MaskedVar, 0, len(rows))
 	for _, r := range rows {

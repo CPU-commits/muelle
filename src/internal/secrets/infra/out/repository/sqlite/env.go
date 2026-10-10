@@ -4,16 +4,12 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"fmt"
 
 	"github.com/CPU-commits/muelle/src/internal/secrets/domain/entity"
 	secretsrepo "github.com/CPU-commits/muelle/src/internal/secrets/domain/repository"
 	"github.com/CPU-commits/muelle/src/shared/domain/repository"
 	sqlitedb "github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
 )
-
-var errInvalidOwner = errors.New("secrets: dueño de variables inválido")
 
 // EnvRepository guarda las variables ya cifradas en env_vars.
 type EnvRepository struct {
@@ -26,8 +22,8 @@ func NewEnvRepository(db *sqlitedb.DB) *EnvRepository { return &EnvRepository{db
 
 // where devuelve la condición sobre la columna del dueño (stage_id o app_id).
 func where(o entity.Owner) (string, int64, error) {
-	if !o.Valid() {
-		return "", 0, fmt.Errorf("%w: %+v", errInvalidOwner, o)
+	if err := o.Check(); err != nil {
+		return "", 0, err
 	}
 	if o.Kind == entity.OwnerApp {
 		return "app_id = ?", o.ID, nil

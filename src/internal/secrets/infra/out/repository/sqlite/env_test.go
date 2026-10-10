@@ -124,13 +124,13 @@ func TestEnvUnknownOwner(t *testing.T) {
 	}
 
 	// Un dueño sin resolver nunca llega a la base.
-	if _, err := repo.List(ctx, entity.Owner{}); err == nil {
+	if _, err := repo.List(ctx, entity.Owner{}); !errors.Is(err, entity.ErrInvalidOwner) {
 		t.Error("List con un dueño vacío debería fallar")
 	}
-	if err := repo.Replace(ctx, entity.Owner{Kind: "project", ID: 1}, vars); err == nil {
+	if err := repo.Replace(ctx, entity.Owner{Kind: "project", ID: 1}, vars); !errors.Is(err, entity.ErrInvalidOwner) {
 		t.Error("Replace con un tipo de dueño desconocido debería fallar")
 	}
-	if err := repo.Patch(ctx, entity.Owner{}, nil, []string{"A"}); err == nil {
+	if err := repo.Patch(ctx, entity.Owner{}, nil, []string{"A"}); !errors.Is(err, entity.ErrInvalidOwner) {
 		t.Error("Patch con un dueño vacío debería fallar")
 	}
 }
