@@ -23,6 +23,9 @@ export default defineConfig(({ mode }) => {
 			},
 		},
 		server: {
+			// `shared/data/config.ts` importa `config/*.json`, que está fuera de las carpetas
+			// que SvelteKit le deja servir al dev server.
+			fs: { allow: ['config'] },
 			proxy: {
 				'/api': { target: backend, changeOrigin: false },
 			},

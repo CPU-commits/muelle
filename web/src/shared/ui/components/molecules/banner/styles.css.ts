@@ -26,8 +26,25 @@ export const tones = styleVariants({
 	},
 })
 
+// El punto y el texto van juntos: si no entra todo, lo que baja es la acción.
+export const message = style({
+	display: 'flex',
+	alignItems: 'flex-start',
+	gap: theme.space[12],
+	flex: '1 1 260px',
+	minWidth: 0,
+})
+
+// Del alto de una línea de texto, para que el punto quede a la altura de la primera.
+export const dotSlot = style({
+	display: 'flex',
+	alignItems: 'center',
+	height: theme.space[20],
+	flexShrink: 0,
+})
+
 export const text = style({
-	flex: '1 1 320px',
+	flex: 1,
 	minWidth: 0,
 })
 

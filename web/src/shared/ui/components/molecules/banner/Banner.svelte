@@ -6,6 +6,8 @@
 		action as actionClass,
 		banner,
 		body as bodyClass,
+		dotSlot,
+		message,
 		text,
 		title as titleClass,
 		tones,
@@ -30,13 +32,15 @@
 </script>
 
 <div class={[banner, tones[tone]]} role={tone === 'error' ? 'alert' : 'status'}>
-	<StatusDot status={dot ?? DOT_BY_TONE[tone]} />
-	<p class={text}>
-		<span class={titleClass}>{title}</span>
-		{#if body}
-			<span class={bodyClass}>{body}</span>
-		{/if}
-	</p>
+	<div class={message}>
+		<span class={dotSlot}><StatusDot status={dot ?? DOT_BY_TONE[tone]} /></span>
+		<p class={text}>
+			<span class={titleClass}>{title}</span>
+			{#if body}
+				<span class={bodyClass}>{body}</span>
+			{/if}
+		</p>
+	</div>
 	{#if action}
 		<div class={actionClass}>{@render action()}</div>
 	{/if}

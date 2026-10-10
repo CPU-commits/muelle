@@ -53,15 +53,10 @@ export const invalid = style({})
 
 export const disabled = style({ opacity: 0.5 })
 
+// La celda donde va el próximo dígito: más clara que las llenas, para que el foco se vea.
 globalStyle(`${root}:focus-within ${cellActive}`, {
-	borderColor: theme.colors.borders.focus,
+	borderColor: theme.colors.text.secondary,
 	boxShadow: theme.shadows.focusRing,
-})
-
-globalStyle(`${root}:has(input:focus-visible)`, {
-	outline: `2px solid ${theme.colors.borders.outline}`,
-	outlineOffset: '4px',
-	borderRadius: theme.radius.md,
 })
 
 globalStyle(`${invalid} ${cell}`, {
