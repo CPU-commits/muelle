@@ -1,8 +1,20 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// clearEnv aísla el test del entorno del que lo ejecuta (un valor vacío cuenta como no definido).
+func clearEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"MUELLE_LISTEN", "MUELLE_DATA_DIR", "MUELLE_MASTER_KEY_FILE", "MUELLE_PANEL_ORIGIN", "MUELLE_SECURE_COOKIES"} {
+		t.Setenv(k, "")
+	}
+}
 
 func TestLoadDefaults(t *testing.T) {
+	clearEnv(t)
 	t.Setenv("MUELLE_PANEL_ORIGIN", "https://panel.example.com")
 	c, err := Load()
 	if err != nil {
@@ -17,6 +29,7 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadOverrides(t *testing.T) {
+	clearEnv(t)
 	t.Setenv("MUELLE_PANEL_ORIGIN", "http://localhost:8080")
 	t.Setenv("MUELLE_LISTEN", "127.0.0.1:9000")
 	t.Setenv("MUELLE_DATA_DIR", "/tmp/m")
@@ -32,15 +45,88 @@ func TestLoadOverrides(t *testing.T) {
 }
 
 func TestLoadRejectsBadOrigin(t *testing.T) {
-	for _, origin := range []string{"", "panel.example.com", "ftp://x.com", "https://x.com/", "https://x.com/panel"} {
+	clearEnv(t)
+	bad := []string{
+		"", "panel.example.com", "ftp://x.com", "https://x.com/", "https://x.com/panel",
+		"HTTPS://panel.example.com", "https://Panel.Example.com", "https://x.com:443", "http://x.com:80",
+		"https://x.com:", "https://x.com:0443", "https://x.com:99999", "https://x.com:0",
+		"https://x.com?", "https://x.com#", "https://panél.example.com", "https://*.example.com", "null",
+		"https://u@x.com", "https://x.com?a=1", "https://x.com#f", "https:x.com",
+	}
+	for _, origin := range bad {
 		t.Setenv("MUELLE_PANEL_ORIGIN", origin)
-		if _, err := Load(); err == nil {
+		_, err := Load()
+		if err == nil {
 			t.Errorf("origen %q debió fallar", origin)
+			continue
+		}
+		if !strings.Contains(err.Error(), "MUELLE_PANEL_ORIGIN") {
+			t.Errorf("origen %q: el error no menciona la variable: %v", origin, err)
 		}
 	}
 }
 
+func TestLoadAcceptsGoodOrigin(t *testing.T) {
+	clearEnv(t)
+	for _, origin := range []string{
+		"https://[::1]:8080", "http://localhost:8080", "https://panel.example.com:8443",
+		"http://127.0.0.1:18080", "https://panel.example.com",
+	} {
+		t.Setenv("MUELLE_PANEL_ORIGIN", origin)
+		t.Setenv("MUELLE_SECURE_COOKIES", "true")
+		c, err := Load()
+		if err != nil {
+			t.Errorf("origen %q debió pasar: %v", origin, err)
+			continue
+		}
+		if c.PanelOrigin != origin {
+			t.Errorf("origen %q alterado: %q", origin, c.PanelOrigin)
+		}
+	}
+}
+
+func TestLoadSuggestsCanonicalOrigin(t *testing.T) {
+	clearEnv(t)
+	cases := map[string]string{
+		"https://Panel.Example.com": "https://panel.example.com",
+		"HTTPS://panel.example.com": "https://panel.example.com",
+		"https://x.com:443":         "https://x.com",
+		"http://x.com:80":           "http://x.com",
+	}
+	for in, want := range cases {
+		t.Setenv("MUELLE_PANEL_ORIGIN", in)
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("origen %q: el error debe sugerir %q, obtuvo %v", in, want, err)
+		}
+	}
+}
+
+func TestLoadRejectsHTTPSWithInsecureCookies(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("MUELLE_PANEL_ORIGIN", "https://panel.example.com")
+	t.Setenv("MUELLE_SECURE_COOKIES", "false")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "MUELLE_SECURE_COOKIES") {
+		t.Fatalf("debió fallar mencionando MUELLE_SECURE_COOKIES: %v", err)
+	}
+}
+
+func TestLoadAcceptsHTTPWithInsecureCookies(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("MUELLE_PANEL_ORIGIN", "http://localhost:8080")
+	t.Setenv("MUELLE_SECURE_COOKIES", "false")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.SecureCookies {
+		t.Fatal("SecureCookies debe ser false")
+	}
+}
+
 func TestLoadRejectsBadBool(t *testing.T) {
+	clearEnv(t)
 	t.Setenv("MUELLE_PANEL_ORIGIN", "https://panel.example.com")
 	t.Setenv("MUELLE_SECURE_COOKIES", "quizás")
 	if _, err := Load(); err == nil {

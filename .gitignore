@@ -4,3 +4,6 @@
 *.db-wal
 /data/
 /tmp/
+.env
+*.key
+muelle_master_key
