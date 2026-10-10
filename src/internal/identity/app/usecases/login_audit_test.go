@@ -8,11 +8,14 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
+	"github.com/CPU-commits/muelle/src/package/clock"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 )
 
@@ -188,6 +191,143 @@ func TestUnauthenticatedAuditIsThrottled(t *testing.T) {
 	if rows := f.rowsFrom(t, before); len(rows) != 1 || rows[0].Action != "auth.login" {
 		t.Fatalf("audit=%+v", rows)
 	}
+}
+
+// timer es un temporizador que programó LoginAudit (la.after) en un test.
+type timer struct {
+	d  time.Duration
+	fn func()
+}
+
+// Al terminar una avalancha, lo que quedó sin avisar se avisa al minuto
+// siguiente aunque no llegue ningún evento más (un temporizador), con la
+// cuenta y desde cuándo; el aviso sigue saliendo a lo más una vez por minuto.
+func TestAuditDropsReportedAfterFloodEnds(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	var logs bytes.Buffer
+	la := NewLoginAudit(f.rec, service.NewTokenBucket(1, 1, f.clock), slog.New(slog.NewTextHandler(&logs, nil)), f.clock)
+	if la.after != nil {
+		t.Fatal("con un reloj manual no hay temporizador de verdad")
+	}
+	var timers []timer
+	la.after = func(d time.Duration, fn func()) { timers = append(timers, timer{d, fn}) }
+	warnings := func() int { return strings.Count(logs.String(), "descartados=") }
+	start := f.now()
+
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // pasa (ráfaga de 1)
+	for range 500 {                               // la avalancha, en el mismo segundo
+		la.failed(ctx, "a", "1.1.1.1", "credentials")
+	}
+	if warnings() != 1 || !strings.Contains(logs.String(), "descartados=1 ") {
+		t.Fatalf("el primer descarte se avisa enseguida, y nada más: %s", logs.String())
+	}
+	if len(timers) != 1 || timers[0].d != auditDropWarnEvery {
+		t.Fatalf("un solo temporizador, al minuto del aviso: %+v", timers)
+	}
+	// Termina la avalancha y no llega nada más: al minuto se avisa el resto.
+	f.advance(timers[0].d)
+	timers[0].fn()
+	if warnings() != 2 || !strings.Contains(logs.String(), "descartados=499 desde="+start.Format("2006-01-02T15:04:05.000Z07:00")) {
+		t.Fatalf("al minuto se avisan los 499 que quedaban: %s", logs.String())
+	}
+	if len(timers) != 1 {
+		t.Fatalf("sin nada pendiente no se programa otro: %+v", timers)
+	}
+
+	// Un aviso justo antes de que venza el temporizador: el temporizador no
+	// repite el aviso, y lo que llega después sale al minuto siguiente.
+	f.advance(time.Hour) // recarga el balde (1 token)
+	la.failed(ctx, "a", "1.1.1.1", "credentials")
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // se avisa enseguida (pasó más de un minuto)
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // queda pendiente: temporizador
+	if warnings() != 3 || len(timers) != 2 {
+		t.Fatalf("avisos=%d temporizadores=%d: %s", warnings(), len(timers), logs.String())
+	}
+	f.advance(timers[1].d)
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // pasa: el minuto recargó el balde
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // vence el minuto: avisa los 2
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // otro más, pendiente (ya hay temporizador)
+	if warnings() != 4 || !strings.Contains(logs.String(), "descartados=2 ") || len(timers) != 2 {
+		t.Fatalf("avisos=%d temporizadores=%d: %s", warnings(), len(timers), logs.String())
+	}
+	timers[1].fn() // el temporizador viejo: todavía no pasó un minuto del último aviso
+	if warnings() != 4 || len(timers) != 3 || timers[2].d != auditDropWarnEvery {
+		t.Fatalf("no avisa antes de tiempo y se reprograma: avisos=%d %+v", warnings(), timers)
+	}
+	f.advance(timers[2].d)
+	timers[2].fn()
+	if warnings() != 5 || !strings.HasSuffix(strings.TrimSpace(logs.String()), "descartados=1 desde="+f.now().Add(-auditDropWarnEvery).Format("2006-01-02T15:04:05.000Z07:00")) {
+		t.Fatalf("el último pendiente sale al minuto: %s", logs.String())
+	}
+}
+
+// Con el reloj del sistema, el aviso del final de la avalancha lo programa un
+// temporizador de verdad (en la burbuja de synctest el tiempo es falso).
+func TestAuditDropTimerWithSystemClock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var logs lockedBuffer
+		la := NewLoginAudit(&memRecorder{}, service.NewTokenBucket(1, 1, clock.System{}), slog.New(slog.NewTextHandler(&logs, nil)), clock.System{})
+		ctx := context.Background()
+		for range 11 { // 1 pasa y 10 se descartan: el primero se avisa enseguida
+			la.failed(ctx, "a", "1.1.1.1", "credentials")
+		}
+		if n := strings.Count(logs.String(), "descartados="); n != 1 {
+			t.Fatalf("avisos=%d: %s", n, logs.String())
+		}
+		time.Sleep(auditDropWarnEvery)
+		synctest.Wait()
+		if !strings.Contains(logs.String(), "descartados=9 ") {
+			t.Fatalf("al minuto se avisan los 9 que quedaban: %s", logs.String())
+		}
+	})
+}
+
+// lockedBuffer es un bytes.Buffer que se puede escribir desde otra goroutine.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// memRecorder guarda los eventos de auditoría en memoria.
+type memRecorder struct {
+	mu     sync.Mutex
+	events []memEvent
+}
+
+type memEvent struct {
+	action, target string
+	details        any
+}
+
+func (r *memRecorder) Record(_ context.Context, action, target string, details any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, memEvent{action, target, details})
+}
+
+func (r *memRecorder) of(action string) []memEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []memEvent
+	for _, e := range r.events {
+		if e.action == action {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // Los fallos del código TOTP solo los provoca quien sabe la contraseña, y el
