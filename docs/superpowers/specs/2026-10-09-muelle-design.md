@@ -211,7 +211,7 @@ proyecto (auditfy)
 | `domains` | `id`, `app_id`, `hostname` (único global), `target_service`, `target_port`, `proxied` (bool), `tls_mode` (`cloudflare`\|`http`), `cf_zone_id`, `cf_record_id` (nulo si muelle no maneja el registro), `status` (`pending`\|`active`\|`error`), `last_error`, `cert_issuer`, `cert_expires_at` |
 | `deploys` | `id`, `app_id`, `status` (`queued`\|`running`\|`succeeded`\|`failed`\|`superseded`), `images` (JSON `servicio → ref@digest`), `trigger` (`panel`\|`api`\|`rollback`), `actor_type` (`user`\|`token`), `actor_id`, `error`, `log` (texto, truncado a 256 KB), `created_at`, `started_at`, `finished_at` |
 | `registries` | `id`, `host` (único), `username`, `password` (cifrado) |
-| `users` | `id`, `username` (único), `password_hash`, `totp_secret` (cifrado, nulo si no tiene 2FA), `totp_pending` (cifrado, generado pero sin confirmar), `created_by`, `created_at`, `failed_logins`, `locked_until` |
+| `users` | `id`, `username` (único), `password_hash`, `totp_secret` (cifrado, nulo si no tiene 2FA), `totp_pending` (cifrado, generado pero sin confirmar), `created_by`, `created_at` |
 | `invites` | `id`, `token_hash`, `created_by`, `expires_at`, `used_at` |
 | `sessions` | `id_hash`, `user_id`, `mfa_pending` (contraseña correcta, falta el código TOTP), `created_at`, `last_seen_at`, `expires_at`, `user_agent`, `ip` |
 | `api_tokens` | `id`, `name`, `token_hash`, `project_id`, `stage_id` (nulo = todo el proyecto), `created_by`, `last_used_at`, `expires_at` (opcional) |
@@ -373,8 +373,8 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 - **Token de API:** `Authorization: Bearer mk_<43 caracteres base64url>` (32 bytes aleatorios). Se guarda su SHA-256 y se muestra una sola vez. Su alcance es un proyecto, o un proyecto + stage. **Solo permite:** leer proyecto/stage/app/estado/deploys/logs dentro del alcance, `GET/PUT/PATCH` de variables, crear deploys y hacer rollback. Cualquier otra operación responde `403`.
 - **Login:**
   - Argon2id con `m=19MiB, t=2, p=1`, el mínimo que recomienda OWASP. Un semáforo permite como máximo 2 hashes a la vez, para que un pico de logins no rompa el presupuesto de RAM (§1). Los parámetros van dentro del hash (formato PHC), así que se pueden subir más adelante.
-  - Bloqueo progresivo por usuario: tras 5 fallos, 1 min; después se duplica hasta 1 h.
-  - Por IP: 20 intentos cada 15 min.
+  - Bloqueo progresivo por usuario e IP: tras 5 fallos del mismo usuario desde la misma IP (en IPv6, el mismo /64), 1 min; después se duplica hasta 1 h. Un login correcto desde esa IP lo reinicia; con 2FA, solo el código correcto. Vive en memoria, con un mapa acotado. Se aplica igual a los nombres que no existen, así un bloqueo no revela qué usuarios hay. Es por usuario e IP, y no solo por usuario, para que un atacante no pueda dejar afuera al admin desde otra IP (recomendación de OWASP).
+  - Por IP: 20 intentos cada 15 min (en IPv6, por /64).
   - Con TOTP, el login es en dos pasos: contraseña → código.
   - Si `require_2fa` está activo, un usuario sin TOTP solo puede configurarlo.
   - No se puede activar `require_2fa` sin tener el propio TOTP configurado (si no, quien lo activa queda encerrado en la configuración).
