@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
@@ -102,24 +103,35 @@ func TestTOTPFailuresLockAcrossLogins(t *testing.T) {
 			t.Fatalf("código %d: got %v", i, err)
 		}
 	}
-	if got := f.reload(t, u.ID); got.FailedLogins != 5 || !got.LockedAt(f.now()) {
-		t.Fatalf("u=%+v", got)
-	}
 	if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); !errors.Is(err, service.ErrLocked) {
 		t.Fatalf("esperaba ErrLocked, got %v", err)
 	}
 
-	// Pasado el bloqueo, el código correcto completa el login y recién ahí reinicia el contador.
+	// Pasado el bloqueo, la contraseña correcta sola no reinicia los fallos:
+	// un código malo más (el 6º fallo) bloquea 2 min.
 	f.advance(service.LockoutFor(5))
-	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
-	if got := f.reload(t, u.ID); got.FailedLogins != 5 {
-		t.Fatalf("la contraseña sola no reinicia: %+v", got)
+	res, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	if err != nil || !res.MFARequired {
+		t.Fatalf("res=%+v err=%v", res, err)
 	}
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.wrongCode(t, secret))); !errors.Is(err, service.ErrInvalidCode) {
+		t.Fatalf("6º fallo: got %v", err)
+	}
+	if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); !errors.Is(err, service.ErrLocked) {
+		t.Fatalf("la contraseña sola no debió reiniciar los fallos: got %v", err)
+	}
+
+	// El código correcto sí los reinicia: después, un código malo no bloquea.
+	f.advance(service.LockoutFor(6))
+	res, _ = f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
 	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.code(t, secret))); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.reload(t, u.ID); got.FailedLogins != 0 || got.LockedUntil != nil {
-		t.Fatalf("u=%+v", got)
+	f.advance(30 * time.Second) // un código ya usado no se acepta de nuevo
+	res, _ = f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.wrongCode(t, secret)))
+	if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); err != nil {
+		t.Fatalf("tras el código correcto, un fallo no bloquea: %v", err)
 	}
 }
 

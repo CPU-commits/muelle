@@ -56,9 +56,7 @@ CREATE TABLE users (
   totp_secret   BLOB,
   totp_pending  BLOB,
   created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at    INTEGER NOT NULL,
-  failed_logins INTEGER NOT NULL DEFAULT 0,
-  locked_until  INTEGER
+  created_at    INTEGER NOT NULL
 );
 
 -- created_by NULL = invitación de setup creada por el sistema.

@@ -58,6 +58,7 @@ func New(d Deps) *Module {
 	scopes := outservice.NewScopeResolver(db)
 	settings := outservice.NewSettingsReader(db)
 	limiter := service.NewLoginLimiter(service.LoginMaxPerIP, service.LoginWindow, c) // compartido por login, código TOTP, setup e invitaciones
+	lockout := service.NewLoginLockout(c)                                             // compartido por login y código TOTP
 
 	return &Module{
 		auth: inhttp.Authenticator{
@@ -65,8 +66,8 @@ func New(d Deps) *Module {
 			Token:   usecases.NewAuthenticateToken(tokens, c),
 		},
 		routes: inhttp.Usecases{
-			Login:          usecases.NewLogin(db, users, sessions, hasher, limiter, c),
-			CompleteTOTP:   usecases.NewCompleteTOTP(db, users, sessions, d.Cipher, totp, limiter, c),
+			Login:          usecases.NewLogin(db, users, sessions, hasher, limiter, lockout, c),
+			CompleteTOTP:   usecases.NewCompleteTOTP(db, users, sessions, d.Cipher, totp, limiter, lockout, c),
 			Logout:         usecases.NewLogout(sessions),
 			Setup:          usecases.NewSetup(db, users, invites, sessions, hasher, d.Audit, limiter, c),
 			AcceptInvite:   usecases.NewAcceptInvite(db, users, invites, sessions, hasher, d.Audit, limiter, c),

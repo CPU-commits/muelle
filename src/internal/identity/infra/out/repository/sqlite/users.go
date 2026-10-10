@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/repository"
@@ -19,8 +18,7 @@ var _ repository.UserRepository = (*UserRepository)(nil)
 
 func NewUserRepository(db *sqlitedb.DB) *UserRepository { return &UserRepository{db: db} }
 
-const userSelect = `SELECT id, username, password_hash, totp_secret, totp_pending, created_by, created_at,
-	failed_logins, locked_until FROM users`
+const userSelect = `SELECT id, username, password_hash, totp_secret, totp_pending, created_by, created_at FROM users`
 
 func (r *UserRepository) Create(ctx context.Context, u entity.User) (entity.User, error) {
 	res, err := r.db.Conn(ctx).ExecContext(ctx,
@@ -77,23 +75,6 @@ func (r *UserRepository) Delete(ctx context.Context, id int64) error {
 	return affectedOne(r.db.Conn(ctx).ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id))
 }
 
-func (r *UserRepository) IncrementFailedLogins(ctx context.Context, id int64) (int, error) {
-	var n int
-	err := r.db.Conn(ctx).QueryRowContext(ctx,
-		`UPDATE users SET failed_logins = failed_logins + 1 WHERE id = ? RETURNING failed_logins`, id).Scan(&n)
-	return n, sqlitedb.NotFound(err)
-}
-
-func (r *UserRepository) SetLockedUntil(ctx context.Context, id int64, until time.Time) error {
-	return affectedOne(r.db.Conn(ctx).ExecContext(ctx,
-		`UPDATE users SET locked_until = ? WHERE id = ?`, sqlitedb.Millis(until), id))
-}
-
-func (r *UserRepository) ResetLoginFailures(ctx context.Context, id int64) error {
-	return affectedOne(r.db.Conn(ctx).ExecContext(ctx,
-		`UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?`, id))
-}
-
 func (r *UserRepository) SetTOTPPending(ctx context.Context, id int64, encrypted []byte) error {
 	return affectedOne(r.db.Conn(ctx).ExecContext(ctx,
 		`UPDATE users SET totp_pending = ? WHERE id = ?`, encrypted, id))
@@ -111,15 +92,13 @@ func (r *UserRepository) ClearTOTP(ctx context.Context, id int64) error {
 
 func scanUser(sc scanner) (entity.User, error) {
 	var u entity.User
-	var createdBy, locked sql.NullInt64
+	var createdBy sql.NullInt64
 	var created int64
-	err := sc.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.TOTPSecret, &u.TOTPPending, &createdBy, &created,
-		&u.FailedLogins, &locked)
+	err := sc.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.TOTPSecret, &u.TOTPPending, &createdBy, &created)
 	if err != nil {
 		return entity.User{}, err
 	}
 	u.CreatedBy = fromNullInt(createdBy)
 	u.CreatedAt = sqlitedb.Time(created)
-	u.LockedUntil = sqlitedb.NullTime(locked)
 	return u, nil
 }

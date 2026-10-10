@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/domain/repository"
@@ -44,31 +43,6 @@ func TestUsers(t *testing.T) {
 	}
 	if got, _ := st.GetByUsername(ctx, "felipe"); got.ID != felipe.ID {
 		t.Fatalf("got=%+v", got)
-	}
-
-	// Fallos de login y bloqueo.
-	if n, _ := st.IncrementFailedLogins(ctx, ana.ID); n != 1 {
-		t.Fatalf("n=%d", n)
-	}
-	if n, _ := st.IncrementFailedLogins(ctx, ana.ID); n != 2 {
-		t.Fatalf("n=%d", n)
-	}
-	if _, err := st.IncrementFailedLogins(ctx, 999); !errors.Is(err, repository.ErrNotFound) {
-		t.Fatalf("usuario inexistente: esperaba ErrNotFound, got %v", err)
-	}
-	if err := st.SetLockedUntil(ctx, ana.ID, t0.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	ana, _ = st.GetByID(ctx, ana.ID)
-	if ana.FailedLogins != 2 || ana.LockedUntil == nil || !ana.LockedUntil.Equal(t0.Add(time.Minute)) {
-		t.Fatalf("ana=%+v", ana)
-	}
-	if err := st.ResetLoginFailures(ctx, ana.ID); err != nil {
-		t.Fatal(err)
-	}
-	ana, _ = st.GetByID(ctx, ana.ID)
-	if ana.FailedLogins != 0 || ana.LockedUntil != nil {
-		t.Fatalf("ana=%+v", ana)
 	}
 
 	// TOTP: pendiente → activo → borrado.

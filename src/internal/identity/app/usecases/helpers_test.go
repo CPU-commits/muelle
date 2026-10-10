@@ -39,6 +39,7 @@ type fixture struct {
 	totp     outservice.TOTP
 	rec      *sqlitedb.AuditRecorder
 	limiter  *service.LoginLimiter
+	lockout  *service.LoginLockout
 
 	login        *Login
 	completeTOTP *CompleteTOTP
@@ -88,9 +89,10 @@ func newFixture(t *testing.T) *fixture {
 	scopes := outservice.NewScopeResolver(db)
 	limiter := service.NewLoginLimiter(service.LoginMaxPerIP, service.LoginWindow, c)
 
-	f.rec, f.limiter = rec, limiter
-	f.login = NewLogin(db, f.users, f.sessions, f.hasher, limiter, c)
-	f.completeTOTP = NewCompleteTOTP(db, f.users, f.sessions, ciph, f.totp, limiter, c)
+	lockout := service.NewLoginLockout(c)
+	f.rec, f.limiter, f.lockout = rec, limiter, lockout
+	f.login = NewLogin(db, f.users, f.sessions, f.hasher, limiter, lockout, c)
+	f.completeTOTP = NewCompleteTOTP(db, f.users, f.sessions, ciph, f.totp, limiter, lockout, c)
 	f.logout = NewLogout(f.sessions)
 	f.authSession = NewAuthenticateSession(f.users, f.sessions, settings, c)
 	f.authToken = NewAuthenticateToken(f.tokens, c)

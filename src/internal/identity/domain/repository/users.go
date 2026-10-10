@@ -6,7 +6,6 @@ package repository
 
 import (
 	"context"
-	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/entity"
 )
@@ -25,12 +24,6 @@ type UserRepository interface {
 	// Delete borra el usuario; sus sesiones e invitaciones se borran en
 	// cascada y el created_by de quienes creó queda en NULL.
 	Delete(ctx context.Context, id int64) error
-
-	// IncrementFailedLogins suma un fallo y devuelve el total acumulado.
-	IncrementFailedLogins(ctx context.Context, id int64) (int, error)
-	SetLockedUntil(ctx context.Context, id int64, until time.Time) error
-	// ResetLoginFailures deja los fallos en 0 y quita el bloqueo.
-	ResetLoginFailures(ctx context.Context, id int64) error
 
 	// SetTOTPPending guarda un secreto TOTP recién generado, ya cifrado.
 	SetTOTPPending(ctx context.Context, id int64, encrypted []byte) error

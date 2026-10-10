@@ -69,82 +69,86 @@ func (f *fixture) countFullSessions(t *testing.T) int {
 }
 
 // Un intento que pasó el chequeo de bloqueo y esperaba al hasher no abre
-// sesión si mientras tanto otros intentos bloquearon al usuario. La
-// respuesta es "bloqueado" sea la contraseña correcta o no, para no
-// revelar cuál era.
+// sesión si mientras tanto otros intentos bloquearon el par (usuario, IP).
+// La respuesta es "bloqueado" sea la contraseña correcta o no, y el bloqueo
+// no cambia, para no revelar cuál era.
 func TestQueuedLoginRechecksLockout(t *testing.T) {
-	f := newFixture(t)
-	ctx := context.Background()
-	u := f.user(t, "felipe")
-	g := newGate()
-	uc := NewLogin(f.db, f.users, f.sessions, gatedHasher{f.hasher, g}, f.limiter, f.clock)
-
 	for _, password := range []string{testPassword, "contraseña-mala!!"} {
-		f.users.ResetLoginFailures(ctx, u.ID)
+		f := newFixture(t)
+		ctx := context.Background()
+		f.user(t, "felipe")
+		g := newGate()
+		uc := NewLogin(f.db, f.users, f.sessions, gatedHasher{f.hasher, g}, f.limiter, f.lockout, f.clock)
+
 		done := make(chan error, 1)
 		go func() {
 			_, err := uc.Execute(ctx, login("felipe", password, "1.1.1.1"))
 			done <- err
 		}()
 		<-g.entered // pasó el chequeo de bloqueo y está en el hasher
-		if err := f.users.SetLockedUntil(ctx, u.ID, f.now().Add(time.Minute)); err != nil {
-			t.Fatal(err)
+		for range 5 {
+			f.lockout.Fail("felipe", "1.1.1.1") // otros intentos bloquean el par
 		}
 		g.release <- struct{}{}
 		if err := <-done; !errors.Is(err, service.ErrLocked) {
 			t.Fatalf("%q: esperaba ErrLocked, got %v", password, err)
 		}
-	}
-	if n := f.countSessions(t); n != 0 {
-		t.Fatalf("no debió abrirse ninguna sesión: %d", n)
-	}
-	// Con el usuario ya bloqueado, el intento malo no escribe nada (igual que el bueno).
-	if got := f.reload(t, u.ID); got.FailedLogins != 0 {
-		t.Fatalf("failed_logins=%d", got.FailedLogins)
+		if n := f.countSessions(t); n != 0 {
+			t.Fatalf("%q: no debió abrirse ninguna sesión: %d", password, n)
+		}
+		// El bloqueo sigue siendo de 1 min: el intento en espera no lo extendió.
+		f.advance(service.LockoutFor(5))
+		if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); err != nil {
+			t.Fatalf("%q: al minuto entra: %v", password, err)
+		}
 	}
 }
 
 // Tampoco el estado que queda puede revelar la contraseña: con 4 fallos, un
-// candidato espera en el hasher mientras un 5º intento malo bloquea al
-// usuario 1 min. Sea el candidato correcto o no, después quedan los mismos
-// fallos y el mismo vencimiento del bloqueo (si el malo lo extendiera a 2
-// min, una prueba al minuto revelaría cuál era).
+// candidato espera en el hasher mientras un 5º intento malo bloquea el par
+// 1 min. Sea el candidato correcto o no, después responde igual (si el malo
+// extendiera el bloqueo a 2 min, una prueba al minuto revelaría cuál era).
 func TestQueuedLoginLeavesSameLockState(t *testing.T) {
-	type state struct {
-		failed int
-		until  time.Time
-		probe  error
-	}
-	run := func(candidate string) state {
+	run := func(candidate string) []error {
 		f := newFixture(t)
 		ctx := context.Background()
-		u := f.user(t, "felipe")
+		f.user(t, "felipe")
 		for range 4 {
 			f.login.Execute(ctx, login("felipe", "contraseña-mala!!", "1.1.1.1"))
 		}
 		g := newGate()
-		uc := NewLogin(f.db, f.users, f.sessions, gatedHasher{f.hasher, g}, f.limiter, f.clock)
+		uc := NewLogin(f.db, f.users, f.sessions, gatedHasher{f.hasher, g}, f.limiter, f.lockout, f.clock)
 		done := make(chan error, 1)
 		go func() {
-			_, err := uc.Execute(ctx, login("felipe", candidate, "2.2.2.2"))
+			_, err := uc.Execute(ctx, login("felipe", candidate, "1.1.1.1"))
 			done <- err
 		}()
 		<-g.entered
-		if _, err := f.login.Execute(ctx, login("felipe", "otra-mala-más!!", "3.3.3.3")); !errors.Is(err, service.ErrInvalidCredentials) {
+		if _, err := f.login.Execute(ctx, login("felipe", "otra-mala-más!!", "1.1.1.1")); !errors.Is(err, service.ErrInvalidCredentials) {
 			t.Fatalf("5º fallo: %v", err)
 		}
 		g.release <- struct{}{}
-		if err := <-done; !errors.Is(err, service.ErrLocked) {
-			t.Fatalf("%q: esperaba ErrLocked, got %v", candidate, err)
-		}
-		cur := f.reload(t, u.ID)
-		f.advance(service.LockoutFor(5))
-		_, probe := f.login.Execute(ctx, login("felipe", "sonda-incorrecta!", "4.4.4.4"))
-		return state{failed: cur.FailedLogins, until: *cur.LockedUntil, probe: probe}
+		var out []error
+		out = append(out, <-done)
+		// Sondas: justo antes y justo después del minuto, y otra mala después.
+		f.advance(service.LockoutFor(5) - time.Second)
+		_, err := f.login.Execute(ctx, login("felipe", "sonda-incorrecta!", "1.1.1.1"))
+		out = append(out, err)
+		f.advance(time.Second)
+		_, err = f.login.Execute(ctx, login("felipe", "sonda-incorrecta!", "1.1.1.1"))
+		out = append(out, err)
+		_, err = f.login.Execute(ctx, login("felipe", "sonda-incorrecta!", "1.1.1.1"))
+		out = append(out, err)
+		return out
 	}
 	good, bad := run(testPassword), run("contraseña-mala!!")
-	if good.failed != 5 || bad.failed != 5 || !good.until.Equal(bad.until) || !errors.Is(good.probe, bad.probe) {
-		t.Fatalf("correcta=%+v incorrecta=%+v", good, bad)
+	for i := range good {
+		if !errors.Is(good[i], bad[i]) || !errors.Is(bad[i], good[i]) {
+			t.Fatalf("respuesta %d: correcta=%v incorrecta=%v", i, good, bad)
+		}
+	}
+	if !errors.Is(good[0], service.ErrLocked) || !errors.Is(good[2], service.ErrInvalidCredentials) {
+		t.Fatalf("respuestas=%v", good)
 	}
 }
 
@@ -160,7 +164,7 @@ func TestConcurrentCompleteTOTPConsumesOnce(t *testing.T) {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
 	g := newGate()
-	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.clock)
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.clock)
 	code := f.code(t, secret)
 
 	errs := make(chan error, 2)
@@ -198,7 +202,7 @@ func TestCompleteTOTPResetDuringValidation(t *testing.T) {
 	secret := f.enableTOTPFor(t, u.ID)
 	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
 	g := newGate()
-	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.clock)
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, f.cipher, gatedTOTP{f.totp, g}, f.limiter, f.lockout, f.clock)
 
 	done := make(chan error, 1)
 	go func() {

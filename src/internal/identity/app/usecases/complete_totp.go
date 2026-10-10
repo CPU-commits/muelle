@@ -15,7 +15,8 @@ import (
 )
 
 // CompleteTOTP valida el código de una sesión pendiente de MFA y la cambia
-// por una sesión completa con otro token.
+// por una sesión completa con otro token. Los códigos malos cuentan en el
+// bloqueo de login del par (usuario, IP), y solo un código correcto lo reinicia.
 type CompleteTOTP struct {
 	tx       sharedrepo.Transactor
 	users    repository.UserRepository
@@ -23,17 +24,16 @@ type CompleteTOTP struct {
 	cipher   cipher.Cipher
 	totp     service.TOTP
 	limiter  *service.LoginLimiter
+	lockout  *service.LoginLockout
 	clock    clock.Clock
-	failures loginFailures
 	issuer   sessionIssuer
 }
 
 func NewCompleteTOTP(tx sharedrepo.Transactor, users repository.UserRepository, sessions repository.SessionRepository,
-	c cipher.Cipher, totp service.TOTP, limiter *service.LoginLimiter, clk clock.Clock) *CompleteTOTP {
+	c cipher.Cipher, totp service.TOTP, limiter *service.LoginLimiter, lockout *service.LoginLockout, clk clock.Clock) *CompleteTOTP {
 	return &CompleteTOTP{
-		tx: tx, users: users, sessions: sessions, cipher: c, totp: totp, limiter: limiter, clock: clk,
-		failures: loginFailures{tx: tx, users: users, clock: clk},
-		issuer:   sessionIssuer{sessions: sessions, clock: clk},
+		tx: tx, users: users, sessions: sessions, cipher: c, totp: totp, limiter: limiter, lockout: lockout, clock: clk,
+		issuer: sessionIssuer{sessions: sessions, clock: clk},
 	}
 }
 
@@ -59,7 +59,7 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 	if err != nil {
 		return dto.SessionOutput{}, err
 	}
-	if u.LockedAt(now) {
+	if uc.lockout.Locked(u.Username, in.IP) {
 		return dto.SessionOutput{}, service.ErrLocked
 	}
 	if !u.HasTOTP() {
@@ -74,11 +74,7 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 		return dto.SessionOutput{}, err
 	}
 	if !uc.totp.Validate(in.Code, string(secret), now) {
-		wasLocked, err := uc.failures.register(ctx, u.ID)
-		if err != nil {
-			return dto.SessionOutput{}, err
-		}
-		if wasLocked {
+		if uc.lockout.Fail(u.Username, in.IP) {
 			return dto.SessionOutput{}, service.ErrLocked
 		}
 		return dto.SessionOutput{}, service.ErrInvalidCode
@@ -86,10 +82,9 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 
 	// El canje se decide de nuevo dentro de la transacción (BEGIN IMMEDIATE),
 	// con el estado actual: dos canjes a la vez de la misma sesión, un
-	// bloqueo o un reinicio del 2FA mientras se validaba el código no abren sesión.
+	// reinicio del 2FA o un bloqueo mientras se validaba el código no abren sesión.
 	var out dto.SessionOutput
 	err = uc.tx.InTx(ctx, func(ctx context.Context) error {
-		now := uc.clock.Now()
 		cur, err := uc.users.GetByID(ctx, u.ID)
 		if errors.Is(err, sharedrepo.ErrNotFound) {
 			return shared.ErrUnauthenticated
@@ -97,20 +92,20 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 		if err != nil {
 			return err
 		}
-		if cur.LockedAt(now) {
-			return service.ErrLocked
-		}
 		if !bytes.Equal(cur.TOTPSecret, u.TOTPSecret) {
 			return shared.ErrUnauthenticated // el código se validó contra un secreto que ya no está activo
 		}
-		if err := uc.sessions.ConsumePending(ctx, ss.IDHash, now); err != nil {
+		if err := uc.sessions.ConsumePending(ctx, ss.IDHash, uc.clock.Now()); err != nil {
 			if errors.Is(err, sharedrepo.ErrNotFound) {
 				return shared.ErrUnauthenticated // ya se canjeó o venció
 			}
 			return err
 		}
-		if err := uc.failures.reset(ctx, cur); err != nil {
-			return err
+		// Bajo el mutex del bloqueo: si otro intento bloqueó el par mientras
+		// tanto, "bloqueado" sin cambiar nada (y el rollback devuelve la sesión
+		// pendiente). Si no, el código correcto reinicia los fallos.
+		if !uc.lockout.Succeed(u.Username, in.IP, true) {
+			return service.ErrLocked
 		}
 		out, err = uc.issuer.issue(ctx, cur, false, in.IP, in.UserAgent)
 		return err

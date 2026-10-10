@@ -3,6 +3,7 @@ package usecases
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -129,53 +130,92 @@ func TestLoginFailuresLockAndReset(t *testing.T) {
 	if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); err != nil {
 		t.Fatalf("tras el bloqueo: %v", err)
 	}
-	u, _ := f.users.GetByUsername(ctx, "felipe")
-	if u.FailedLogins != 0 || u.LockedUntil != nil {
-		t.Fatalf("el login correcto debe resetear los fallos: %+v", u)
+	// El login correcto reinició los fallos: 4 más no bloquean.
+	for range 4 {
+		f.login.Execute(ctx, login("felipe", "contraseña-mala!!", "1.1.1.1"))
+	}
+	if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); err != nil {
+		t.Fatalf("el login correcto debe reiniciar los fallos: %v", err)
 	}
 }
 
-// Los fallos se guardan aunque el login devuelva un error: InTx deshace todo
-// cuando fn devuelve un error, así que el contador se confirma aparte.
-func TestFailedLoginsPersist(t *testing.T) {
+// El calendario del bloqueo se respeta de punta a punta: 5 fallos, 1 min; el
+// 6º, 2 min; el 7º, 4 min.
+func TestLoginLockoutSchedule(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	u := f.user(t, "felipe")
-
-	for n := 1; n <= 7; n++ {
+	f.user(t, "felipe")
+	for range 4 {
 		f.login.Execute(ctx, login("felipe", "contraseña-mala!!", "1.1.1.1"))
-		got := f.reload(t, u.ID)
-		if got.FailedLogins != n {
-			t.Fatalf("tras %d fallos, failed_logins=%d", n, got.FailedLogins)
-		}
-		if want := service.LockoutFor(n); want > 0 {
-			if got.LockedUntil == nil || !got.LockedUntil.Equal(f.now().Add(want)) {
-				t.Fatalf("tras %d fallos, locked_until=%v, esperaba ahora + %v", n, got.LockedUntil, want)
-			}
-			// Mientras dura el bloqueo ni se verifica la contraseña; se espera a que pase.
-			f.advance(want)
-		}
 	}
-	if got := f.reload(t, u.ID); got.FailedLogins != 7 {
-		t.Fatalf("failed_logins=%d", got.FailedLogins)
+	for n := 5; n <= 7; n++ {
+		if _, err := f.login.Execute(ctx, login("felipe", "contraseña-mala!!", "1.1.1.1")); !errors.Is(err, service.ErrInvalidCredentials) {
+			t.Fatalf("fallo %d: got %v", n, err)
+		}
+		d := service.LockoutFor(n)
+		f.advance(d - time.Second)
+		if _, err := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1")); !errors.Is(err, service.ErrLocked) {
+			t.Fatalf("con %d fallos sigue bloqueado hasta %v: got %v", n, d, err)
+		}
+		f.advance(time.Second)
 	}
 }
 
-// Un cliente que corta la conexión cancela el ctx del request: el fallo
-// igual se guarda.
-func TestLoginFailureSurvivesCanceledContext(t *testing.T) {
+// El bloqueo es por usuario e IP: un atacante que se equivoca desde su IP
+// solo se bloquea a sí mismo, y el usuario entra desde la suya.
+func TestAttackerLocksOnlyItself(t *testing.T) {
 	f := newFixture(t)
-	u := f.user(t, "felipe")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	ctx := context.Background()
+	f.user(t, "admin")
 	for range 5 {
-		if _, err := f.login.failures.register(ctx, u.ID); err != nil {
-			t.Fatal(err)
+		f.login.Execute(ctx, login("admin", "contraseña-mala!!", "203.0.113.9"))
+	}
+	if _, err := f.login.Execute(ctx, login("admin", testPassword, "203.0.113.9")); !errors.Is(err, service.ErrLocked) {
+		t.Fatalf("el atacante queda bloqueado: got %v", err)
+	}
+	if _, err := f.login.Execute(ctx, login("admin", testPassword, "198.51.100.1")); err != nil {
+		t.Fatalf("el admin entra desde otra IP: %v", err)
+	}
+}
+
+// Una IPv6 cuenta por su /64: rotar direcciones del mismo /64 no ayuda.
+func TestLoginLockoutGroupsIPv6By64(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.user(t, "admin")
+	for i := range 5 {
+		f.login.Execute(ctx, login("admin", "contraseña-mala!!", fmt.Sprintf("2001:db8:1:2::%x", i+1)))
+	}
+	if _, err := f.login.Execute(ctx, login("admin", testPassword, "2001:db8:1:2:ffff::1")); !errors.Is(err, service.ErrLocked) {
+		t.Fatalf("otra dirección del mismo /64: got %v", err)
+	}
+	if _, err := f.login.Execute(ctx, login("admin", testPassword, "2001:db8:1:3::1")); err != nil {
+		t.Fatalf("otro /64 entra: %v", err)
+	}
+}
+
+// Un usuario que no existe recibe exactamente las mismas respuestas que uno
+// que existe con una contraseña mala: 423 locked no revela qué usuarios hay.
+func TestUnknownAndKnownUsersGetSameResponses(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.user(t, "felipe")
+	sequence := func(username, ip string) []error {
+		var out []error
+		for range 7 {
+			_, err := f.login.Execute(ctx, login(username, "contraseña-mala!!", ip))
+			out = append(out, err)
+		}
+		return out
+	}
+	known, unknown := sequence("felipe", "1.1.1.1"), sequence("nadie", "2.2.2.2")
+	for i := range known {
+		if !errors.Is(unknown[i], known[i]) || !errors.Is(known[i], unknown[i]) {
+			t.Fatalf("intento %d: existe=%v, no existe=%v", i+1, known[i], unknown[i])
 		}
 	}
-	got := f.reload(t, u.ID)
-	if got.FailedLogins != 5 || !got.LockedAt(f.now()) {
-		t.Fatalf("u=%+v", got)
+	if !errors.Is(known[4], service.ErrInvalidCredentials) || !errors.Is(known[5], service.ErrLocked) {
+		t.Fatalf("secuencia=%v", known)
 	}
 }
 

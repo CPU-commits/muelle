@@ -18,8 +18,8 @@ func TestNewUser(t *testing.T) {
 	if err != nil || u.Username != "felipe" || u.PasswordHash != "hash" || *u.CreatedBy != 3 || !u.CreatedAt.Equal(t0) {
 		t.Fatalf("u=%+v err=%v", u, err)
 	}
-	if u.HasTOTP() || u.HasPendingTOTP() || u.LockedAt(t0) {
-		t.Fatalf("un usuario nuevo no tiene 2FA ni bloqueo: %+v", u)
+	if u.HasTOTP() || u.HasPendingTOTP() {
+		t.Fatalf("un usuario nuevo no tiene 2FA: %+v", u)
 	}
 	for _, bad := range []string{"", "ab", "Felipe", "con espacio", strings.Repeat("a", 33)} {
 		_, err := NewUser(bad, "hash", nil, t0)
@@ -29,7 +29,7 @@ func TestNewUser(t *testing.T) {
 	}
 }
 
-func TestUserTOTPAndLock(t *testing.T) {
+func TestUserTOTP(t *testing.T) {
 	u := User{TOTPSecret: []byte("x")}
 	if !u.HasTOTP() || u.HasPendingTOTP() {
 		t.Fatalf("u=%+v", u)
@@ -37,15 +37,6 @@ func TestUserTOTPAndLock(t *testing.T) {
 	u = User{TOTPPending: []byte("x")}
 	if u.HasTOTP() || !u.HasPendingTOTP() {
 		t.Fatalf("u=%+v", u)
-	}
-
-	until := t0.Add(time.Minute)
-	u = User{LockedUntil: &until}
-	if !u.LockedAt(t0) || !u.LockedAt(until.Add(-time.Millisecond)) {
-		t.Fatal("antes de locked_until debe estar bloqueado")
-	}
-	if u.LockedAt(until) || u.LockedAt(until.Add(time.Second)) {
-		t.Fatal("desde locked_until ya no está bloqueado")
 	}
 }
 

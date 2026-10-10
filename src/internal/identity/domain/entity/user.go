@@ -19,8 +19,6 @@ type User struct {
 	TOTPPending  []byte // cifrado; generado y esperando que lo confirme con un código
 	CreatedBy    *int64 // nil: el primer usuario, o su creador ya no existe
 	CreatedAt    time.Time
-	FailedLogins int
-	LockedUntil  *time.Time
 }
 
 // NewUser valida el nombre y arma un usuario nuevo, todavía sin id.
@@ -36,8 +34,3 @@ func (u User) HasTOTP() bool { return len(u.TOTPSecret) > 0 }
 
 // HasPendingTOTP dice si hay un secreto generado que todavía no confirmó.
 func (u User) HasPendingTOTP() bool { return len(u.TOTPPending) > 0 }
-
-// LockedAt dice si en now el usuario sigue bloqueado por intentos fallidos.
-func (u User) LockedAt(now time.Time) bool {
-	return u.LockedUntil != nil && now.Before(*u.LockedUntil)
-}
