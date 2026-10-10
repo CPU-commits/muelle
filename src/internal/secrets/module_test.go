@@ -264,11 +264,7 @@ func TestEnvAPIDecryptFailure(t *testing.T) {
 	httptestutil.Expect(t, c.Do("PUT", appEnv, map[string]any{"vars": map[string]string{"DATABASE_URL": "postgres://x"}, "secret": false}, session), http.StatusNoContent)
 
 	// Mover la fila de la app a su stage: la AAD ya no coincide.
-	var stageID int64
-	if err := e.db.Conn(ctx).QueryRowContext(ctx,
-		`SELECT s.id FROM stages s JOIN projects p ON p.id = s.project_id WHERE p.slug = 'auditfy' AND s.slug = 'staging'`).Scan(&stageID); err != nil {
-		t.Fatal(err)
-	}
+	stageID := seedtest.StageID(t, e.db, "auditfy", "staging")
 	if _, err := e.db.Conn(ctx).ExecContext(ctx, `UPDATE env_vars SET stage_id = ?, app_id = NULL WHERE key = 'DATABASE_URL'`, stageID); err != nil {
 		t.Fatal(err)
 	}
@@ -319,16 +315,12 @@ func TestEnvAPILimits(t *testing.T) {
 	}
 }
 
-// Un PATCH que solo borra claves que no existen responde 204, pero no marca
-// apps ni deja auditoría.
+// Un PATCH que no cambia nada (unset de claves que no existen, o set con el
+// mismo valor y secret) responde 204, pero no marca apps ni deja auditoría.
 func TestEnvAPINoopPatch(t *testing.T) {
 	e := newTestEnv(t)
 	c := e.client
-	ctx := context.Background()
-	var appID int64
-	if err := e.db.Conn(ctx).QueryRowContext(ctx, `SELECT id FROM apps WHERE slug = 'api' ORDER BY id LIMIT 1`).Scan(&appID); err != nil {
-		t.Fatal(err)
-	}
+	appID := seedtest.AppID(t, e.db, "auditfy", "staging", "api")
 	httptestutil.Expect(t, c.Do("PATCH", stageEnv, map[string]any{"unset": []string{"NOPE"}}, session), http.StatusNoContent)
 	httptestutil.Expect(t, c.Do("PATCH", appEnv, map[string]any{"unset": []string{"NOPE"}}, session), http.StatusNoContent)
 	if !seedtest.ConfigChangedAt(t, e.db, appID).Equal(seedtest.T0) {
@@ -336,6 +328,51 @@ func TestEnvAPINoopPatch(t *testing.T) {
 	}
 	if events := e.audit(t); len(events) != 0 {
 		t.Fatalf("un PATCH sin cambios no se audita: %+v", events)
+	}
+
+	httptestutil.Expect(t, c.Do("PUT", appEnv, map[string]any{"vars": map[string]string{"A": "1"}}, session), http.StatusNoContent)
+	putAt := e.clock.Now()
+	e.clock.Advance(time.Minute)
+	httptestutil.Expect(t, c.Do("PATCH", appEnv, map[string]any{"set": map[string]string{"A": "1"}, "secret": true}, session), http.StatusNoContent)
+	if !seedtest.ConfigChangedAt(t, e.db, appID).Equal(putAt) {
+		t.Fatal("un set con el mismo valor y secret no marca la app")
+	}
+	if events := e.audit(t); len(events) != 1 {
+		t.Fatalf("un set sin cambios no se audita: %+v", events)
+	}
+}
+
+// La única lectura que le queda a PATCH es descifrar las claves de set que ya
+// existen, para ver si cambian. Una fila rota no lo bloquea: se puede agregar
+// otra variable, y sobrescribirla la arregla.
+func TestEnvAPIPatchOverBrokenRow(t *testing.T) {
+	e := newTestEnv(t)
+	c := e.client
+	ctx := context.Background()
+	httptestutil.Expect(t, c.Do("PUT", stageEnv, map[string]any{"vars": map[string]string{"BROKEN": "viejo"}, "secret": false}, session), http.StatusNoContent)
+	// Mover la fila del stage a la app: con la AAD de la app no descifra.
+	appID := seedtest.AppID(t, e.db, "auditfy", "staging", "api")
+	if _, err := e.db.Conn(ctx).ExecContext(ctx, `UPDATE env_vars SET app_id = ?, stage_id = NULL WHERE key = 'BROKEN'`, appID); err != nil {
+		t.Fatal(err)
+	}
+	w := c.Do("GET", appEnv, nil, session)
+	if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "viejo") {
+		t.Fatalf("GET con una fila rota: %d %s", w.Code, w.Body.String())
+	}
+
+	httptestutil.Expect(t, c.Do("PATCH", appEnv, map[string]any{"set": map[string]string{"OTHER": "y"}, "secret": false}, session), http.StatusNoContent)
+	// El mismo valor: no descifrar cuenta como cambio, así que se reescribe.
+	w = c.Do("PATCH", appEnv, map[string]any{"set": map[string]string{"BROKEN": "viejo"}, "secret": false}, session)
+	httptestutil.Expect(t, w, http.StatusNoContent)
+	if strings.Contains(w.Body.String(), "viejo") {
+		t.Fatalf("la respuesta filtró el valor: %s", w.Body.String())
+	}
+
+	w = c.Do("GET", appEnv, nil, session)
+	httptestutil.Expect(t, w, http.StatusOK)
+	vars := httptestutil.Decode[map[string][]map[string]any](t, w)["vars"]
+	if len(vars) != 2 || vars[0]["key"] != "BROKEN" || vars[0]["value"] != "viejo" || vars[1]["value"] != "y" {
+		t.Fatalf("vars=%v", vars)
 	}
 }
 
