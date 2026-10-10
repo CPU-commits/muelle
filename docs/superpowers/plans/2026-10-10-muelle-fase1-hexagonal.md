@@ -760,7 +760,7 @@ type Job struct {
 	Run   func(ctx context.Context) error
 }
 
-// Run ejecuta cada job cada Every (la primera vez después de Every) hasta que
+// Run ejecuta cada job una vez al arrancar y después cada Every, hasta que
 // ctx se cancele. Un error se registra en el log y no detiene al job. Bloquea hasta que ctx termina.
 func Run(ctx context.Context, jobs []Job, log *slog.Logger)
 ```
@@ -934,7 +934,7 @@ func (m *Module) RegisterRoutes(k *utils.Kit)
 
 Detalles:
 - Las apps de formulario guardan el spec **normalizado**. Las compose solo se validan como no vacías y de hasta 256 KiB (`validateCompose` de la Tarea 20 ref).
-- `GetApp` y `ListApps` devuelven `pending_changes` (`config_changed_at > last_deployed_at`, o sin deploy).
+- `GetApp` y `ListApps` devuelven `pending_changes` (`config_changed_at > last_deployed_at`; una app sin deploys no tiene cambios pendientes, spec §5.2 regla 4).
 - Cambiar el spec o el compose actualiza `config_changed_at`.
 - Auditoría con las mismas acciones que la referencia.
 
@@ -1112,6 +1112,8 @@ Portar de la Tarea 23 (ref) `main`, `serve` y `genkey`, con estos cambios:
   - setup → login → crear proyecto, stage y app → crear token de CI → `PUT …/env` con el token → `GET …/env` enmascarado → token de otro stage da 403;
   - al final, `unset` de las variables `MUELLE_*` exportadas.
 - [ ] **Step 3:** Commit del test: `test: matriz de alcance de tokens con todos los módulos`.
+
+**Nota:** el backup se llama `muelle-AAAA-MM-DD.db` (Task M-admin), no `muelle-AAAAMMDD-HHMMSS.db` como espera el flujo de la Tarea 23 (ref). Ajustar esa expectativa al correr el flujo `curl`.
 
 ### Task I4: CI y README
 
