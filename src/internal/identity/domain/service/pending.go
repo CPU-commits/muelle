@@ -62,18 +62,12 @@ func (p *PendingCodeAttempts) Forget(sessionHash string) {
 }
 
 // makeRoom se llama con el mapa lleno: borra las sesiones vencidas y, si no
-// alcanza, cualquiera hasta dejar un cuarto libre.
+// alcanza, las que vencen antes hasta dejar un cuarto libre.
 func (p *PendingCodeAttempts) makeRoom(now time.Time) {
 	for k, e := range p.entries {
 		if !now.Before(e.expires) {
 			delete(p.entries, k)
 		}
 	}
-	target := p.maxKeys * 3 / 4
-	for k := range p.entries {
-		if len(p.entries) <= target {
-			return
-		}
-		delete(p.entries, k)
-	}
+	evictSoonest(p.entries, p.maxKeys*3/4, func(e pendingEntry) time.Time { return e.expires })
 }

@@ -87,6 +87,29 @@ func TestLoginLimiterIsBounded(t *testing.T) {
 	}
 }
 
+// Con el mapa lleno se desalojan las ventanas que vencen antes, nunca
+// cualquiera.
+func TestLoginLimiterEvictsSoonestEnding(t *testing.T) {
+	c := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	l := NewLoginLimiter(1, 15*time.Minute, c)
+	l.maxIPs = 100
+	for i := range 100 {
+		l.Allow(fmt.Sprintf("10.0.0.%d", i)) // la ventana de cada una vence un segundo después que la anterior
+		c.Advance(time.Second)
+	}
+	l.Allow("10.0.1.1")
+	// Se fueron las 25 más viejas (hasta dejar 3/4) y quedaron las demás.
+	for i := range 100 {
+		_, ok := l.hits[fmt.Sprintf("10.0.0.%d", i)]
+		if want := i >= 25; ok != want {
+			t.Fatalf("10.0.0.%d: en el mapa=%v, esperaba %v", i, ok, want)
+		}
+	}
+	if l.Allow("10.0.0.99") {
+		t.Fatal("la IP con la ventana más nueva sigue limitada")
+	}
+}
+
 func TestLoginLimiterCapsKeyLength(t *testing.T) {
 	c := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	l := NewLoginLimiter(1, 15*time.Minute, c)

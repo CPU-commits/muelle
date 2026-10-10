@@ -133,28 +133,20 @@ func (l *progressiveLock) succeed(key string) bool {
 }
 
 // makeRoom se llama con el mapa lleno. Primero olvida las claves viejas (sin
-// bloqueo vigente ni fallos recientes); si no alcanza, desaloja claves que no
-// están bloqueadas y, en último caso, cualquiera, hasta dejar un cuarto libre
-// para que el barrido no se repita en cada clave nueva.
+// bloqueo vigente ni fallos recientes); si no alcanza, desaloja las que
+// vencen antes, hasta dejar un cuarto libre para que el barrido no se repita
+// en cada clave nueva: primero las que no están bloqueadas (la de fallo más
+// viejo primero) y después los bloqueos que terminan antes.
 func (l *progressiveLock) makeRoom(now time.Time) {
 	for k, e := range l.entries {
 		if !now.Before(e.lockedUntil) && now.Sub(e.lastFailure) >= lockoutForget {
 			delete(l.entries, k)
 		}
 	}
-	target := l.maxKeys * 3 / 4
-	for k, e := range l.entries {
-		if len(l.entries) <= target {
-			return
+	evictSoonest(l.entries, l.maxKeys*3/4, func(e lockEntry) time.Time {
+		if now.Before(e.lockedUntil) {
+			return e.lockedUntil
 		}
-		if !now.Before(e.lockedUntil) {
-			delete(l.entries, k)
-		}
-	}
-	for k := range l.entries {
-		if len(l.entries) <= target {
-			return
-		}
-		delete(l.entries, k)
-	}
+		return e.lastFailure // sin bloqueo vigente: siempre antes que cualquier bloqueo
+	})
 }

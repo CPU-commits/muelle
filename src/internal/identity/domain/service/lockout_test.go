@@ -123,6 +123,25 @@ func TestLockoutKey(t *testing.T) {
 	}
 }
 
+// Con el mapa lleno de bloqueos, se desalojan los que vencen antes: un
+// bloqueo largo sobrevive a una avalancha de claves nuevas.
+func TestLockoutLongLockSurvivesFlood(t *testing.T) {
+	l, c := newLockout()
+	l.l.maxKeys = 8
+	long := lockoutKey("admin", "203.0.113.9")
+	l.l.entries[long] = lockEntry{failures: 11, lockedUntil: c.Now().Add(time.Hour), lastFailure: c.Now()}
+	for i := range 200 {
+		ip := fmt.Sprintf("10.0.%d.%d", i/250, i%250)
+		for range 5 {
+			l.Fail("nadie", ip) // cada una queda bloqueada 1 min
+		}
+		c.Advance(time.Second)
+	}
+	if !l.Locked("admin", "203.0.113.9") {
+		t.Fatal("el bloqueo de 1 h no debió desalojarse")
+	}
+}
+
 // El mapa tiene un tamaño máximo. Con el mapa lleno se olvidan primero los
 // pares viejos, después los que no están bloqueados; un bloqueo vigente es
 // lo último que se desaloja.

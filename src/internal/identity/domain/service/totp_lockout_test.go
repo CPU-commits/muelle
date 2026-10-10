@@ -67,6 +67,23 @@ func TestPendingCodeAttempts(t *testing.T) {
 	}
 }
 
+// Con el mapa lleno se desalojan las sesiones que vencen antes.
+func TestPendingCodeAttemptsEvictsSoonestExpiring(t *testing.T) {
+	c := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	p := NewPendingCodeAttempts(c)
+	p.maxKeys = 100
+	for i := range 100 {
+		p.Fail(fmt.Sprintf("s%d", i), c.Now().Add(time.Duration(i+1)*time.Second))
+	}
+	p.Fail("nueva", c.Now().Add(MFAPendingTTL))
+	for i := range 100 {
+		_, ok := p.entries[fmt.Sprintf("s%d", i)]
+		if want := i >= 25; ok != want {
+			t.Fatalf("s%d: en el mapa=%v, esperaba %v", i, ok, want)
+		}
+	}
+}
+
 func TestPendingCodeAttemptsIsBounded(t *testing.T) {
 	c := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	p := NewPendingCodeAttempts(c)
