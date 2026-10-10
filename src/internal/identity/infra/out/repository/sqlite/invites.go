@@ -23,8 +23,11 @@ func (r *InviteRepository) Create(ctx context.Context, inv entity.Invite) error 
 	_, err := r.db.Conn(ctx).ExecContext(ctx,
 		`INSERT INTO invites (token_hash, created_by, expires_at, used_at) VALUES (?, ?, ?, ?)`,
 		inv.TokenHash, nullInt(inv.CreatedBy), sqlitedb.Millis(inv.ExpiresAt), sqlitedb.NullMillis(inv.UsedAt))
-	if sqlitedb.IsUnique(err) {
+	switch {
+	case sqlitedb.IsUnique(err):
 		return sharedrepo.ErrConflict
+	case sqlitedb.IsForeignKey(err):
+		return sharedrepo.ErrNotFound // el creador ya no existe
 	}
 	return err
 }

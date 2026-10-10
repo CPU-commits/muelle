@@ -8,6 +8,7 @@ import (
 )
 
 type InviteRepository interface {
+	// Create guarda la invitación. Si su creador ya no existe devuelve ErrNotFound.
 	Create(ctx context.Context, inv entity.Invite) error
 	GetByTokenHash(ctx context.Context, tokenHash string) (entity.Invite, error)
 	// MarkUsed marca la invitación como usada en at. Si no existe o ya estaba

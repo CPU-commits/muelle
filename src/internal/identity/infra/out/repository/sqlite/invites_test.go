@@ -46,6 +46,15 @@ func TestInvites(t *testing.T) {
 	}
 }
 
+// Un creador que ya no existe (lo borraron mientras tanto) no es un error 500.
+func TestCreateInviteWithMissingCreator(t *testing.T) {
+	r := newRepos(t)
+	missing := int64(999)
+	if err := r.invites.Create(context.Background(), entity.NewInvite("inv", &missing, t0, time.Hour)); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("esperaba ErrNotFound, got %v", err)
+	}
+}
+
 func TestDeleteUnusedSystemInvites(t *testing.T) {
 	r := newRepos(t)
 	ctx := context.Background()

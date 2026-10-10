@@ -10,6 +10,7 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
+	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 	sharedrepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
@@ -225,6 +226,21 @@ func TestSetupRequiresSystemInvite(t *testing.T) {
 	f.rawExec(t, "DELETE FROM users WHERE id = ?", felipe.ID)
 	if _, err := f.setup.Execute(ctx, accept("de-felipe", "ana", testPassword)); !errors.Is(err, service.ErrInviteInvalid) {
 		t.Fatalf("esperaba ErrInviteInvalid, got %v", err)
+	}
+}
+
+// Quien pide la invitación fue borrado mientras su petición estaba en curso:
+// 401, no un 500 por la clave foránea.
+func TestCreateInviteByDeletedUser(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	gone := f.user(t, "ana")
+	f.users.Delete(ctx, gone.ID)
+	if _, err := f.createInvite.Execute(ctx, dto.CreateInviteInput{CreatedBy: gone.ID, CreatorUsername: "ana"}); !errors.Is(err, shared.ErrUnauthenticated) {
+		t.Fatalf("esperaba ErrUnauthenticated, got %v", err)
+	}
+	if rows := f.auditRows(t); len(rows) != 0 {
+		t.Fatalf("audit=%+v", rows)
 	}
 }
 

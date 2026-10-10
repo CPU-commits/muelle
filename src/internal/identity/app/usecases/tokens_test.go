@@ -216,6 +216,22 @@ func TestTokenScopes(t *testing.T) {
 	}
 }
 
+// Quien pide el token fue borrado mientras su petición estaba en curso: 401,
+// no un 404 que haría pensar que falta el proyecto.
+func TestCreateTokenByDeletedUser(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	gone := f.user(t, "ana")
+	f.project(t, "auditfy")
+	f.users.Delete(ctx, gone.ID)
+	if _, err := f.createToken.Execute(ctx, newToken("ci", "auditfy", "", gone.ID, 0)); !errors.Is(err, shared.ErrUnauthenticated) {
+		t.Fatalf("esperaba ErrUnauthenticated, got %v", err)
+	}
+	if list, _ := f.listTokens.Execute(ctx); len(list) != 0 {
+		t.Fatalf("list=%+v", list)
+	}
+}
+
 // Un token de stage cuyo stage desapareció (borrado con foreign_keys=OFF) no
 // autentica: no puede volverse un token de todo el proyecto.
 func TestAuthenticateTokenWithOrphanedStage(t *testing.T) {
