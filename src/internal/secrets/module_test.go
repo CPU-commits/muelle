@@ -225,18 +225,26 @@ func TestEnvAPINullBodyKeepsVars(t *testing.T) {
 	c := e.client
 	httptestutil.Expect(t, c.Do("PUT", appEnv, map[string]any{"vars": map[string]string{"A": "1"}, "secret": false}, session), http.StatusNoContent)
 
-	for _, tc := range []struct{ method, body string }{
-		{"PUT", "null"},
-		{"PUT", "{}"},
-		{"PUT", `{"secret":false}`},
-		{"PUT", `{"vars":null}`},
-		{"PATCH", "null"},
-		{"PATCH", `{"set":null,"unset":null}`},
-		{"PATCH", `{"set":{},"unset":[]}`},
+	for _, tc := range []struct {
+		method, body string
+		status       int
+		code         string
+	}{
+		// DecodeJSON solo acepta objetos: un null ni siquiera llega al caso de uso.
+		{"PUT", "null", 400, "invalid_json"},
+		{"PATCH", "null", 400, "invalid_json"},
+		{"PUT", "[]", 400, "invalid_json"},
+		// Un objeto sin vars, o un PATCH vacío, lo rechaza el caso de uso.
+		{"PUT", "{}", 422, "invalid"},
+		{"PUT", `{"secret":false}`, 422, "invalid"},
+		{"PUT", `{"vars":null}`, 422, "invalid"},
+		{"PATCH", "{}", 422, "invalid"},
+		{"PATCH", `{"set":null,"unset":null}`, 422, "invalid"},
+		{"PATCH", `{"set":{},"unset":[]}`, 422, "invalid"},
 	} {
 		w := c.Do(tc.method, appEnv, tc.body, session)
-		if w.Code != http.StatusUnprocessableEntity || httptestutil.ErrorCode(t, w) != "invalid" {
-			t.Errorf("%s %s: %d %s", tc.method, tc.body, w.Code, w.Body.String())
+		if w.Code != tc.status || httptestutil.ErrorCode(t, w) != tc.code {
+			t.Errorf("%s %s: %d %s, esperaba %d %s", tc.method, tc.body, w.Code, w.Body.String(), tc.status, tc.code)
 		}
 	}
 
