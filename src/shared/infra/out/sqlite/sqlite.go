@@ -23,7 +23,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	msqlite "modernc.org/sqlite"
@@ -48,31 +47,23 @@ type DB struct {
 
 var _ repository.Transactor = (*DB)(nil)
 
-// txKey guarda en el ctx la transacción de una base concreta (un *txState).
+// txKey guarda en el ctx la *sql.Tx de una base concreta. Un ctx creado
+// dentro de una transacción la sigue llevando aunque termine: así quien lo use
+// tarde recibe sql.ErrTxDone, en vez de escribir fuera de la transacción.
 type txKey struct{ d *DB }
-
-// txState es la transacción que InTx deja en el ctx. done se marca cuando la
-// transacción termina: un ctx que sobrevive a InTx (ej. una goroutine con
-// context.WithoutCancel) vuelve a usar la base en vez de una *sql.Tx cerrada.
-type txState struct {
-	tx   *sql.Tx
-	done atomic.Bool
-}
-
-// activeTx devuelve la transacción en curso de d en ctx, si hay una sin terminar.
-func (d *DB) activeTx(ctx context.Context) (*sql.Tx, bool) {
-	st, ok := ctx.Value(txKey{d}).(*txState)
-	if !ok || st.done.Load() {
-		return nil, false
-	}
-	return st.tx, true
-}
 
 // Open abre la base en path con WAL, claves foráneas, busy_timeout de 5 s y
 // transacciones IMMEDIATE (los escritores esperan en vez de fallar con SQLITE_BUSY).
-// Si el archivo no existe lo crea con permisos 0600; si existe, se los pone.
-// SQLite crea los archivos -wal y -shm con los mismos permisos.
+// Si el archivo no existe lo crea con permisos 0600; si existe, se los pone,
+// también a un -wal o -shm que haya quedado. SQLite crea los -wal y -shm
+// nuevos con los permisos de la base.
+//
+// path va dentro de una URI file:, así que rechaza ":memory:" y las rutas con
+// "?" o "#", que cambiarían las opciones de la conexión.
 func Open(path string) (*DB, error) {
+	if path == ":memory:" || strings.ContainsAny(path, "?#") {
+		return nil, fmt.Errorf("sqlite: la ruta %q no sirve: tiene que ser un archivo, sin '?' ni '#'", path)
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: abriendo %s: %w", path, err)
@@ -80,6 +71,11 @@ func Open(path string) (*DB, error) {
 	f.Close()
 	if err := os.Chmod(path, 0o600); err != nil {
 		return nil, fmt.Errorf("sqlite: permisos de %s: %w", path, err)
+	}
+	for _, sidecar := range []string{path + "-wal", path + "-shm"} {
+		if err := os.Chmod(sidecar, 0o600); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("sqlite: permisos de %s: %w", sidecar, err)
+		}
 	}
 	dsn := "file:" + path +
 		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
@@ -163,38 +159,33 @@ func (d *DB) Migrate(ctx context.Context) error {
 //   - Cualquier error de fn hace rollback de todo. Lo que debe quedar aunque la
 //     operación falle (ej. el contador de intentos fallidos de un login) se
 //     guarda en su propio InTx, y el error de dominio se devuelve fuera de él.
-//   - Usa solo el ctx que recibe fn. Una escritura con el ctx de afuera va por
-//     otra conexión, que espera el lock de esta transacción hasta el
-//     busy_timeout y falla con SQLITE_BUSY.
-//   - Si ctx ya trae una transacción en curso de esta base, fn corre dentro de
-//     ella, sin savepoints: un error del InTx interno que el externo ignora no
-//     deshace lo que escribió el interno.
+//   - Dentro de fn usa solo el ctx que recibe fn. Una escritura con el ctx de
+//     afuera va por otra conexión, que espera el lock de esta transacción hasta
+//     el busy_timeout y falla con SQLITE_BUSY.
+//   - Si ctx ya trae una transacción de esta base, fn corre dentro de ella, sin
+//     savepoints: un error del InTx interno que el externo ignora no deshace lo
+//     que escribió el interno.
+//   - El ctx de fn, y todo ctx derivado de él (también con
+//     context.WithoutCancel), sigue apuntando a esta transacción después de que
+//     termine: sus consultas, y un InTx con él, fallan con sql.ErrTxDone. Una
+//     goroutine que trabaje con la base arranca con un ctx derivado de afuera
+//     de la transacción (ej. context.WithoutCancel(ctxExterno)), o recién
+//     después de que InTx vuelva; nunca con el ctx de fn.
 //   - Nunca limites el pool con SetMaxOpenConns(1): una consulta con un ctx sin
 //     la transacción esperaría para siempre una conexión libre, en vez de
 //     fallar por busy_timeout.
-//
-// Cuando InTx termina, el ctx de fn deja de llevar la transacción: si alguien
-// lo conserva (ej. context.WithoutCancel en una goroutine), Conn devuelve la
-// base y un InTx con él abre una transacción nueva.
 func (d *DB) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
-	if _, ok := d.activeTx(ctx); ok {
+	if _, ok := ctx.Value(txKey{d}).(*sql.Tx); ok {
 		return fn(ctx)
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("sqlite: iniciando la transacción: %w", err)
 	}
-	st := &txState{tx: tx}
-	defer func() {
-		// También si fn hizo panic. Después de un Commit exitoso, Rollback no
-		// hace nada (sql.ErrTxDone).
-		st.done.Store(true)
-		tx.Rollback()
-	}()
-	err = fn(context.WithValue(ctx, txKey{d}, st))
-	// Se marca antes del Commit: desde aquí, quien conserve el ctx usa la base.
-	st.done.Store(true)
-	if err != nil {
+	// También si fn hace panic. Después de un Commit exitoso, Rollback no hace
+	// nada (sql.ErrTxDone).
+	defer tx.Rollback()
+	if err := fn(context.WithValue(ctx, txKey{d}, tx)); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -203,10 +194,10 @@ func (d *DB) InTx(ctx context.Context, fn func(ctx context.Context) error) error
 	return nil
 }
 
-// Conn devuelve la transacción en curso del ctx si hay una; si no (o si ya
-// terminó), la base.
+// Conn devuelve la transacción del ctx si trae una, aunque ya haya terminado
+// (sus consultas fallan entonces con sql.ErrTxDone); si no, la base.
 func (d *DB) Conn(ctx context.Context) Executor {
-	if tx, ok := d.activeTx(ctx); ok {
+	if tx, ok := ctx.Value(txKey{d}).(*sql.Tx); ok {
 		return tx
 	}
 	return d.db

@@ -181,9 +181,10 @@ func TestInTxNestedSwallowedErrorStillCommits(t *testing.T) {
 	}
 }
 
-// Un ctx que sobrevive a su transacción (ej. una goroutine con
-// context.WithoutCancel) sigue funcionando: Conn vuelve a la base.
-func TestConnAfterTxFinishes(t *testing.T) {
+// El ctx de fn sigue apuntando a su transacción aunque sobreviva a InTx (ej.
+// una goroutine con context.WithoutCancel): sus consultas fallan con
+// sql.ErrTxDone en vez de escribir en silencio fuera de la transacción.
+func TestFnContextAfterTxFinishes(t *testing.T) {
 	d := newTestDB(t)
 	boom := errors.New("boom")
 	for _, fail := range []bool{false, true} {
@@ -202,23 +203,61 @@ func TestConnAfterTxFinishes(t *testing.T) {
 		before := countProjects(t, d)
 		done := make(chan error)
 		go func() { done <- insertProject(leaked, d, fmt.Sprintf("goroutine-%v", fail)) }()
-		if err := <-done; err != nil {
-			t.Fatalf("fail=%v: escribir con el ctx de una transacción terminada: %v", fail, err)
+		if err := <-done; !errors.Is(err, sql.ErrTxDone) {
+			t.Fatalf("fail=%v: escribir con el ctx de una transacción terminada devolvió %v, esperaba sql.ErrTxDone", fail, err)
 		}
-		if _, ok := d.Conn(leaked).(*sql.DB); !ok {
-			t.Fatalf("fail=%v: Conn con una transacción terminada es %T, esperaba la *sql.DB", fail, d.Conn(leaked))
-		}
-
-		// Un InTx con ese ctx abre una transacción nueva en vez de reutilizar la terminada.
+		// Un InTx con ese ctx tampoco abre otra transacción por su cuenta.
 		err = d.InTx(leaked, func(ctx context.Context) error {
-			return insertProject(ctx, d, fmt.Sprintf("tx-nueva-%v", fail))
+			return insertProject(ctx, d, fmt.Sprintf("tx-%v", fail))
 		})
-		if err != nil {
-			t.Fatalf("fail=%v: InTx con el ctx de una transacción terminada: %v", fail, err)
+		if !errors.Is(err, sql.ErrTxDone) {
+			t.Fatalf("fail=%v: InTx con el ctx de una transacción terminada devolvió %v, esperaba sql.ErrTxDone", fail, err)
 		}
-		if n := countProjects(t, d); n != before+2 {
-			t.Fatalf("fail=%v: hay %d proyectos, esperaba %d", fail, n, before+2)
+		if n := countProjects(t, d); n != before {
+			t.Fatalf("fail=%v: hay %d proyectos, esperaba %d: algo se escribió fuera de la transacción", fail, n, before)
 		}
+	}
+}
+
+// Un InTx anidado en una goroutine cuya transacción externa termina a mitad de
+// camino falla con sql.ErrTxDone: lo que viene después nunca se confirma solo.
+func TestNestedInTxInGoroutineAfterOuterEnds(t *testing.T) {
+	d := newTestDB(t)
+	started, proceed := make(chan struct{}), make(chan struct{})
+	result := make(chan error, 1)
+	err := d.InTx(context.Background(), func(outer context.Context) error {
+		go func() {
+			result <- d.InTx(outer, func(inner context.Context) error {
+				// Esto todavía es parte de la transacción externa.
+				if err := insertProject(inner, d, "antes"); err != nil {
+					return err
+				}
+				close(started)
+				<-proceed // mientras tanto, la externa se confirma
+				return insertProject(inner, d, "despues")
+			})
+		}()
+		<-started
+		return insertProject(outer, d, "externo")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(proceed)
+	if err := <-result; !errors.Is(err, sql.ErrTxDone) {
+		t.Fatalf("el InTx de la goroutine devolvió %v, esperaba sql.ErrTxDone", err)
+	}
+	var n int
+	if err := d.Conn(context.Background()).QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM projects WHERE slug = 'despues'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("lo que la goroutine escribió después de terminar la transacción se confirmó solo")
+	}
+	// Sin savepoints, lo de antes quedó con la externa.
+	if n := countProjects(t, d); n != 2 {
+		t.Fatalf("hay %d proyectos, esperaba 2 (externo y antes)", n)
 	}
 }
 
@@ -438,6 +477,77 @@ func TestOpenFileMode(t *testing.T) {
 	}
 	defer d2.Close()
 	check("base existente", existing)
+
+	// Un -wal o -shm que ya existe con datos (ej. de un muelle que se cayó)
+	// también queda en 0600. Se simula copiando los archivos con la base
+	// abierta. Vacíos no sirven: SQLite ya corrige los permisos de un archivo
+	// de largo 0 al abrirlo.
+	live := filepath.Join(dir, "viva.db")
+	d3, err := Open(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d3.Close()
+	if err := d3.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := insertProject(context.Background(), d3, "en-el-wal"); err != nil {
+		t.Fatal(err)
+	}
+	crashed := filepath.Join(dir, "caida.db")
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		data, err := os.ReadFile(live + suffix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if suffix != "" && len(data) == 0 {
+			t.Fatalf("%s está vacío: la prueba no sirve", suffix)
+		}
+		if err := os.WriteFile(crashed+suffix, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(crashed+suffix, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d4, err := Open(crashed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d4.Close()
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		check("caída"+suffix, crashed+suffix)
+	}
+	if n := countProjects(t, d4); n != 1 {
+		t.Fatalf("la base recuperada tiene %d proyectos, esperaba el del WAL", n)
+	}
+}
+
+// path va dentro de una URI file:, así que "?" o "#" cambiarían sus opciones
+// (ej. "?_pragma=foreign_keys(0)"), y ":memory:" no es un archivo.
+func TestOpenRejectsSpecialPaths(t *testing.T) {
+	dir := t.TempDir()
+	for _, p := range []string{
+		":memory:",
+		filepath.Join(dir, "muelle.db?_pragma=foreign_keys(0)"),
+		filepath.Join(dir, "muelle#x.db"),
+	} {
+		d, err := Open(p)
+		if err == nil {
+			d.Close()
+			t.Errorf("Open(%q) debió fallar", p)
+			continue
+		}
+		if !strings.HasPrefix(err.Error(), "sqlite: ") || !strings.Contains(err.Error(), p) {
+			t.Errorf("Open(%q): error %q, esperaba uno que nombre la ruta", p, err)
+		}
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("Open no debe crear archivos para una ruta rechazada: %v", entries)
+	}
+	if _, err := os.Stat(":memory:"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Open creó el archivo :memory:: %v", err)
+	}
 }
 
 func TestTimeHelpers(t *testing.T) {

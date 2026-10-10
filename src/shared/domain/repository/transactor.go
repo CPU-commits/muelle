@@ -15,8 +15,12 @@ import "context"
 //     consultas no ven la transacción y una escritura espera su lock.
 //   - Un InTx anidado no tiene savepoints: si el interno devuelve un error y el
 //     externo lo ignora, lo que escribió el interno se confirma igual.
-//   - Si el ctx de fn sobrevive a InTx (ej. una goroutine con
-//     context.WithoutCancel), deja de llevar la transacción y usa la base.
+//   - El ctx de fn, y todo ctx derivado de él (también con
+//     context.WithoutCancel), sigue apuntando a la transacción después de que
+//     termine: lo que se haga con él falla. Una goroutine que trabaje con la
+//     base arranca con un ctx derivado de afuera de la transacción (ej.
+//     context.WithoutCancel(ctxExterno)), o recién después de que InTx vuelva;
+//     nunca con el ctx de fn. Así nada se confirma solo, fuera de la transacción.
 //   - La implementación nunca limita el pool a una conexión (en SQLite,
 //     nunca SetMaxOpenConns(1)): una consulta con un ctx sin la transacción
 //     esperaría para siempre una conexión libre.
