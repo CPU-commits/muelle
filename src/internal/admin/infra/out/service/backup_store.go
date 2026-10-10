@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 
 	"github.com/CPU-commits/muelle/src/internal/admin/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/admin/domain/service"
@@ -15,9 +16,14 @@ import (
 // BackupStore guarda las copias como archivos en dir, hechas con VACUUM INTO.
 // Las copias tienen contraseñas hasheadas, secretos cifrados y datos TOTP:
 // el directorio es 0700 y los archivos 0600.
+//
+// El directorio tiene que estar en un sistema de archivos con enlaces duros
+// (Create publica con os.Link). Un volumen local de Docker (el valor por
+// defecto) los soporta; algunos montajes de red o FAT no.
 type BackupStore struct {
 	db  *sqlite.DB
 	dir string
+	mu  sync.Mutex // un Create a la vez: así limpiar temporales viejos no borra uno en curso
 }
 
 var _ service.BackupStore = (*BackupStore)(nil)
@@ -42,6 +48,20 @@ func (s *BackupStore) Create(ctx context.Context, name string) error {
 		return err
 	}
 	final := filepath.Join(s.dir, name)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Un crash durante VACUUM INTO deja un temporal con una copia completa
+	// (secretos incluidos) que List no ve: se borra antes de seguir.
+	stale, err := filepath.Glob(filepath.Join(s.dir, "muelle-*.db.*.tmp"))
+	if err != nil {
+		return err
+	}
+	for _, p := range stale {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 
 	f, err := os.CreateTemp(s.dir, name+".*.tmp")
 	if err != nil {

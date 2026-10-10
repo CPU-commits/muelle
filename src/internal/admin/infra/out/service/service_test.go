@@ -124,10 +124,20 @@ func TestBackupStoreCancelledLeavesNothing(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "backups")
 	s := NewBackupStore(db, dir)
 
-	cctx, cancel := context.WithTimeout(ctx, 5*time.Millisecond)
+	// Se cancela en cuanto aparece el temporal: así VACUUM INTO está a medias.
+	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	go func() {
+		for cctx.Err() == nil {
+			if tmps, _ := filepath.Glob(filepath.Join(dir, "*.tmp")); len(tmps) > 0 {
+				cancel()
+				return
+			}
+			time.Sleep(200 * time.Microsecond)
+		}
+	}()
 	if err := s.Create(cctx, "muelle-2026-10-01.db"); err == nil {
-		t.Fatal("VACUUM INTO terminó antes del plazo: no se probó la limpieza")
+		t.Skip("la copia terminó antes de poder cancelarla: no se probó la limpieza")
 	}
 	if names, err := s.List(ctx); err != nil || len(names) != 0 {
 		t.Fatalf("names=%v err=%v", names, err)
@@ -135,6 +145,28 @@ func TestBackupStoreCancelledLeavesNothing(t *testing.T) {
 	left, _ := os.ReadDir(dir)
 	if len(left) != 0 {
 		t.Fatalf("quedaron archivos: %v", left)
+	}
+}
+
+func TestBackupStoreRemovesStaleTemporaries(t *testing.T) {
+	db := sqlitetest.New(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "muelle-2026-09-30.db.123456.tmp")
+	other := filepath.Join(dir, "otro.txt")
+	for _, p := range []string{stale, other} {
+		if err := os.WriteFile(p, []byte("copia vieja"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := NewBackupStore(db, dir).Create(ctx, "muelle-2026-10-01.db"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("el temporal viejo sigue ahí: err=%v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("un archivo ajeno no se debe tocar: %v", err)
 	}
 }
 

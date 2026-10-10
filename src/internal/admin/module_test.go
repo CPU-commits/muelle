@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -154,8 +155,19 @@ func TestNewValidatesDeps(t *testing.T) {
 	full := Deps{DB: e.db, Cipher: ciph, Audit: rec, DataDir: t.TempDir()}
 
 	// Sin Clock usa el reloj del sistema.
-	if m := New(full); m == nil {
+	m := New(full)
+	if m == nil {
 		t.Fatal("New devolvió nil")
+	}
+	// Se corren los jobs para ejercitar de verdad ese reloj.
+	for _, j := range m.Jobs() {
+		if err := j.Run(context.Background()); err != nil {
+			t.Fatalf("%s: %v", j.Name, err)
+		}
+	}
+	today := "muelle-" + time.Now().UTC().Format("2006-01-02") + ".db"
+	if _, err := os.Stat(filepath.Join(full.DataDir, "backups", today)); err != nil {
+		t.Fatalf("el backup debía usar la fecha del reloj del sistema: %v", err)
 	}
 
 	cases := map[string]func(d *Deps){

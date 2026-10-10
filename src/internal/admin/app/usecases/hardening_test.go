@@ -25,7 +25,7 @@ func TestPatchSettingsRejectsTokens(t *testing.T) {
 	ctx := entity.WithPrincipal(context.Background(), entity.Principal{
 		UserID: uid, Token: &entity.TokenScope{ID: 1, ProjectSlug: "p"},
 	})
-	for _, in := range []dto.PatchSettingsInput{{Require2FA: ptr(true)}, {Require2FA: ptr(false)}} {
+	for _, in := range []dto.PatchSettingsInput{{Require2FA: ptr(true)}, {Require2FA: ptr(false)}, {}} {
 		if _, err := e.patch().Execute(ctx, in); !errors.Is(err, entity.ErrForbidden) {
 			t.Fatalf("err=%v", err)
 		}

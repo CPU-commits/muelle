@@ -56,15 +56,16 @@ func NewPatchSettings(settings repository.SettingsRepository, totp service.TOTPS
 // Activar require_2fa exige que quien lo pide tenga su propio TOTP (§10.1):
 // sin esa guarda quedaría encerrado en la pantalla de configuración.
 func (u *PatchSettings) Execute(ctx context.Context, in dto.PatchSettingsInput) (dto.SettingsOutput, error) {
+	p, ok := shared.PrincipalFrom(ctx)
+	if !ok {
+		return dto.SettingsOutput{}, shared.ErrUnauthenticated
+	}
+	// Los ajustes son de la sesión de un usuario, nunca de un token de API
+	// (aunque el patch venga vacío).
+	if p.Token != nil {
+		return dto.SettingsOutput{}, shared.ErrForbidden
+	}
 	if in.Require2FA != nil {
-		p, ok := shared.PrincipalFrom(ctx)
-		if !ok {
-			return dto.SettingsOutput{}, shared.ErrUnauthenticated
-		}
-		// Los ajustes son de la sesión de un usuario, nunca de un token de API.
-		if p.Token != nil {
-			return dto.SettingsOutput{}, shared.ErrForbidden
-		}
 		err := u.tx.InTx(ctx, func(ctx context.Context) error {
 			if *in.Require2FA {
 				has, err := u.totp.HasTOTP(ctx, p.UserID)
