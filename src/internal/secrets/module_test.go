@@ -152,6 +152,17 @@ func TestEnvAPIResponseShape(t *testing.T) {
 	if got := strings.TrimSpace(w.Body.String()); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
+
+	// Una no secreta muestra su valor (también el vacío) y "secret":false; nada se omite.
+	e.clock.Advance(time.Minute)
+	httptestutil.Expect(t, c.Do("PATCH", stageEnv, map[string]any{"set": map[string]string{"EMPTY": ""}, "secret": false}, session), http.StatusNoContent)
+	w = c.Do("GET", stageEnv, nil, session)
+	httptestutil.Expect(t, w, http.StatusOK)
+	want = `{"vars":[{"key":"EMPTY","value":"","secret":false,"updated_at":"2026-10-10T13:01:00Z"},` +
+		`{"key":"TOKEN","value":null,"secret":true,"updated_at":"2026-10-10T13:00:00Z"}]}`
+	if got := strings.TrimSpace(w.Body.String()); got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
 }
 
 func TestEnvAPIErrors(t *testing.T) {
@@ -178,6 +189,12 @@ func TestEnvAPIErrors(t *testing.T) {
 		{"PATCH de un stage inexistente", "PATCH", "/api/v1/projects/auditfy/stages/nope/env", map[string]any{"set": map[string]string{"A": "1"}}, 404, "not_found"},
 		{"PUT de una app inexistente", "PUT", appsPath + "/nope/env", map[string]any{"vars": map[string]string{"A": "1"}}, 404, "not_found"},
 		{"GET de un proyecto inexistente", "GET", "/api/v1/projects/nope/stages/staging/env", nil, 404, "not_found"},
+		// json/v2 rechaza el UTF-8 inválido y los surrogates sueltos al leer el cuerpo.
+		{"valor con UTF-8 inválido", "PUT", appEnv, "{\"vars\":{\"A\":\"\xff\"}}", 400, "invalid_json"},
+		{"valor con un surrogate suelto", "PATCH", appEnv, `{"set":{"A":"\ud800"}}`, 400, "invalid_json"},
+		// El NUL es JSON válido, pero no puede ir en el entorno de un proceso.
+		{"valor con NUL", "PUT", appEnv, `{"vars":{"A":"a\u0000b"}}`, 422, "invalid"},
+		{"PATCH vacío", "PATCH", appEnv, `{}`, 422, "invalid"},
 		// 1 MiB es el límite del spec (§10) para todos los cuerpos.
 		{"cuerpo de más de 1 MiB", "PUT", appEnv, `{"vars":{"BIG":"` + strings.Repeat("x", 1<<20) + `"}}`, 400, "invalid_json"},
 	}
@@ -198,6 +215,95 @@ func TestEnvAPIErrors(t *testing.T) {
 	}
 	if events := e.audit(t); len(events) != 0 {
 		t.Fatalf("las peticiones fallidas no se auditan: %+v", events)
+	}
+}
+
+// Un body null o sin vars nunca borra las variables: el PUT las reemplazaría
+// todas por nada. Lo mismo un PATCH null, que no haría nada y marcaría las apps.
+func TestEnvAPINullBodyKeepsVars(t *testing.T) {
+	e := newTestEnv(t)
+	c := e.client
+	httptestutil.Expect(t, c.Do("PUT", appEnv, map[string]any{"vars": map[string]string{"A": "1"}, "secret": false}, session), http.StatusNoContent)
+
+	for _, tc := range []struct{ method, body string }{
+		{"PUT", "null"},
+		{"PUT", "{}"},
+		{"PUT", `{"secret":false}`},
+		{"PUT", `{"vars":null}`},
+		{"PATCH", "null"},
+		{"PATCH", `{"set":null,"unset":null}`},
+		{"PATCH", `{"set":{},"unset":[]}`},
+	} {
+		w := c.Do(tc.method, appEnv, tc.body, session)
+		if w.Code != http.StatusUnprocessableEntity || httptestutil.ErrorCode(t, w) != "invalid" {
+			t.Errorf("%s %s: %d %s", tc.method, tc.body, w.Code, w.Body.String())
+		}
+	}
+
+	w := c.Do("GET", appEnv, nil, session)
+	httptestutil.Expect(t, w, http.StatusOK)
+	vars := httptestutil.Decode[map[string][]map[string]any](t, w)["vars"]
+	if len(vars) != 1 || vars[0]["key"] != "A" || vars[0]["value"] != "1" {
+		t.Fatalf("las variables cambiaron: %v", vars)
+	}
+	if events := e.audit(t); len(events) != 1 {
+		t.Fatalf("solo el primer PUT se audita: %+v", events)
+	}
+}
+
+// Los valores no secretos vuelven tal cual, con cualquier texto UTF-8.
+func TestEnvAPIUnicodeValues(t *testing.T) {
+	e := newTestEnv(t)
+	c := e.client
+	value := "ñandú 🚀 \"comillas\" \\ <b>&\t\n"
+	httptestutil.Expect(t, c.Do("PUT", stageEnv, map[string]any{"vars": map[string]string{"TEXT": value}, "secret": false}, session), http.StatusNoContent)
+	w := c.Do("GET", stageEnv, nil, session)
+	httptestutil.Expect(t, w, http.StatusOK)
+	vars := httptestutil.Decode[map[string][]map[string]any](t, w)["vars"]
+	if len(vars) != 1 || vars[0]["value"] != value {
+		t.Fatalf("vars=%v", vars)
+	}
+}
+
+// Un token de auditfy/staging no lee ni escribe las variables de
+// auditfy/production, ni las del stage ni las de sus apps. Si las rutas no
+// usaran {p}/{s}/{a} literales, el middleware las vería como del proyecto y
+// el GET pasaría.
+func TestEnvAPIStageTokenCannotTouchOtherStage(t *testing.T) {
+	e := newTestEnv(t)
+	c := e.client
+	for _, path := range []string{prodEnv, prodApp} {
+		httptestutil.Expect(t, c.Do("PUT", path, map[string]any{"vars": map[string]string{"PROD": "valor-prod"}, "secret": false}, session), http.StatusNoContent)
+	}
+	before := e.audit(t)
+
+	bodies := map[string]any{
+		"GET":   nil,
+		"PUT":   map[string]any{"vars": map[string]string{"A": "1"}},
+		"PATCH": map[string]any{"set": map[string]string{"A": "1"}, "unset": []string{"PROD"}},
+	}
+	for _, path := range []string{prodEnv, prodApp} {
+		for _, method := range []string{"GET", "PUT", "PATCH"} {
+			w := c.Do(method, path, bodies[method], httptestutil.WithBearer("staging"), httptestutil.WithOrigin(""))
+			if w.Code != http.StatusForbidden || httptestutil.ErrorCode(t, w) != "out_of_scope" {
+				t.Errorf("%s %s: %d %s", method, path, w.Code, w.Body.String())
+			}
+			if strings.Contains(w.Body.String(), "valor-prod") {
+				t.Errorf("%s %s filtró un valor: %s", method, path, w.Body.String())
+			}
+		}
+	}
+
+	for _, path := range []string{prodEnv, prodApp} {
+		w := c.Do("GET", path, nil, session)
+		httptestutil.Expect(t, w, http.StatusOK)
+		vars := httptestutil.Decode[map[string][]map[string]any](t, w)["vars"]
+		if len(vars) != 1 || vars[0]["key"] != "PROD" || vars[0]["value"] != "valor-prod" {
+			t.Fatalf("%s cambió: %v", path, vars)
+		}
+	}
+	if after := e.audit(t); len(after) != len(before) {
+		t.Fatalf("las peticiones rechazadas no se auditan: %+v", after)
 	}
 }
 
