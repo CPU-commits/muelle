@@ -12,7 +12,9 @@ import (
 	sharedrepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
 )
 
-// DeleteUser borra un usuario con sus sesiones e invitaciones. Nadie puede
+// DeleteUser borra un usuario con sus sesiones e invitaciones. Sus tokens de
+// API quedan, sin creador (created_by NULL): son del proyecto y el CI depende
+// de ellos (§10.1 del spec); se revocan a mano si hace falta. Nadie puede
 // borrarse a sí mismo, y quien lo pide tiene que seguir existiendo: los dos
 // chequeos y el borrado van en la misma transacción, así dos usuarios que
 // se borran mutuamente a la vez no dejan la base sin usuarios.

@@ -293,3 +293,38 @@ func TestContractAdminTOTPStatus(t *testing.T) {
 	}
 	tryRequire("después del reinicio de su 2FA", e.login("bob"), http.StatusConflict, "totp_required_first")
 }
+
+// Un token es del proyecto, no de quien lo creó: borrar al usuario no lo
+// revoca (el CI depende de él), y GET /tokens muestra created_by null.
+func TestContractTokenOutlivesItsCreator(t *testing.T) {
+	e := api{t: t, c: newTestContainer(t)}
+	admin := e.setup()
+	const P = "/api/v1/projects/p"
+	e.create(admin, "/api/v1/projects", map[string]string{"slug": "p", "name": "P"})
+	e.create(admin, P+"/stages", map[string]string{"slug": "st"})
+	bob := e.invite(admin, "bob")
+	id, tok := e.newToken(bob, "p", "st")
+	createdBy := func() (any, bool) {
+		t.Helper()
+		w := e.do("GET", "/api/v1/tokens", nil, admin)
+		httptestutil.Expect(t, w, http.StatusOK)
+		for _, tk := range httptestutil.Decode[[]map[string]any](t, w) {
+			if n, _ := tk["id"].(float64); fmt.Sprint(int64(n)) == id {
+				v, ok := tk["created_by"]
+				return v, ok
+			}
+		}
+		t.Fatalf("GET /tokens no trae el token %s", id)
+		return nil, false
+	}
+	if v, _ := createdBy(); v != "bob" {
+		t.Fatalf("created_by=%v, esperaba bob", v)
+	}
+
+	httptestutil.Expect(t, e.do("DELETE", "/api/v1/users/bob", nil, admin), http.StatusNoContent)
+	if v, ok := createdBy(); !ok || v != nil {
+		t.Fatalf("después de borrar a bob: created_by=%v (presente=%v), esperaba null", v, ok)
+	}
+	expect(t, "token de bob borrado: leer", e.bearer(tok, "GET", P+"/stages/st", nil), http.StatusOK, "")
+	expect(t, "token de bob borrado: variables", e.bearer(tok, "PUT", P+"/stages/st/env", map[string]any{"vars": map[string]string{"A": "1"}}), http.StatusNoContent, "")
+}

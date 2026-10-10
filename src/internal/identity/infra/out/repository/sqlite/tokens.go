@@ -21,15 +21,18 @@ var _ repository.TokenRepository = (*TokenRepository)(nil)
 func NewTokenRepository(db *sqlitedb.DB) *TokenRepository { return &TokenRepository{db: db} }
 
 // tokenSelect lee los slugs del alcance de las tablas de catalog (solo
-// lectura). Las claves foráneas ON DELETE CASCADE borran un token con su
-// proyecto o su stage, pero si la base quedó inconsistente (por ejemplo, un
+// lectura) y el username de quien lo creó (NULL si se borró: created_by es
+// ON DELETE SET NULL, el token no se borra con su creador). Las claves
+// foráneas ON DELETE CASCADE borran un token con su proyecto o su stage, pero
+// si la base quedó inconsistente (por ejemplo, un
 // borrado con foreign_keys=OFF) el token no puede ampliar su alcance: sin su
 // proyecto no aparece (JOIN), y con un stage que no existe o es de otro
 // proyecto el slug llega NULL y scanToken lo rechaza (errBrokenScope).
 const tokenSelect = `SELECT t.id, t.name, t.token_hash, t.project_id, p.slug, t.stage_id, s.slug,
-	t.created_by, t.created_at, t.last_used_at, t.expires_at
+	t.created_by, u.username, t.created_at, t.last_used_at, t.expires_at
 	FROM api_tokens t JOIN projects p ON p.id = t.project_id
-	LEFT JOIN stages s ON s.id = t.stage_id AND s.project_id = t.project_id`
+	LEFT JOIN stages s ON s.id = t.stage_id AND s.project_id = t.project_id
+	LEFT JOIN users u ON u.id = t.created_by`
 
 // errBrokenScope: el token tiene stage, pero el stage no existe o es de otro
 // proyecto. Sin su slug, Principal.Allows lo trataría como de todo el proyecto.
@@ -103,10 +106,10 @@ func (r *TokenRepository) Touch(ctx context.Context, id int64, at time.Time) err
 func scanToken(sc scanner) (entity.APIToken, error) {
 	var t entity.APIToken
 	var stageID, createdBy, used, expires sql.NullInt64
-	var stageSlug sql.NullString
+	var stageSlug, createdByName sql.NullString
 	var created int64
 	err := sc.Scan(&t.ID, &t.Name, &t.TokenHash, &t.ProjectID, &t.ProjectSlug, &stageID, &stageSlug,
-		&createdBy, &created, &used, &expires)
+		&createdBy, &createdByName, &created, &used, &expires)
 	if err != nil {
 		return entity.APIToken{}, err
 	}
@@ -116,6 +119,7 @@ func scanToken(sc scanner) (entity.APIToken, error) {
 	t.StageSlug = stageSlug.String
 	t.StageID = fromNullInt(stageID)
 	t.CreatedBy = fromNullInt(createdBy)
+	t.CreatedByName = createdByName.String
 	t.CreatedAt = sqlitedb.Time(created)
 	t.LastUsedAt = sqlitedb.NullTime(used)
 	t.ExpiresAt = sqlitedb.NullTime(expires)

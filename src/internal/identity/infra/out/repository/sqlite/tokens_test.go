@@ -20,11 +20,12 @@ func TestTokens(t *testing.T) {
 	exp := t0.Add(24 * time.Hour)
 	proj, err := st.Create(ctx, entity.APIToken{Name: "ci-todo", TokenHash: "h1", ProjectID: projectID, CreatedBy: &u.ID, CreatedAt: t0, ExpiresAt: &exp})
 	if err != nil || proj.ID == 0 || proj.Name != "ci-todo" || proj.ProjectSlug != "auditfy" || proj.ProjectID != projectID ||
-		proj.StageSlug != "" || proj.StageID != nil || !proj.ExpiresAt.Equal(exp) || *proj.CreatedBy != u.ID || !proj.CreatedAt.Equal(t0) {
+		proj.StageSlug != "" || proj.StageID != nil || !proj.ExpiresAt.Equal(exp) || *proj.CreatedBy != u.ID || proj.CreatedByName != "felipe" ||
+		!proj.CreatedAt.Equal(t0) {
 		t.Fatalf("proj=%+v err=%v", proj, err)
 	}
 	stg, err := st.Create(ctx, entity.APIToken{Name: "ci-staging", TokenHash: "h2", ProjectID: projectID, StageID: &stageID, CreatedAt: t0})
-	if err != nil || stg.StageSlug != "staging" || stg.StageID == nil || *stg.StageID != stageID || stg.ExpiresAt != nil || stg.CreatedBy != nil {
+	if err != nil || stg.StageSlug != "staging" || stg.StageID == nil || *stg.StageID != stageID || stg.ExpiresAt != nil || stg.CreatedBy != nil || stg.CreatedByName != "" {
 		t.Fatalf("stg=%+v err=%v", stg, err)
 	}
 	missing := int64(999)
@@ -68,6 +69,29 @@ func TestTokens(t *testing.T) {
 	exec(t, r.db, `DELETE FROM stages WHERE id = ?`, stageID)
 	if _, err := st.GetByHash(ctx, "h2"); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("el token del stage debió borrarse, got %v", err)
+	}
+}
+
+// Un token no se borra con quien lo creó: es del proyecto, y el CI depende de
+// él. Queda sin creador (created_by NULL), y sigue sirviendo para autenticar.
+func TestTokenOutlivesItsCreator(t *testing.T) {
+	r := newRepos(t)
+	ctx := context.Background()
+	projectID, _ := seedStage(t, r.db)
+	ana := r.user(t, "ana", nil)
+	tok, err := r.tokens.Create(ctx, entity.APIToken{Name: "ci", TokenHash: "h1", ProjectID: projectID, CreatedBy: &ana.ID, CreatedAt: t0})
+	if err != nil || tok.CreatedByName != "ana" {
+		t.Fatalf("tok=%+v err=%v", tok, err)
+	}
+	if err := r.users.Delete(ctx, ana.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.tokens.GetByHash(ctx, "h1")
+	if err != nil || got.ID != tok.ID || got.CreatedBy != nil || got.CreatedByName != "" {
+		t.Fatalf("después de borrar a ana: got=%+v err=%v", got, err)
+	}
+	if list, err := r.tokens.List(ctx); err != nil || len(list) != 1 || list[0].CreatedBy != nil || list[0].CreatedByName != "" {
+		t.Fatalf("list=%+v err=%v", list, err)
 	}
 }
 

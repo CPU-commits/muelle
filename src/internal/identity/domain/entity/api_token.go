@@ -21,10 +21,13 @@ type APIToken struct {
 	ProjectSlug string
 	StageID     *int64
 	StageSlug   string // vacío: todo el proyecto
-	CreatedBy   *int64
-	CreatedAt   time.Time
-	LastUsedAt  *time.Time
-	ExpiresAt   *time.Time // nil: no vence
+	CreatedBy   *int64 // nil si quien lo creó se borró: el token sigue, es del proyecto
+	// CreatedByName es el username de CreatedBy, que completa el repositorio;
+	// "" si ese usuario se borró.
+	CreatedByName string
+	CreatedAt     time.Time
+	LastUsedAt    *time.Time
+	ExpiresAt     *time.Time // nil: no vence
 }
 
 // NewAPIToken valida el nombre y arma un token nuevo, todavía sin id. Los

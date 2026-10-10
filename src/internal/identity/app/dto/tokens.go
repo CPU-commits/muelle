@@ -16,7 +16,8 @@ type TokenOutput struct {
 	ID         int64
 	Name       string
 	Project    string
-	Stage      string // vacío: todo el proyecto
+	Stage      string  // vacío: todo el proyecto
+	CreatedBy  *string // username de quien lo creó; nil si ese usuario se borró
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
 	ExpiresAt  *time.Time

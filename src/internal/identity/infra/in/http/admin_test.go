@@ -109,7 +109,7 @@ func TestTokensAPI(t *testing.T) {
 	created := httptestutil.Decode[map[string]any](t, w)
 	if tok, _ := created["token"].(string); !strings.HasPrefix(tok, "mk_") || len(tok) != 46 ||
 		created["name"] != "ci" || created["project"] != "auditfy" || created["stage"] != "staging" ||
-		created["last_used_at"] != nil || created["expires_at"] == nil {
+		created["last_used_at"] != nil || created["expires_at"] == nil || created["created_by"] != "admin" {
 		t.Fatalf("created=%v", created)
 	}
 
@@ -130,12 +130,48 @@ func TestTokensAPI(t *testing.T) {
 		if _, ok := tok["token"]; ok {
 			t.Fatalf("el token en claro se muestra una sola vez: %v", tok)
 		}
+		if tok["created_by"] != "admin" {
+			t.Fatalf("created_by=%v, esperaba admin: %v", tok["created_by"], tok)
+		}
 	}
 
 	id := strconv.Itoa(int(created["id"].(float64)))
 	httptestutil.Expect(t, e.do("DELETE", "/api/v1/tokens/"+id, nil, s), http.StatusNoContent)
 	expectCode(t, e.do("DELETE", "/api/v1/tokens/"+id, nil, s), http.StatusNotFound, "not_found")
 	expectCode(t, e.do("DELETE", "/api/v1/tokens/abc", nil, s), http.StatusUnprocessableEntity, "invalid")
+}
+
+// GET /tokens dice quién creó cada token, para encontrar los de una persona
+// que se va. Borrarla no los revoca (son del proyecto y el CI depende de
+// ellos): siguen sirviendo, con created_by null.
+func TestTokenCreatedByDeletedUser(t *testing.T) {
+	e := newEnv(t)
+	s := httptestutil.WithSession(e.login())
+	e.exec(`INSERT INTO projects (slug, name, created_at) VALUES ('auditfy', 'Auditfy', 0)`)
+	e.user("ana")
+	w := e.do("POST", "/api/v1/auth/login", map[string]string{"username": "ana", "password": testPassword})
+	httptestutil.Expect(t, w, http.StatusOK)
+	ana := httptestutil.WithSession(httptestutil.SessionFrom(t, w))
+	w = e.do("POST", "/api/v1/tokens", map[string]any{"name": "ci", "project": "auditfy"}, ana)
+	httptestutil.Expect(t, w, http.StatusCreated)
+	created := httptestutil.Decode[map[string]any](t, w)
+	if created["created_by"] != "ana" {
+		t.Fatalf("created=%v", created)
+	}
+
+	httptestutil.Expect(t, e.do("DELETE", "/api/v1/users/ana", nil, s), http.StatusNoContent)
+	w = e.do("GET", "/api/v1/tokens", nil, s)
+	httptestutil.Expect(t, w, http.StatusOK)
+	list := httptestutil.Decode[[]map[string]any](t, w)
+	if len(list) != 1 || list[0]["id"] != created["id"] {
+		t.Fatalf("borrar a ana no debió borrar su token: %v", list)
+	}
+	if v, ok := list[0]["created_by"]; !ok || v != nil {
+		t.Fatalf("created_by=%v (presente=%v), esperaba null", v, ok)
+	}
+	if _, err := e.mod.Authenticator().AuthenticateToken(t.Context(), created["token"].(string)); err != nil {
+		t.Fatalf("el token de un usuario borrado debió seguir sirviendo: %v", err)
+	}
 }
 
 func TestCreateTokenErrors(t *testing.T) {

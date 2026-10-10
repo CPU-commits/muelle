@@ -77,8 +77,12 @@ func (uc *CreateToken) Execute(ctx context.Context, in dto.CreateTokenInput) (dt
 }
 
 func toTokenOutput(t entity.APIToken) dto.TokenOutput {
-	return dto.TokenOutput{
+	out := dto.TokenOutput{
 		ID: t.ID, Name: t.Name, Project: t.ProjectSlug, Stage: t.StageSlug,
 		CreatedAt: t.CreatedAt, LastUsedAt: t.LastUsedAt, ExpiresAt: t.ExpiresAt,
 	}
+	if t.CreatedByName != "" {
+		out.CreatedBy = &t.CreatedByName
+	}
+	return out
 }

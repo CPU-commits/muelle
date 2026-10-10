@@ -44,6 +44,7 @@ type tokenRes struct {
 	Name       string     `json:"name"`
 	Project    string     `json:"project"`
 	Stage      string     `json:"stage,omitempty"` // sin stage: todo el proyecto
+	CreatedBy  *string    `json:"created_by"`      // username; null si ese usuario se borró
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at"`
 	ExpiresAt  *time.Time `json:"expires_at"`
@@ -64,6 +65,6 @@ func toUserRes(u dto.UserOutput) userRes {
 }
 
 func toTokenRes(t dto.TokenOutput) tokenRes {
-	return tokenRes{ID: t.ID, Name: t.Name, Project: t.Project, Stage: t.Stage,
+	return tokenRes{ID: t.ID, Name: t.Name, Project: t.Project, Stage: t.Stage, CreatedBy: t.CreatedBy,
 		CreatedAt: t.CreatedAt, LastUsedAt: t.LastUsedAt, ExpiresAt: t.ExpiresAt}
 }
