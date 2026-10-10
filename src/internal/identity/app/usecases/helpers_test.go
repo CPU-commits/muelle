@@ -107,7 +107,7 @@ func newFixture(t *testing.T) *fixture {
 	f.enableTOTP = NewEnableTOTP(db, f.users, ciph, f.totp, replay, rec, c)
 	f.listUsers = NewListUsers(f.users)
 	f.deleteUser = NewDeleteUser(db, f.users, rec)
-	f.resetTOTP = NewResetUserTOTP(f.users, rec)
+	f.resetTOTP = NewResetUserTOTP(db, f.users, f.sessions, rec)
 	f.createToken = NewCreateToken(db, f.users, f.tokens, scopes, rec, c)
 	f.listTokens = NewListTokens(f.tokens)
 	f.deleteToken = NewDeleteToken(f.tokens, rec)

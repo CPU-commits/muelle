@@ -85,6 +85,19 @@ func TestDeleteUserAndResetTOTP(t *testing.T) {
 	expectCode(t, e.do("DELETE", "/api/v1/users/ana/totp", nil, s), http.StatusNotFound, "not_found")
 }
 
+func TestResetTOTPLogsUserOut(t *testing.T) {
+	e := newEnv(t)
+	s := httptestutil.WithSession(e.login())
+	e.user("ana")
+	w := e.do("POST", "/api/v1/auth/login", map[string]string{"username": "ana", "password": testPassword})
+	ana := httptestutil.WithSession(httptestutil.SessionFrom(t, w))
+	httptestutil.Expect(t, e.do("GET", "/api/v1/auth/me", nil, ana), http.StatusOK)
+
+	httptestutil.Expect(t, e.do("DELETE", "/api/v1/users/ana/totp", nil, s), http.StatusNoContent)
+	expectCode(t, e.do("GET", "/api/v1/auth/me", nil, ana), http.StatusUnauthorized, "unauthenticated")
+	httptestutil.Expect(t, e.do("GET", "/api/v1/auth/me", nil, s), http.StatusOK)
+}
+
 func TestTokensAPI(t *testing.T) {
 	e := newEnv(t)
 	s := httptestutil.WithSession(e.login())

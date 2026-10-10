@@ -109,6 +109,29 @@ func TestConsumePending(t *testing.T) {
 	}
 }
 
+func TestDeleteSessionsByUser(t *testing.T) {
+	r := newRepos(t)
+	ctx := context.Background()
+	ana := r.user(t, "ana", nil)
+	beto := r.user(t, "beto", nil)
+	r.sessions.Create(ctx, entity.NewSession("ana-1", ana.ID, false, t0, time.Hour, "", ""))
+	r.sessions.Create(ctx, entity.NewSession("ana-2", ana.ID, true, t0, time.Minute, "", ""))
+	r.sessions.Create(ctx, entity.NewSession("beto", beto.ID, false, t0, time.Hour, "", ""))
+
+	n, err := r.sessions.DeleteByUser(ctx, ana.ID)
+	if err != nil || n != 2 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	for _, h := range []string{"ana-1", "ana-2"} {
+		if _, err := r.sessions.Get(ctx, h); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("%s debió borrarse, got %v", h, err)
+		}
+	}
+	if _, err := r.sessions.Get(ctx, "beto"); err != nil {
+		t.Fatalf("la sesión de otro usuario sigue: %v", err)
+	}
+}
+
 func TestDeleteUserCascadesSessions(t *testing.T) {
 	r := newRepos(t)
 	ctx := context.Background()

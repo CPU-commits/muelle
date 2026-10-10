@@ -55,6 +55,14 @@ func (r *SessionRepository) Delete(ctx context.Context, idHash string) error {
 	return err
 }
 
+func (r *SessionRepository) DeleteByUser(ctx context.Context, userID int64) (int64, error) {
+	res, err := r.db.Conn(ctx).ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (r *SessionRepository) ConsumePending(ctx context.Context, idHash string, now time.Time) error {
 	return affectedOne(r.db.Conn(ctx).ExecContext(ctx,
 		`DELETE FROM sessions WHERE id_hash = ? AND mfa_pending = 1 AND expires_at > ?`, idHash, sqlitedb.Millis(now)))

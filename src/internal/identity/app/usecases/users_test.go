@@ -76,6 +76,31 @@ func TestDeleteUserAndResetTOTP(t *testing.T) {
 	}
 }
 
+// Reiniciar el 2FA de alguien (perdió el teléfono, o se lo robaron) cierra
+// todas sus sesiones, completas y pendientes.
+func TestResetTOTPRevokesSessions(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	admin := f.user(t, "admin")
+	ana := f.user(t, "ana")
+	adminSession, _ := f.login.Execute(ctx, login("admin", testPassword, "1.1.1.1"))
+	full, _ := f.login.Execute(ctx, login("ana", testPassword, "1.1.1.1"))
+	f.enableTOTPFor(t, ana.ID)
+	pending, _ := f.login.Execute(ctx, login("ana", testPassword, "1.1.1.1"))
+
+	if err := f.resetTOTP.Execute(withUser(admin), "ana"); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{full.Token, pending.Token} {
+		if _, err := f.authSession.Execute(ctx, token); !errors.Is(err, shared.ErrUnauthenticated) {
+			t.Fatalf("la sesión de ana debió cerrarse, got %v", err)
+		}
+	}
+	if _, err := f.authSession.Execute(ctx, adminSession.Token); err != nil {
+		t.Fatalf("la sesión del admin sigue: %v", err)
+	}
+}
+
 func TestDeleteUserDeletesSessions(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
