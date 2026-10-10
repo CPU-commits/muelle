@@ -48,6 +48,13 @@ func (t APIToken) Expired(now time.Time) bool {
 	return t.ExpiresAt != nil && !now.Before(*t.ExpiresAt)
 }
 
+// ScopeValid dice si el alcance está completo: siempre un proyecto, y slug de
+// stage si y solo si el token tiene stage. Un alcance incompleto no se usa,
+// porque Principal.Allows trataría un stage vacío como todo el proyecto.
+func (t APIToken) ScopeValid() bool {
+	return t.ProjectSlug != "" && (t.StageID == nil) == (t.StageSlug == "")
+}
+
 // Scope es el alcance que se pone en el Principal de una petición con este token.
 func (t APIToken) Scope() shared.TokenScope {
 	return shared.TokenScope{ID: t.ID, Name: t.Name, ProjectSlug: t.ProjectSlug, StageSlug: t.StageSlug}

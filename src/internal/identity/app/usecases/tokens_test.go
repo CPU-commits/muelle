@@ -215,3 +215,21 @@ func TestTokenScopes(t *testing.T) {
 		t.Fatalf("remaining=%+v", remaining)
 	}
 }
+
+// Un token de stage cuyo stage desapareció (borrado con foreign_keys=OFF) no
+// autentica: no puede volverse un token de todo el proyecto.
+func TestAuthenticateTokenWithOrphanedStage(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	auditfy := f.project(t, "auditfy")
+	staging := f.stage(t, auditfy, "staging")
+	tok, err := f.createToken.Execute(ctx, newToken("ci", "auditfy", "staging", u.ID, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.rawExec(t, "DELETE FROM stages WHERE id = ?", staging)
+	if p, err := f.authToken.Execute(ctx, tok.Plain); !errors.Is(err, shared.ErrUnauthenticated) {
+		t.Fatalf("esperaba ErrUnauthenticated, got p=%+v err=%v", p, err)
+	}
+}

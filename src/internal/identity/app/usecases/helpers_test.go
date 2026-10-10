@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,7 +20,6 @@ import (
 	"github.com/CPU-commits/muelle/src/package/clock"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
 	sqlitedb "github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
-	"github.com/CPU-commits/muelle/src/shared/infra/out/sqlite/sqlitetest"
 )
 
 const testPassword = "una-contraseña-larga"
@@ -28,6 +28,7 @@ const testPassword = "una-contraseña-larga"
 // manual y cifrado de verdad.
 type fixture struct {
 	db       *sqlitedb.DB
+	path     string
 	clock    *clock.Manual
 	cipher   *crypto.Cipher
 	users    *sqliterepo.UserRepository
@@ -62,14 +63,22 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	db := sqlitetest.New(t)
+	path := filepath.Join(t.TempDir(), "muelle.db")
+	db, err := sqlitedb.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	c := clock.NewManual(time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC))
 	ciph, err := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
 	f := &fixture{
-		db: db, clock: c, cipher: ciph,
+		db: db, path: path, clock: c, cipher: ciph,
 		users: sqliterepo.NewUserRepository(db), sessions: sqliterepo.NewSessionRepository(db),
 		invites: sqliterepo.NewInviteRepository(db), tokens: sqliterepo.NewTokenRepository(db),
 		hasher: outservice.NewArgon2Hasher(), totp: outservice.NewTOTP(),
@@ -139,6 +148,20 @@ func (f *fixture) exec(t *testing.T, query string, args ...any) int64 {
 	}
 	id, _ := res.LastInsertId()
 	return id
+}
+
+// rawExec corre SQL en una conexión aparte sin claves foráneas, para dejar
+// filas huérfanas como las de un borrado con foreign_keys=OFF.
+func (f *fixture) rawExec(t *testing.T, query string, args ...any) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", "file:"+f.path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(query, args...); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
 }
 
 func (f *fixture) project(t *testing.T, slug string) int64 {

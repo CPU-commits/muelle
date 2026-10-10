@@ -139,6 +139,28 @@ func TestNewAPIToken(t *testing.T) {
 	}
 }
 
+// ScopeValid: un token siempre es de un proyecto, y tiene slug de stage si y
+// solo si tiene stage. Si no, Allows lo trataría como de todo el proyecto.
+func TestAPITokenScopeValid(t *testing.T) {
+	stage := int64(4)
+	cases := []struct {
+		name string
+		tok  APIToken
+		want bool
+	}{
+		{"proyecto", APIToken{ProjectSlug: "auditfy"}, true},
+		{"stage", APIToken{ProjectSlug: "auditfy", StageID: &stage, StageSlug: "staging"}, true},
+		{"sin proyecto", APIToken{}, false},
+		{"stage sin slug", APIToken{ProjectSlug: "auditfy", StageID: &stage}, false},
+		{"slug sin stage", APIToken{ProjectSlug: "auditfy", StageSlug: "staging"}, false},
+	}
+	for _, c := range cases {
+		if got := c.tok.ScopeValid(); got != c.want {
+			t.Errorf("%s: ScopeValid=%v, esperaba %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestAPITokenExpiredAndScope(t *testing.T) {
 	exp := t0.Add(time.Hour)
 	tok := APIToken{ID: 9, Name: "ci", ProjectSlug: "auditfy", StageSlug: "staging", ExpiresAt: &exp}

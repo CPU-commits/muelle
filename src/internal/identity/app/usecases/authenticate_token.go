@@ -36,7 +36,7 @@ func (uc *AuthenticateToken) Execute(ctx context.Context, bearer string) (shared
 		return shared.Principal{}, err
 	}
 	now := uc.clock.Now()
-	if t.Expired(now) {
+	if t.Expired(now) || !t.ScopeValid() {
 		return shared.Principal{}, shared.ErrUnauthenticated
 	}
 	if t.LastUsedAt == nil || now.Sub(*t.LastUsedAt) >= service.TouchEvery {

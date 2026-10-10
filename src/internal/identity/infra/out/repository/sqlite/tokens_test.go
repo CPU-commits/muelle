@@ -71,6 +71,39 @@ func TestTokens(t *testing.T) {
 	}
 }
 
+// Un token de stage cuyo stage ya no existe (borrado con foreign_keys=OFF) o
+// es de otro proyecto no puede convertirse en un token de todo el proyecto:
+// el repositorio no lo devuelve. Lo mismo un token cuyo proyecto no existe.
+func TestTokensWithBrokenScope(t *testing.T) {
+	r, path := newReposAt(t)
+	ctx := context.Background()
+	projectID, stageID := seedStage(t, r.db)
+	otherID := exec(t, r.db, `INSERT INTO projects (slug, name, created_at) VALUES ('otro', 'Otro', 0)`)
+	movedID := exec(t, r.db, `INSERT INTO stages (project_id, slug, created_at) VALUES (?, 'production', 0)`, projectID)
+	orphan, _ := r.tokens.Create(ctx, entity.APIToken{Name: "huerfano", TokenHash: "h1", ProjectID: projectID, StageID: &stageID, CreatedAt: t0})
+	moved, _ := r.tokens.Create(ctx, entity.APIToken{Name: "movido", TokenHash: "h2", ProjectID: projectID, StageID: &movedID, CreatedAt: t0})
+	whole, _ := r.tokens.Create(ctx, entity.APIToken{Name: "proyecto", TokenHash: "h3", ProjectID: projectID, CreatedAt: t0})
+	other, _ := r.tokens.Create(ctx, entity.APIToken{Name: "otro", TokenHash: "h4", ProjectID: otherID, CreatedAt: t0})
+
+	rawExec(t, path, `DELETE FROM stages WHERE id = ?`, stageID)
+	rawExec(t, path, `UPDATE stages SET project_id = ? WHERE id = ?`, otherID, movedID)
+	rawExec(t, path, `DELETE FROM projects WHERE id = ?`, otherID)
+
+	for _, hash := range []string{"h1", "h2", "h4"} {
+		if tok, err := r.tokens.GetByHash(ctx, hash); !errors.Is(err, repository.ErrNotFound) {
+			t.Errorf("%s: esperaba ErrNotFound, got tok=%+v err=%v", hash, tok, err)
+		}
+	}
+	if tok, err := r.tokens.GetByHash(ctx, "h3"); err != nil || tok.StageSlug != "" || tok.ProjectSlug != "auditfy" {
+		t.Fatalf("el token de proyecto sigue sirviendo: tok=%+v err=%v", tok, err)
+	}
+	// La lista no los muestra como si fueran de todo el proyecto.
+	list, err := r.tokens.List(ctx)
+	if err != nil || len(list) != 1 || list[0].ID != whole.ID {
+		t.Fatalf("list=%+v err=%v (huérfano %d, movido %d, otro %d)", list, err, orphan.ID, moved.ID, other.ID)
+	}
+}
+
 func TestTokensCascadeWithProject(t *testing.T) {
 	r := newRepos(t)
 	ctx := context.Background()

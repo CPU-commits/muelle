@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -22,9 +24,43 @@ type repos struct {
 
 func newRepos(t *testing.T) repos {
 	t.Helper()
-	db := sqlitetest.New(t)
+	return reposOn(sqlitetest.New(t))
+}
+
+func reposOn(db *sqlitedb.DB) repos {
 	return repos{db: db, users: NewUserRepository(db), sessions: NewSessionRepository(db),
 		invites: NewInviteRepository(db), tokens: NewTokenRepository(db)}
+}
+
+// newReposAt abre la base en una ruta conocida, para poder corromperla desde
+// otra conexión (rawExec).
+func newReposAt(t *testing.T) (repos, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "muelle.db")
+	db, err := sqlitedb.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return reposOn(db), path
+}
+
+// rawExec corre SQL en una conexión aparte sin claves foráneas (en SQLite
+// vienen apagadas si no se activan), para dejar filas huérfanas como las que
+// quedarían si alguien borra con foreign_keys=OFF.
+func rawExec(t *testing.T, path, query string, args ...any) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(query, args...); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
 }
 
 func (r repos) user(t *testing.T, name string, createdBy *int64) entity.User {
