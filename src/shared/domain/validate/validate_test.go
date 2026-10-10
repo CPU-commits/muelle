@@ -174,11 +174,29 @@ func TestName(t *testing.T) {
 	if err := Name("name", "Proyecto ñandú", 64); err != nil {
 		t.Errorf("Name con acentos debió pasar: %v", err)
 	}
-	for _, s := range []string{"\x00", "​", "a\nb", "‮abc", "a\tb"} {
+	invisible := []string{
+		"\x00", "a\nb", "a\tb",
+		"\u200b",    // espacio de ancho cero (Cf)
+		"\u202eabc", // invierte el texto (Cf)
+		"a\u2028b",  // separador de línea (Zl)
+		"a\u2029b",  // separador de párrafo (Zp)
+		"\u3164",    // relleno Hangul
+		"a\u115fb",  // relleno inicial Hangul
+		"a\u1160b",  // relleno medial Hangul
+		"\uffa0",    // relleno Hangul de ancho medio
+	}
+	for _, s := range invisible {
 		err := Name("name", s, 64)
 		var ve *Error
 		if !errors.As(err, &ve) || ve.Field != "name" {
 			t.Errorf("Name(%q) = %v, esperaba que rechazara el carácter invisible", s, err)
+		}
+	}
+	for _, s := range []string{"a\xffb", "\xc3", "ok\xed\xa0\x80"} {
+		err := Name("name", s, 64)
+		var ve *Error
+		if !errors.As(err, &ve) || ve.Field != "name" || !strings.Contains(ve.Message, "UTF-8") {
+			t.Errorf("Name(%q) = %v, esperaba que rechazara el UTF-8 inválido", s, err)
 		}
 	}
 }

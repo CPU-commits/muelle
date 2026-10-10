@@ -48,12 +48,13 @@ func (p Principal) Actor() (ActorType, *int64) {
 // Allows dice si el principal puede operar sobre project/stage.
 // Una sesión puede todo. Un token tiene que ser de ese proyecto; si está
 // limitado a un stage, solo puede tocar ese stage, y sobre recursos del
-// proyecto (stage vacío) solo puede leer.
+// proyecto (stage vacío) solo puede leer. Un proyecto vacío, en la ruta o en
+// el token, nunca autoriza a un token.
 func (p Principal) Allows(project, stage string, write bool) bool {
 	if p.Token == nil {
 		return true
 	}
-	if project != p.Token.ProjectSlug {
+	if project == "" || p.Token.ProjectSlug == "" || project != p.Token.ProjectSlug {
 		return false
 	}
 	if p.Token.StageSlug == "" {

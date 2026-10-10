@@ -94,9 +94,17 @@ func EnvKey(field, key string) error {
 	return nil
 }
 
+// hangulFillers son letras Hangul que se ven como un espacio vacío.
+var hangulFillers = map[rune]bool{0x115F: true, 0x1160: true, 0x3164: true, 0xFFA0: true}
+
 // Name valida un texto libre obligatorio (nombres de proyectos, tokens).
-// Rechaza caracteres de control y de formato (invisibles, como U+200B o U+202E).
+// Rechaza el UTF-8 inválido, los caracteres de control y de formato
+// (invisibles, como U+200B o U+202E), los separadores de línea y de párrafo
+// (U+2028 y U+2029) y los rellenos Hangul, que se ven en blanco.
 func Name(field, s string, max int) error {
+	if !utf8.ValidString(s) {
+		return Errorf(field, "no es UTF-8 válido")
+	}
 	if strings.TrimSpace(s) == "" {
 		return Errorf(field, "es obligatorio")
 	}
@@ -104,7 +112,7 @@ func Name(field, s string, max int) error {
 		return Errorf(field, "no puede superar %d caracteres", max)
 	}
 	for _, r := range s {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) || hangulFillers[r] {
 			return Errorf(field, "no puede contener caracteres de control ni invisibles")
 		}
 	}

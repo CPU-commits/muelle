@@ -9,6 +9,9 @@ func TestAllows(t *testing.T) {
 	session := Principal{UserID: 1, Username: "felipe"}
 	projectToken := Principal{Token: &TokenScope{ID: 7, Name: "ci", ProjectSlug: "auditfy"}}
 	stageToken := Principal{Token: &TokenScope{ID: 8, Name: "ci-staging", ProjectSlug: "auditfy", StageSlug: "staging"}}
+	// Un TokenScope sin ProjectSlug sería un bug de identity.
+	noProjectToken := Principal{Token: &TokenScope{ID: 9, Name: "roto"}}
+	noProjectStageToken := Principal{Token: &TokenScope{ID: 10, Name: "roto", StageSlug: "staging"}}
 
 	cases := []struct {
 		name           string
@@ -28,6 +31,12 @@ func TestAllows(t *testing.T) {
 		{"token de stage, leer proyecto", stageToken, "auditfy", "", false, true},
 		{"token de stage, escribir en proyecto", stageToken, "auditfy", "", true, false},
 		{"token de stage, otro proyecto mismo stage", stageToken, "otro", "staging", false, false},
+		// Un slug vacío nunca autoriza a un token, aunque coincidan.
+		{"token de proyecto, sin proyecto", projectToken, "", "", false, false},
+		{"token de stage, sin proyecto", stageToken, "", "staging", false, false},
+		{"token sin proyecto, sin proyecto", noProjectToken, "", "", false, false},
+		{"token sin proyecto, leer proyecto", noProjectToken, "auditfy", "", false, false},
+		{"token sin proyecto con stage, sin proyecto", noProjectStageToken, "", "staging", false, false},
 	}
 	for _, c := range cases {
 		if got := c.p.Allows(c.project, c.stage, c.write); got != c.want {

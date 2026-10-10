@@ -1,10 +1,20 @@
 // Package crypto cifra valores con AES-256-GCM usando la clave maestra.
 //
 // Cada valor se cifra con un nonce aleatorio y con datos asociados (AAD) que
-// lo ligan a su fila, así un valor cifrado copiado a otra fila no descifra.
-// Cada fila y columna cifrada usa una AAD única con el formato
-// <tabla>:<dueño>:<clave> (ej. "env:app:12:DATABASE_URL"). Solo la última
-// parte puede contener ':', para que dos AAD distintas nunca se confundan.
+// lo ligan a su fila y columna, así un valor cifrado copiado a otro lugar no
+// descifra. Las AAD canónicas son:
+//
+//	env:app:<id>:<key>       env_vars.value de una app (<id> es apps.id)
+//	env:stage:<id>:<key>     env_vars.value de un stage (<id> es stages.id)
+//	users:totp:<id>          users.totp_secret (<id> es users.id)
+//	users:totp_pending:<id>  users.totp_pending
+//	settings:<key>           settings.value de un setting cifrado
+//
+// La regla: el prefijo fijo (todo antes del último segmento) es distinto para
+// cada tabla y columna, y solo el último segmento es texto libre (puede
+// contener ':'). Así dos AAD de lugares distintos nunca coinciden. Una
+// columna cifrada nueva agrega su prefijo a esta lista.
+//
 // La AAD nunca es vacía: Encrypt hace panic y Decrypt devuelve cipher.ErrDecrypt.
 package crypto
 
