@@ -485,7 +485,11 @@ func TestCorrectCodeAfterSessionUsedUp(t *testing.T) {
 		_, err := uc.Execute(ctx, completeFrom(att.Token, wrong, "2001:db8::2"))
 		done <- err
 	}()
-	<-g.entered // el 5º código malo agotó la sesión y la está por borrar
+	select {
+	case <-g.entered: // el 5º código malo agotó la sesión y la está por borrar
+	case err := <-done:
+		t.Fatalf("el 5º código malo debió borrar la sesión: %v", err)
+	}
 	_, err := f.completeTOTP.Execute(ctx, completeFrom(att.Token, good, "2001:db8::3"))
 	close(g.release)
 	if err := <-done; !errors.Is(err, service.ErrInvalidCode) {

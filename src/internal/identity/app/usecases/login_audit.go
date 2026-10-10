@@ -41,12 +41,12 @@ const (
 // auditDropWarnEvery, en el log y con una fila auth.audit_dropped con la
 // cuenta (así el volumen queda acotado y el ataque se ve igual): el primero
 // enseguida, y lo que se acumula después, al vencer el intervalo, aunque la
-// avalancha haya terminado y no llegue ningún evento más. Los del paso del
-// código (reason
-// code) se registran siempre: solo llega a ese paso quien sabe la contraseña,
-// el bloqueo por usuario ya los acota (unos 33 códigos malos por día y
-// usuario), y una avalancha de contraseñas malas que vacía el balde no puede
-// esconder un ataque al 2FA.
+// avalancha haya terminado y no llegue ningún evento más.
+//
+// Los del paso del código (reason code) se registran siempre: solo llega a
+// ese paso quien sabe la contraseña, el bloqueo por usuario ya los acota
+// (unos 33 códigos malos por día y usuario), y una avalancha de contraseñas
+// malas que vacía el balde no puede esconder un ataque al 2FA.
 type LoginAudit struct {
 	rec    audit.Recorder
 	bucket *service.TokenBucket
