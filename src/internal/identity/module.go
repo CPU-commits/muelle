@@ -85,7 +85,7 @@ func New(d Deps) *Module {
 			CreateInvite:   usecases.NewCreateInvite(db, users, invites, d.Audit, c),
 			ListUsers:      usecases.NewListUsers(users),
 			DeleteUser:     usecases.NewDeleteUser(db, users, d.Audit),
-			ResetUserTOTP:  usecases.NewResetUserTOTP(db, users, sessions, d.Audit),
+			ResetUserTOTP:  usecases.NewResetUserTOTP(db, users, sessions, totpLockout, replay, d.Audit),
 			CreateToken:    usecases.NewCreateToken(db, users, tokens, scopes, d.Audit, c),
 			ListTokens:     usecases.NewListTokens(tokens),
 			DeleteToken:    usecases.NewDeleteToken(tokens, d.Audit),

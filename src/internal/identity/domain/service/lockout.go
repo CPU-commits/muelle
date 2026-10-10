@@ -75,6 +75,11 @@ func (l *TOTPLockout) Fail(userID int64) (wasLocked, locked bool) { return l.l.f
 // Succeed decide un código correcto; mismo contrato que LoginLockout.Succeed.
 func (l *TOTPLockout) Succeed(userID int64) bool { return l.l.succeed(totpKey(userID)) }
 
+// Reset olvida los fallos y el bloqueo del 2FA del usuario, aunque esté
+// bloqueado: al reiniciarle el 2FA (ResetUserTOTP), los códigos malos del
+// secreto anterior no lo dejan afuera con el nuevo.
+func (l *TOTPLockout) Reset(userID int64) { l.l.reset(totpKey(userID)) }
+
 // progressiveLock cuenta fallos por clave y bloquea según LockoutFor, con un
 // mapa acotado. Mientras una clave está bloqueada, ni un fallo ni un acierto
 // cambian nada.
@@ -130,6 +135,12 @@ func (l *progressiveLock) succeed(key string) bool {
 	}
 	delete(l.entries, key)
 	return true
+}
+
+func (l *progressiveLock) reset(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.entries, key)
 }
 
 // makeRoom se llama con el mapa lleno. Primero olvida las claves viejas (sin

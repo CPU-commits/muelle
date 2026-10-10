@@ -232,6 +232,51 @@ func TestCompleteTOTPAfterReset(t *testing.T) {
 	}
 }
 
+// Reiniciar el 2FA de un usuario (un admin, para quien perdió el teléfono)
+// también borra en memoria sus fallos de código y sus códigos usados: con el
+// secreto nuevo entra enseguida, aunque el anterior lo hubiera bloqueado.
+func TestResetUserTOTPClearsCodeFailuresAndReplay(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	used := service.TOTPStep(f.now())
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.code(t, secret))); err != nil {
+		t.Fatal(err)
+	}
+	f.advance(service.TOTPPeriod)
+	for i := range 5 {
+		res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+		if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.wrongCode(t, secret))); !errors.Is(err, service.ErrInvalidCode) {
+			t.Fatalf("código malo %d: %v", i+1, err)
+		}
+	}
+	if !f.totpLock.Locked(u.ID) {
+		t.Fatal("5 códigos malos bloquean el 2FA del usuario")
+	}
+
+	if err := f.resetTOTP.Execute(ctx, "felipe"); err != nil {
+		t.Fatal(err)
+	}
+	if f.totpLock.Locked(u.ID) {
+		t.Fatal("el reinicio del 2FA borra el bloqueo por códigos")
+	}
+	if !f.replay.Use(u.ID, used) {
+		t.Fatal("el reinicio del 2FA borra los códigos usados del usuario")
+	}
+
+	// Con el secreto nuevo entra enseguida, y un código malo no lo bloquea.
+	other := f.enableTOTPFor(t, u.ID)
+	res, _ = f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.wrongCode(t, other))); !errors.Is(err, service.ErrInvalidCode) {
+		t.Fatalf("un código malo después del reinicio: %v", err)
+	}
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.code(t, other))); err != nil {
+		t.Fatalf("con el secreto nuevo entra: %v", err)
+	}
+}
+
 func TestRequire2FA(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

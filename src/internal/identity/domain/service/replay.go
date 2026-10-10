@@ -52,6 +52,14 @@ func (g *TOTPReplayGuard) Set(userID, step int64) {
 	g.record(userID, step)
 }
 
+// Forget olvida los pasos usados de userID: al reiniciarle el 2FA
+// (ResetUserTOTP) ya no hay secreto, y el próximo lo registra con Set.
+func (g *TOTPReplayGuard) Forget(userID int64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.last, userID)
+}
+
 func (g *TOTPReplayGuard) record(userID, step int64) {
 	if _, ok := g.last[userID]; !ok && len(g.last) >= g.maxUsers {
 		g.makeRoom()

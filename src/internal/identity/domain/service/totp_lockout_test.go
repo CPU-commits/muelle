@@ -44,6 +44,26 @@ func TestTOTPLockoutPerUser(t *testing.T) {
 	}
 }
 
+// Reset olvida los fallos y el bloqueo del 2FA de un usuario (al reiniciarle
+// el 2FA), aunque esté bloqueado, y no toca a los demás.
+func TestTOTPLockoutReset(t *testing.T) {
+	c := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	l := NewTOTPLockout(c)
+	for range 5 {
+		l.Fail(7)
+		l.Fail(8)
+	}
+	l.Reset(7)
+	if l.Locked(7) || !l.Locked(8) {
+		t.Fatal("Reset desbloquea solo al usuario 7")
+	}
+	for n := 1; n <= 4; n++ {
+		if _, locked := l.Fail(7); locked {
+			t.Fatalf("Reset olvidó los fallos: el fallo %d ya bloquea", n)
+		}
+	}
+}
+
 // Una sesión pendiente valida a lo más MaxPendingCodeAttempts códigos: cada
 // intento se reserva antes, el último lo avisa, y después no hay más (la
 // cuenta no vuelve a empezar). Forget olvida la cuenta de una sesión canjeada.

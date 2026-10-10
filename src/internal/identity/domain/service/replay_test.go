@@ -17,6 +17,23 @@ func TestTOTPStep(t *testing.T) {
 	}
 }
 
+// Forget olvida los pasos usados de un usuario (al reiniciarle el 2FA) y no
+// toca a los demás.
+func TestTOTPReplayGuardForget(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	g := NewTOTPReplayGuard(clock.NewManual(at))
+	step := TOTPStep(at)
+	g.Use(1, step)
+	g.Use(2, step)
+	g.Forget(1)
+	if !g.Use(1, step) {
+		t.Fatal("después de Forget, el paso del usuario 1 se acepta de nuevo")
+	}
+	if g.Use(2, step) {
+		t.Fatal("el usuario 2 conserva su paso usado")
+	}
+}
+
 // Un código TOTP no se acepta dos veces (RFC 6238 §5.2): un paso ya usado,
 // o uno anterior, se rechaza.
 func TestTOTPReplayGuard(t *testing.T) {
