@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/CPU-commits/muelle/internal/validate"
+	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
 
 const (

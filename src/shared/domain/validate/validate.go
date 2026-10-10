@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -35,9 +36,22 @@ var (
 	envKeyRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 )
 
-func ProjectSlug(s string) error { return slug("slug", s, slug16Re, 16) }
-func StageSlug(s string) error   { return slug("slug", s, slug12Re, 12) }
-func AppSlug(s string) error     { return slug("slug", s, slug16Re, 16) }
+// reservedProjects no se pueden usar como proyecto: la red de un stage se
+// llama <proyecto>_<stage> y chocaría con muelle_panel o docker_gwbridge (§5.2 del spec).
+var reservedProjects = map[string]bool{"muelle": true, "docker": true}
+
+func ProjectSlug(s string) error {
+	if err := slug("slug", s, slug16Re, 16); err != nil {
+		return err
+	}
+	if reservedProjects[s] {
+		return Errorf("slug", "%q está reservado", s)
+	}
+	return nil
+}
+
+func StageSlug(s string) error { return slug("slug", s, slug12Re, 12) }
+func AppSlug(s string) error   { return slug("slug", s, slug16Re, 16) }
 
 // VolumeName valida nombres de volúmenes y de servicios compose (mismas reglas que una app).
 func VolumeName(field, s string) error { return slug(field, s, slug16Re, 16) }
@@ -67,20 +81,32 @@ func Password(s string) error {
 	return nil
 }
 
-func EnvKey(s string) error {
-	if !envKeyRe.MatchString(s) {
-		return Errorf("vars", "clave %q inválida: letras, números y '_', sin empezar con número, hasta 128", s)
+// EnvKey valida la clave de una variable. field es el campo del cuerpo donde
+// viene la clave ("vars", "set" o "unset"), para que el error lo nombre.
+func EnvKey(field, key string) error {
+	if !envKeyRe.MatchString(key) {
+		return Errorf(field, "clave %q inválida: letras, números y '_', sin empezar con número, hasta 128", key)
+	}
+	// compose-go lee del entorno las variables COMPOSE_* (§5.2 del spec).
+	if strings.HasPrefix(key, "COMPOSE_") {
+		return Errorf(field, "clave %q inválida: el prefijo COMPOSE_ está reservado", key)
 	}
 	return nil
 }
 
 // Name valida un texto libre obligatorio (nombres de proyectos, tokens).
+// Rechaza caracteres de control y de formato (invisibles, como U+200B o U+202E).
 func Name(field, s string, max int) error {
 	if strings.TrimSpace(s) == "" {
 		return Errorf(field, "es obligatorio")
 	}
 	if utf8.RuneCountInString(s) > max {
 		return Errorf(field, "no puede superar %d caracteres", max)
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return Errorf(field, "no puede contener caracteres de control ni invisibles")
+		}
 	}
 	return nil
 }

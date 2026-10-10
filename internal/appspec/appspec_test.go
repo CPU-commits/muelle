@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CPU-commits/muelle/internal/validate"
+	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
 
 func TestParseAppliesDefaults(t *testing.T) {

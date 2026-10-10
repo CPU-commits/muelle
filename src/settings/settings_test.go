@@ -1,4 +1,4 @@
-package config
+package settings
 
 import (
 	"strings"
@@ -52,6 +52,10 @@ func TestLoadRejectsBadOrigin(t *testing.T) {
 		"https://x.com:", "https://x.com:0443", "https://x.com:99999", "https://x.com:0",
 		"https://x.com?", "https://x.com#", "https://panél.example.com", "https://*.example.com", "null",
 		"https://u@x.com", "https://x.com?a=1", "https://x.com#f", "https:x.com",
+		// IP literales no canónicas o no soportadas.
+		"https://[0:0:0:0:0:0:0:1]", "https://[2001:0db8::1]", "https://[::ffff:127.0.0.1]",
+		"https://[fe80::1%25eth0]", "https://[127.0.0.1]",
+		"http://127.1:8080", "http://0x7f.0.0.1", "http://0177.0.0.1", "http://2130706433", "http://256.0.0.1",
 	}
 	for _, origin := range bad {
 		t.Setenv("MUELLE_PANEL_ORIGIN", origin)
@@ -60,7 +64,7 @@ func TestLoadRejectsBadOrigin(t *testing.T) {
 			t.Errorf("origen %q debió fallar", origin)
 			continue
 		}
-		if !strings.Contains(err.Error(), "MUELLE_PANEL_ORIGIN") {
+		if !strings.HasPrefix(err.Error(), "MUELLE_PANEL_ORIGIN:") {
 			t.Errorf("origen %q: el error no menciona la variable: %v", origin, err)
 		}
 	}
@@ -70,7 +74,7 @@ func TestLoadAcceptsGoodOrigin(t *testing.T) {
 	clearEnv(t)
 	for _, origin := range []string{
 		"https://[::1]:8080", "http://localhost:8080", "https://panel.example.com:8443",
-		"http://127.0.0.1:18080", "https://panel.example.com",
+		"http://127.0.0.1:18080", "https://panel.example.com", "https://[2001:db8::1]",
 	} {
 		t.Setenv("MUELLE_PANEL_ORIGIN", origin)
 		t.Setenv("MUELLE_SECURE_COOKIES", "true")
@@ -92,12 +96,27 @@ func TestLoadSuggestsCanonicalOrigin(t *testing.T) {
 		"HTTPS://panel.example.com": "https://panel.example.com",
 		"https://x.com:443":         "https://x.com",
 		"http://x.com:80":           "http://x.com",
+		"https://[0:0:0:0:0:0:0:1]": "https://[::1]",
+		"https://[2001:0db8::1]":    "https://[2001:db8::1]",
 	}
 	for in, want := range cases {
 		t.Setenv("MUELLE_PANEL_ORIGIN", in)
 		_, err := Load()
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("origen %q: el error debe sugerir %q, obtuvo %v", in, want, err)
+		}
+	}
+}
+
+func TestLoadRejectsNonCanonicalIPv4(t *testing.T) {
+	clearEnv(t)
+	for _, origin := range []string{
+		"http://127.1:8080", "http://0x7f.0.0.1", "http://0177.0.0.1", "http://2130706433", "http://256.0.0.1",
+	} {
+		t.Setenv("MUELLE_PANEL_ORIGIN", origin)
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "decimal con puntos") {
+			t.Errorf("origen %q: esperaba el error de IP v4, obtuvo %v", origin, err)
 		}
 	}
 }
