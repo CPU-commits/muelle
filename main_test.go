@@ -47,6 +47,39 @@ func TestNewHTTPServer(t *testing.T) {
 	}
 }
 
+func TestRunUsage(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		code int
+	}{
+		{nil, 2},
+		{[]string{"otro"}, 2},
+		{[]string{"serve", "extra"}, 2},
+		{[]string{"genkey", "extra"}, 2},
+		{[]string{"genkey", "-h"}, 2},
+		{[]string{"-h"}, 0},
+		{[]string{"--help"}, 0},
+		{[]string{"help"}, 0},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := run(tc.args, &stdout, &stderr)
+		if code != tc.code {
+			t.Errorf("%q: código %d, esperaba %d", tc.args, code, tc.code)
+		}
+		// La ayuda pedida va a stdout; la de un error, a stderr.
+		out, other := &stderr, &stdout
+		if tc.code == 0 {
+			out, other = &stdout, &stderr
+		}
+		if !strings.Contains(out.String(), usage) {
+			t.Errorf("%q: falta el uso en la salida: %q", tc.args, out.String())
+		}
+		if other.Len() != 0 {
+			t.Errorf("%q: salida inesperada: %q", tc.args, other.String())
+		}
+	}
+}
+
 func TestRunGenkey(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"genkey"}, &stdout, &stderr); code != 0 {
@@ -97,6 +130,27 @@ func lastLogLine(t *testing.T, out string) map[string]any {
 		t.Fatalf("la última línea no es JSON: %q (%v)", out, err)
 	}
 	return m
+}
+
+// Sin la clave maestra, serve termina con un error en JSON (el mismo formato
+// que el resto del log) que dice qué variable revisar y cómo crear una clave.
+func TestRunServeMissingKey(t *testing.T) {
+	dataDir := serveEnv(t, "127.0.0.1:0", "")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"serve"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("código %d, esperaba 1", code)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr=%q: el error va en el log JSON", stderr.String())
+	}
+	m := lastLogLine(t, stdout.String())
+	errMsg, _ := m["err"].(string)
+	if m["level"] != "ERROR" || !strings.Contains(errMsg, "MUELLE_MASTER_KEY_FILE") || !strings.Contains(errMsg, "muelle genkey") {
+		t.Fatalf("log=%v", m)
+	}
+	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+		t.Fatalf("sin la clave no se debió crear DataDir: %v", err)
+	}
 }
 
 // Con el puerto ocupado (por ejemplo, otra instancia), serve falla antes de

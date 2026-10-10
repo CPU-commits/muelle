@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -166,4 +167,68 @@ func TestNewWrongMasterKey(t *testing.T) {
 		t.Fatalf("con la clave original: %v", err)
 	}
 	c.Close()
+}
+
+// Sin PanelOrigin o DataDir, New devuelve un error, en vez de dejar que un
+// módulo haga panic, y no toca nada.
+func TestNewRequiresPanelOriginAndDataDir(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*settings.Settings)
+		want string
+	}{
+		{"sin PanelOrigin", func(s *settings.Settings) { s.PanelOrigin = "" }, "MUELLE_PANEL_ORIGIN"},
+		{"sin DataDir", func(s *settings.Settings) { s.DataDir = "" }, "MUELLE_DATA_DIR"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testSettings(t)
+			dataDir := s.DataDir
+			tc.edit(&s)
+			c, err := New(context.Background(), s, testLogger(t))
+			if err == nil {
+				c.Close()
+				t.Fatal("New debió fallar")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v, esperaba que nombre %s", err, tc.want)
+			}
+			if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+				t.Fatalf("New no debió crear DataDir: %v", err)
+			}
+		})
+	}
+}
+
+// Si la clave maestra falta o no sirve, el error dice qué variable revisar y
+// cómo crear una clave, y New no crea DataDir.
+func TestNewBadMasterKey(t *testing.T) {
+	for _, tc := range []struct{ name, content string }{
+		{"no existe", ""},
+		{"no es base64", "no-es-base64!"},
+		{"tamaño incorrecto", base64.StdEncoding.EncodeToString([]byte("corta"))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testSettings(t)
+			if tc.content == "" {
+				if err := os.Remove(s.MasterKeyFile); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(s.MasterKeyFile, []byte(tc.content+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			c, err := New(context.Background(), s, testLogger(t))
+			if err == nil {
+				c.Close()
+				t.Fatal("New debió fallar")
+			}
+			for _, want := range []string{"MUELLE_MASTER_KEY_FILE", s.MasterKeyFile, "muelle genkey"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err=%v, esperaba que diga %q", err, want)
+				}
+			}
+			if _, err := os.Stat(s.DataDir); !os.IsNotExist(err) {
+				t.Fatalf("con la clave mal no se debió crear DataDir: %v", err)
+			}
+		})
+	}
 }

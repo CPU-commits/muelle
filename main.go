@@ -27,7 +27,8 @@ const usage = `uso: muelle <comando>
 
 comandos:
   serve    levanta el panel y la API (configuración por variables MUELLE_*)
-  genkey   imprime una clave maestra nueva en base64`
+  genkey   imprime una clave maestra nueva en base64
+  help     muestra esta ayuda (también -h y --help)`
 
 const (
 	// memoryLimit es el límite blando de memoria de serve si GOMEMLIMIT no
@@ -50,30 +51,41 @@ func main() {
 }
 
 // run ejecuta el comando de args (sin el nombre del programa) y devuelve el
-// código de salida.
+// código de salida: 0 si terminó bien, 1 si serve falló y 2 si los
+// argumentos no sirven (con el uso en stderr).
 func run(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
+	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
 	}
-	switch args[0] {
-	case "serve":
-		// También el error final y lo que se registre con slog.Default o el
-		// paquete log sale en JSON.
-		log := slog.New(slog.NewJSONHandler(stdout, nil))
-		slog.SetDefault(log)
-		if err := serve(log); err != nil {
-			log.Error("muelle terminó con error", "err", err)
-			return 1
-		}
+	cmd, extra := args[0], args[1:]
+	switch cmd {
+	case "-h", "--help", "help":
+		fmt.Fprintln(stdout, usage)
 		return 0
-	case "genkey":
+	case "serve", "genkey":
+		if len(extra) > 0 {
+			fmt.Fprintf(stderr, "muelle %s: no recibe argumentos (sobra %q)\n\n%s\n", cmd, extra[0], usage)
+			return 2
+		}
+	default:
+		fmt.Fprintf(stderr, "muelle: comando desconocido %q\n\n%s\n", cmd, usage)
+		return 2
+	}
+
+	if cmd == "genkey" {
 		fmt.Fprintln(stdout, crypto.GenerateKey())
 		return 0
-	default:
-		fmt.Fprintln(stderr, usage)
-		return 2
 	}
+	// También el error final y lo que se registre con slog.Default o el
+	// paquete log sale en JSON.
+	log := slog.New(slog.NewJSONHandler(stdout, nil))
+	slog.SetDefault(log)
+	if err := serve(log); err != nil {
+		log.Error("muelle terminó con error", "err", err)
+		return 1
+	}
+	return 0
 }
 
 func serve(log *slog.Logger) error {
