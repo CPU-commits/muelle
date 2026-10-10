@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
+	"github.com/CPU-commits/muelle/src/internal/identity/domain/repository"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 )
@@ -89,5 +90,42 @@ func TestTOTPLockExpiresForLegitimateUser(t *testing.T) {
 	f.advance(service.LockoutFor(5))
 	if _, err := f.completeTOTP.Execute(ctx, completeFrom(res.Token, f.code(t, secret), "198.51.100.7")); err != nil {
 		t.Fatalf("vencido el bloqueo, el código correcto entra: %v", err)
+	}
+}
+
+var errDiskFull = errors.New("disco lleno")
+
+// failingDeleteSessions no puede borrar sesiones.
+type failingDeleteSessions struct{ repository.SessionRepository }
+
+func (failingDeleteSessions) Delete(context.Context, string) error { return errDiskFull }
+
+// Si falla el borrado de la sesión que agotó sus intentos, la marca en
+// memoria la sigue frenando hasta que vence: ni el código correcto se valida.
+func TestUsedUpSessionBlockedWhenDeleteFails(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	uc := NewCompleteTOTP(f.db, f.users, failingDeleteSessions{f.sessions}, f.cipher, f.totp, f.limiter, f.totpLock, f.attempts, f.replay, f.la, f.clock)
+	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "203.0.113.9"))
+	wrong := f.wrongCode(t, secret)
+	for i := range 4 {
+		if _, err := uc.Execute(ctx, completeFrom(res.Token, wrong, "2001:db8::1")); !errors.Is(err, service.ErrInvalidCode) {
+			t.Fatalf("código malo %d: %v", i+1, err)
+		}
+	}
+	if _, err := uc.Execute(ctx, completeFrom(res.Token, wrong, "2001:db8::1")); !errors.Is(err, errDiskFull) {
+		t.Fatalf("5º código malo: esperaba el error del borrado, got %v", err)
+	}
+	if _, err := f.sessions.Get(ctx, service.HashToken(res.Token)); err != nil {
+		t.Fatalf("la sesión sigue en la base: %v", err)
+	}
+	f.advance(service.LockoutFor(5)) // vence el bloqueo del usuario; la sesión pendiente, no
+	if _, err := uc.Execute(ctx, completeFrom(res.Token, f.code(t, secret), "198.51.100.7")); !errors.Is(err, shared.ErrUnauthenticated) {
+		t.Fatalf("la sesión agotada no acepta ni el código correcto: got %v", err)
+	}
+	if n := f.countFullSessions(t); n != 0 {
+		t.Fatalf("sesiones completas=%d", n)
 	}
 }

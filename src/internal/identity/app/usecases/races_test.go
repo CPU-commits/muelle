@@ -11,7 +11,9 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
+	"github.com/CPU-commits/muelle/src/internal/identity/domain/repository"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
+	"github.com/CPU-commits/muelle/src/package/cipher"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 )
 
@@ -358,6 +360,137 @@ func TestWrongCodeRacingTheTOTPLock(t *testing.T) {
 	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "198.51.100.7"))
 	if _, err := f.completeTOTP.Execute(ctx, completeFrom(res.Token, f.code(t, secret), "198.51.100.7")); err != nil {
 		t.Fatalf("pasado el minuto, el código correcto entra: %v", err)
+	}
+}
+
+// gatedCipher detiene el descifrado del secreto TOTP: CompleteTOTP ya leyó la
+// sesión y pasó el chequeo de bloqueo, y todavía no reservó su intento.
+type gatedCipher struct {
+	cipher.Cipher
+	g *gate
+}
+
+func (c gatedCipher) Decrypt(ciphertext []byte, aad string) ([]byte, error) {
+	c.g.pass()
+	return c.Cipher.Decrypt(ciphertext, aad)
+}
+
+// countingTOTP cuenta los códigos que se validan.
+type countingTOTP struct {
+	service.TOTP
+	n *atomic.Int32
+}
+
+func (c countingTOTP) Validate(code, secret string, at time.Time) (int64, bool) {
+	c.n.Add(1)
+	return c.TOTP.Validate(code, secret, at)
+}
+
+// gatedDeleteSessions detiene el borrado de una sesión.
+type gatedDeleteSessions struct {
+	repository.SessionRepository
+	g *gate
+}
+
+func (s gatedDeleteSessions) Delete(ctx context.Context, idHash string) error {
+	s.g.pass()
+	return s.SessionRepository.Delete(ctx, idHash)
+}
+
+// Muchos pedidos a la vez sobre una misma sesión pendiente: cada uno reserva
+// su intento antes de validar el código, así entre todos se validan a lo más
+// MaxPendingCodeAttempts códigos (los demás ni se miran) y la sesión queda
+// agotada: después ni el código correcto sirve.
+func TestConcurrentCodesOnOneSessionCheckAtMostFive(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	res, err := f.login.Execute(ctx, login("felipe", testPassword, "203.0.113.9"))
+	if err != nil || !res.MFARequired {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	g := newGate()
+	var checked atomic.Int32
+	uc := NewCompleteTOTP(f.db, f.users, f.sessions, gatedCipher{f.cipher, g}, countingTOTP{f.totp, &checked}, f.limiter, f.totpLock, f.attempts, f.replay, f.la, f.clock)
+	wrong := f.wrongCode(t, secret)
+	const n = 12
+	errs := make(chan error, n)
+	for i := range n {
+		go func() {
+			_, err := uc.Execute(ctx, completeFrom(res.Token, wrong, fmt.Sprintf("2001:db8:%x::1", i+1)))
+			errs <- err
+		}()
+	}
+	for range n {
+		<-g.entered // los n leyeron la sesión vigente y pasaron el chequeo de bloqueo
+	}
+	close(g.release)
+	var invalid, unauth, other int
+	for range n {
+		switch err := <-errs; {
+		case errors.Is(err, service.ErrInvalidCode):
+			invalid++
+		case errors.Is(err, shared.ErrUnauthenticated):
+			unauth++
+		default:
+			other++
+		}
+	}
+	if c := checked.Load(); c != service.MaxPendingCodeAttempts || invalid != service.MaxPendingCodeAttempts || unauth != n-service.MaxPendingCodeAttempts {
+		t.Fatalf("códigos validados=%d (máximo %d) inválidos=%d rechazados sin validar=%d otros=%d",
+			c, service.MaxPendingCodeAttempts, invalid, unauth, other)
+	}
+	f.advance(service.LockoutFor(5)) // vence el bloqueo del usuario; la sesión pendiente, no
+	if _, err := f.completeTOTP.Execute(ctx, completeFrom(res.Token, f.code(t, secret), "198.51.100.7")); !errors.Is(err, shared.ErrUnauthenticated) {
+		t.Fatalf("la sesión agotada no acepta ni el código correcto: got %v", err)
+	}
+	if c, n := checked.Load(), f.countFullSessions(t); c != service.MaxPendingCodeAttempts || n != 0 {
+		t.Fatalf("códigos validados=%d sesiones completas=%d", c, n)
+	}
+}
+
+// La 5ª reserva deja la sesión agotada en memoria antes de borrarla de la
+// base: un código correcto que llega en el medio ya no se valida.
+func TestCorrectCodeAfterSessionUsedUp(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	att, _ := f.login.Execute(ctx, login("felipe", testPassword, "203.0.113.9"))
+	wrong := f.wrongCode(t, secret)
+	for i := range 4 {
+		if _, err := f.completeTOTP.Execute(ctx, completeFrom(att.Token, wrong, "2001:db8::1")); !errors.Is(err, service.ErrInvalidCode) {
+			t.Fatalf("código malo %d: %v", i+1, err)
+		}
+	}
+	// El usuario legítimo entra por su lado: su código correcto reinicia la
+	// cuenta por usuario, así a la sesión del atacante solo la frena su límite.
+	legit, _ := f.login.Execute(ctx, login("felipe", testPassword, "198.51.100.7"))
+	if _, err := f.completeTOTP.Execute(ctx, completeFrom(legit.Token, f.code(t, secret), "198.51.100.7")); err != nil {
+		t.Fatal(err)
+	}
+	f.advance(service.TOTPPeriod)
+	wrong, good := f.wrongCode(t, secret), f.code(t, secret)
+
+	g := newGate()
+	uc := NewCompleteTOTP(f.db, f.users, gatedDeleteSessions{f.sessions, g}, f.cipher, f.totp, f.limiter, f.totpLock, f.attempts, f.replay, f.la, f.clock)
+	done := make(chan error, 1)
+	go func() {
+		_, err := uc.Execute(ctx, completeFrom(att.Token, wrong, "2001:db8::2"))
+		done <- err
+	}()
+	<-g.entered // el 5º código malo agotó la sesión y la está por borrar
+	_, err := f.completeTOTP.Execute(ctx, completeFrom(att.Token, good, "2001:db8::3"))
+	close(g.release)
+	if err := <-done; !errors.Is(err, service.ErrInvalidCode) {
+		t.Fatalf("5º código malo: %v", err)
+	}
+	if !errors.Is(err, shared.ErrUnauthenticated) {
+		t.Fatalf("el código correcto después del 5º: esperaba ErrUnauthenticated, got %v", err)
+	}
+	if n := f.countFullSessions(t); n != 1 {
+		t.Fatalf("solo la sesión del usuario legítimo: sesiones completas=%d", n)
 	}
 }
 

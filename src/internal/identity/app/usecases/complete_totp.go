@@ -17,8 +17,10 @@ import (
 // CompleteTOTP valida el código de una sesión pendiente de MFA y la cambia
 // por una sesión completa con otro token. A este paso solo llega quien sabe
 // la contraseña, así que los códigos malos no se cuentan por IP sino:
-//   - por sesión pendiente: al MaxPendingCodeAttempts-ésimo código malo se
-//     borra y hay que volver a poner la contraseña;
+//   - por sesión pendiente (service.PendingCodeAttempts): se validan a lo más
+//     MaxPendingCodeAttempts códigos, cada uno con su intento reservado antes
+//     de validarlo; si el último es malo la sesión se borra y hay que volver a
+//     poner la contraseña;
 //   - por usuario, desde cualquier IP (service.TOTPLockout), con el
 //     calendario progresivo; solo un código correcto lo reinicia.
 type CompleteTOTP struct {
@@ -83,10 +85,18 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 	if err != nil {
 		return dto.SessionOutput{}, err
 	}
+	// El intento se reserva antes de validar el código: los pedidos en curso
+	// a la vez sobre la misma sesión no pasan del límite, y una sesión agotada
+	// no valida ni el código correcto, aunque todavía no se haya borrado.
+	last, reserved := uc.attempts.Reserve(ss.IDHash, ss.ExpiresAt)
+	if !reserved {
+		return dto.SessionOutput{}, shared.ErrUnauthenticated
+	}
 	step, ok := uc.totp.Validate(in.Code, string(secret), now)
 	if !ok {
-		// Con el usuario ya bloqueado no cambia nada (ni la cuenta de la sesión):
-		// la respuesta y el estado son los mismos que con un código correcto.
+		// Con el usuario ya bloqueado no cambia nada más (ni se borra la
+		// sesión): la respuesta y el estado son los mismos que con un código
+		// correcto.
 		wasLocked, locked := uc.lockout.Fail(u.ID)
 		if wasLocked {
 			return dto.SessionOutput{}, service.ErrLocked
@@ -95,13 +105,7 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 		if locked {
 			uc.audit.locked(ctx, u.Username, in.IP, "code")
 		}
-		if uc.attempts.Fail(ss.IDHash, ss.ExpiresAt) {
-			// La sesión agotó sus intentos: hay que volver a poner la contraseña.
-			if err := uc.sessions.Delete(ctx, ss.IDHash); err != nil {
-				return dto.SessionOutput{}, err
-			}
-		}
-		return dto.SessionOutput{}, service.ErrInvalidCode
+		return dto.SessionOutput{}, uc.invalidCode(ctx, ss.IDHash, last)
 	}
 
 	// El canje se decide de nuevo dentro de la transacción (BEGIN IMMEDIATE),
@@ -146,10 +150,23 @@ func (uc *CompleteTOTP) Execute(ctx context.Context, in dto.CompleteTOTPInput) (
 	// porque con el rollback un evento registrado adentro se perdería.
 	if errors.Is(err, service.ErrInvalidCode) {
 		uc.audit.failed(ctx, u.Username, in.IP, "code")
+		return dto.SessionOutput{}, uc.invalidCode(ctx, ss.IDHash, last)
 	}
 	if err != nil {
 		return dto.SessionOutput{}, err
 	}
 	uc.attempts.Forget(ss.IDHash)
 	return out, nil
+}
+
+// invalidCode responde a un código malo o ya usado. Si era el último intento
+// de la sesión, la borra: hay que volver a poner la contraseña. Si el borrado
+// falla, la sesión igual queda agotada en memoria hasta que vence.
+func (uc *CompleteTOTP) invalidCode(ctx context.Context, sessionHash string, last bool) error {
+	if last {
+		if err := uc.sessions.Delete(ctx, sessionHash); err != nil {
+			return err
+		}
+	}
+	return service.ErrInvalidCode
 }
