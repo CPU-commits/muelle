@@ -11,6 +11,8 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/entity"
 )
 
+// UserRepository guarda los usuarios. Los métodos que reciben un id devuelven
+// ErrNotFound si el usuario no existe.
 type UserRepository interface {
 	// Create guarda u (sin id) y devuelve el usuario guardado. Si el nombre
 	// ya existe devuelve ErrConflict.
