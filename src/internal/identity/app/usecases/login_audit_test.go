@@ -293,8 +293,28 @@ func TestAuditDropsReportedAfterFloodEnds(t *testing.T) {
 	if warnings() != 5 || !strings.HasSuffix(strings.TrimSpace(logs.String()), "descartados=1 desde="+f.now().Add(-auditDropWarnEvery).Format("2006-01-02T15:04:05.000Z07:00")) {
 		t.Fatalf("el último pendiente sale al minuto: %s", logs.String())
 	}
+	// El temporizador vence al minuto del último aviso (no al minuto del
+	// descarte), y el aviso dice desde el primer descarte pendiente.
+	f.advance(time.Hour)
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // pasa
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // se avisa enseguida
+	f.advance(10 * time.Second)                   // cada avance recarga 1 token (ráfaga de 1)
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // pasa
+	first := f.now()
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // pendiente: temporizador a los 50 s
+	f.advance(10 * time.Second)
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // pasa
+	la.failed(ctx, "a", "1.1.1.1", "credentials") // pendiente
+	if warnings() != 6 || len(timers) != 4 || timers[3].d != auditDropWarnEvery-10*time.Second {
+		t.Fatalf("avisos=%d temporizadores=%+v", warnings(), timers)
+	}
+	f.advance(timers[3].d - 10*time.Second)
+	timers[3].fn()
+	if warnings() != 7 || !strings.HasSuffix(strings.TrimSpace(logs.String()), "descartados=2 desde="+first.Format("2006-01-02T15:04:05.000Z07:00")) {
+		t.Fatalf("avisa los 2 pendientes desde el primero: %s", logs.String())
+	}
 	// Cada aviso deja también su fila en la auditoría.
-	want := []string{`{"count":1}`, `{"count":499}`, `{"count":1}`, `{"count":2}`, `{"count":1}`}
+	want := []string{`{"count":1}`, `{"count":499}`, `{"count":1}`, `{"count":2}`, `{"count":1}`, `{"count":1}`, `{"count":2}`}
 	if got := droppedRows(t, f.auditRows(t)); !slices.Equal(got, want) {
 		t.Fatalf("resúmenes=%v, esperaba %v", got, want)
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
 	"github.com/CPU-commits/muelle/src/package/cipher"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
+	sharedrepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
 )
 
 func completeTOTP(pendingToken, code string) dto.CompleteTOTPInput {
@@ -59,6 +60,32 @@ func TestTOTPCodeCannotBeReused(t *testing.T) {
 	f.advance(service.TOTPPeriod)
 	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(second.Token, f.code(t, secret))); err != nil {
 		t.Fatalf("el código del período siguiente sirve (y la sesión pendiente sigue): %v", err)
+	}
+}
+
+// Un código ya usado también gasta su intento de la sesión: si es el último,
+// la sesión se borra igual que con un código malo.
+func TestReusedCodeOnLastAttemptDeletesSession(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	u := f.user(t, "felipe")
+	secret := f.enableTOTPFor(t, u.ID)
+	code := f.code(t, secret)
+	first, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(first.Token, code)); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := f.login.Execute(ctx, login("felipe", testPassword, "1.1.1.1"))
+	for i := range service.MaxPendingCodeAttempts - 1 {
+		if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, f.wrongCode(t, secret))); !errors.Is(err, service.ErrInvalidCode) {
+			t.Fatalf("código malo %d: %v", i+1, err)
+		}
+	}
+	if _, err := f.completeTOTP.Execute(ctx, completeTOTP(res.Token, code)); !errors.Is(err, service.ErrInvalidCode) {
+		t.Fatalf("el código ya usado, como último intento: %v", err)
+	}
+	if _, err := f.sessions.Get(ctx, service.HashToken(res.Token)); !errors.Is(err, sharedrepo.ErrNotFound) {
+		t.Fatalf("la sesión agotada se borra: %v", err)
 	}
 }
 
