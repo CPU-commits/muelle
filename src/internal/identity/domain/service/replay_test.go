@@ -52,6 +52,45 @@ func TestTOTPReplayGuard(t *testing.T) {
 	}
 }
 
+// Con el mapa lleno solo se olvidan los pasos que ya no pueden volver a
+// validarse: un paso reciente (el actual o el anterior) sobrevive, y su
+// código sigue sin poder reutilizarse.
+func TestTOTPReplayGuardKeepsRecentSteps(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	c := clock.NewManual(at)
+	g := NewTOTPReplayGuard(c)
+	g.maxUsers = 4
+	now := TOTPStep(at)
+	g.Set(1, now-5) // viejo
+	g.Set(2, now-5) // viejo
+	g.Set(3, now)   // reciente
+	g.Set(4, now-1) // reciente (dentro del desfase)
+	g.Use(5, now)   // mapa lleno: se olvidan solo los viejos
+	if _, ok := g.last[1]; ok {
+		t.Fatal("un paso viejo se olvida")
+	}
+	if g.Use(3, now) || g.Use(4, now-1) {
+		t.Fatal("un paso reciente no se olvida: su código sigue usado")
+	}
+
+	// Si todos son recientes, se desaloja primero el más viejo.
+	g = NewTOTPReplayGuard(c)
+	g.maxUsers = 4
+	g.Set(1, now-1)
+	g.Set(2, now)
+	g.Set(3, now)
+	g.Set(4, now)
+	g.Set(5, now)
+	if _, ok := g.last[1]; ok {
+		t.Fatal("el paso más viejo es el primero en irse")
+	}
+	for id := range int64(4) {
+		if g.Use(id+2, now) {
+			t.Fatalf("usuario %d: el paso actual no debió olvidarse", id+2)
+		}
+	}
+}
+
 // El mapa está acotado: un paso que ya no puede volver a validarse (más
 // viejo que el período de desfase) se puede olvidar.
 func TestTOTPReplayGuardIsBounded(t *testing.T) {

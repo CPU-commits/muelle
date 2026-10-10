@@ -61,7 +61,8 @@ func (g *TOTPReplayGuard) record(userID, step int64) {
 
 // makeRoom se llama con el mapa lleno. Un paso más viejo que el desfase
 // tolerado (un período) ya no puede volver a validarse, así que se olvida.
-// Si no alcanza, se desaloja cualquiera hasta dejar un cuarto libre.
+// Si no alcanza, se desalojan los pasos más viejos hasta dejar un cuarto
+// libre (solo pasa con miles de usuarios entrando en el mismo minuto).
 func (g *TOTPReplayGuard) makeRoom() {
 	oldest := TOTPStep(g.clock.Now()) - 1
 	for id, step := range g.last {
@@ -69,11 +70,7 @@ func (g *TOTPReplayGuard) makeRoom() {
 			delete(g.last, id)
 		}
 	}
-	target := g.maxUsers * 3 / 4
-	for id := range g.last {
-		if len(g.last) <= target {
-			return
-		}
-		delete(g.last, id)
-	}
+	evictSoonest(g.last, g.maxUsers*3/4, func(step int64) time.Time {
+		return time.Unix(step*int64(TOTPPeriod/time.Second), 0)
+	})
 }
