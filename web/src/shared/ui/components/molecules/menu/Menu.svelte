@@ -3,7 +3,6 @@
 	import type { Attachment } from 'svelte/attachments'
 	import Icon from '../../atoms/icon/Icon.svelte'
 	import {
-		aligns,
 		header as headerClass,
 		item as itemClass,
 		itemDanger,
@@ -16,10 +15,15 @@
 		triggerGhost,
 	} from './styles.css'
 	import type { MenuEntry } from './types'
+	import { placeBelow } from './position'
 
 	// Botón que abre un menú (patrón "menu button" de WAI-ARIA): flechas para moverse,
-	// Escape o Tab para cerrar, y clic afuera también cierra. Usos: la cuenta del header
-	// y las "Opciones" (⋯) de una fila.
+	// Escape o Tab para cerrar, y clic afuera también cierra. Usos: la cuenta del header,
+	// las "Opciones" (⋯) de una fila y los selectores del breadcrumb.
+	//
+	// El panel va en la capa superior (`popover="manual"`), así que ningún `overflow` de
+	// una List, Table o Card lo recorta. Se ubica con el rect del botón: abajo, o arriba si
+	// no entra, y siempre adentro de la pantalla.
 	type Props = {
 		/** Nombre del botón y del menú ("Cuenta: felipe", "Opciones de auditfy"). */
 		label: string
@@ -28,13 +32,23 @@
 		variant?: 'ghost' | 'bare'
 		/** Contenido del botón; por defecto, los tres puntos. */
 		trigger?: Snippet
+		/** Clase para el botón, en vez de la del `variant` (el selector del breadcrumb). */
+		triggerClass?: string
 		/** De qué lado del botón se alinea el panel. */
 		align?: 'start' | 'end'
 		/** Algo arriba de los items que no es un item (el usuario de la sesión). */
 		header?: Snippet
 	}
 
-	let { label, items, variant = 'ghost', trigger, align = 'end', header }: Props = $props()
+	let {
+		label,
+		items,
+		variant = 'ghost',
+		trigger,
+		triggerClass,
+		align = 'end',
+		header,
+	}: Props = $props()
 
 	const menuId = $props.id()
 	let open = $state(false)
@@ -110,12 +124,27 @@
 		}
 	}
 
-	// Al abrir, el foco va al primer item (también con el mouse, como pide el patrón).
-	const focusFirst: Attachment<HTMLElement> = (element) => {
+	// Muestra el panel en la capa superior, lo ubica junto al botón (y lo reubica si la
+	// página scrollea o cambia de tamaño) y le da el foco al primer item, como pide el
+	// patrón, también con el mouse.
+	const showPanel: Attachment<HTMLElement> = (element) => {
+		element.showPopover()
+		const place = () => {
+			if (triggerElement) placeBelow(element, triggerElement, align)
+		}
+		place()
 		menuItems(element)[0]?.focus()
+		window.addEventListener('resize', place)
+		window.addEventListener('scroll', place, true)
+		return () => {
+			window.removeEventListener('resize', place)
+			window.removeEventListener('scroll', place, true)
+			if (element.matches(':popover-open')) element.hidePopover()
+		}
 	}
 
-	// Un clic fuera del menú lo cierra sin robarle el foco a lo que se clickeó.
+	// Un clic fuera del menú lo cierra sin robarle el foco a lo que se clickeó. El panel
+	// sigue siendo hijo de este div en el DOM aunque se vea en la capa superior.
 	const closeOnOutsideClick: Attachment<HTMLElement> = (element) => {
 		const onPointerDown = (event: PointerEvent) => {
 			if (open && !element.contains(event.target as Node)) close(false)
@@ -130,7 +159,7 @@
 	<button
 		{@attach rememberTrigger}
 		type="button"
-		class={variant === 'ghost' ? triggerGhost : triggerBare}
+		class={triggerClass ?? (variant === 'ghost' ? triggerGhost : triggerBare)}
 		aria-label={label}
 		aria-haspopup="menu"
 		aria-expanded={open}
@@ -146,7 +175,7 @@
 	</button>
 
 	{#if open}
-		<div class={[panel, aligns[align]]}>
+		<div popover="manual" class={panel} {@attach showPanel}>
 			{#if header}
 				<div class={headerClass}>{@render header()}</div>
 			{/if}
@@ -157,7 +186,6 @@
 				tabindex="-1"
 				class={list}
 				onkeydown={onMenuKeydown}
-				{@attach focusFirst}
 			>
 				{#each items as entry (entry.id)}
 					{#if entry.kind === 'separator'}

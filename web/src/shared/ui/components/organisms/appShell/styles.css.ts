@@ -29,12 +29,26 @@ export const headerInner = style({
 	gap: theme.space[4],
 })
 
+// Dos columnas: el logo o el breadcrumb (que puede envolver en varias líneas) y la
+// cuenta, que nunca baja de línea.
 export const topRow = style({
+	display: 'grid',
+	gridTemplateColumns: 'minmax(0, 1fr) auto',
+	alignItems: 'start',
+	columnGap: theme.space[16],
+	minHeight: theme.control.lg,
+})
+
+export const leading = style({
 	display: 'flex',
-	flexWrap: 'wrap',
 	alignItems: 'center',
-	justifyContent: 'space-between',
-	gap: `${theme.space[8]} ${theme.space[16]}`,
+	minWidth: 0,
+	minHeight: theme.control.lg,
+})
+
+export const account = style({
+	display: 'flex',
+	alignItems: 'center',
 	minHeight: theme.control.lg,
 })
 

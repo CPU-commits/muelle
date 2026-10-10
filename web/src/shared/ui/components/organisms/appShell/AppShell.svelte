@@ -6,6 +6,7 @@
 	import type { MenuEntry } from '../../molecules/menu/types'
 	import { ShellSlots, setShellSlots } from './shellSlots.svelte.ts'
 	import {
+		account,
 		accountHint,
 		accountName,
 		accountUser,
@@ -13,6 +14,7 @@
 		brandName,
 		header,
 		headerInner,
+		leading,
 		main,
 		shell,
 		skipLink,
@@ -60,28 +62,32 @@
 	<header class={header}>
 		<div class={headerInner}>
 			<div class={topRow}>
-				{#if slots.breadcrumb}
-					{@render slots.breadcrumb()}
-				{:else}
-					<a href={homeHref} class={brand}>
-						<Logo />
-						<span class={brandName}>{appName}</span>
-					</a>
-				{/if}
+				<div class={leading}>
+					{#if slots.breadcrumb}
+						{@render slots.breadcrumb()}
+					{:else}
+						<a href={homeHref} class={brand}>
+							<Logo />
+							<span class={brandName}>{appName}</span>
+						</a>
+					{/if}
+				</div>
 
-				<Menu label={accountLabel} items={accountItems} variant="bare" align="end">
-					{#snippet trigger()}
-						<Avatar name={username} />
-					{/snippet}
-					{#snippet header()}
-						<div class={accountName}>
-							<span class={accountUser}>{username}</span>
-							{#if hint}
-								<span class={accountHint}>{hint}</span>
-							{/if}
-						</div>
-					{/snippet}
-				</Menu>
+				<div class={account}>
+					<Menu label={accountLabel} items={accountItems} variant="bare" align="end">
+						{#snippet trigger()}
+							<Avatar name={username} />
+						{/snippet}
+						{#snippet header()}
+							<div class={accountName}>
+								<span class={accountUser}>{username}</span>
+								{#if hint}
+									<span class={accountHint}>{hint}</span>
+								{/if}
+							</div>
+						{/snippet}
+					</Menu>
+				</div>
 			</div>
 
 			{#if slots.nav}

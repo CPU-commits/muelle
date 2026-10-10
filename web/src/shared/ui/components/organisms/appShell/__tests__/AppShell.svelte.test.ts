@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { userEvent } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-svelte'
 import ShellHarness from './ShellHarness.svelte'
 
@@ -49,5 +49,26 @@ describe('AppShell', () => {
 		await screen.getByRole('menuitem', { name: 'Cerrar sesión' }).click()
 		expect(onLogout).toHaveBeenCalledOnce()
 		await expect.element(screen.getByRole('menu')).not.toBeInTheDocument()
+	})
+
+	it('a 360 px con un breadcrumb largo, el avatar no baja de línea y el menú entra', async () => {
+		await page.viewport(360, 700)
+		const screen = await render(ShellHarness, {
+			override: true,
+			longCrumbs: true,
+			onLogout: vi.fn(),
+		})
+		const account = screen.getByRole('button', { name: 'Cuenta: felipe' })
+		const avatar = account.element().getBoundingClientRect()
+		const crumbs = screen.getByRole('navigation', { name: 'Ubicación' }).element()
+
+		expect(avatar.right).toBeLessThanOrEqual(360)
+		expect(avatar.top).toBeLessThan(crumbs.getBoundingClientRect().top + 40)
+
+		await account.click()
+		const panel = (document.querySelector('[role="menu"]') as HTMLElement).parentElement
+		const rect = (panel as HTMLElement).getBoundingClientRect()
+		expect(rect.left).toBeGreaterThanOrEqual(0)
+		expect(rect.right).toBeLessThanOrEqual(360)
 	})
 })

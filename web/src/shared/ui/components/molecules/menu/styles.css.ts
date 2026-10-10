@@ -1,4 +1,4 @@
-import { style, styleVariants } from '@vanilla-extract/css'
+import { style } from '@vanilla-extract/css'
 import { menuIn } from '@/shared/ui/themes/animations.css'
 import { theme } from '@/shared/ui/themes/theme.css'
 
@@ -30,23 +30,26 @@ export const triggerBare = style({
 	borderRadius: theme.radius.full,
 })
 
+// En la capa superior (`popover`): se borran los estilos del UA para popovers (inset 0,
+// margin auto, borde) y la posición la escribe `placeBelow`.
 export const panel = style({
-	position: 'absolute',
-	top: `calc(100% + ${theme.space[6]})`,
-	zIndex: theme.zIndex.dropdown,
+	position: 'fixed',
+	inset: 'auto',
+	margin: 0,
 	minWidth: '220px',
-	maxWidth: 'min(320px, calc(100vw - 32px))',
+	maxWidth: 'min(320px, calc(100vw - 16px))',
+	maxHeight: 'calc(100vh - 16px)',
+	overflowY: 'auto',
 	padding: theme.space[4],
 	border: `1px solid ${theme.colors.borders.control}`,
 	borderRadius: theme.radius.lg,
 	backgroundColor: theme.colors.background.surface,
+	color: theme.colors.text.primary,
 	boxShadow: theme.shadows.menu,
 	animation: `${menuIn} 0.12s ease-out`,
-})
-
-export const aligns = styleVariants({
-	start: { left: 0 },
-	end: { right: 0 },
+	'@media': {
+		'(prefers-reduced-motion: reduce)': { animation: 'none' },
+	},
 })
 
 export const header = style({
