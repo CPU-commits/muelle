@@ -350,7 +350,7 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
 
 ## 10. API (`/api/v1`)
 
-Todas las respuestas son JSON. Formato de error: `{"error": {"code": "string", "message": "string"}}`. Los recursos se identifican por slug.
+Todas las respuestas son JSON. Formato de error: `{"error": {"code": "string", "message": "string"}}`. Los recursos se identifican por slug. Las fechas van en RFC 3339, en UTC y con a lo más milisegundos (`2026-10-10T19:36:53.77Z`), lo mismo en la respuesta de un create que en el GET: el reloj (`package/clock`) ya da la hora así, con la precisión que guarda SQLite.
 
 Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan campos desconocidos, claves duplicadas, UTF-8 inválido y datos después del valor. El cuerpo se limita a 1 MiB.
 

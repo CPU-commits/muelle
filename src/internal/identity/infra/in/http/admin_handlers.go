@@ -49,7 +49,7 @@ func (h *handler) createInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	url := h.panelOrigin + "/invite/" + inv.Token
-	utils.WriteJSON(w, http.StatusCreated, inviteRes{URL: url, ExpiresAt: inv.ExpiresAt.UTC()})
+	utils.WriteJSON(w, http.StatusCreated, inviteRes{URL: url, ExpiresAt: inv.ExpiresAt})
 }
 
 func (h *handler) listTokens(w http.ResponseWriter, r *http.Request) {
