@@ -52,7 +52,7 @@ func (h *handler) createInvite(w http.ResponseWriter, r *http.Request) {
 	// todo POST sin Bearer cuyo Origin no sea exactamente el del panel, y esta
 	// ruta no acepta tokens, así que aquí Origin siempre es el del panel.
 	url := r.Header.Get("Origin") + "/invite/" + inv.Token
-	utils.WriteJSON(w, http.StatusCreated, inviteRes{URL: url, ExpiresAt: inv.ExpiresAt})
+	utils.WriteJSON(w, http.StatusCreated, inviteRes{URL: url, ExpiresAt: inv.ExpiresAt.UTC()})
 }
 
 func (h *handler) listTokens(w http.ResponseWriter, r *http.Request) {
