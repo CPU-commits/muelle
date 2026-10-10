@@ -1,0 +1,495 @@
+# Instrucciones del proyecto
+
+SPA Svelte 5 + SvelteKit (sin SSR), con clean architecture de 3 capas por módulo.
+Antes de tocar código, leé la sección [Arquitectura](#arquitectura) de este archivo y, para
+lo propio de muelle, la sección [muelle](#muelle).
+
+## Reglas que no se negocian
+
+1. **El dominio es puro.** `src/modules/*/domain/**` no importa Svelte, `$app/*`,
+   TanStack, `@/shared/data` ni `@/shared/ui` (stores, estilos, i18n). Si necesitás algo de
+   eso en el dominio, es que la lógica está en el lugar equivocado.
+
+2. **Las dependencias entran por puertos.** El dominio declara interfaces en
+   `domain/repositories/`; la capa `data` las implementa; `container.ts` las conecta.
+   Ningún caso de uso importa un repositorio concreto.
+
+3. **Los DTOs no salen de `data`.** La forma del backend vive en `data/dtos/` y se traduce
+   en `data/mappers/`. Si un `created_at` o un `snake_case` aparece en la UI, hay un mapper
+   faltante.
+
+4. **La UI no ve status HTTP.** Los repositorios traducen `ApiError` a errores de dominio
+   (`NotFoundError`, `ForbiddenError`, …). Los viewModels miran `error.code`, nunca `error.status`.
+
+5. **Estado y markup separados.** Toda pantalla es `X.viewModel.svelte.ts` (clase con
+   `$state`/`$derived`, queries, mutations y navegación) + `XScreen.svelte` (sólo markup) +
+   `styles.css.ts` (vanilla-extract). Si hay un `$state`, `$derived` o `$effect` en el
+   `<script>` de una pantalla, va al viewModel.
+
+6. **Entre módulos, sólo el barrel.** Se importa `@/modules/<x>`, nunca
+   `@/modules/<x>/data/...`.
+
+7. **Los casos de uso son `async`.** Aunque sólo deleguen: garantiza que un error de
+   validación llegue como promesa rechazada y no como throw síncrono.
+
+8. **Nada de SSR.** `ssr = false` en el layout raíz y `adapter-static` con fallback. No hay
+   `+page.server.ts`, `+server.ts` ni `hooks.server.ts`: si hace falta lógica de servidor,
+   va en el backend.
+
+9. **`shared/` tiene las mismas 3 capas que un módulo: `domain/`, `data/`, `ui/`.** Nada de
+   `shared/utils/`, `shared/helpers/` ni carpetas sueltas que mezclen capas: un helper va en
+   la capa que lo usa (`shared/ui/utils/format.ts`, `shared/data/http/parse.ts`).
+   `shared/data` no importa `shared/ui`.
+
+Estas reglas se revisan a mano en code review: no hay un verificador automático.
+
+## Convenciones
+
+- **Nombres de archivo**: `camelCase.ts` para lógica, `PascalCase.svelte` para componentes,
+  `X.viewModel.svelte.ts` y `styles.css.ts` colocados junto a la pantalla.
+- **Módulos con runes** (`.svelte.ts`) se importan **con la extensión completa**:
+  `import { XViewModel } from './X.viewModel.svelte.ts'`.
+- **ViewModels**: una clase instanciada en el `<script>` de la pantalla
+  (`const vm = new XViewModel()`). `useQueryClient`, `createQuery` y `createMutation` sólo
+  funcionan durante la inicialización del componente.
+- **Acciones de un viewModel**: arrow functions de clase (`save = async () => {…}`), porque
+  la pantalla las pasa como callback (`onclick={vm.save}`) y un método perdería el `this`.
+- **Props reactivas hacia un viewModel**: como getter (`new XViewModel(() => id)`), nunca
+  el valor suelto, o el viewModel queda congelado con el valor inicial.
+- **Entidades en estado**: `$state.raw`. Son inmutables, no hace falta volverlas un proxy.
+- **Navegación**: siempre con `resolve()` de `$app/paths` (`goto(resolve('/x'))`,
+  `href={resolve('/x/[id]', { id })}`). eslint lo exige.
+- **Casos de uso**: un archivo por operación, factory `makeXxx(deps)` que devuelve la función.
+- **Cache keys y opciones de query**: todas en `data/queries/`, nunca inline en un viewModel.
+- **Textos**: siempre desde `import { m } from '@/shared/ui/i18n/paraglide/messages'`,
+  nunca hardcodeados en la UI. En muelle cada módulo tiene sus archivos de mensajes (ver
+  [i18n](#i18n-prefijo-por-módulo)): agregá la clave en el `es.json` **y** el `en.json`.
+- **Estilos**: sólo tokens de `theme` (`@/shared/ui/themes/theme.css`), nunca un hex suelto.
+- **Errores de dominio**: heredan de las clases de `@/shared/domain`, con `name` propio.
+- **Entidades inmutables**: las operaciones devuelven copia (`{ ...example, name }`).
+- **`exactOptionalPropertyTypes` está activo**: para un campo opcional hay que OMITIR la
+  clave (`...(x ? { x } : {})`), no asignarle `undefined`.
+
+## Tests
+
+- **Los tests viven junto a lo que prueban**, en `__tests__/` al lado del archivo, uno por
+  archivo y con su mismo nombre: `domain/use-cases/login.ts` →
+  `domain/use-cases/__tests__/login.test.ts`. No hay carpeta `tests/` por módulo.
+- Dominio, casos de uso y mappers: `*.test.ts`, corren en node contra el fake en memoria del
+  puerto (`domain/repositories/__fakes__/`), sin mockear `fetch`.
+- Integración de un módulo: `<modulo>/__tests__/*.integration.test.ts` en node contra MSW
+  (`@/mocks/server`), entrando por `container.ts`.
+- ViewModels: `__tests__/X.viewModel.svelte.test.ts` junto a la pantalla, corren en Chromium
+  (el `.svelte.test.ts` es lo que los manda al proyecto browser de vitest). Se montan con un
+  harness (en el mismo `__tests__/`) que hace `setQueryClientContext` e instancia el
+  viewModel, mockeando el **container** del módulo, no la red. Ver
+  `src/modules/auth/ui/screens/login/__tests__/` (también mockea `$app/navigation`: `goto`
+  no existe fuera del runtime de SvelteKit).
+- E2E: `e2e/*.e2e.ts` contra el build con MSW (`pnpm test:e2e`).
+
+## Antes de decir que terminaste
+
+```bash
+pnpm verify     # lint + check + test
+```
+
+Si tocaste `messages/` o `project.inlang/`, corré `pnpm codegen` antes.
+
+---
+
+## Arquitectura
+
+### El mapa
+
+```
+src/
+  routes/          rutas file-based de SvelteKit. Sólo CABLEAN pantallas y guards.
+  modules/         una carpeta por dominio de negocio (el corazón).
+  shared/          las MISMAS 3 capas que un módulo, y nada más.
+    domain/        dominio compartido: Brand, Email, errores, Paginated.
+    data/          infraestructura de datos: config, cliente http, QueryClient.
+    ui/            design system (atoms / molecules / organisms) y todo lo de la vista:
+      themes/      tokens de vanilla-extract, paleta, fuentes, estilos globales.
+      stores/      estado cliente global con runes: toasts.
+      i18n/        locale + paraglide generado (`i18n/paraglide`).
+      utils/       helpers de la vista: formateo con Intl, errores de formularios.
+      assets/      favicon y estáticos importados.
+  mocks/           MSW: handlers/<módulo>.ts + db/<módulo>.ts.
+  hooks.client.ts  arranque de la app (el `main.tsx` de una SPA).
+```
+
+Alias: `@` → `src/`.
+
+### Anatomía de un módulo
+
+```
+src/modules/<módulo>/
+  domain/                        PURO. Sin Svelte, sin fetch, sin estilos.
+    entities/                    entidades + invariantes (inmutables)
+    value-objects/               ids branded, enums con máquina de estados
+    repositories/                PUERTOS (interfaces), no implementaciones
+      __fakes__/                 el fake en memoria del puerto, para los tests
+    use-cases/                   una operación de negocio por archivo
+    errors/                      errores de dominio del módulo
+    index.ts
+  data/                          ADAPTADORES. Traduce backend <-> dominio.
+    dtos/                        forma exacta del backend + schema Zod
+    mappers/                     DTO <-> entidad (el único que conoce ambas)
+    datasources/                 rutas y verbos HTTP
+    repositories/                implementa el puerto; traduce errores
+    queries/                     cache keys + queryOptions + mutations
+    index.ts
+  container.ts                   COMPOSITION ROOT: inyecta el repo en los casos de uso
+  ui/
+    screens/<pantalla>/          XScreen.svelte + X.viewModel.svelte.ts + styles.css.ts
+    features/<bloque>/           bloques compuestos reutilizables
+    components/<pieza>/          piezas chicas del módulo
+    index.ts
+  __tests__/                     integración del módulo entero contra MSW
+  index.ts                       superficie pública del módulo
+```
+
+El módulo de referencia es `src/modules/auth`.
+
+### El flujo completo
+
+```
+XScreen.svelte  ->  X.viewModel.svelte.ts  ->  data/queries  ->  caso de uso  ->  PUERTO
+                                                                                    |
+                                                          data/repositories (adaptador)
+                                                                                    |
+                                                  data/datasources -> shared/data/http -> backend
+                                                                                    |
+                                                             data/mappers (DTO -> entidad)
+```
+
+La UI nunca ve un DTO ni un status HTTP. El dominio nunca ve un `fetch`.
+
+### Reglas de dependencia
+
+| Capa               | Puede importar                                  | No puede importar                                                          |
+| ------------------ | ----------------------------------------------- | -------------------------------------------------------------------------- |
+| `modules/*/domain` | `@/shared/domain`, `zod`                        | Svelte, `$app/*`, TanStack, `@/shared/data`, `@/shared/ui`, su `data`/`ui` |
+| `modules/*/data`   | su `domain`, `@/shared/domain`, `@/shared/data` | Svelte, `$app/*`, `@/shared/ui`, su `ui`                                   |
+| `modules/*/ui`     | su `domain`, su `data`, `@/shared/*`, `$app/*`  | tripas de otros módulos                                                    |
+| `routes`           | `@/modules/<x>` (barrel), `@/shared/*`          | `domain`/`data`/`ui` de un módulo directamente                             |
+| `shared/ui`        | `@/shared/domain`, `@/shared/data`              | `modules/`                                                                 |
+| `shared/data`      | `@/shared/domain`                               | `modules/`, `@/shared/ui`                                                  |
+| `shared/domain`    | nada                                            | todo lo demás                                                              |
+
+### Configuración por entorno
+
+`config/local.json` y `config/production.json` guardan la config **pública** de cada
+entorno, validada con Zod al arrancar (`src/shared/data/config.ts`). En muelle `apiUrl` es
+`''` en los dos: el panel y la API comparten origen. `devProxy` (solo local) es a dónde
+proxea `pnpm dev`. Nada de secretos: todo lo que empieza con `VITE_` entra al bundle.
+
+---
+
+## muelle
+
+El panel de muelle (spec §11): una SPA que el binario de Go sirve junto a la API
+`/api/v1`. Plan: `docs/superpowers/plans/2026-10-10-muelle-fase4-panel.md`. Diseño: el
+canvas de Claude Design `https://claude.ai/artifact/1KK1CAWeGNG2rXK2C7hkVB`
+(`project/<Pantalla>.dc.html`): se copia la apariencia, no el mecanismo. Los textos de la
+UI van en español neutro con **tú** ("Usa tu usuario", "Ingresa el código"), como el diseño.
+
+### Comandos de desarrollo
+
+```bash
+pnpm install
+pnpm dev:mock     # sin backend: MSW contesta en el navegador
+pnpm dev          # con un `muelle serve` local (ver web/README.md)
+pnpm verify       # antes de decir que terminaste
+pnpm test:e2e     # playwright contra un build CON mocks: pisa ./build, después `pnpm build`
+pnpm build        # el ./build que embebe el binario (sin MSW)
+```
+
+Con el backend real: `MUELLE_PANEL_ORIGIN=http://localhost:5173 MUELLE_SECURE_COOKIES=false
+MUELLE_LISTEN=127.0.0.1:18080 … go run . serve` en la raíz y `pnpm dev` acá. El backend
+compara el `Origin` de cada escritura con `MUELLE_PANEL_ORIGIN`; el proxy de Vite lo deja
+pasar tal cual. `MUELLE_BACKEND_URL` cambia el destino del proxy.
+
+Datos de `pnpm dev:mock` (`src/mocks/db/auth.ts`):
+
+| Qué                  | Valor                                                                        |
+| -------------------- | ---------------------------------------------------------------------------- |
+| Usuario / contraseña | `felipe` / `una-contraseña-larga` (sin 2FA al empezar)                       |
+| Código de 2FA válido | `123456` (el mock no calcula TOTP)                                           |
+| Invitación           | `/invite/invitacion-demo`                                                    |
+| Setup                | `/setup?token=setup-demo` (responde `already_set_up` mientras haya usuarios) |
+
+El estado del mock vive en `sessionStorage` de la pestaña: sobrevive a un F5. Para empezar
+de cero, cerrá la pestaña.
+
+### Paralelismo de F1
+
+Cada tarea F1 crea o modifica **solo**:
+
+- `src/modules/<su módulo>/`;
+- sus rutas (tabla de abajo) y lo que cuelgue de ellas;
+- `src/mocks/handlers/<módulo>.ts` y `src/mocks/db/<módulo>.ts` (ya existen, vacíos, y
+  `handlers/index.ts` ya los importa);
+- `messages/<módulo>/es.json` y `messages/<módulo>/en.json` (ya existen y ya están en
+  `project.inlang`).
+
+`package.json` ya trae lo de F1: CodeMirror 6 (`codemirror`, `@codemirror/state`,
+`@codemirror/view`, `@codemirror/language`, `@codemirror/commands`, `@codemirror/lang-yaml`,
+`@lezer/highlight`) y `qrcode`. Si una tarea necesita
+cambiar `shared/`, `package.json` o una ruta ajena, se detiene y lo reporta.
+
+### Rutas
+
+| URL                                                  | Archivo (`src/routes/…`)                                | Dueño                                                                             |
+| ---------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `/login`, `/setup?token=`, `/invite/[token]`, `/2fa` | `login/`, `setup/`, `invite/[token]/`, `2fa/`           | F0 (`auth`)                                                                       |
+| `/`                                                  | `(app)/+page.svelte`                                    | F1-catalog (Proyectos)                                                            |
+| `/projects/[p]/stages/[s]/apps/[a]` (layout)         | `(app)/projects/[p]/stages/[s]/apps/[a]/+layout.svelte` | F0 lo arma; F1-catalog lo enriquece (header de la app, selectores del breadcrumb) |
+| `/projects/[p]/stages/[s]/apps/[a]` (Resumen)        | `…/apps/[a]/+page.svelte`                               | F1-deploy-ingress                                                                 |
+| `…/apps/[a]/configuracion`                           | `…/apps/[a]/configuracion/+page.svelte`                 | F1-catalog (formulario o editor de compose)                                       |
+| `…/apps/[a]/variables`                               | `…/apps/[a]/variables/+page.svelte`                     | F1-secrets                                                                        |
+| `…/apps/[a]/dominios`                                | `…/apps/[a]/dominios/+page.svelte`                      | F1-deploy-ingress                                                                 |
+| `…/apps/[a]/deploys`                                 | `…/apps/[a]/deploys/+page.svelte`                       | F1-deploy-ingress                                                                 |
+| `…/apps/[a]/logs`                                    | `…/apps/[a]/logs/+page.svelte`                          | F1-deploy-ingress                                                                 |
+| `/projects/[p]/stages/[s]/variables`                 | `(app)/projects/[p]/stages/[s]/variables/+page.svelte`  | F1-secrets                                                                        |
+| `/ajustes`                                           | `(app)/ajustes/+page.svelte`                            | F1-identity-admin                                                                 |
+| `/ajustes/tokens`                                    | `(app)/ajustes/tokens/+page.svelte`                     | F1-identity-admin                                                                 |
+
+- Todo lo de `(app)` pasa por el guard de `(app)/+layout.ts`: sin sesión va a `/login`, con
+  `needsTotpSetup` a `/2fa`. Las páginas reciben `params` tipados (`let { params }: PageProps = $props()`).
+- Los placeholders de F0 (`EmptyState` "En construcción") se reemplazan enteros por
+  `<XScreen … />` del barrel del módulo.
+- El layout de una app pone el breadcrumb y los tabs en el header con `<ShellHeader>`. La
+  página de variables del stage hace lo mismo con su breadcrumb. El contenido de `main` es de
+  cada página: en el diseño, el h1 de Resumen es el nombre de la app y el de Variables es
+  "Variables".
+
+### i18n: prefijo por módulo
+
+- Cada clave empieza con el nombre del módulo: `catalog_…`, `secrets_…`, `identity_…`,
+  `admin_…`, `deploy_…`, `ingress_…`, `auth_…`. Las de F0 son `common_…`, `nav_…`,
+  `pagination_…` y `not_found_…` (en `messages/es.json` / `en.json`): se pueden usar, no se
+  agregan. Si falta algo genérico, va con el prefijo del módulo.
+- Las claves de un módulo van en `messages/<módulo>/{es,en}.json` (`project.inlang` mezcla
+  todos los archivos: el prefijo evita choques). Las dos lenguas, siempre.
+- Después de tocar mensajes, `pnpm codegen` (también lo corre `pnpm check`).
+- Claves útiles de F0: `common_save`, `common_cancel`, `common_delete`, `common_edit`,
+  `common_create`, `common_back`, `common_close`, `common_retry`, `common_loading`,
+  `common_search`, `common_options`, `common_optional`, `common_copy`, `common_copied`,
+  `common_required`, `common_error_generic`, `common_unavailable` y
+  `common_coming_title({ phase })`.
+
+### Tema
+
+`import { theme } from '@/shared/ui/themes/theme.css'`, solo en `styles.css.ts`:
+
+| Token                       | Qué                                                                                                                                                                                                                    |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `colors.background.*`       | `page` #0A0A0B, `surface` #101012 (tarjetas, filas), `sunken` #0D0D0F (pies, filas atenuadas), `hover` #141416, `raised` #18181B, `divider` #1A1A1D, `inverse`/`inverseHover` (botón primario), `danger`/`dangerHover` |
+| `colors.borders.*`          | `subtle` #222225, `control` #2E2E33, `strong` #3A3A40, `focus` #6E6E77, `outline` #EDEDED, `danger`                                                                                                                    |
+| `colors.text.*`             | `primary` #EDEDED, `secondary` #A1A1A8, `tertiary` #83838C, `disabled` #6E6E77 (no para texto que hay que leer), `inverse`, `strong`, `separator`, `onDanger`                                                          |
+| `colors.status.*`           | `ok`, `warn`/`warnText`/`warnBorder`/`warnSurface`, `error`/`errorText`/`errorBorder`/`errorSurface`/`errorDivider`/`errorSunken`, `idle`                                                                              |
+| `space[n]`                  | en px, la clave es el valor: 0, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 80                                                                                                                                 |
+| `typography.fontSize[n]`    | 11, 12, 13, 14 (base), 15, 16, 18, 20, 24 (h1), 28 (nombre de app)                                                                                                                                                     |
+| `typography.fontFamily`     | `sans` (Geist), `mono` (Geist Mono)                                                                                                                                                                                    |
+| `typography.fontWeight`     | `regular` 400, `medium` 500, `semibold` 600                                                                                                                                                                            |
+| `typography.letterSpacing`  | `tighter` -0.03em (h1), `tight` -0.02em, `snug` -0.01em                                                                                                                                                                |
+| `radius`                    | `xs` 4 (badge), `sm` 5, `md` 6 (controles), `lg` 8 (tarjetas, avisos), `xl` 12 (diálogos), `full`                                                                                                                      |
+| `control`                   | alturas: `xs` 28, `sm` 32, `md` 36, `lg` 40, `xl` 48, `tab` 44, `badge` 20, `badgeLg` 24                                                                                                                               |
+| `shadows`                   | `focusRing`, `modal`, `menu`                                                                                                                                                                                           |
+| `layout`                    | `maxWidth` 1248px, `gutter` clamp(16px, 3vw, 24px), `authWidth` 360px                                                                                                                                                  |
+| `zIndex`, `transition.fast` |                                                                                                                                                                                                                        |
+
+Geist y Geist Mono están empaquetadas (`themes/fonts.ts`, `@fontsource-variable/*`): nada
+de Google Fonts ni CDN. El foco con teclado es el global (`2px solid` claro, offset 2px);
+los controles muestran el suyo (borde `focus` + `focusRing`).
+
+### Componentes (`@/shared/ui`)
+
+Todos se importan del barrel: `import { Button, Card } from '@/shared/ui'`. Los que reciben
+un `href` lo esperan **ya resuelto** con `resolve()`.
+
+**Átomos**
+
+| Componente   | Props                                                                                                                                                                                                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Button`     | `variant` `primary`·`secondary`·`ghost`·`danger` (primary) · `size` `xs` 28·`sm` 32·`md` 36·`lg` 40 (md) · `loading` · `iconOnly` (pasá `aria-label`) · `fullWidth` · atributos de `<button>` (`type` = `button`) · `children`                                            |
+| `LinkButton` | `href` · `variant` · `size` · `iconOnly` · `fullWidth` · atributos de `<a>` · `children`. Para una acción que navega ("Desplegar" → Deploys)                                                                                                                              |
+| `Input`      | `inputSize` `sm` 32·`md` 36·`lg` 40 · `mono` (Geist Mono 13) · `bind:value` · atributos de `<input>`                                                                                                                                                                      |
+| `Select`     | `inputSize` · `bind:value` · `children` (`<option>`) · atributos de `<select>`                                                                                                                                                                                            |
+| `Textarea`   | `mono` · `bind:value` · atributos de `<textarea>`                                                                                                                                                                                                                         |
+| `Checkbox`   | `label` o `children` · `bind:checked` · atributos de `<input>`                                                                                                                                                                                                            |
+| `Switch`     | `bind:checked` · atributos de `<input>` (`role="switch"`). Va dentro del `<label>` de la pantalla, o con `aria-label`                                                                                                                                                     |
+| `Badge`      | `tone` `neutral`·`ok`·`warn`·`error`·`mono` ("compose")·`strong` ("nuevo") · `shape` `tag`·`pill` · `size` `sm` 20·`md` 24 · `dot` (`true` o un `StatusTone`) · `children`                                                                                                |
+| `StatusDot`  | `status` `ok`·`warn`·`bad`·`idle` (anillo) · `size` 6·8 · `pulse` ("en vivo") · `label` (si el punto es la única pista)                                                                                                                                                   |
+| `Mono`       | `tone` `inherit`·`primary`·`secondary`·`tertiary`·`disabled` · `size` `inherit`·11·12·13·14 · `truncate` · `title` · `children`. Para slugs, imágenes, digests, redes, claves                                                                                             |
+| `Icon`       | `name` (`plus`, `search`, `more`, `chevronRight`, `chevronDown`, `chevronUpDown`, `arrowLeft`, `arrowUpRight`, `copy`, `check`, `x`, `lock`, `download`, `upload`, `refresh`, `trash`, `logOut`, `shield`, `globe`, `alert`, `clock`, `external`) · `size` (16) · `label` |
+| `Avatar`     | `name` · `size` `sm` 28·`md` 32                                                                                                                                                                                                                                           |
+| `Logo`       | `size` (22)                                                                                                                                                                                                                                                               |
+| `Spinner`    | `size` `sm`·`md`·`lg` · `label`                                                                                                                                                                                                                                           |
+
+**Moléculas**
+
+| Componente         | Props                                                                                                                                                                                                                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Field`            | `label` · `hint` · `error` · `optional` ("· opcional") · `children(a11y)`: `{#snippet children(a11y)}<Input {...a11y} />{/snippet}`                                                                                                                                                                |
+| `SearchInput`      | `label` (el `aria-label`) · `inputSize` · `bind:value` · atributos de `<input>`                                                                                                                                                                                                                    |
+| `CodeInput`        | `value` · `label` · `length` (6) · `disabled` · `focusOnMount` · `oninput(value)` · `oncomplete(value)` · el `a11y` de `Field`                                                                                                                                                                     |
+| `Banner`           | `tone` `info`·`warn`·`error` · `title` (en 500) · `body` (gris) · `dot` · `action` (snippet: botones a la derecha)                                                                                                                                                                                 |
+| `Card`             | `title` · `description` · `headingLevel` 2·3 · `tone` `default`·`danger`·`highlight` · `flush` (encabezado en franja y contenido al borde, para tablas o `<dl>`) · `aside` (snippet, solo `flush`) · `note` (texto del pie) · `footer` (snippet: botones del pie, `size="sm"`) · `id` · `children` |
+| `List` / `ListRow` | `List`: `label` · `children`. `ListRow`: `href` (la fila entera es un link) · `muted` · `height` `sm` 44·`md` 52·`lg` 56 · `class` · `children`                                                                                                                                                    |
+| `Table`            | `framed` (true; `false` dentro de una `Card flush`) · `minWidth` · `caption` · `children` (`<thead>`/`<tbody>` planos). Clases: `cellEnd`, `cellActions`, `cellMono`, `rowMuted`                                                                                                                   |
+| `Tabs`             | `label` · `items: NavItem[]` (`{ href, label, active }`). La nav subrayada del header                                                                                                                                                                                                              |
+| `SubNav`           | `label` · `items: NavItem[]`. `SubNavLayout`: lo mismo + `children` (nav de 180 px a la izquierda, contenido a la derecha: Ajustes, Configuración)                                                                                                                                                 |
+| `Breadcrumb`       | `label` · `homeHref` · `homeLabel` · `items: BreadcrumbItem[]` (`{ label, href?, initial? }`)                                                                                                                                                                                                      |
+| `Menu`             | `label` · `items: MenuEntry[]` (`{ kind: 'action', id, label, onSelect, icon?, tone?: 'danger', disabled? }`, `{ kind: 'link', id, label, href, icon? }`, `{ kind: 'separator', id }`) · `variant` `ghost` (los ⋯ de una fila) · `bare` · `trigger` (snippet) · `align` · `header` (snippet)       |
+| `Modal`            | `open` · `title` · `description` · `size` `sm`·`md`·`lg` · `onClose` (Escape o clic en el fondo) · `children` · `footer` (snippet). Es un `<dialog>` nativo: foco atrapado y devuelto                                                                                                              |
+| `ConfirmDialog`    | `open` · `title` · `body` · `confirmLabel` · `cancelLabel` · `loading` · `tone` `danger`·`primary` · `onConfirm` · `onCancel`                                                                                                                                                                      |
+| `CopyButton`       | `value` · `label` · `iconOnly` · `variant` · `size`                                                                                                                                                                                                                                                |
+| `SegmentedControl` | `label` o `labelledBy` · `name` · `options: ChoiceOption<T>[]` (`{ value, label, disabled? }`) · `value` · `disabled` · `onChange`                                                                                                                                                                 |
+| `RadioGroup`       | lo mismo que `SegmentedControl` + `direction` `row`·`column`                                                                                                                                                                                                                                       |
+| `EmptyState`       | `title` · `body` · `icon` · `action` (snippet)                                                                                                                                                                                                                                                     |
+| `ComingSoon`       | `phase` 2·3 · `feature` ("El historial de deploys"). Ver [Fase 2/3](#endpoints-de-las-fases-2-y-3-unavailableerror)                                                                                                                                                                                |
+| `ErrorState`       | `title` · `body` · `retryLabel` · `onRetry`                                                                                                                                                                                                                                                        |
+| `LoadingState`     | `label`                                                                                                                                                                                                                                                                                            |
+| `PageHeader`       | `title` (el h1) · `subtitle` · `meta` ("10 apps") · `titleSize` `md` 24·`lg` 28 · `badges` · `details` · `actions` (snippets)                                                                                                                                                                      |
+| `Pagination`       | `page` · `totalPages` · `label` · `prevLabel` · `nextLabel` · `onPageChange`                                                                                                                                                                                                                       |
+| `Toaster`          | va en el layout raíz; se usa con `toast.success/error/info(title, description?)` de `@/shared/ui/stores`                                                                                                                                                                                           |
+| `LocaleSwitcher`   | `label`                                                                                                                                                                                                                                                                                            |
+
+**Organismos**
+
+| Componente    | Props                                                                                                                                   |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `AppShell`    | El marco con sesión. No se usa directo: lo monta `SessionShell` (barrel de `auth`) en `(app)/+layout.svelte`                            |
+| `ShellHeader` | `breadcrumb` · `nav` (snippets). No dibuja nada donde está: mientras está montado, reemplaza el logo y/o la nav del header del AppShell |
+| `AuthLayout`  | `appName` · `host` · `width` `sm` 360·`md` 440 · `children`. Las pantallas de acceso                                                    |
+
+Clases y helpers: `srOnly`, `textLink` (link dentro de un texto), `truncate`, `firstError`,
+`formatDate`, `formatDateTime`, `formatNumber`, `formatRelative`.
+
+### HTTP y errores
+
+- `http.get/post/put/patch/delete(path, { query, body, signal })` de
+  `@/shared/data/http/client`, con `path` sin `/api/v1` (`http.get('/projects')`). Manda la
+  cookie (`credentials: 'same-origin'`) y JSON; un 204 devuelve `null`.
+- El backend siempre responde `{"error":{"code","message"}}`: llega como
+  `ApiError(status, code, message)`.
+- Un 401 en una ruta con sesión limpia el cache y manda a `/login`; un 403
+  `totp_setup_required`, a `/2fa`. No hay que manejarlos en las pantallas.
+  (`redirectOn401: false` es solo para los endpoints de acceso de `auth`.)
+- Los repositorios traducen con `withDomainErrors(() => ds.algo(), MAP)` (o `toDomainError`)
+  de `@/shared/data/http/domainErrors`, con un `DomainErrorMap`:
+    - `codes`: errores propios por `error.code` (`not_empty` → `ProjectNotEmpty`). Ganan siempre.
+    - `notFound`: el error para un 404 (`ProjectNotFound`).
+    - `fields`: nombre de dominio de los campos de un 422 (`{ deploy_timeout_s: 'deployTimeoutSeconds' }`).
+      El 422 `invalid` trae `"<campo>: <motivo>"`; sale como `ValidationError` con `field` y
+      `message` = el motivo. El viewModel lo pone en el campo del formulario.
+    - `phase`: ver abajo.
+    - Sin mapa: 401 `UnauthorizedError`, 403 `ForbiddenError`, 404 `NotFoundError`,
+      409 `ConflictError`, 423/429 `RateLimitedError`, 5xx y red `UnavailableError`, el resto
+      `UnexpectedError`. Una respuesta con otra forma es `ContractError` (`parseOrThrow`).
+
+### Endpoints de las fases 2 y 3: `UnavailableError`
+
+Deploys, status, logs, rollback y dominios (spec §7, §8, §9, §10), y en Ajustes registries,
+Cloudflare, IP pública, email ACME y `panel_allowed_cidrs`, todavía no existen en el backend.
+
+1. El repositorio de esas rutas pasa `{ phase: 2 }` (o `3`) en su `DomainErrorMap`: un 404 o
+   405 se vuelve `UnavailableError` con `phase`. Ojo: el backend responde igual
+   `not_found` a una ruta que no existe y a un recurso que no existe; en estos endpoints el
+   404 se lee como "la ruta todavía no existe".
+2. El viewModel lo detecta con `pendingPhase(error)` de `@/shared/domain` (`2 | 3 | null`).
+3. La pantalla muestra `<ComingSoon phase={vm.pendingPhase} feature={…} />` en vez de un
+   error. `shouldRetry` no reintenta estos errores.
+4. Con `pnpm dev:mock`, los handlers de MSW responden con datos y no aparece.
+
+Un `UnavailableError` sin `phase` es un backend caído o sin red: eso sí es un error
+(`ErrorState` con reintento).
+
+Si lo nuevo son **campos** de un endpoint que ya existe (`GET/PATCH /settings` de la Fase 1
+solo tiene `require_2fa`), no hay 404: el DTO los declara opcionales y que falten quiere
+decir "fase pendiente". Mandarlos en un `PATCH` responde 400 `invalid_json` (el backend
+rechaza campos desconocidos): mientras no existan, no se mandan.
+
+### Sesión y `auth`
+
+- La sesión es la cookie `muelle_session` (HttpOnly): el panel nunca la lee ni guarda nada
+  en localStorage.
+- Para saber quién es el usuario: `createQuery(() => meQuery())` con `meQuery` del barrel
+  de `auth`. Devuelve `Me`: `username`, `totpEnabled` y `needsTotpSetup`. El guard ya lo dejó
+  en el cache.
+- El barrel también exporta `authKeys`, `loadSessionState` (para guards), `landingFor` y
+  `SessionShell`. Cerrar sesión vacía todo el cache de TanStack Query.
+
+### MSW
+
+```
+src/mocks/
+  api.ts            api('/projects'), apiError(status, code, message), invalid(campo, motivo),
+                    notFound(), noContent()
+  session.ts        requireSession(): la respuesta 401/403 si no hay sesión completa, o undefined;
+                    sessionUser()
+  db/persist.ts     loadPersisted / savePersisted (sessionStorage en el navegador)
+  db/<módulo>.ts    los datos del módulo
+  handlers/<módulo>.ts
+  handlers/index.ts junta todos (ya importa los de F1)
+```
+
+Un handler típico:
+
+```ts
+http.get(api('/projects'), () => requireSession() ?? HttpResponse.json(catalogDb.projects)),
+http.post(api('/projects'), async ({ request }) => {
+	const denied = requireSession()
+	if (denied) return denied
+	const body = (await request.json()) as { slug?: string }
+	if (!body.slug) return invalid('slug', 'es obligatorio')
+	…
+}),
+```
+
+- Los errores, con los mismos `code` que el backend (los `mapper_errors.go` de cada módulo y
+  `src/cmd/http/server.go`).
+- Cada `db/<módulo>.ts` exporta un objeto con `reset()`; los tests de integración lo llaman
+  en `beforeEach`, junto con `authDb.reset()`, y hacen
+  `server.listen({ onUnhandledRequest: 'error' })`.
+- Los usuarios y las invitaciones viven en `db/auth.ts` (`authDb.state.users`,
+  `authDb.addInvite(token)`): el mock de `identity` los usa en vez de tener otra lista.
+- `server.use(…)` dentro de un test para un caso puntual (un 422, un 404, `HttpResponse.error()`).
+
+### Cosas que conviene saber
+
+- Las rutas `(app)/…` y sus `+page.ts` corren solo en el navegador (`ssr = false`).
+- `@tanstack/svelte-form` 1.33.5 (la última estable) avisa `state_proxy_equality_mismatch`
+  en la consola de `pnpm dev`; es interno de la librería y no aparece en el build.
+- Chrome anota en la consola cada respuesta 4xx de `fetch` ("Failed to load resource"): un
+  401 de `/auth/me` en `/login` es esperado, no un error de la app.
+- `pnpm test:e2e` construye con mocks en `./build`; para el build que se embebe, `pnpm build`.
+  `static/mockServiceWorker.js` se copia al build, pero no hace nada si nadie lo registra.
+
+---
+
+## Svelte MCP
+
+You are able to use the Svelte MCP server, where you have access to comprehensive Svelte 5 and SvelteKit documentation. Here's how to use the available tools effectively:
+
+### 1. list-sections
+
+Use this FIRST to discover all available documentation sections. Returns a structured list with titles, use_cases, and paths.
+When asked about Svelte or SvelteKit topics, ALWAYS use this tool at the start of the chat to find relevant sections.
+
+### 2. get-documentation
+
+Retrieves full documentation content for specific sections. Accepts single or multiple sections.
+After calling the list-sections tool, you MUST analyze the returned documentation sections (especially the use_cases field) and then use the get-documentation tool to fetch ALL documentation sections that are relevant for the user's task.
+
+### 3. svelte-autofixer
+
+Analyzes Svelte code and returns issues and suggestions.
+You MUST use this tool whenever writing Svelte code before sending it to the user. Keep calling it until no issues or suggestions are returned.
+
+### 4. playground-link
+
+Generates a Svelte Playground link with the provided code.
+After completing the code, ask the user if they want a playground link. Only call this tool after user confirmation and NEVER if code was written to files in their project.
