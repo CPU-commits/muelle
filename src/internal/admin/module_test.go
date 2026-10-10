@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,6 +145,38 @@ func TestPatchSettingsBadBody(t *testing.T) {
 	}
 	// Un body vacío ({}) no cambia nada.
 	httptestutil.Expect(t, e.c.Do("PATCH", "/api/v1/settings", map[string]bool{}, con), http.StatusOK)
+}
+
+func TestNewValidatesDeps(t *testing.T) {
+	e := newEnv(t)
+	ciph, _ := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
+	rec := sqlite.NewAuditRecorder(e.db, e.clk, nil)
+	full := Deps{DB: e.db, Cipher: ciph, Audit: rec, DataDir: t.TempDir()}
+
+	// Sin Clock usa el reloj del sistema.
+	if m := New(full); m == nil {
+		t.Fatal("New devolvió nil")
+	}
+
+	cases := map[string]func(d *Deps){
+		"Deps.DB":      func(d *Deps) { d.DB = nil },
+		"Deps.Cipher":  func(d *Deps) { d.Cipher = nil },
+		"Deps.Audit":   func(d *Deps) { d.Audit = nil },
+		"Deps.DataDir": func(d *Deps) { d.DataDir = "" },
+	}
+	for want, mutate := range cases {
+		d := full
+		mutate(&d)
+		func() {
+			defer func() {
+				msg, _ := recover().(string)
+				if !strings.Contains(msg, "admin.New: falta "+want) {
+					t.Errorf("%s: panic=%q", want, msg)
+				}
+			}()
+			New(d)
+		}()
+	}
 }
 
 func TestVerifyMasterKey(t *testing.T) {

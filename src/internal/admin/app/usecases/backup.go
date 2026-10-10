@@ -3,8 +3,10 @@ package usecases
 import (
 	"context"
 	"slices"
+	"sync"
 
 	"github.com/CPU-commits/muelle/src/internal/admin/app/dto"
+	"github.com/CPU-commits/muelle/src/internal/admin/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/admin/domain/service"
 	"github.com/CPU-commits/muelle/src/package/clock"
 )
@@ -15,6 +17,7 @@ const BackupsToKeep = 7
 type Backup struct {
 	store service.BackupStore
 	clock clock.Clock
+	mu    sync.Mutex // una sola ejecución a la vez: el job y un llamado manual no se pisan
 }
 
 func NewBackup(store service.BackupStore, c clock.Clock) *Backup {
@@ -24,7 +27,10 @@ func NewBackup(store service.BackupStore, c clock.Clock) *Backup {
 // Execute crea la copia del día si todavía no existe (el job corre cada hora)
 // y conserva solo las últimas 7. La fecha es la UTC del reloj inyectado.
 func (u *Backup) Execute(ctx context.Context) (dto.BackupOutput, error) {
-	name := "muelle-" + u.clock.Now().UTC().Format("2006-01-02") + ".db"
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	name := entity.BackupName(u.clock.Now())
 	out := dto.BackupOutput{Name: name}
 
 	names, err := u.store.List(ctx)

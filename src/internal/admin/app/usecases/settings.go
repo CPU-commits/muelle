@@ -57,20 +57,24 @@ func NewPatchSettings(settings repository.SettingsRepository, totp service.TOTPS
 // sin esa guarda quedaría encerrado en la pantalla de configuración.
 func (u *PatchSettings) Execute(ctx context.Context, in dto.PatchSettingsInput) (dto.SettingsOutput, error) {
 	if in.Require2FA != nil {
-		if *in.Require2FA {
-			p, ok := shared.PrincipalFrom(ctx)
-			if !ok {
-				return dto.SettingsOutput{}, shared.ErrUnauthenticated
-			}
-			has, err := u.totp.HasTOTP(ctx, p.UserID)
-			if err != nil {
-				return dto.SettingsOutput{}, err
-			}
-			if !has {
-				return dto.SettingsOutput{}, service.ErrTOTPRequiredFirst
-			}
+		p, ok := shared.PrincipalFrom(ctx)
+		if !ok {
+			return dto.SettingsOutput{}, shared.ErrUnauthenticated
+		}
+		// Los ajustes son de la sesión de un usuario, nunca de un token de API.
+		if p.Token != nil {
+			return dto.SettingsOutput{}, shared.ErrForbidden
 		}
 		err := u.tx.InTx(ctx, func(ctx context.Context) error {
+			if *in.Require2FA {
+				has, err := u.totp.HasTOTP(ctx, p.UserID)
+				if err != nil {
+					return err
+				}
+				if !has {
+					return service.ErrTOTPRequiredFirst
+				}
+			}
 			if err := u.settings.Set(ctx, entity.KeyRequire2FA, []byte(entity.FormatBool(*in.Require2FA)), false); err != nil {
 				return err
 			}

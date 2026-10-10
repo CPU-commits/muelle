@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -66,11 +67,14 @@ func TestSettings(t *testing.T) {
 	repo := NewSettingsRepository(sqlitetest.New(t))
 	ctx := context.Background()
 
-	if _, _, err := repo.Get(ctx, "require_2fa"); err != shared.ErrNotFound {
+	if _, _, err := repo.Get(ctx, "require_2fa"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("err=%v", err)
 	}
-	repo.Set(ctx, "require_2fa", []byte("true"), false)
-	repo.Set(ctx, "require_2fa", []byte("false"), false)
+	for _, v := range []string{"true", "false"} {
+		if err := repo.Set(ctx, "require_2fa", []byte(v), false); err != nil {
+			t.Fatal(err)
+		}
+	}
 	v, enc, err := repo.Get(ctx, "require_2fa")
 	if err != nil || enc || string(v) != "false" {
 		t.Fatalf("v=%q enc=%v err=%v", v, enc, err)
@@ -85,9 +89,26 @@ func TestSettings(t *testing.T) {
 		t.Fatalf("v=%q enc=%v err=%v", v, enc, err)
 	}
 	// Volver a sin cifrar limpia la marca.
-	repo.Set(ctx, "x", []byte("plano"), false)
+	if err := repo.Set(ctx, "x", []byte("plano"), false); err != nil {
+		t.Fatal(err)
+	}
 	if _, enc, _ := repo.Get(ctx, "x"); enc {
 		t.Fatal("encrypted debe volver a 0")
+	}
+}
+
+func TestSettingsInsertDoesNotOverwrite(t *testing.T) {
+	repo := NewSettingsRepository(sqlitetest.New(t))
+	ctx := context.Background()
+	if err := repo.Insert(ctx, "k", []byte{1, 2}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Insert(ctx, "k", []byte("otro"), false); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("err=%v", err)
+	}
+	v, enc, err := repo.Get(ctx, "k")
+	if err != nil || !enc || string(v) != "\x01\x02" {
+		t.Fatalf("v=%q enc=%v err=%v", v, enc, err)
 	}
 }
 

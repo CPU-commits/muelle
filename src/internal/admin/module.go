@@ -40,6 +40,19 @@ type Module struct {
 }
 
 func New(d Deps) *Module {
+	switch {
+	case d.DB == nil:
+		panic("admin.New: falta Deps.DB")
+	case d.Cipher == nil:
+		panic("admin.New: falta Deps.Cipher")
+	case d.Audit == nil:
+		panic("admin.New: falta Deps.Audit")
+	case d.DataDir == "":
+		panic("admin.New: falta Deps.DataDir (los backups van en <DataDir>/backups)")
+	}
+	if d.Clock == nil {
+		d.Clock = clock.System{}
+	}
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
@@ -57,7 +70,7 @@ func New(d Deps) *Module {
 	return &Module{
 		handler: inhttp.NewHandler(getSettings, patchSettings, listAudit),
 		jobs:    incron.Jobs(purge, backup, d.Log),
-		verify:  usecases.NewVerifyMasterKey(settings, d.Cipher),
+		verify:  usecases.NewVerifyMasterKey(settings, d.Cipher, d.DB),
 	}
 }
 

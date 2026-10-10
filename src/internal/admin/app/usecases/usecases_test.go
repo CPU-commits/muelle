@@ -217,7 +217,7 @@ func TestVerifyMasterKey(t *testing.T) {
 	keyB, _ := crypto.New(bytes.Repeat([]byte{8}, crypto.KeySize))
 
 	// Primer arranque: guarda el valor cifrado.
-	if err := NewVerifyMasterKey(repo, keyA).Execute(ctx); err != nil {
+	if err := NewVerifyMasterKey(repo, keyA, e.db).Execute(ctx); err != nil {
 		t.Fatal(err)
 	}
 	stored, enc, err := repo.Get(ctx, "master_key_check")
@@ -225,7 +225,7 @@ func TestVerifyMasterKey(t *testing.T) {
 		t.Fatalf("stored=%q enc=%v err=%v", stored, enc, err)
 	}
 	// Segundo arranque con la misma clave: pasa y no reescribe.
-	if err := NewVerifyMasterKey(repo, keyA).Execute(ctx); err != nil {
+	if err := NewVerifyMasterKey(repo, keyA, e.db).Execute(ctx); err != nil {
 		t.Fatal(err)
 	}
 	again, _, _ := repo.Get(ctx, "master_key_check")
@@ -233,13 +233,15 @@ func TestVerifyMasterKey(t *testing.T) {
 		t.Fatal("el valor de control no debe reescribirse")
 	}
 	// Con otra clave: ErrWrongMasterKey.
-	err = NewVerifyMasterKey(repo, keyB).Execute(ctx)
+	err = NewVerifyMasterKey(repo, keyB, e.db).Execute(ctx)
 	if !errors.Is(err, service.ErrWrongMasterKey) || err.Error() != "clave maestra incorrecta" {
 		t.Fatalf("err=%v", err)
 	}
 	// Un valor de control sin cifrar tampoco se acepta.
-	repo.Set(ctx, "master_key_check", []byte("muelle"), false)
-	if err := NewVerifyMasterKey(repo, keyA).Execute(ctx); !errors.Is(err, service.ErrWrongMasterKey) {
+	if err := repo.Set(ctx, "master_key_check", []byte("muelle"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewVerifyMasterKey(repo, keyA, e.db).Execute(ctx); !errors.Is(err, service.ErrWrongMasterKey) {
 		t.Fatalf("err=%v", err)
 	}
 }

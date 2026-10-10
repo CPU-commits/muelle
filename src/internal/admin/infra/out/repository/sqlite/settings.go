@@ -35,16 +35,34 @@ func (r *SettingsRepository) Get(ctx context.Context, key string) ([]byte, bool,
 	return value, encrypted == 1, nil
 }
 
-// Set guarda un valor sin cifrar como texto (así lo lee SQL con = 'true') y uno cifrado como blob.
-func (r *SettingsRepository) Set(ctx context.Context, key string, value []byte, encrypted bool) error {
-	var v any = string(value)
-	enc := 0
+// storable da el valor y la marca como se guardan: un valor sin cifrar como
+// texto (así lo lee SQL con = 'true') y uno cifrado como blob.
+func storable(value []byte, encrypted bool) (any, int) {
 	if encrypted {
-		v, enc = value, 1
+		return value, 1
 	}
+	return string(value), 0
+}
+
+func (r *SettingsRepository) Set(ctx context.Context, key string, value []byte, encrypted bool) error {
+	v, enc := storable(value, encrypted)
 	_, err := r.db.Conn(ctx).ExecContext(ctx,
 		`INSERT INTO settings (key, value, encrypted) VALUES (?, ?, ?)
 		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, encrypted = excluded.encrypted`,
 		key, v, enc)
 	return err
+}
+
+func (r *SettingsRepository) Insert(ctx context.Context, key string, value []byte, encrypted bool) error {
+	v, enc := storable(value, encrypted)
+	res, err := r.db.Conn(ctx).ExecContext(ctx,
+		`INSERT INTO settings (key, value, encrypted) VALUES (?, ?, ?) ON CONFLICT (key) DO NOTHING`,
+		key, v, enc)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return shared.ErrConflict
+	}
+	return nil
 }

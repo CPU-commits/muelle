@@ -15,6 +15,9 @@ import (
 type SettingsRepository interface {
 	Get(ctx context.Context, key string) (value []byte, encrypted bool, err error)
 	Set(ctx context.Context, key string, value []byte, encrypted bool) error
+	// Insert guarda el valor solo si la clave no existe; si existe devuelve
+	// repository.ErrConflict y no toca nada.
+	Insert(ctx context.Context, key string, value []byte, encrypted bool) error
 }
 
 // AuditRepository lista y purga los eventos. Escribirlos es del audit.Recorder.
