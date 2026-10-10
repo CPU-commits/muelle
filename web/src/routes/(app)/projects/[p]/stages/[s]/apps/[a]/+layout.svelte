@@ -1,0 +1,63 @@
+<script lang="ts">
+	import { resolve } from '$app/paths'
+	import { page } from '$app/state'
+	import { m } from '@/shared/ui/i18n/paraglide/messages'
+	import { Breadcrumb, ShellHeader, Tabs } from '@/shared/ui'
+	import type { LayoutProps } from './$types'
+
+	// El detalle de una app: el header del AppShell cambia el logo por "proyecto / stage
+	// / app" y la nav por los tabs de la app. Lo arma F0 con los parámetros de la ruta;
+	// F1-catalog lo enriquece (selectores, nombre, kind, imagen, cambios pendientes).
+	let { params, children }: LayoutProps = $props()
+</script>
+
+<ShellHeader>
+	{#snippet breadcrumb()}
+		<Breadcrumb
+			label={m.nav_location()}
+			homeHref={resolve('/')}
+			homeLabel={m.nav_home()}
+			items={[
+				{ label: params.p, initial: params.p.charAt(0), href: resolve('/') },
+				{
+					label: params.s,
+					href: resolve('/(app)/projects/[p]/stages/[s]/variables', {
+						p: params.p,
+						s: params.s,
+					}),
+				},
+				{
+					label: params.a,
+					href: resolve('/(app)/projects/[p]/stages/[s]/apps/[a]', params),
+				},
+			]}
+		/>
+	{/snippet}
+
+	{#snippet nav()}
+		{@const path = page.url.pathname}
+		{@const base = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]', params)}
+		{@const config = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/configuracion', params)}
+		{@const variables = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/variables', params)}
+		{@const domains = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/dominios', params)}
+		{@const deploys = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/deploys', params)}
+		{@const logs = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/logs', params)}
+		<Tabs
+			label={m.nav_app_sections()}
+			items={[
+				{ href: base, label: m.nav_app_summary(), active: path === base },
+				{ href: config, label: m.nav_app_config(), active: path.startsWith(config) },
+				{
+					href: variables,
+					label: m.nav_app_variables(),
+					active: path.startsWith(variables),
+				},
+				{ href: domains, label: m.nav_app_domains(), active: path.startsWith(domains) },
+				{ href: deploys, label: m.nav_app_deploys(), active: path.startsWith(deploys) },
+				{ href: logs, label: m.nav_app_logs(), active: path.startsWith(logs) },
+			]}
+		/>
+	{/snippet}
+</ShellHeader>
+
+{@render children()}
