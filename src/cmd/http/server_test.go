@@ -116,6 +116,11 @@ func TestOriginCheck(t *testing.T) {
 	if w.Code != http.StatusForbidden || errorCode(t, w) != "bad_origin" {
 		t.Fatalf("DELETE con sesión y Origin ajeno: %d %s", w.Code, w.Body.String())
 	}
+	// Los navegadores mandan "Origin: null" desde iframes sandbox, data: o file:.
+	w = do(s, "POST", "/api/v1/ping", "null")
+	if w.Code != http.StatusForbidden || errorCode(t, w) != "bad_origin" {
+		t.Fatalf("Origin null: %d %s", w.Code, w.Body.String())
+	}
 
 	if w := do(s, "POST", "/api/v1/ping", testOrigin); w.Code != http.StatusOK {
 		t.Fatalf("Origin del panel: %d %s", w.Code, w.Body.String())
@@ -125,6 +130,10 @@ func TestOriginCheck(t *testing.T) {
 	}
 	if w := do(s, "PUT", "/api/v1/projects/auditfy/env", "", "Authorization", "Bearer mk_t"); w.Code != http.StatusOK {
 		t.Fatalf("Bearer sin Origin: %d %s", w.Code, w.Body.String())
+	}
+	// El esquema no distingue mayúsculas (RFC 9110 §11.1).
+	if w := do(s, "PUT", "/api/v1/projects/auditfy/env", "", "Authorization", "bearer mk_t"); w.Code != http.StatusOK {
+		t.Fatalf("bearer en minúsculas sin Origin: %d %s", w.Code, w.Body.String())
 	}
 	if w := do(s, "GET", "/api/v1/ping", ""); w.Code != http.StatusOK {
 		t.Fatalf("GET sin Origin: %d %s", w.Code, w.Body.String())
@@ -170,5 +179,42 @@ func TestCommonErrors(t *testing.T) {
 	w := do(s, "DELETE", "/api/v1/projects/auditfy", testOrigin, "Cookie", utils.SessionCookie+"=vencida")
 	if w.Code != http.StatusUnauthorized || errorCode(t, w) != "unauthenticated" {
 		t.Fatalf("sesión vencida: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// Una ruta que no existe responde el mismo JSON de error que el resto de la API.
+func TestUnmatchedRouteIsJSON(t *testing.T) {
+	s := newTestServer(t)
+	for _, path := range []string{"/api/v1/no-existe", "/api/v1/projects", "/otra-cosa"} {
+		w := do(s, "GET", path, "")
+		if w.Code != http.StatusNotFound || w.Header().Get("Content-Type") != "application/json" {
+			t.Errorf("%s: %d %v %s", path, w.Code, w.Header(), w.Body.String())
+			continue
+		}
+		if got := strings.TrimSpace(w.Body.String()); got != `{"error":{"code":"not_found","message":"no existe"}}` {
+			t.Errorf("%s: body=%s", path, got)
+		}
+	}
+	// Las rutas registradas siguen respondiendo.
+	if w := do(s, "GET", "/api/v1/ping", ""); w.Code != http.StatusOK {
+		t.Fatalf("ruta registrada: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestNewServerRequiresConfig(t *testing.T) {
+	cases := map[string]Config{
+		"Auth":        {PanelOrigin: testOrigin},
+		"PanelOrigin": {Auth: fakeAuth{}},
+	}
+	for field, c := range cases {
+		func() {
+			defer func() {
+				r := recover()
+				if msg, _ := r.(string); !strings.Contains(msg, field) {
+					t.Errorf("sin %s: recover() = %v, esperaba un panic que lo nombre", field, r)
+				}
+			}()
+			NewServer(c)
+		}()
 	}
 }

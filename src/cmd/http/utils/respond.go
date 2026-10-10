@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"log/slog"
@@ -23,12 +24,23 @@ type errorDetail struct {
 const internalBody = `{"error":{"code":"internal","message":"error interno"}}` + "\n"
 
 // WriteJSON responde v como JSON (json/v2, con las claves de los map ordenadas).
-// Si v no se puede serializar responde 500, en vez de una respuesta a medias.
+// Los bytes de UTF-8 inválido en un string salen como U+FFFD. Si v no se puede
+// serializar responde 500, en vez de una respuesta a medias, y lo registra con
+// slog.Default(); lo que responde el propio Kit usa el logger del Kit.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
-	body, err := jsonv2.Marshal(v, jsonv2.Deterministic(true))
+	writeJSON(slog.Default(), w, status, v)
+}
+
+// WriteError usa el formato del spec: {"error": {"code": "...", "message": "..."}}.
+func WriteError(w http.ResponseWriter, status int, code, message string) {
+	WriteJSON(w, status, errorBody{Error: errorDetail{Code: code, Message: message}})
+}
+
+func writeJSON(log *slog.Logger, w http.ResponseWriter, status int, v any) {
+	body, err := jsonv2.Marshal(v, jsonv2.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
-		slog.Error("respuesta JSON", "err", err)
+		log.Error("respuesta JSON", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(internalBody))
 		return
@@ -37,9 +49,9 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Write(append(body, '\n'))
 }
 
-// WriteError usa el formato del spec: {"error": {"code": "...", "message": "..."}}.
-func WriteError(w http.ResponseWriter, status int, code, message string) {
-	WriteJSON(w, status, errorBody{Error: errorDetail{Code: code, Message: message}})
+// writeError es WriteError con el logger del Kit.
+func (k *Kit) writeError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(k.log, w, status, errorBody{Error: errorDetail{Code: code, Message: message}})
 }
 
 // RegisterError asocia un error (comparado con errors.Is) a un status, código y mensaje.
@@ -59,15 +71,15 @@ func (k *Kit) RegisterError(target error, status int, code, message string) {
 // un error registrado → su status; cualquier otro → 500 "internal" y log.Error.
 func (k *Kit) Fail(w http.ResponseWriter, err error) {
 	if ve, ok := errors.AsType[*validate.Error](err); ok {
-		WriteError(w, http.StatusUnprocessableEntity, "invalid", ve.Error())
+		k.writeError(w, http.StatusUnprocessableEntity, "invalid", ve.Error())
 		return
 	}
 	if e, ok := k.lookup(err); ok {
-		WriteError(w, e.status, e.code, e.message)
+		k.writeError(w, e.status, e.code, e.message)
 		return
 	}
 	k.log.Error("error interno", "err", err)
-	WriteError(w, http.StatusInternalServerError, "internal", "error interno")
+	k.writeError(w, http.StatusInternalServerError, "internal", "error interno")
 }
 
 // lookup busca el último error registrado que coincide con err.

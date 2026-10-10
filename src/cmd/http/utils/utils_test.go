@@ -92,6 +92,7 @@ func newTestKit() (*Kit, *http.ServeMux) {
 	k.Handle("GET /api/v1/projects/{p}/stages/{s}/env", AccessToken, echo)
 	k.Handle("PUT /api/v1/projects/{p}/stages/{s}/env", AccessToken, echo)
 	k.Handle("DELETE /api/v1/projects/{p}", AccessToken, echo)
+	k.Handle("OPTIONS /api/v1/projects/{p}", AccessToken, echo)
 	k.HandlePublic("POST /public", echo)
 	return k, mux
 }
@@ -104,6 +105,16 @@ func cookie(v string) reqOpt {
 
 func bearer(v string) reqOpt {
 	return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+v) }
+}
+
+// cookies agrega varias cookies muelle_session, como haría un subdominio que
+// planta la suya (cookie tossing).
+func cookies(vs ...string) reqOpt {
+	return func(r *http.Request) {
+		for _, v := range vs {
+			r.AddCookie(&http.Cookie{Name: SessionCookie, Value: v})
+		}
+	}
 }
 
 func serve(h http.Handler, method, path string, opts ...reqOpt) *httptest.ResponseRecorder {
@@ -139,6 +150,11 @@ func TestHandleAccess(t *testing.T) {
 		{"bearer de stage, borrar proyecto", "DELETE", "/api/v1/projects/auditfy", bearer("mk_stage"), 403, "out_of_scope"},
 		{"bearer desconocido", "GET", "/api/v1/projects/auditfy", bearer("mk_nope"), 401, "bad_token"},
 		{"bearer sin TokenScope", "GET", "/api/v1/projects/auditfy", bearer("mk_broken"), 500, "internal"},
+		// HEAD es lectura y OPTIONS es escritura (write := método distinto de GET y HEAD).
+		{"bearer de stage, HEAD de proyecto", "HEAD", "/api/v1/projects/auditfy", bearer("mk_stage"), 200, ""},
+		{"bearer de proyecto, HEAD de otro proyecto", "HEAD", "/api/v1/projects/otro", bearer("mk_project"), 403, "out_of_scope"},
+		{"bearer de stage, OPTIONS de proyecto", "OPTIONS", "/api/v1/projects/auditfy", bearer("mk_stage"), 403, "out_of_scope"},
+		{"bearer de proyecto, OPTIONS de proyecto", "OPTIONS", "/api/v1/projects/auditfy", bearer("mk_project"), 200, ""},
 		// Sesiones.
 		{"sin cookie", "GET", "/session", nil, 401, "unauthenticated"},
 		{"cookie vacía", "GET", "/session", cookie(""), 401, "unauthenticated"},
@@ -153,6 +169,9 @@ func TestHandleAccess(t *testing.T) {
 		{"falta configurar TOTP, endpoint de token", "GET", "/api/v1/projects/auditfy", cookie("setup"), 403, "totp_setup_required"},
 		{"falta configurar TOTP, setup", "GET", "/setup", cookie("setup"), 200, ""},
 		{"sesión completa en setup", "GET", "/setup", cookie("full"), 200, ""},
+		{"dos cookies de sesión", "GET", "/session", cookies("full", "pending"), 400, "ambiguous_session"},
+		{"dos cookies de sesión iguales", "GET", "/session", cookies("full", "full"), 400, "ambiguous_session"},
+		{"dos cookies de sesión en endpoint de token", "GET", "/api/v1/projects/auditfy", cookies("full", "setup"), 400, "ambiguous_session"},
 		// Públicos.
 		{"público sin nada", "POST", "/public", nil, 200, ""},
 	}
@@ -195,6 +214,67 @@ func TestHandlePutsPrincipalInContext(t *testing.T) {
 	}
 }
 
+// El alcance de un token se verifica con los comodines {p} y {s}: una ruta
+// AccessToken que no los tiene dejaría pasar cualquier token, así que el Kit
+// la rechaza al registrarla.
+func TestHandleTokenPatternGuard(t *testing.T) {
+	ok := func(http.ResponseWriter, *http.Request) {}
+	register := func(pattern string, a Access) (msg string) {
+		defer func() {
+			if r := recover(); r != nil {
+				msg = fmt.Sprint(r)
+			}
+		}()
+		k := NewKit(http.NewServeMux(), fakeAuth{}, true, discard())
+		k.Handle(pattern, a, ok)
+		return ""
+	}
+
+	bad := map[string]string{
+		"GET /api/v1/projects":                             "{p}",
+		"GET /api/v1/tokens/{id}":                          "{p}",
+		"GET /api/v1/projects/{project}":                   "{p}",
+		"GET /api/v1/projects/{p...}":                      "{p}",
+		"GET /api/v1/projects/{p}/stages/x/env":            "{s}",
+		"GET /api/v1/projects/{p}/stages/{stage}/env":      "{s}",
+		"GET /api/v1/projects/{p}/stages/{s}/apps/x":       "{a}",
+		"GET /api/v1/projects/{p}/stages/{s}/apps/{app}/x": "{a}",
+		"GET /api/v1/projects/{p}/":                        "/",
+		"/api/v1/projects/{p}/stages/{s}/":                 "/",
+	}
+	for pattern, want := range bad {
+		msg := register(pattern, AccessToken)
+		if msg == "" {
+			t.Errorf("%q: Handle con AccessToken debió hacer panic", pattern)
+			continue
+		}
+		if !strings.Contains(msg, pattern) || !strings.Contains(msg, want) || !strings.Contains(msg, "AccessToken") {
+			t.Errorf("%q: el panic %q debe nombrar la ruta, AccessToken y %s", pattern, msg, want)
+		}
+	}
+
+	good := []string{
+		"GET /api/v1/projects/{p}",
+		"GET /api/v1/projects/{p}/stages",
+		"GET /api/v1/projects/{p}/stages/{s}",
+		"PUT /api/v1/projects/{p}/stages/{s}/env",
+		"GET /api/v1/projects/{p}/stages/{s}/apps",
+		"PATCH /api/v1/projects/{p}/stages/{s}/apps/{a}/env",
+		"/api/v1/projects/{p}/env",
+	}
+	for _, pattern := range good {
+		if msg := register(pattern, AccessToken); msg != "" {
+			t.Errorf("%q: panic inesperado: %s", pattern, msg)
+		}
+	}
+	// Las rutas que no aceptan tokens no necesitan comodines.
+	for _, a := range []Access{AccessSession, AccessSetup, AccessMFAPending} {
+		if msg := register("GET /api/v1/projects/", a); msg != "" {
+			t.Errorf("Access %d: panic inesperado: %s", a, msg)
+		}
+	}
+}
+
 type decodeTarget struct {
 	A int    `json:"a"`
 	B string `json:"b"`
@@ -218,6 +298,12 @@ func TestDecodeJSONRejects(t *testing.T) {
 		"vacío":             ``,
 		"tipo incorrecto":   `{"a":"uno"}`,
 		"no es objeto":      `[1]`,
+		"null":              `null`,
+		"null con espacios": " \n null ",
+		"arreglo vacío":     `[]`,
+		"string":            `"x"`,
+		"número":            `1`,
+		"booleano":          `true`,
 		"más de 1 MiB":      `{"b":"` + strings.Repeat("x", MaxBodyBytes) + `"}`,
 	}
 	for name, body := range cases {
@@ -252,6 +338,8 @@ func TestDecodeJSONMessages(t *testing.T) {
 		{`{"a":1,"a":2}`, `"a"`},
 		{`{"a":"uno"}`, `"a"`},
 		{`{"b":"` + strings.Repeat("x", MaxBodyBytes) + `"}`, "1 MiB"},
+		{`null`, "objeto"},
+		{`[]`, "objeto"},
 	}
 	for _, c := range cases {
 		w, _, _ := decodeInto(c.body)
@@ -343,20 +431,75 @@ func TestWriteJSON(t *testing.T) {
 	}
 }
 
+// Un string con UTF-8 inválido (ej. un nombre que vino de Docker) no tumba la
+// respuesta: los bytes inválidos salen como U+FFFD.
+func TestWriteJSONInvalidUTF8(t *testing.T) {
+	w := httptest.NewRecorder()
+	WriteJSON(w, http.StatusOK, map[string]string{"name": "a\xffb"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var got map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["name"] != "a\uFFFDb" {
+		t.Fatalf("name=%q, esperaba %q", got["name"], "a\uFFFDb")
+	}
+}
+
+// Lo que escribe el Kit registra sus fallos en el logger del Kit; WriteJSON,
+// que no recibe el Kit, en slog.Default() (main lo configura).
+func TestWriteJSONLogger(t *testing.T) {
+	unmarshalable := map[string]any{"f": func() {}}
+
+	var kitLogs bytes.Buffer
+	writeJSON(slog.New(slog.NewTextHandler(&kitLogs, nil)), httptest.NewRecorder(), http.StatusOK, unmarshalable)
+	if !strings.Contains(kitLogs.String(), "respuesta JSON") {
+		t.Fatalf("el error debe ir al logger del Kit: %q", kitLogs.String())
+	}
+
+	var defaultLogs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&defaultLogs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	WriteJSON(httptest.NewRecorder(), http.StatusOK, unmarshalable)
+	if !strings.Contains(defaultLogs.String(), "respuesta JSON") {
+		t.Fatalf("el error debe ir a slog.Default(): %q", defaultLogs.String())
+	}
+}
+
 func TestClientIP(t *testing.T) {
-	r := httptest.NewRequest("GET", "/", nil)
-	r.RemoteAddr = "10.0.0.5:51234"
-	if ip := ClientIP(r); ip != "10.0.0.5" {
-		t.Fatalf("RemoteAddr: %q", ip)
+	cases := []struct {
+		name, remote, realIP, want string
+	}{
+		{"sin header", "10.0.0.5:51234", "", "10.0.0.5"},
+		{"sin header, IPv6", "[2001:db8::1]:443", "", "2001:db8::1"},
+		{"RemoteAddr sin puerto", "sin-puerto", "", "sin-puerto"},
+		// Caddy llega desde la red interna (loopback o privada) y pone X-Real-IP.
+		{"header desde 10.x", "10.0.0.5:51234", " 203.0.113.7 ", "203.0.113.7"},
+		{"header desde 127.0.0.1", "127.0.0.1:51234", "203.0.113.7", "203.0.113.7"},
+		{"header desde 192.168.x", "192.168.1.2:51234", "203.0.113.7", "203.0.113.7"},
+		{"header desde ::1", "[::1]:51234", "203.0.113.7", "203.0.113.7"},
+		{"header IPv6 se canoniza", "127.0.0.1:1", "2001:0db8:0:0::1", "2001:db8::1"},
+		// Desde una IP pública el header es del cliente: se ignora.
+		{"header falsificado desde IP pública", "198.51.100.9:51234", "10.1.2.3", "198.51.100.9"},
+		{"header falsificado desde IPv6 pública", "[2001:db8::9]:1", "127.0.0.1", "2001:db8::9"},
+		// Un header que no es una IP se ignora aunque venga de la red interna.
+		{"header basura", "10.0.0.5:51234", "<script>", "10.0.0.5"},
+		{"header con dos IPs", "10.0.0.5:51234", "203.0.113.7, 10.0.0.1", "10.0.0.5"},
+		{"header con zona", "10.0.0.5:51234", "fe80::1%eth0", "10.0.0.5"},
+		{"header desde RemoteAddr inválido", "sin-puerto", "203.0.113.7", "sin-puerto"},
 	}
-	r.Header.Set("X-Real-IP", " 203.0.113.7 ")
-	if ip := ClientIP(r); ip != "203.0.113.7" {
-		t.Fatalf("X-Real-IP: %q", ip)
-	}
-	r = httptest.NewRequest("GET", "/", nil)
-	r.RemoteAddr = "sin-puerto"
-	if ip := ClientIP(r); ip != "sin-puerto" {
-		t.Fatalf("RemoteAddr sin puerto: %q", ip)
+	for _, c := range cases {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = c.remote
+		if c.realIP != "" {
+			r.Header.Set("X-Real-IP", c.realIP)
+		}
+		if ip := ClientIP(r); ip != c.want {
+			t.Errorf("%s: ClientIP = %q, esperaba %q", c.name, ip, c.want)
+		}
 	}
 }
 
@@ -366,7 +509,12 @@ func TestBearerToken(t *testing.T) {
 		ok    bool
 	}{
 		"Bearer mk_abc": {"mk_abc", true},
+		"bearer x":      {"x", true},
+		"BEARER x":      {"x", true},
 		"Bearer ":       {"", false},
+		"bearer ":       {"", false},
+		"Bearer":        {"", false},
+		"Bearerx":       {"", false},
 		"Basic abc":     {"", false},
 		"":              {"", false},
 	}

@@ -5,8 +5,10 @@ package utils
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
@@ -60,8 +62,39 @@ func NewKit(mux *http.ServeMux, auth Authenticator, secureCookies bool, log *slo
 
 // Handle registra un endpoint autenticado con el nivel de acceso a.
 // El Principal queda en el ctx (entity.PrincipalFrom).
+//
+// El alcance de un token se verifica con los comodines {p} y {s} de la ruta,
+// así que una ruta AccessToken tiene que nombrarlos exactamente así: hace
+// panic al registrarla si no tiene {p}, si tiene /stages/ sin {s}, si tiene
+// /apps/ sin {a} o si termina en "/" (abarcaría cualquier ruta debajo).
 func (k *Kit) Handle(pattern string, a Access, h http.HandlerFunc) {
+	if a == AccessToken {
+		checkTokenPattern(pattern)
+	}
 	k.mux.Handle(pattern, k.authenticate(a, h))
+}
+
+// checkTokenPattern hace panic si pattern no sirve para verificar el alcance
+// de un token. Es un error de programación, como un patrón inválido del mux.
+func checkTokenPattern(pattern string) {
+	path := pattern
+	if i := strings.IndexByte(pattern, '/'); i >= 0 {
+		path = pattern[i:] // sin el método ni el host
+	}
+	var problem string
+	switch {
+	case !strings.Contains(path, "{p}"):
+		problem = "no tiene el comodín {p}"
+	case strings.Contains(path, "/stages/") && !strings.Contains(path, "{s}"):
+		problem = "tiene /stages/ sin el comodín {s}"
+	case strings.Contains(path, "/apps/") && !strings.Contains(path, "{a}"):
+		problem = "tiene /apps/ sin el comodín {a}"
+	case strings.HasSuffix(path, "/"):
+		problem = `termina en "/" y abarcaría cualquier ruta debajo`
+	default:
+		return
+	}
+	panic(fmt.Sprintf("utils: la ruta %q usa AccessToken pero %s; sin eso no se puede verificar el alcance del token", pattern, problem))
 }
 
 // HandlePublic registra un endpoint sin autenticación (login, setup, aceptar invitación).
@@ -78,7 +111,7 @@ func (k *Kit) authenticate(a Access, next http.HandlerFunc) http.Handler {
 		ctx := r.Context()
 		if bearer, ok := BearerToken(r); ok {
 			if a != AccessToken {
-				WriteError(w, http.StatusForbidden, "token_not_allowed", "los tokens de API no pueden usar este endpoint")
+				k.writeError(w, http.StatusForbidden, "token_not_allowed", "los tokens de API no pueden usar este endpoint")
 				return
 			}
 			p, err := k.auth.AuthenticateToken(ctx, bearer)
@@ -92,16 +125,22 @@ func (k *Kit) authenticate(a Access, next http.HandlerFunc) http.Handler {
 			}
 			write := r.Method != http.MethodGet && r.Method != http.MethodHead
 			if !p.Allows(r.PathValue("p"), r.PathValue("s"), write) {
-				WriteError(w, http.StatusForbidden, "out_of_scope", "el token no tiene acceso a este recurso")
+				k.writeError(w, http.StatusForbidden, "out_of_scope", "el token no tiene acceso a este recurso")
 				return
 			}
 			next(w, r.WithContext(entity.WithPrincipal(ctx, p)))
 			return
 		}
 
+		// Dos cookies de sesión indican que un subdominio plantó la suya
+		// (cookie tossing): no se adivina cuál es la buena.
+		if len(r.CookiesNamed(SessionCookie)) > 1 {
+			k.writeError(w, http.StatusBadRequest, "ambiguous_session", "la petición trae más de una cookie de sesión")
+			return
+		}
 		c, err := r.Cookie(SessionCookie)
 		if err != nil || c.Value == "" {
-			WriteError(w, http.StatusUnauthorized, "unauthenticated", "inicia sesión")
+			k.writeError(w, http.StatusUnauthorized, "unauthenticated", "inicia sesión")
 			return
 		}
 		p, err := k.auth.AuthenticateSession(ctx, c.Value)
@@ -111,13 +150,13 @@ func (k *Kit) authenticate(a Access, next http.HandlerFunc) http.Handler {
 		}
 		switch {
 		case p.MFAPending && a != AccessMFAPending:
-			WriteError(w, http.StatusUnauthorized, "mfa_required", "falta el código de 2FA")
+			k.writeError(w, http.StatusUnauthorized, "mfa_required", "falta el código de 2FA")
 			return
 		case !p.MFAPending && a == AccessMFAPending:
-			WriteError(w, http.StatusBadRequest, "no_mfa_pending", "esta sesión no espera un código")
+			k.writeError(w, http.StatusBadRequest, "no_mfa_pending", "esta sesión no espera un código")
 			return
 		case p.NeedsTOTPSetup && a != AccessSetup:
-			WriteError(w, http.StatusForbidden, "totp_setup_required", "configura 2FA para continuar")
+			k.writeError(w, http.StatusForbidden, "totp_setup_required", "configura 2FA para continuar")
 			return
 		}
 		next(w, r.WithContext(entity.WithPrincipal(ctx, p)))

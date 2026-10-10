@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -14,12 +15,23 @@ import (
 
 // DecodeJSON lee el body con json/v2 estricto (máx. MaxBodyBytes): rechaza campos
 // desconocidos, claves duplicadas, UTF-8 inválido y datos después del valor.
+// También rechaza un body que no es un objeto JSON (null, [], "x", 1…): todos
+// los cuerpos de la API son objetos, y un null dejaría dst sin tocar.
 // Si falla responde 400 "invalid_json" con un mensaje en español sin detalles internos de Go, y devuelve false.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	// json/v2 ya rechaza por defecto las claves duplicadas y el UTF-8 inválido,
-	// y UnmarshalRead exige un único valor hasta el final del body.
-	err := jsonv2.UnmarshalRead(http.MaxBytesReader(w, r.Body, MaxBodyBytes), dst, jsonv2.RejectUnknownMembers(true))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
 	if err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid_json", decodeMessage(err))
+		return false
+	}
+	// Un body vacío sigue de largo para que json/v2 dé el error de siempre.
+	if trimmed := bytes.TrimLeft(body, " \t\r\n"); len(trimmed) > 0 && trimmed[0] != '{' {
+		WriteError(w, http.StatusBadRequest, "invalid_json", "JSON inválido: el cuerpo debe ser un objeto")
+		return false
+	}
+	// json/v2 ya rechaza por defecto las claves duplicadas y el UTF-8 inválido,
+	// y Unmarshal exige un único valor hasta el final del body.
+	if err := jsonv2.Unmarshal(body, dst, jsonv2.RejectUnknownMembers(true)); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid_json", decodeMessage(err))
 		return false
 	}

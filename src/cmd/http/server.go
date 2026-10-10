@@ -28,7 +28,15 @@ type Server struct {
 // NewServer arma el mux y el Kit, y registra los errores comunes:
 // repository.ErrNotFound 404 not_found, ErrConflict 409 conflict, ErrNotEmpty 409 not_empty,
 // entity.ErrUnauthenticated 401 unauthenticated, entity.ErrForbidden 403 forbidden.
+// Hace panic si falta Auth o PanelOrigin: sin ellos ningún endpoint
+// autenticado ni ninguna escritura del panel podría funcionar.
 func NewServer(c Config) *Server {
+	if c.Auth == nil {
+		panic("http: NewServer sin Config.Auth")
+	}
+	if c.PanelOrigin == "" {
+		panic("http: NewServer sin Config.PanelOrigin")
+	}
 	log := c.Logger
 	if log == nil {
 		log = slog.Default()
@@ -48,6 +56,8 @@ func (s *Server) Kit() *utils.Kit { return s.kit }
 
 // ServeHTTP pone X-Content-Type-Options: nosniff y, en /api/, Cache-Control: no-store;
 // rechaza con 403 bad_origin las peticiones que modifican algo, sin Bearer y con un Origin distinto de PanelOrigin.
+// Una petición que no coincide con ninguna ruta responde 404 not_found en JSON,
+// en vez del texto plano del ServeMux.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -55,6 +65,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.originAllowed(r) {
 		utils.WriteError(w, http.StatusForbidden, "bad_origin", "origen no permitido")
+		return
+	}
+	// Sin patrón el mux respondería 404 o 405 en texto plano.
+	if _, pattern := s.mux.Handler(r); pattern == "" {
+		utils.WriteError(w, http.StatusNotFound, "not_found", "no existe")
 		return
 	}
 	s.mux.ServeHTTP(w, r)
