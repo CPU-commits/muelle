@@ -1,4 +1,5 @@
 import { style, styleVariants } from '@vanilla-extract/css'
+import { media } from '@/shared/ui/themes/media'
 import { theme } from '@/shared/ui/themes/theme.css'
 
 // Las pantallas de acceso (`Login.dc.html`): logo arriba a la izquierda, el host a la
@@ -32,16 +33,21 @@ export const brandName = style({
 	letterSpacing: theme.typography.letterSpacing.tight,
 })
 
+// Centrado "seguro": con `margin: auto` el formulario queda al medio cuando entra, y
+// cuando es más alto que la pantalla (el QR de /2fa en un teléfono) empieza arriba y se
+// scrollea, en vez de cortarse por arriba como con `align-items: center`.
 export const main = style({
 	flex: '1 1 auto',
 	display: 'flex',
-	alignItems: 'center',
-	justifyContent: 'center',
-	padding: `${theme.space[24]} ${theme.space[16]} ${theme.space[80]}`,
+	padding: `${theme.space[16]} ${theme.space[16]} ${theme.space[48]}`,
+	'@media': {
+		[media.sm]: { padding: `${theme.space[24]} ${theme.space[16]} ${theme.space[80]}` },
+	},
 })
 
 export const content = style({
 	width: '100%',
+	margin: 'auto',
 })
 
 export const widths = styleVariants({

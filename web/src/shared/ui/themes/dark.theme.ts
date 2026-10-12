@@ -17,7 +17,8 @@ export const darkTheme = {
 			inverse: c['gray-100'],
 			inverseHover: c.white,
 			danger: c['red-600'],
-			dangerHover: c['red-550'],
+			// Más oscuro y no más claro: con texto blanco, #D9454B daba 4.3:1.
+			dangerHover: c['red-700'],
 		},
 		borders: {
 			subtle: c['gray-800'],
@@ -32,6 +33,7 @@ export const darkTheme = {
 			secondary: c['gray-300'],
 			tertiary: c['gray-400'],
 			disabled: c['gray-500'],
+			faint: c['gray-450'],
 			inverse: c['gray-950'],
 			strong: c.white,
 			separator: c['gray-700'],

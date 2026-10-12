@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ICONS, type IconName, type IconShape } from './icons'
+	import { icon } from './styles.css'
 
 	type Props = {
 		name: IconName
@@ -27,7 +28,7 @@
 	aria-label={label}
 	aria-hidden={label ? undefined : 'true'}
 	focusable="false"
-	style:flex-shrink="0"
+	class={icon}
 >
 	{#each shape.paths as d (d)}
 		<path {d} />

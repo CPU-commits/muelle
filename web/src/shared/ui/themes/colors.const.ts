@@ -13,6 +13,7 @@ export default {
 		'gray-750': '#2E2E33',
 		'gray-700': '#3A3A40',
 		'gray-500': '#6E6E77',
+		'gray-450': '#808089',
 		'gray-400': '#83838C',
 		'gray-300': '#A1A1A8',
 		'gray-100': '#EDEDED',
@@ -23,6 +24,6 @@ export default {
 		'red-500': '#F2555A',
 		'red-400': '#F2777D',
 		'red-600': '#C7343A',
-		'red-550': '#D9454B',
+		'red-700': '#B32D33',
 	},
 } as const

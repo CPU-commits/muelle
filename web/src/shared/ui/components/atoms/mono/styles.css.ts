@@ -11,7 +11,8 @@ export const tones = styleVariants({
 	primary: { color: theme.colors.text.primary },
 	secondary: { color: theme.colors.text.secondary },
 	tertiary: { color: theme.colors.text.tertiary },
-	disabled: { color: theme.colors.text.disabled },
+	// El sufijo apagado de una tarea, un "—": legible (≥ 4.5:1), apenas más tenue que tertiary.
+	disabled: { color: theme.colors.text.faint },
 })
 
 export const sizes = styleVariants({

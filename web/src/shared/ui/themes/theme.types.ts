@@ -34,6 +34,8 @@ export type ColorsTheme = {
 		tertiary: string
 		/** Deshabilitado e íconos: no cumple 4.5:1, no usarlo para texto que hay que leer. */
 		disabled: string
+		/** El texto más apagado que se puede leer (≥ 4.5:1 sobre page, surface y hover). */
+		faint: string
 		inverse: string
 		strong: string
 		/** Las barras del breadcrumb. */
