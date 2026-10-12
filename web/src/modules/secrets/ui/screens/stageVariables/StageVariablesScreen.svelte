@@ -10,6 +10,7 @@
 		LoadingState,
 		PageHeader,
 	} from '@/shared/ui'
+	import { refocusOnClose } from '../../components/refocus'
 	import { EnvAddCard, EnvDialogs, EnvVarList } from '../../features/envEditor'
 	import { EnvImportPanel } from '../../features/envImport'
 	import { StageVariablesViewModel } from './StageVariables.viewModel.svelte.ts'
@@ -29,16 +30,18 @@
 		subtitle={m.secrets_stage_subtitle({ stage: vm.stage })}
 	>
 		{#snippet actions()}
-			<Button
-				variant="secondary"
-				aria-expanded={vm.importer.open}
-				aria-controls={vm.importer.open ? importId : undefined}
-				disabled={!vm.editor.hasLoaded}
-				onclick={vm.importer.toggle}
-			>
-				<Icon name="download" />
-				{m.secrets_import_toggle()}
-			</Button>
+			<span {@attach refocusOnClose(() => vm.importer.closedCount)}>
+				<Button
+					variant="secondary"
+					aria-expanded={vm.importer.open}
+					aria-controls={vm.importer.open ? importId : undefined}
+					disabled={!vm.editor.hasLoaded}
+					onclick={vm.importer.toggle}
+				>
+					<Icon name="download" />
+					{m.secrets_import_toggle()}
+				</Button>
+			</span>
 		{/snippet}
 	</PageHeader>
 

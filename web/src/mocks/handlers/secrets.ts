@@ -54,7 +54,8 @@ async function decode(
 		return { error: badJson('JSON inválido: el cuerpo está vacío o incompleto') }
 	}
 	for (const [name, value] of Object.entries(body)) {
-		const kind = fields[name]
+		// `hasOwn`: `constructor` o `__proto__` no son campos del cuerpo (el backend da 400).
+		const kind = Object.hasOwn(fields, name) ? fields[name] : undefined
 		if (!kind) return { error: badJson(`JSON inválido: el campo ${quote(name)} no existe`) }
 		if (value === null) continue
 		const wrongType = badJson(

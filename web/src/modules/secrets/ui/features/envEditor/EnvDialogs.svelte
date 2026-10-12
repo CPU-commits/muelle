@@ -52,6 +52,8 @@
 			/>
 			{#if vm.editMakesSecret}
 				<p class={editNote}>{m.secrets_edit_to_secret_note()}</p>
+			{:else if vm.editRevealsSecret}
+				<p class={editNote}>{m.secrets_edit_to_plain_note()}</p>
 			{/if}
 		</form>
 	{/if}

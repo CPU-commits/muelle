@@ -240,6 +240,9 @@ describe('EnvEditorViewModel', () => {
 
 			expect(vm.editTitle).toBe(m.secrets_replace_title({ key: 'JWT_SECRET' }))
 			expect(vm.editValue).toBe('')
+			vm.setEditSecret(false)
+			expect(vm.editRevealsSecret).toBe(true)
+			vm.setEditSecret(true)
 			await vm.submitEdit()
 			expect(vm.editError).toBe(m.secrets_error_new_value_required())
 			expect(mocks.patchEnv).not.toHaveBeenCalled()
@@ -271,6 +274,19 @@ describe('EnvEditorViewModel', () => {
 
 			expect(lastPatch()).toMatchObject({ set: [['LOG_LEVEL', 'info']], secret: true })
 			expect(vm.confirmingSecret).toBeNull()
+		})
+
+		it('marcar como secreta usa el valor de la lista al confirmar, no el del diálogo', async () => {
+			const vm = await mount()
+			vm.askSecure(APP_VARS[0] as EnvVar)
+
+			// Mientras el diálogo estaba abierto, otra pestaña cambió el valor.
+			mocks.getEnv.mockResolvedValue([plain('LOG_LEVEL', 'warn'), ...APP_VARS.slice(1)])
+			vm.retry()
+			await vi.waitFor(() => expect(vm.vars[0]).toMatchObject({ value: 'warn' }))
+			await vm.confirmSecure()
+
+			expect(lastPatch()).toMatchObject({ set: [['LOG_LEVEL', 'warn']], secret: true })
 		})
 
 		it('una secreta no se puede "marcar como secreta"', async () => {
@@ -323,8 +339,11 @@ describe('EnvEditorViewModel', () => {
 		await vi.waitFor(() => expect(vm.isAdding).toBe(true))
 		vm.askDelete(APP_VARS[1] as EnvVar)
 		await expect(vm.confirmDelete()).resolves.toBe(false)
+		vm.setNewKey('NEXT')
 		release()
 		await expect(first).resolves.toBe(true)
 		expect(mocks.patchEnv).toHaveBeenCalledTimes(1)
+		// Lo que se escribió mientras se guardaba no se borra.
+		expect(vm.newKey).toBe('NEXT')
 	})
 })

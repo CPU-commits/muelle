@@ -26,12 +26,17 @@ function refreshOwner(client: QueryClient, owner: EnvOwner): Promise<void> {
 	return client.invalidateQueries({ queryKey: secretsKeys.owner(owner), exact: true })
 }
 
+// Las variables de una mutación llevan valores en claro (también secretos): `gcTime: 0`
+// las saca del MutationCache apenas nadie la observa, en vez de 5 minutos después.
+const FORGET_VALUES = { gcTime: 0 } as const
+
 /**
  * Agregar, editar, borrar o importar. El backend marca con cambios pendientes a la app (o
  * a todas las apps del stage): las queries de catalog que lo muestran se invalidan en F2.
  */
 export function patchEnvMutation(client: QueryClient) {
 	return {
+		...FORGET_VALUES,
 		mutationFn: (input: PatchEnvInput) => secretsUseCases.patchEnv(input),
 		onSuccess: (_: void, input: PatchEnvInput) => refreshOwner(client, input.owner),
 	}
@@ -39,6 +44,7 @@ export function patchEnvMutation(client: QueryClient) {
 
 export function replaceEnvMutation(client: QueryClient) {
 	return {
+		...FORGET_VALUES,
 		mutationFn: (input: ReplaceEnvInput) => secretsUseCases.replaceEnv(input),
 		onSuccess: (_: void, input: ReplaceEnvInput) => refreshOwner(client, input.owner),
 	}

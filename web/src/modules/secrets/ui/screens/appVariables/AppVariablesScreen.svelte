@@ -10,6 +10,7 @@
 		LoadingState,
 		PageHeader,
 	} from '@/shared/ui'
+	import { refocusOnClose } from '../../components/refocus'
 	import { EnvAddCard, EnvDialogs, EnvVarList } from '../../features/envEditor'
 	import { EnvImportPanel } from '../../features/envImport'
 	import { InheritedEnvList } from '../../features/inheritedEnv'
@@ -26,16 +27,18 @@
 <div class={page}>
 	<PageHeader title={m.secrets_title()} subtitle={m.secrets_app_subtitle()}>
 		{#snippet actions()}
-			<Button
-				variant="secondary"
-				aria-expanded={vm.importer.open}
-				aria-controls={vm.importer.open ? importId : undefined}
-				disabled={!vm.editor.hasLoaded}
-				onclick={vm.importer.toggle}
-			>
-				<Icon name="download" />
-				{m.secrets_import_toggle()}
-			</Button>
+			<span {@attach refocusOnClose(() => vm.importer.closedCount)}>
+				<Button
+					variant="secondary"
+					aria-expanded={vm.importer.open}
+					aria-controls={vm.importer.open ? importId : undefined}
+					disabled={!vm.editor.hasLoaded}
+					onclick={vm.importer.toggle}
+				>
+					<Icon name="download" />
+					{m.secrets_import_toggle()}
+				</Button>
+			</span>
 		{/snippet}
 	</PageHeader>
 

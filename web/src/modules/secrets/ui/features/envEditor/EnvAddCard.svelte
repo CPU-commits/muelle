@@ -46,7 +46,7 @@
 				onblur={vm.checkNewKey}
 			/>
 			{#if vm.newKeyError}
-				<p id={`${id}-key-error`} class={fieldError}>{vm.newKeyError}</p>
+				<p id={`${id}-key-error`} class={fieldError} role="alert">{vm.newKeyError}</p>
 			{/if}
 		</div>
 		<div class={valueField}>
@@ -63,7 +63,9 @@
 				oninput={(event) => vm.setNewValue(event.currentTarget.value)}
 			/>
 			{#if vm.newValueError}
-				<p id={`${id}-value-error`} class={fieldError}>{vm.newValueError}</p>
+				<p id={`${id}-value-error`} class={fieldError} role="alert">
+					{vm.newValueError}
+				</p>
 			{/if}
 		</div>
 		<Checkbox

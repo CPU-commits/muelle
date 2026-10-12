@@ -14,7 +14,8 @@ import type { EnvEditorViewModel } from '../envEditor'
 
 // "Importar .env": el texto pegado se parsea mientras se escribe, se compara con las
 // variables del dueño (el plan: nuevas, cambian, secretas que se reescriben, sin cambios
-// y, si reemplaza, las que se borran) y se aplica en un solo PATCH. El texto puede tener
+// y, si reemplaza, las que se borran) y se aplica en un solo PATCH. Borrar variables o
+// dejar a la vista el valor de una secreta se confirma antes. El texto puede tener
 // secretos: se borra al cerrar el panel y después de importar.
 export class EnvImportViewModel {
 	open = $state(false)
@@ -23,7 +24,13 @@ export class EnvImportViewModel {
 	secret = $state(true)
 	/** Lo que rechazó el backend (un 422, un límite que el panel no podía ver). */
 	serverError = $state<string | null>(null)
-	confirmingReplace = $state(false)
+	/**
+	 * El plan que se está confirmando: el que vio la persona. Si mientras tanto la lista se
+	 * vuelve a cargar, se aplica este y no uno recalculado (que podría borrar otra cosa).
+	 */
+	confirming = $state.raw<ImportPlan | null>(null)
+	/** Cuántas veces se cerró el panel: la pantalla devuelve el foco al botón que lo abre. */
+	closedCount = $state(0)
 
 	readonly #editor: EnvEditorViewModel
 
@@ -93,8 +100,44 @@ export class EnvImportViewModel {
 		)
 	}
 
-	get removedKeysText(): string {
-		return this.plan.removed.join(', ')
+	get isConfirming(): boolean {
+		return this.confirming !== null
+	}
+
+	get confirmTitle(): string {
+		const plan = this.confirming
+		if (!plan) return ''
+		return plan.removed.length > 0
+			? m.secrets_import_replace_title()
+			: m.secrets_import_unmask_title()
+	}
+
+	get confirmBody(): string {
+		const plan = this.confirming
+		if (!plan) return ''
+		const revealed = revealedKeys(plan)
+		return [
+			plan.removed.length > 0
+				? m.secrets_import_replace_body({
+						count: plan.removed.length,
+						keys: plan.removed.join(', '),
+					})
+				: '',
+			revealed.length > 0
+				? m.secrets_import_unmask_body({
+						count: revealed.length,
+						keys: revealed.join(', '),
+					})
+				: '',
+		]
+			.filter(Boolean)
+			.join(' ')
+	}
+
+	get confirmLabel(): string {
+		return this.confirming && this.confirming.removed.length > 0
+			? m.secrets_import_replace_confirm()
+			: m.secrets_import_submit()
 	}
 
 	toggle = (): void => {
@@ -109,7 +152,8 @@ export class EnvImportViewModel {
 		this.mode = 'merge'
 		this.secret = true
 		this.serverError = null
-		this.confirmingReplace = false
+		this.confirming = null
+		this.closedCount += 1
 	}
 
 	setText = (value: string): void => {
@@ -127,29 +171,31 @@ export class EnvImportViewModel {
 		this.serverError = null
 	}
 
-	/** "Importar": si va a borrar variables, primero lo confirma. */
+	/** "Importar": si va a borrar variables o a mostrar secretas, primero lo confirma. */
 	submit = async (): Promise<boolean> => {
 		if (!this.canSubmit) return false
-		if (this.plan.removed.length > 0) {
-			this.confirmingReplace = true
+		const plan = this.plan
+		if (plan.removed.length > 0 || revealedKeys(plan).length > 0) {
+			this.confirming = plan
 			return false
 		}
-		return this.#apply()
+		return this.#apply(plan)
 	}
 
-	confirmReplace = async (): Promise<boolean> => {
-		if (!this.canSubmit) return false
-		const applied = await this.#apply()
-		this.confirmingReplace = false
+	confirmImport = async (): Promise<boolean> => {
+		const plan = this.confirming
+		if (!plan || this.#editor.isSaving) return false
+		const applied = await this.#apply(plan)
+		this.confirming = null
 		return applied
 	}
 
-	cancelReplace = (): void => {
-		if (!this.isSubmitting) this.confirmingReplace = false
+	cancelConfirm = (): void => {
+		if (!this.isSubmitting) this.confirming = null
 	}
 
-	async #apply(): Promise<boolean> {
-		const patch = this.plan.patch
+	async #apply(plan: ImportPlan): Promise<boolean> {
+		const patch = plan.patch
 		if (!patch) return false
 		this.serverError = null
 		const applied = await this.#editor.applyImport(patch, (message) => {
@@ -161,4 +207,9 @@ export class EnvImportViewModel {
 		this.close()
 		return true
 	}
+}
+
+/** Las secretas que el import deja de marcar: su valor se va a poder leer. */
+function revealedKeys(plan: ImportPlan): string[] {
+	return plan.changed.filter((change) => change.reason === 'to_plain').map((change) => change.key)
 }

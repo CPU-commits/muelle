@@ -136,15 +136,63 @@ describe('EnvImportViewModel', () => {
 
 		expect(importer.plan.removed).toEqual(['JWT_SECRET', 'LOG_LEVEL'])
 		await expect(importer.submit()).resolves.toBe(false)
-		expect(importer.confirmingReplace).toBe(true)
+		expect(importer.isConfirming).toBe(true)
+		expect(importer.confirmTitle).toBe(m.secrets_import_replace_title())
+		expect(importer.confirmBody).toBe(
+			m.secrets_import_replace_body({ count: 2, keys: 'JWT_SECRET, LOG_LEVEL' }),
+		)
 		expect(mocks.patchEnv).not.toHaveBeenCalled()
 
-		await expect(importer.confirmReplace()).resolves.toBe(true)
+		await expect(importer.confirmImport()).resolves.toBe(true)
 		expect(mocks.patchEnv.mock.calls[0]?.[0]).toMatchObject({
 			unset: ['JWT_SECRET', 'LOG_LEVEL'],
 			set: new Map(),
 		})
-		expect(importer.confirmingReplace).toBe(false)
+		expect(importer.isConfirming).toBe(false)
+	})
+
+	it('dejar de marcar como secreta una que lo era también se confirma', async () => {
+		const { importer } = await mount()
+		importer.setText('JWT_SECRET=visible')
+		importer.setSecret(false)
+
+		await expect(importer.submit()).resolves.toBe(false)
+
+		expect(importer.confirmTitle).toBe(m.secrets_import_unmask_title())
+		expect(importer.confirmBody).toBe(
+			m.secrets_import_unmask_body({ count: 1, keys: 'JWT_SECRET' }),
+		)
+		expect(importer.confirmLabel).toBe(m.secrets_import_submit())
+		importer.cancelConfirm()
+		expect(importer.isConfirming).toBe(false)
+		expect(mocks.patchEnv).not.toHaveBeenCalled()
+	})
+
+	it('aplica el plan que se confirmó, aunque la lista cambie mientras tanto', async () => {
+		const { importer, editor } = await mount()
+		importer.setText('PORT=3000')
+		importer.setSecret(false)
+		importer.setMode('replace')
+		await importer.submit()
+
+		// Otra pestaña agregó una variable: el plan recalculado también la borraría.
+		mocks.getEnv.mockResolvedValue([...APP_VARS, plain('OTHER', 'x')])
+		editor.retry()
+		await vi.waitFor(() => expect(editor.count).toBe(4))
+		expect(importer.plan.removed).toContain('OTHER')
+
+		await importer.confirmImport()
+
+		expect(mocks.patchEnv.mock.calls[0]?.[0]).toMatchObject({
+			unset: ['JWT_SECRET', 'LOG_LEVEL'],
+		})
+	})
+
+	it('al cerrar cuenta un cierre más, para devolver el foco al botón', async () => {
+		const { importer } = await mount()
+		expect(importer.closedCount).toBe(0)
+		importer.close()
+		expect(importer.closedCount).toBe(1)
 	})
 
 	it('sin nada que cambiar no hay nada que importar', async () => {

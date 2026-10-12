@@ -185,9 +185,10 @@ export class EnvEditorViewModel {
 		this.newFormError = null
 		if (this.newKeyError || this.newValueError) return false
 
+		const sent = { key: this.newKey, value: this.newValue }
 		const saved = await this.#save(
 			'add',
-			{ set: [[key, this.newValue]], secret: this.newSecret },
+			{ set: [[key, sent.value]], secret: this.newSecret },
 			(message, error) => {
 				if (error instanceof InvalidEnvValue) this.newValueError = message
 				else this.newFormError = message
@@ -196,10 +197,13 @@ export class EnvEditorViewModel {
 		)
 		if (!saved) return false
 		toast.success(m.secrets_add_success(), savedKeyNote(this.kind, key))
-		this.newKey = ''
-		this.newValue = ''
-		// La siguiente vuelve a ser secreta: olvidarse de marcarla expondría su valor.
-		this.newSecret = true
+		// Lo que se escribió mientras se guardaba (la siguiente variable) no se borra.
+		if (this.newKey === sent.key && this.newValue === sent.value) {
+			this.newKey = ''
+			this.newValue = ''
+			// La siguiente vuelve a ser secreta: olvidarse de marcarla expondría su valor.
+			this.newSecret = true
+		}
 		return true
 	}
 
@@ -243,6 +247,11 @@ export class EnvEditorViewModel {
 	/** Una no secreta que pasa a secreta: después no se va a poder leer. */
 	get editMakesSecret(): boolean {
 		return this.editing !== null && !this.editing.secret && this.editSecret
+	}
+
+	/** Una secreta que deja de serlo: su valor nuevo se va a poder leer en el panel. */
+	get editRevealsSecret(): boolean {
+		return this.editing !== null && this.editing.secret && !this.editSecret
 	}
 
 	/** De una secreta no se sabe el valor: escribir uno nuevo siempre es un cambio. */
@@ -300,10 +309,19 @@ export class EnvEditorViewModel {
 		if (this.pendingAction !== 'secure') this.confirmingSecret = null
 	}
 
-	/** El backend no tiene "solo cambiar la marca": se reescribe el mismo valor como secreta. */
+	/**
+	 * El backend no tiene "solo cambiar la marca": se reescribe el valor como secreta. El
+	 * valor se lee de la lista al confirmar, no al abrir el diálogo: si mientras tanto
+	 * cambió (otra pestaña, un sync-env), no se pisa con el viejo.
+	 */
 	confirmSecure = async (): Promise<boolean> => {
-		const envVar = this.confirmingSecret
-		if (!envVar || envVar.secret) return false
+		const asked = this.confirmingSecret
+		if (!asked) return false
+		const envVar = findEnvVar(this.vars, asked.key)
+		if (!envVar || envVar.secret) {
+			this.confirmingSecret = null
+			return false
+		}
 		const saved = await this.#save('secure', {
 			set: [[envVar.key, envVar.value]],
 			secret: true,
@@ -424,6 +442,8 @@ export class EnvEditorViewModel {
 			return false
 		} finally {
 			this.pendingAction = null
+			// Las variables de la mutación tienen los valores en claro: no se guardan.
+			this.#patch.reset()
 		}
 	}
 }

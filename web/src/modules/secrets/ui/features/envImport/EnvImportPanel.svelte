@@ -200,16 +200,13 @@
 	</section>
 
 	<ConfirmDialog
-		open={vm.confirmingReplace}
-		title={m.secrets_import_replace_title()}
-		body={m.secrets_import_replace_body({
-			count: vm.plan.removed.length,
-			keys: vm.removedKeysText,
-		})}
-		confirmLabel={m.secrets_import_replace_confirm()}
+		open={vm.isConfirming}
+		title={vm.confirmTitle}
+		body={vm.confirmBody}
+		confirmLabel={vm.confirmLabel}
 		cancelLabel={m.common_cancel()}
 		loading={vm.isSubmitting}
-		onConfirm={() => void vm.confirmReplace()}
-		onCancel={vm.cancelReplace}
+		onConfirm={() => void vm.confirmImport()}
+		onCancel={vm.cancelConfirm}
 	/>
 {/if}
