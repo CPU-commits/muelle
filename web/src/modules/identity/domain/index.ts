@@ -16,7 +16,7 @@ export type { Invite } from './entities/invite'
 export { INVITE_TTL_HOURS, inviteHoursLeft } from './entities/invite'
 export type { ProjectRef, StageRef } from './entities/scope'
 export type { User } from './entities/user'
-export { isCurrentUser, userInitial } from './entities/user'
+export { isCurrentUser } from './entities/user'
 export type { TokenExpiryProblem, TokenNameProblem } from './errors/identityErrors'
 export {
 	CannotDeleteSelf,

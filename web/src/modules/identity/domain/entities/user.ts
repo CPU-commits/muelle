@@ -9,7 +9,3 @@ export interface User {
 export function isCurrentUser(user: User, currentUsername: string | null): boolean {
 	return currentUsername !== null && user.username === currentUsername
 }
-
-export function userInitial(username: string): string {
-	return username.trim().charAt(0).toUpperCase() || '?'
-}
