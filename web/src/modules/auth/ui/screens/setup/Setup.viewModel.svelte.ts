@@ -1,6 +1,7 @@
-import { goto } from '$app/navigation'
+import { goto, replaceState } from '$app/navigation'
 import { resolve } from '$app/paths'
 import { createMutation, useQueryClient } from '@tanstack/svelte-query'
+import { onMount } from 'svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { setupMutation } from '../../../data'
 import { AlreadySetUp, InvalidInvite, MissingInviteToken } from '../../../domain'
@@ -20,16 +21,19 @@ export class SetupViewModel {
 	alreadySetUp = $state(false)
 	serverErrors = $state.raw<AccountServerErrors>(NO_SERVER_ERRORS)
 
-	readonly #token: () => string | null
+	readonly #token: string | null
 	readonly #client = useQueryClient()
 	readonly #setup = createMutation(() => setupMutation(this.#client))
 
+	// El token se lee UNA vez y se saca de la URL: no queda en el historial, en una captura
+	// de pantalla ni en el Referer. Si se recarga, /setup sin token pide el link de nuevo.
 	constructor(token: () => string | null) {
-		this.#token = token
+		this.#token = token()
+		if (this.hasToken) onMount(() => replaceState(resolve('/setup'), {}))
 	}
 
 	get hasToken(): boolean {
-		return (this.#token() ?? '').trim().length > 0
+		return (this.#token ?? '').trim().length > 0
 	}
 
 	get isPending(): boolean {
@@ -45,7 +49,7 @@ export class SetupViewModel {
 		this.serverErrors = NO_SERVER_ERRORS
 		try {
 			await this.#setup.mutateAsync({
-				token: this.#token(),
+				token: this.#token,
 				username: values.username,
 				password: values.password,
 			})

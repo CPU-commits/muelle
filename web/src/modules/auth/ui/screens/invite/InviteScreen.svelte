@@ -7,7 +7,7 @@
 	import { InviteViewModel } from './Invite.viewModel.svelte.ts'
 	import { screen } from './styles.css'
 
-	let { token }: { token: string } = $props()
+	let { token }: { token: string | null } = $props()
 
 	const vm = new InviteViewModel(() => token)
 	const titleId = $props.id()
@@ -21,14 +21,16 @@
 			subtitle={m.auth_invite_subtitle()}
 		/>
 
-		{#if vm.formError}
+		{#if !vm.hasToken}
+			<Banner tone="error" title={m.auth_invite_missing_token()} />
+		{:else if vm.formError}
 			<Banner tone="error" title={vm.formError} />
 		{/if}
 
 		<AccountForm
 			labelledBy={titleId}
 			submitLabel={m.auth_invite_submit()}
-			disabled={vm.invalid || vm.isPending}
+			disabled={!vm.canSubmit || vm.isPending}
 			loading={vm.isPending}
 			serverErrors={vm.serverErrors}
 			onSubmit={vm.submit}

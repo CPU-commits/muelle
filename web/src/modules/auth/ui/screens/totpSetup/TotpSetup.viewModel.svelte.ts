@@ -95,7 +95,13 @@ export class TotpSetupViewModel {
 	}
 
 	logout = async (): Promise<void> => {
-		await this.#logout.mutateAsync()
+		this.formError = null
+		try {
+			await this.#logout.mutateAsync()
+		} catch {
+			this.formError = m.auth_error_logout()
+			return
+		}
 		await goto(resolve('/login'))
 	}
 }

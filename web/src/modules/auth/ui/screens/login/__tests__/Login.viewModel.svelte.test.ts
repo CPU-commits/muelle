@@ -9,6 +9,7 @@ import LoginHarness from './LoginHarness.svelte'
 const mocks = vi.hoisted(() => ({
 	login: vi.fn(),
 	completeTotp: vi.fn(),
+	logout: vi.fn(),
 	goto: vi.fn(),
 }))
 
@@ -19,7 +20,7 @@ vi.mock('@/modules/auth/container', () => ({
 		getMe: vi.fn(),
 		login: mocks.login,
 		completeTotp: mocks.completeTotp,
-		logout: vi.fn(),
+		logout: mocks.logout,
 		setup: vi.fn(),
 		acceptInvite: vi.fn(),
 		beginTotpSetup: vi.fn(),
@@ -29,8 +30,10 @@ vi.mock('@/modules/auth/container', () => ({
 
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }))
 
+let client: QueryClient
+
 async function mountViewModel(initialStep?: LoginStep): Promise<LoginViewModel> {
-	const client = new QueryClient({
+	client = new QueryClient({
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	})
 	let vm: LoginViewModel | undefined
@@ -56,6 +59,7 @@ describe('LoginViewModel', () => {
 		vi.clearAllMocks()
 		mocks.login.mockResolvedValue({ mfaRequired: false })
 		mocks.completeTotp.mockResolvedValue(undefined)
+		mocks.logout.mockResolvedValue(undefined)
 		mocks.goto.mockResolvedValue(undefined)
 	})
 
@@ -144,5 +148,23 @@ describe('LoginViewModel', () => {
 		expect(vm.step).toBe('password')
 		expect(vm.formError).toBeNull()
 		expect(vm.code).toBe('')
+	})
+
+	it('un login exitoso vacía todo el cache: nada de la sesión anterior queda', async () => {
+		const vm = await mountViewModel()
+		client.setQueryData(['catalog', 'projects'], ['de-otro-usuario'])
+
+		await submitPassword(vm, 'felipe', 'una-contraseña-larga')
+
+		expect(client.getQueryData(['catalog', 'projects'])).toBeUndefined()
+	})
+
+	it('Volver descarta la sesión que esperaba el código', async () => {
+		const vm = await mountViewModel('code')
+
+		vm.backToPassword()
+
+		await expect.poll(() => mocks.logout).toHaveBeenCalledOnce()
+		expect(vm.step).toBe('password')
 	})
 })

@@ -4,6 +4,8 @@ import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-qu
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import type { MenuEntry } from '@/shared/ui'
 import { localeLabel, nextLocale, setLocale } from '@/shared/ui/i18n'
+import { toast } from '@/shared/ui/stores'
+import { describeError } from '@/shared/ui/utils/errorMessage'
 import { logoutMutation, meQuery } from '../../../data'
 import type { Me } from '../../../domain'
 
@@ -64,8 +66,14 @@ export class SessionShellViewModel {
 		]
 	}
 
+	// Si falla, la sesión sigue abierta en el servidor: se queda acá y lo dice.
 	logout = async (): Promise<void> => {
-		await this.#logout.mutateAsync()
+		try {
+			await this.#logout.mutateAsync()
+		} catch (error) {
+			toast.error(m.auth_error_logout(), describeError(error))
+			return
+		}
 		await goto(resolve('/login'))
 	}
 }

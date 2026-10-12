@@ -39,44 +39,53 @@ export async function loadSessionState(client: QueryClient): Promise<SessionStat
 	}
 }
 
-// Al abrir o cerrar una sesión, lo que había en el cache era de otra (o de ninguna).
-function forgetSession(client: QueryClient): void {
+// Una sesión nueva (login, código, setup, invitación) o cerrada: TODO el cache era de la
+// anterior (o de ninguna). Se vacía entero para que nadie vea datos de otro usuario.
+function startOver(client: QueryClient): void {
+	client.clear()
+}
+
+// Mismo usuario, otro estado (activó 2FA): solo `me` cambió.
+function forgetMe(client: QueryClient): void {
 	client.removeQueries({ queryKey: authKeys.all })
 }
 
 export function loginMutation(client: QueryClient) {
 	return {
 		mutationFn: (input: LoginInput) => authUseCases.login(input),
-		onSuccess: () => forgetSession(client),
+		onSuccess: () => startOver(client),
 	}
 }
 
 export function completeTotpMutation(client: QueryClient) {
 	return {
 		mutationFn: (code: string) => authUseCases.completeTotp(code),
-		onSuccess: () => forgetSession(client),
+		onSuccess: () => startOver(client),
 	}
 }
 
-/** Cerrar sesión vacía TODO el cache: el siguiente usuario no ve datos del anterior. */
+/**
+ * Cerrar sesión vacía TODO el cache, pero solo si salió bien: si falló, la sesión sigue
+ * abierta y la pantalla queda como estaba (ver `makeLogout`).
+ */
 export function logoutMutation(client: QueryClient) {
 	return {
 		mutationFn: () => authUseCases.logout(),
-		onSettled: () => client.clear(),
+		onSuccess: () => startOver(client),
 	}
 }
 
 export function setupMutation(client: QueryClient) {
 	return {
 		mutationFn: (input: SetupInput) => authUseCases.setup(input),
-		onSuccess: () => forgetSession(client),
+		onSuccess: () => startOver(client),
 	}
 }
 
 export function acceptInviteMutation(client: QueryClient) {
 	return {
 		mutationFn: (input: AcceptInviteInput) => authUseCases.acceptInvite(input),
-		onSuccess: () => forgetSession(client),
+		onSuccess: () => startOver(client),
 	}
 }
 
@@ -89,6 +98,6 @@ export function beginTotpSetupMutation() {
 export function enableTotpMutation(client: QueryClient) {
 	return {
 		mutationFn: (code: string) => authUseCases.enableTotp(code),
-		onSuccess: () => forgetSession(client),
+		onSuccess: () => forgetMe(client),
 	}
 }

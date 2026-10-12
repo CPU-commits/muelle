@@ -1,6 +1,7 @@
-import { goto } from '$app/navigation'
+import { goto, replaceState } from '$app/navigation'
 import { resolve } from '$app/paths'
 import { createMutation, useQueryClient } from '@tanstack/svelte-query'
+import { onMount } from 'svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { acceptInviteMutation } from '../../../data'
 import { InvalidInvite } from '../../../domain'
@@ -19,12 +20,23 @@ export class InviteViewModel {
 	invalid = $state(false)
 	serverErrors = $state.raw<AccountServerErrors>(NO_SERVER_ERRORS)
 
-	readonly #token: () => string
+	readonly #token: string | null
 	readonly #client = useQueryClient()
 	readonly #accept = createMutation(() => acceptInviteMutation(this.#client))
 
-	constructor(token: () => string) {
-		this.#token = token
+	// El token se lee UNA vez y se saca de la URL (queda /invite): no queda en el historial,
+	// en una captura ni en el Referer. Si se recarga, /invite dice que falta el link.
+	constructor(token: () => string | null) {
+		this.#token = token()
+		if (this.hasToken) onMount(() => replaceState(resolve('/invite'), {}))
+	}
+
+	get hasToken(): boolean {
+		return (this.#token ?? '').trim().length > 0
+	}
+
+	get canSubmit(): boolean {
+		return this.hasToken && !this.invalid
 	}
 
 	get isPending(): boolean {
@@ -36,7 +48,7 @@ export class InviteViewModel {
 		this.serverErrors = NO_SERVER_ERRORS
 		try {
 			await this.#accept.mutateAsync({
-				token: this.#token(),
+				token: this.#token ?? '',
 				username: values.username,
 				password: values.password,
 			})

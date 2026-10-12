@@ -3,7 +3,7 @@ import { resolve } from '$app/paths'
 import { createForm } from '@tanstack/svelte-form'
 import { createMutation, useQueryClient } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { completeTotpMutation, loginMutation } from '../../../data'
+import { completeTotpMutation, loginMutation, logoutMutation } from '../../../data'
 import { normalizeTotpCode, SessionExpired, TOTP_CODE_LENGTH } from '../../../domain'
 import { authErrorMessage } from '../../components/authMessages'
 
@@ -33,6 +33,7 @@ export class LoginViewModel {
 	readonly #client = useQueryClient()
 	readonly #login = createMutation(() => loginMutation(this.#client))
 	readonly #totp = createMutation(() => completeTotpMutation(this.#client))
+	readonly #logout = createMutation(() => logoutMutation(this.#client))
 
 	readonly form = createForm(() => ({
 		defaultValues: EMPTY_LOGIN_FORM,
@@ -76,7 +77,10 @@ export class LoginViewModel {
 		}
 	}
 
+	// La sesión que esperaba el código no sirve más: se descarta (el backend puede
+	// contestar 401 mfa_required, que cuenta como cerrada) y se vuelve a la contraseña.
 	backToPassword = (): void => {
+		this.#logout.mutate(undefined, { onError: () => {} })
 		this.#toPassword(null)
 	}
 
