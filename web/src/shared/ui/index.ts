@@ -75,5 +75,6 @@ export type { AuthWidth } from './components/organisms/authLayout/styles.css'
 
 // Clases sueltas y helpers de la vista
 export { srOnly, textLink, truncate } from './themes/utilities.css'
+export { describeError } from './utils/errorMessage'
 export { firstError } from './utils/forms'
 export { formatDate, formatDateTime, formatNumber, formatRelative } from './utils/format'

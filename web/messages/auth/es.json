@@ -30,6 +30,8 @@
 	"auth_invite_subtitle": "Elige tu usuario y tu contraseña.",
 	"auth_invite_submit": "Crear cuenta",
 	"auth_invite_invalid": "La invitación no existe, ya se usó o venció. Pide una nueva.",
+	"auth_error_logout": "No se pudo cerrar la sesión. Vuelve a intentar.",
+	"auth_invite_missing_token": "Falta el token de la invitación. Usa el link completo que te pasaron.",
 
 	"auth_2fa_title": "Configurar 2FA",
 	"auth_2fa_subtitle": "Escanea el código con tu app de autenticación y escribe el código de 6 dígitos que muestra.",

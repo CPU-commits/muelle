@@ -5,10 +5,13 @@
 	import { AuthLayout, EmptyState, LinkButton } from '@/shared/ui'
 </script>
 
+<!-- El mensaje de un error que no es 404 lo arma `handleError` (hooks.client.ts). -->
 <AuthLayout appName="muelle" host={page.url.host} width="md">
 	<EmptyState
 		title={page.status === 404 ? m.not_found_title() : m.common_error_generic()}
-		body={page.status === 404 ? m.not_found_body() : m.common_unavailable()}
+		body={page.status === 404
+			? m.not_found_body()
+			: (page.error?.message ?? m.common_unavailable())}
 	>
 		{#snippet action()}
 			<LinkButton href={resolve('/')} variant="secondary" size="sm">

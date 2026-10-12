@@ -1,4 +1,4 @@
-import { UnauthorizedError } from '@/shared/domain'
+import { AmbiguousSessionError, UnauthorizedError } from '@/shared/domain'
 import { MfaRequired } from '../errors/authErrors'
 import type { Me } from './me'
 
@@ -22,6 +22,8 @@ export type SessionState =
  * a nadie al login por eso.
  */
 export function sessionStateFromError(error: unknown): SessionState | null {
+	// Dos cookies de sesión: el login no lo arregla (vuelve a pasar), hay que borrarlas.
+	if (error instanceof AmbiguousSessionError) return null
 	if (error instanceof MfaRequired) return { status: 'mfa_pending' }
 	if (error instanceof UnauthorizedError) return { status: 'signed_out' }
 	return null

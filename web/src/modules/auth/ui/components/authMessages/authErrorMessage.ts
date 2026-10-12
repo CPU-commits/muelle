@@ -1,5 +1,5 @@
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { UnavailableError } from '@/shared/domain'
+import { describeError } from '@/shared/ui/utils/errorMessage'
 import {
 	AccountLocked,
 	AlreadySetUp,
@@ -29,7 +29,8 @@ export function passwordMessage(error: InvalidPassword): string {
 	}
 }
 
-// La pantalla elige el mensaje por la CLASE del error de dominio, nunca por un status.
+// La pantalla elige el mensaje por la CLASE del error de dominio, nunca por un status. Lo
+// que no es de auth (backend caído, bad_origin, dos cookies) lo explica `describeError`.
 export function authErrorMessage(error: unknown): string {
 	if (error instanceof InvalidCredentials) return m.auth_error_invalid_credentials()
 	if (error instanceof AccountLocked) return m.auth_error_locked()
@@ -43,6 +44,5 @@ export function authErrorMessage(error: unknown): string {
 	if (error instanceof UsernameTaken) return m.auth_error_username_taken()
 	if (error instanceof InvalidUsername) return m.auth_error_username_format()
 	if (error instanceof InvalidPassword) return passwordMessage(error)
-	if (error instanceof UnavailableError) return m.common_unavailable()
-	return m.common_error_generic()
+	return describeError(error)
 }

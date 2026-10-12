@@ -30,6 +30,8 @@
 	"auth_invite_subtitle": "Choose your username and password.",
 	"auth_invite_submit": "Create account",
 	"auth_invite_invalid": "The invite doesn't exist, was already used or expired. Ask for a new one.",
+	"auth_error_logout": "Couldn't sign out. Please try again.",
+	"auth_invite_missing_token": "The invite token is missing. Use the full link you were given.",
 
 	"auth_2fa_title": "Set up 2FA",
 	"auth_2fa_subtitle": "Scan the code with your authenticator app and enter the 6-digit code it shows.",

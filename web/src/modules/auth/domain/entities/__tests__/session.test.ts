@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { UnavailableError } from '@/shared/domain'
+import { AmbiguousSessionError, UnavailableError } from '@/shared/domain'
 import { InvalidCredentials, MfaRequired, SessionExpired, sessionStateFromError } from '../..'
 
 describe('sessionStateFromError', () => {
@@ -15,5 +15,9 @@ describe('sessionStateFromError', () => {
 	it('un backend caído no es "sin sesión": devuelve null', () => {
 		expect(sessionStateFromError(new UnavailableError('caído'))).toBeNull()
 		expect(sessionStateFromError(new Error('otro'))).toBeNull()
+	})
+
+	it('dos cookies de sesión no son "sin sesión": mandar al login no lo arregla', () => {
+		expect(sessionStateFromError(new AmbiguousSessionError())).toBeNull()
 	})
 })
