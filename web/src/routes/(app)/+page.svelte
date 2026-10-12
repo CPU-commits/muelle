@@ -1,8 +1,7 @@
 <script lang="ts">
-	import { m } from '@/shared/ui/i18n/paraglide/messages'
-	import { EmptyState, PageHeader } from '@/shared/ui'
+	import { ProjectsScreen } from '@/modules/catalog'
 </script>
 
-<!-- Placeholder de F0: lo reemplaza F1-catalog con su pantalla. -->
-<PageHeader title={m.nav_projects()} />
-<EmptyState icon="clock" title={m.common_wip_title()} body={m.common_wip_body()} />
+<!-- F2 pasa acá los snippets de la Fase 2 (appStatusDot, appStatus, appLastDeploy y
+     stageVariablesCount), con los componentes de `deploy` y `secrets`. -->
+<ProjectsScreen />
