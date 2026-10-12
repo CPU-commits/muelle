@@ -27,6 +27,9 @@ const panel = style({
 export const history = style([panel, { flex: '1 1 340px' }])
 
 export const historyList = style({
+	listStyle: 'none',
+	margin: 0,
+	padding: 0,
 	display: 'flex',
 	flexDirection: 'column',
 	gap: '1px',
@@ -146,6 +149,8 @@ export const notice = style({
 })
 
 export const lines = style({
+	listStyle: 'none',
+	margin: 0,
 	padding: `${theme.space[12]} 0 ${theme.space[16]}`,
 })
 

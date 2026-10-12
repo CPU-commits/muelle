@@ -40,12 +40,15 @@ export const live = style({
 	gap: theme.space[8],
 })
 
-// Las métricas del servicio: una grilla que envuelve, con divisores de 1 px.
+// Las métricas del servicio: una grilla que envuelve, con divisores de 1 px. Cada celda
+// dibuja su línea derecha e inferior y la grilla se corre 1 px para esconder las del
+// borde (la tarjeta corta lo que sobra): así un hueco al final queda del color de la
+// tarjeta y no como un bloque gris.
 export const metrics = style({
 	display: 'grid',
-	gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))',
-	gap: '1px',
-	backgroundColor: theme.colors.borders.subtle,
+	gridTemplateColumns: 'repeat(auto-fill, minmax(min(240px, 100%), 1fr))',
+	marginRight: '-1px',
+	marginBottom: '-1px',
 })
 
 export const metric = style({
@@ -54,7 +57,7 @@ export const metric = style({
 	gap: theme.space[6],
 	minWidth: 0,
 	padding: `${theme.space[16]} ${theme.space[20]}`,
-	backgroundColor: theme.colors.background.surface,
+	boxShadow: `inset -1px -1px 0 ${theme.colors.borders.subtle}`,
 })
 
 export const term = style({

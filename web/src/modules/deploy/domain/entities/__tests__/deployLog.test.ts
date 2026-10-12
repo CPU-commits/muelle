@@ -39,6 +39,8 @@ describe('logLineTone', () => {
 		['UpdateStatus: rollback_started', 'warn'],
 		['UpdateStatus: completed', 'ok'],
 		['deploy exitoso en 52 s', 'ok'],
+		['timeout esperando convergencia', 'warn'],
+		['esperando convergencia · timeout 300 s', 'normal'],
 		['render ok · 1 servicio · 14 variables (6 secretas)', 'normal'],
 	])('%s → %s', (text, tone) => {
 		expect(logLineTone(text)).toBe(tone)

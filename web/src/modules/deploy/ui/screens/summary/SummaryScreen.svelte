@@ -173,12 +173,12 @@
 					<div class={metric}>
 						<dt class={term}>{m.deploy_memory()}</dt>
 						<dd class={bigValue}>
-							{#if service.memoryBytes === null}
+							{#if service.memoryBytes === null || service.runningReplicas === 0}
 								{m.deploy_none()}
 							{:else}
-								{megabytesNumber(service.memoryBytes)}
+								{megabytesNumber(service.memoryBytes / service.runningReplicas)}
 								<span class={unit}>
-									{m.deploy_memory_unit()}{#if service.memoryLimitBytes !== null}
+									{m.deploy_memory_unit_each()}{#if service.memoryLimitBytes !== null}
 										· {m.deploy_memory_limit({
 											limit: megabytesText(service.memoryLimitBytes),
 										})}{/if}

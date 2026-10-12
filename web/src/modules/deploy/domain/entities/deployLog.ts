@@ -60,7 +60,7 @@ const TIMESTAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}
 const TONES: readonly [RegExp, LogTone][] = [
 	[/^\$\s/, 'command'],
 	[/\b(deploy fallido|non-zero exit|fatal)\b|^error\b/i, 'error'],
-	[/\b(unhealthy|rollback_started|rollback_completed|paused|timeout)\b/i, 'warn'],
+	[/\b(unhealthy|rollback_started|rollback_completed|paused|timeout esperando)\b/i, 'warn'],
 	[/\b(deploy exitoso|UpdateStatus: completed)\b/i, 'ok'],
 ]
 

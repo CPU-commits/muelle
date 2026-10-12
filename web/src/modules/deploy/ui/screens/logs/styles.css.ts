@@ -25,7 +25,6 @@ export const status = style({
 	flexWrap: 'wrap',
 	alignItems: 'center',
 	gap: `${theme.space[4]} ${theme.space[12]}`,
-	minHeight: theme.space[20],
 	fontSize: theme.typography.fontSize[13],
 	color: theme.colors.text.tertiary,
 })
@@ -38,6 +37,8 @@ export const box = style({
 
 // Las líneas se apilan desde abajo, como en una terminal.
 export const lines = style({
+	listStyle: 'none',
+	margin: 0,
 	marginTop: 'auto',
 	padding: `${theme.space[8]} 0`,
 })
