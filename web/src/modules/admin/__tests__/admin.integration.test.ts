@@ -210,6 +210,14 @@ describe('registries (Fase 2)', () => {
 		expect(pendingPhase(addError)).toBe(2)
 	})
 
+	it('el backend actual responde not_found a una ruta que no existe: también es la Fase 2', async () => {
+		server.use(http.get(api('/registries'), () => apiError(404, 'not_found', 'no existe')))
+
+		const error = await adminUseCases.listRegistries().catch((caught: unknown) => caught)
+
+		expect(pendingPhase(error)).toBe(2)
+	})
+
 	it('un backend caído es UnavailableError sin fase (se reintenta)', async () => {
 		server.use(http.get(api('/registries'), () => HttpResponse.error()))
 

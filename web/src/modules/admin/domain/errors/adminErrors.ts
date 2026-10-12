@@ -1,4 +1,4 @@
-import { ConflictError, ValidationError } from '@/shared/domain'
+import { ConflictError, NotFoundError, ValidationError } from '@/shared/domain'
 
 // Los `error.code` de admin que el panel distingue (mapper_errors.go) y los errores de
 // validación que el dominio detecta antes de mandar nada. Los mensajes son para logs: la
@@ -20,6 +20,17 @@ export class RegistryExists extends ConflictError {
 	constructor(options?: ErrorOptions) {
 		super('Ya hay un registry con ese host', options)
 		this.name = 'RegistryExists'
+	}
+}
+
+/**
+ * `not_found` en `PATCH`/`DELETE /registries/{host}`: lo borró otra persona. (Que la ruta
+ * todavía no exista es otra cosa: `no_route`, que sale como `UnavailableError` de Fase 2.)
+ */
+export class RegistryNotFound extends NotFoundError {
+	constructor(options?: ErrorOptions) {
+		super('El registry ya no existe', options)
+		this.name = 'RegistryNotFound'
 	}
 }
 

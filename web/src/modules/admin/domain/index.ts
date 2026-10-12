@@ -18,6 +18,7 @@ export {
 	InvalidPort,
 	InvalidRegistryHost,
 	RegistryExists,
+	RegistryNotFound,
 	RequiredField,
 	TotpRequiredFirst,
 } from './errors/adminErrors'

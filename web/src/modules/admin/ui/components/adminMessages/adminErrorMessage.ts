@@ -7,6 +7,7 @@ import {
 	InvalidPort,
 	InvalidRegistryHost,
 	RegistryExists,
+	RegistryNotFound,
 	RequiredField,
 	TotpRequiredFirst,
 } from '../../../domain'
@@ -15,6 +16,7 @@ import {
 export function adminErrorMessage(error: unknown): string {
 	if (error instanceof TotpRequiredFirst) return m.admin_security_totp_first()
 	if (error instanceof RegistryExists) return m.admin_error_registry_exists()
+	if (error instanceof RegistryNotFound) return m.admin_error_registry_not_found()
 	if (error instanceof UnavailableError) return m.common_unavailable()
 	return m.common_error_generic()
 }

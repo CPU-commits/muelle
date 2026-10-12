@@ -1,7 +1,7 @@
 import type { ApiError } from '@/shared/data/http/errors'
 import { type DomainErrorMap, withDomainErrors } from '@/shared/data/http/domainErrors'
 import type { AuditRepository, RegistryRepository, SettingsRepository } from '../../domain'
-import { REGISTRIES_PHASE, RegistryExists, TotpRequiredFirst } from '../../domain'
+import { REGISTRIES_PHASE, RegistryExists, RegistryNotFound, TotpRequiredFirst } from '../../domain'
 import { adminHttpDataSource } from '../datasources/adminHttpDataSource'
 import {
 	auditEventFromDto,
@@ -28,10 +28,15 @@ const SETTINGS_ERRORS: DomainErrorMap = {
 	},
 }
 
-// Fase 2: un 404 o 405 es que la ruta todavía no existe (también el de un DELETE).
+// Fase 2: que la ruta no exista es `UnavailableError` con la fase. Hoy eso es cualquier 404
+// o 405; cuando el backend mande `no_route`, un `not_found` va a ser el registry que ya no
+// está (`notFound`).
 const REGISTRY_ERRORS: DomainErrorMap = {
 	phase: REGISTRIES_PHASE,
 	codes: { conflict: (error) => new RegistryExists(cause(error)) },
+	// No en `codes`, que gana siempre: el backend actual responde `not_found` también a una
+	// ruta que no existe, y eso tiene que seguir saliendo como "llega con la Fase 2".
+	notFound: (error) => new RegistryNotFound(cause(error)),
 	fields: { host: 'host', username: 'username', password: 'password' },
 }
 
