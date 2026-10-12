@@ -128,8 +128,6 @@
 				/>
 				<p id={`${ids}-hint`} class={hint}>{m.catalog_compose_editor_hint()}</p>
 			</section>
-
-			<DeleteAppCard appRef={vm.ref} id="c-del" />
 		</div>
 
 		<aside class={aside}>
@@ -171,4 +169,6 @@
 			</Card>
 		</aside>
 	</div>
+
+	<DeleteAppCard appRef={vm.ref} id="c-del" />
 </div>
