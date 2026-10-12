@@ -9,6 +9,7 @@
 		"dev": "vite dev",
 		"dev:mock": "VITE_USE_MOCKS=1 vite dev",
 		"build": "vite build",
+		"build:e2e": "BUILD_DIR=build-e2e/mock VITE_USE_MOCKS=1 vite build && BUILD_DIR=build-e2e/prod VITE_USE_MOCKS=0 vite build",
 		"preview": "vite preview",
 		"check": "pnpm codegen && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "pnpm codegen && svelte-check --tsconfig ./tsconfig.json --watch",
@@ -18,7 +19,7 @@
 		"test:watch": "vitest",
 		"test:e2e": "playwright test",
 		"verify": "pnpm lint && pnpm check && pnpm test",
-		"clean": "rm -rf build .svelte-kit src/shared/ui/i18n/paraglide test-results"
+		"clean": "rm -rf build build-e2e .svelte-kit src/shared/ui/i18n/paraglide test-results"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.0.2",

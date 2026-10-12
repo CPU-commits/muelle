@@ -13,6 +13,7 @@ muelle_master_key
 web/node_modules/
 web/.svelte-kit/
 web/build/*
+web/build-e2e/
 web/test-results/
 web/playwright-report/
 web/src/shared/ui/i18n/paraglide/

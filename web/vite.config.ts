@@ -22,6 +22,11 @@ export default defineConfig(({ mode }) => {
 				'@': resolve('./src'),
 			},
 		},
+		build: {
+			// Nada de assets en línea como `data:` (Vite lo hace con los de menos de 4 kB,
+			// como el favicon): la CSP del panel solo deja `img-src 'self'`.
+			assetsInlineLimit: 0,
+		},
 		server: {
 			// `shared/data/config.ts` importa `config/*.json`, que está fuera de las carpetas
 			// que SvelteKit le deja servir al dev server.

@@ -1,3 +1,4 @@
+import './zodSetup'
 import { z } from 'zod'
 import localConfig from '../../../config/local.json'
 import productionConfig from '../../../config/production.json'

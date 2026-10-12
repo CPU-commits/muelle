@@ -7,6 +7,7 @@ bun.lockb
 
 # Generados
 /build
+/build-e2e
 /.svelte-kit
 src/shared/ui/i18n/paraglide
 static/mockServiceWorker.js

@@ -16,6 +16,10 @@ globalStyle('html, body', {
 	minHeight: '100vh',
 })
 
+// El contenedor de %sveltekit.body% en app.html: no arma caja propia. Va acá y no como
+// `style="display: contents"` en el HTML porque la CSP del panel no deja estilos en línea.
+globalStyle('[data-app-root]', { display: 'contents' })
+
 globalStyle('body', {
 	fontFamily: theme.typography.fontFamily.sans,
 	fontSize: theme.typography.fontSize[14],

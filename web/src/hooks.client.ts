@@ -1,3 +1,5 @@
+// Primero que nada: Zod sin JIT antes de que se cree un solo schema (ver el módulo).
+import '@/shared/data/zodSetup'
 import { goto } from '$app/navigation'
 import { resolve } from '$app/paths'
 import type { ClientInit, HandleClientError } from '@sveltejs/kit'
