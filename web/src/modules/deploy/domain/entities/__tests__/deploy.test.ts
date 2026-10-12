@@ -51,7 +51,7 @@ describe('deployDurationMs', () => {
 
 	it('de uno corriendo: hasta ahora', () => {
 		const deploy = makeDeploy(1, { status: 'running', finishedAt: null })
-		expect(deployDurationMs(deploy, new Date('2026-10-10T14:00:25Z'))).toBe(24_000)
+		expect(deployDurationMs(deploy, Date.parse('2026-10-10T14:00:25Z'))).toBe(24_000)
 	})
 
 	it('uno que nunca empezó no tiene duración', () => {

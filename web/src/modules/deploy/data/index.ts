@@ -4,8 +4,10 @@ export {
 	createDeployMutation,
 	deployKeys,
 	deploysQuery,
+	followDeployLog,
 	lastDeployQuery,
 	refreshDeploys,
 	rollbackMutation,
 	STATUS_REFRESH_MS,
+	streamAppLogs,
 } from './queries/deployQueries'

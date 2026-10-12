@@ -5,7 +5,9 @@ import {
 	type CreateDeployInput,
 	type Deploy,
 	type DeployAccepted,
+	type FollowDeployLogInput,
 	latestDeploy,
+	type StreamAppLogsInput,
 } from '../../domain'
 
 export const deployKeys = {
@@ -21,12 +23,19 @@ export const STATUS_REFRESH_MS = 5_000
 /** Cada cuánto se refresca el historial mientras hay un deploy en cola o corriendo. */
 export const ACTIVE_DEPLOY_REFRESH_MS = 3_000
 
+// svelte-query devuelve un resultado "tracked": solo avisa de los cambios en las
+// propiedades que alguien ya leyó. Un viewModel que lee `data` en un `$derived` antes de
+// mirar `error` se pierde el error (queda `pending` para siempre). Con 'all' avisa de
+// todo cambio; estas queries son chicas y no se refrescan tan seguido.
+const NOTIFY_ALL = 'all' as const
+
 /** El estado de la app en Swarm. Lo usa el Resumen, Logs (servicios) y Proyectos (F2). */
 export function appStatusQuery(app: AppRef) {
 	return queryOptions({
 		queryKey: deployKeys.status(app),
 		queryFn: ({ signal }) => deployUseCases.getAppStatus(app, signal),
 		staleTime: STATUS_REFRESH_MS,
+		notifyOnChangeProps: NOTIFY_ALL,
 	})
 }
 
@@ -36,6 +45,7 @@ export function deploysQuery(app: AppRef) {
 		queryKey: deployKeys.list(app),
 		queryFn: ({ signal }) => deployUseCases.listDeploys(app, signal),
 		staleTime: 10_000,
+		notifyOnChangeProps: NOTIFY_ALL,
 	})
 }
 
@@ -74,4 +84,17 @@ export function rollbackMutation(client: QueryClient) {
 /** Un deploy cambió de estado (lo dijo el stream de su log): el historial ya no vale. */
 export function refreshDeploys(client: QueryClient, app: AppRef): Promise<void> {
 	return client.invalidateQueries({ queryKey: deployKeys.app(app) })
+}
+
+// Los streams no son queries (no hay nada que cachear: llegan, se muestran y se van),
+// pero entran por acá igual, para que un viewModel nunca hable con el container.
+
+/** El log de un deploy hasta que termina: SSE con fallback a `?offset`. */
+export function followDeployLog(input: FollowDeployLogInput, signal: AbortSignal) {
+	return deployUseCases.followDeployLog(input, signal)
+}
+
+/** Los logs en vivo de un servicio. */
+export function streamAppLogs(input: StreamAppLogsInput, signal: AbortSignal) {
+	return deployUseCases.streamAppLogs(input, signal)
 }

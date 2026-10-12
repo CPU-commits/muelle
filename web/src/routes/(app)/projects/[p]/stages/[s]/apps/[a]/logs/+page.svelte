@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { m } from '@/shared/ui/i18n/paraglide/messages'
-	import { EmptyState, PageHeader } from '@/shared/ui'
+	import { LogsScreen } from '@/modules/deploy'
+	import type { PageProps } from './$types'
+
+	let { params }: PageProps = $props()
 </script>
 
-<!-- Placeholder de F0: lo reemplaza F1-deploy-ingress con su pantalla. -->
-<PageHeader title={m.nav_app_logs()} />
-<EmptyState icon="clock" title={m.common_wip_title()} body={m.common_wip_body()} />
+<LogsScreen project={params.p} stage={params.s} app={params.a} />

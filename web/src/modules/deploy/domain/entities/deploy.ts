@@ -68,13 +68,13 @@ export function hasActiveDeploy(deploys: readonly Deploy[]): boolean {
 }
 
 /**
- * Cuánto duró (o lleva) en ms: desde que empezó hasta que terminó, o hasta `now` si sigue
- * corriendo. Null si nunca empezó (en cola o reemplazado).
+ * Cuánto duró (o lleva) en ms: desde que empezó hasta que terminó, o hasta `nowMs` si
+ * sigue corriendo. Null si nunca empezó (en cola o reemplazado).
  */
-export function deployDurationMs(deploy: Deploy, now: Date = new Date()): number | null {
+export function deployDurationMs(deploy: Deploy, nowMs: number = Date.now()): number | null {
 	if (!deploy.startedAt) return null
-	const end = deploy.finishedAt ?? now
-	return Math.max(0, end.getTime() - deploy.startedAt.getTime())
+	const end = deploy.finishedAt?.getTime() ?? nowMs
+	return Math.max(0, end - deploy.startedAt.getTime())
 }
 
 /** La imagen de un servicio en este deploy, si la tiene. */
