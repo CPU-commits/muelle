@@ -85,7 +85,12 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
   viewModel, mockeando el **container** del módulo, no la red. Ver
   `src/modules/auth/ui/screens/login/__tests__/` (también mockea `$app/navigation`: `goto`
   no existe fuera del runtime de SvelteKit).
-- E2E: `e2e/*.e2e.ts` contra el build con MSW (`pnpm test:e2e`).
+- E2E: `e2e/*.e2e.ts` contra el build con MSW servido con la CSP (`pnpm test:e2e`, ver
+  [CSP](#csp)).
+- Componentes: `__tests__/X.svelte.test.ts` junto al componente, en Chromium, con un
+  harness cuando hace falta un contexto (ver `molecules/menu/__tests__/`). Un harness que
+  mide posiciones importa `@/shared/ui/themes/global.css` (sin el `box-sizing` global las
+  medidas no son las del panel).
 
 ## Antes de decir que terminaste
 
@@ -201,8 +206,8 @@ pnpm install
 pnpm dev:mock     # sin backend: MSW contesta en el navegador
 pnpm dev          # con un `muelle serve` local (ver web/README.md)
 pnpm verify       # antes de decir que terminaste
-pnpm test:e2e     # playwright contra un build CON mocks: pisa ./build, después `pnpm build`
-pnpm build        # el ./build que embebe el binario (sin MSW)
+pnpm test:e2e     # playwright contra build-e2e/ (con y sin MSW, bajo la CSP); no toca ./build
+pnpm build        # el ./build que embebe el binario (sin MSW ni mockServiceWorker.js)
 ```
 
 Con el backend real: `MUELLE_PANEL_ORIGIN=http://localhost:5173 MUELLE_SECURE_COOKIES=false
@@ -240,29 +245,37 @@ cambiar `shared/`, `package.json` o una ruta ajena, se detiene y lo reporta.
 
 ### Rutas
 
-| URL                                                  | Archivo (`src/routes/…`)                                | Dueño                                                                             |
-| ---------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `/login`, `/setup?token=`, `/invite/[token]`, `/2fa` | `login/`, `setup/`, `invite/[token]/`, `2fa/`           | F0 (`auth`)                                                                       |
-| `/`                                                  | `(app)/+page.svelte`                                    | F1-catalog (Proyectos)                                                            |
-| `/projects/[p]/stages/[s]/apps/[a]` (layout)         | `(app)/projects/[p]/stages/[s]/apps/[a]/+layout.svelte` | F0 lo arma; F1-catalog lo enriquece (header de la app, selectores del breadcrumb) |
-| `/projects/[p]/stages/[s]/apps/[a]` (Resumen)        | `…/apps/[a]/+page.svelte`                               | F1-deploy-ingress                                                                 |
-| `…/apps/[a]/configuracion`                           | `…/apps/[a]/configuracion/+page.svelte`                 | F1-catalog (formulario o editor de compose)                                       |
-| `…/apps/[a]/variables`                               | `…/apps/[a]/variables/+page.svelte`                     | F1-secrets                                                                        |
-| `…/apps/[a]/dominios`                                | `…/apps/[a]/dominios/+page.svelte`                      | F1-deploy-ingress                                                                 |
-| `…/apps/[a]/deploys`                                 | `…/apps/[a]/deploys/+page.svelte`                       | F1-deploy-ingress                                                                 |
-| `…/apps/[a]/logs`                                    | `…/apps/[a]/logs/+page.svelte`                          | F1-deploy-ingress                                                                 |
-| `/projects/[p]/stages/[s]/variables`                 | `(app)/projects/[p]/stages/[s]/variables/+page.svelte`  | F1-secrets                                                                        |
-| `/ajustes`                                           | `(app)/ajustes/+page.svelte`                            | F1-identity-admin                                                                 |
-| `/ajustes/tokens`                                    | `(app)/ajustes/tokens/+page.svelte`                     | F1-identity-admin                                                                 |
+| URL                                                             | Archivo (`src/routes/…`)                                 | Dueño                                                                          |
+| --------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `/login`, `/setup?token=`, `/invite/[token]`, `/invite`, `/2fa` | `login/`, `setup/`, `invite/[token]/`, `invite/`, `2fa/` | F0 (`auth`)                                                                    |
+| `/`                                                             | `(app)/+page.svelte`                                     | F1-catalog (Proyectos)                                                         |
+| `/projects/[p]/stages/[s]/apps/[a]` (layout)                    | `(app)/projects/[p]/stages/[s]/apps/[a]/+layout.svelte`  | F0 lo arma; F1-catalog cambia los items del breadcrumb por selectores (sin h1) |
+| `/projects/[p]/stages/[s]/apps/[a]` (Resumen)                   | `…/apps/[a]/+page.svelte`                                | F1-deploy-ingress                                                              |
+| `…/apps/[a]/configuracion`                                      | `…/apps/[a]/configuracion/+page.svelte`                  | F1-catalog (formulario o editor de compose)                                    |
+| `…/apps/[a]/variables`                                          | `…/apps/[a]/variables/+page.svelte`                      | F1-secrets                                                                     |
+| `…/apps/[a]/dominios`                                           | `…/apps/[a]/dominios/+page.svelte`                       | F1-deploy-ingress                                                              |
+| `…/apps/[a]/deploys`                                            | `…/apps/[a]/deploys/+page.svelte`                        | F1-deploy-ingress                                                              |
+| `…/apps/[a]/logs`                                               | `…/apps/[a]/logs/+page.svelte`                           | F1-deploy-ingress                                                              |
+| `/projects/[p]/stages/[s]/variables`                            | `(app)/projects/[p]/stages/[s]/variables/+page.svelte`   | F1-secrets                                                                     |
+| `/ajustes`                                                      | `(app)/ajustes/+page.svelte`                             | F1-identity-admin                                                              |
+| `/ajustes/tokens`                                               | `(app)/ajustes/tokens/+page.svelte`                      | F1-identity-admin                                                              |
 
 - Todo lo de `(app)` pasa por el guard de `(app)/+layout.ts`: sin sesión va a `/login`, con
   `needsTotpSetup` a `/2fa`. Las páginas reciben `params` tipados (`let { params }: PageProps = $props()`).
 - Los placeholders de F0 (`EmptyState` "En construcción") se reemplazan enteros por
   `<XScreen … />` del barrel del módulo.
-- El layout de una app pone el breadcrumb y los tabs en el header con `<ShellHeader>`. La
-  página de variables del stage hace lo mismo con su breadcrumb. El contenido de `main` es de
-  cada página: en el diseño, el h1 de Resumen es el nombre de la app y el de Variables es
-  "Variables".
+- **Quién dibuja el header de una app.** El layout `apps/[a]/+layout.svelte` solo llena el
+  `<ShellHeader>` (breadcrumb y tabs) y no pone nada en `main`: ni h1 ni encabezado. Cada
+  página dibuja su propio encabezado, como en el diseño:
+    - Resumen (F1-deploy-ingress) tiene el header grande: nombre de la app, kind, imagen,
+      cambios pendientes y las acciones de deploy;
+    - Configuración, Variables, Dominios, Deploys y Logs tienen el h1 de su sección
+      ("Variables", "Deploys").
+- F1-catalog exporta desde su barrel la query del resumen de una app (nombre, kind, imagen,
+  cambios pendientes) y un componente chico con esos datos, para que las páginas los usen
+  sin entrar a las tripas de `catalog`. En el layout cambia los items del breadcrumb por
+  selectores (`{ kind: 'menu', … }`, ver `Breadcrumb`).
+- La página de variables del stage pone su breadcrumb con `<ShellHeader>` igual.
 
 ### i18n: prefijo por módulo
 
@@ -276,29 +289,30 @@ cambiar `shared/`, `package.json` o una ruta ajena, se detiene y lo reporta.
 - Claves útiles de F0: `common_save`, `common_cancel`, `common_delete`, `common_edit`,
   `common_create`, `common_back`, `common_close`, `common_retry`, `common_loading`,
   `common_search`, `common_options`, `common_optional`, `common_copy`, `common_copied`,
-  `common_required`, `common_error_generic`, `common_unavailable` y
-  `common_coming_title({ phase })`.
+  `common_required`, `common_error_generic`, `common_unavailable`,
+  `common_coming_title({ phase })`, `common_load_more`, `common_no_more`, `common_forbidden`
+  y `common_rate_limited`. Para el texto de un error cualquiera, mejor `describeError(error)`.
 
 ### Tema
 
 `import { theme } from '@/shared/ui/themes/theme.css'`, solo en `styles.css.ts`:
 
-| Token                       | Qué                                                                                                                                                                                                                    |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `colors.background.*`       | `page` #0A0A0B, `surface` #101012 (tarjetas, filas), `sunken` #0D0D0F (pies, filas atenuadas), `hover` #141416, `raised` #18181B, `divider` #1A1A1D, `inverse`/`inverseHover` (botón primario), `danger`/`dangerHover` |
-| `colors.borders.*`          | `subtle` #222225, `control` #2E2E33, `strong` #3A3A40, `focus` #6E6E77, `outline` #EDEDED, `danger`                                                                                                                    |
-| `colors.text.*`             | `primary` #EDEDED, `secondary` #A1A1A8, `tertiary` #83838C, `disabled` #6E6E77 (no para texto que hay que leer), `inverse`, `strong`, `separator`, `onDanger`                                                          |
-| `colors.status.*`           | `ok`, `warn`/`warnText`/`warnBorder`/`warnSurface`, `error`/`errorText`/`errorBorder`/`errorSurface`/`errorDivider`/`errorSunken`, `idle`                                                                              |
-| `space[n]`                  | en px, la clave es el valor: 0, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 80                                                                                                                                 |
-| `typography.fontSize[n]`    | 11, 12, 13, 14 (base), 15, 16, 18, 20, 24 (h1), 28 (nombre de app)                                                                                                                                                     |
-| `typography.fontFamily`     | `sans` (Geist), `mono` (Geist Mono)                                                                                                                                                                                    |
-| `typography.fontWeight`     | `regular` 400, `medium` 500, `semibold` 600                                                                                                                                                                            |
-| `typography.letterSpacing`  | `tighter` -0.03em (h1), `tight` -0.02em, `snug` -0.01em                                                                                                                                                                |
-| `radius`                    | `xs` 4 (badge), `sm` 5, `md` 6 (controles), `lg` 8 (tarjetas, avisos), `xl` 12 (diálogos), `full`                                                                                                                      |
-| `control`                   | alturas: `xs` 28, `sm` 32, `md` 36, `lg` 40, `xl` 48, `tab` 44, `badge` 20, `badgeLg` 24                                                                                                                               |
-| `shadows`                   | `focusRing`, `modal`, `menu`                                                                                                                                                                                           |
-| `layout`                    | `maxWidth` 1248px, `gutter` clamp(16px, 3vw, 24px), `authWidth` 360px                                                                                                                                                  |
-| `zIndex`, `transition.fast` |                                                                                                                                                                                                                        |
+| Token                       | Qué                                                                                                                                                                                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `colors.background.*`       | `page` #0A0A0B, `surface` #101012 (tarjetas, filas), `sunken` #0D0D0F (pies, filas atenuadas), `hover` #141416, `raised` #18181B, `divider` #1A1A1D, `inverse`/`inverseHover` (botón primario), `danger` #C7343A/`dangerHover` #B32D33 (los dos ≥ 4.5:1 con texto blanco) |
+| `colors.borders.*`          | `subtle` #222225, `control` #2E2E33, `strong` #3A3A40, `focus` #6E6E77, `outline` #EDEDED, `danger`                                                                                                                                                                       |
+| `colors.text.*`             | `primary` #EDEDED, `secondary` #A1A1A8, `tertiary` #83838C, `faint` #808089 (lo más tenue que se lee: ≥ 4.5:1; lo usa `Mono tone="disabled"`), `disabled` #6E6E77 (controles deshabilitados, no texto que hay que leer), `inverse`, `strong`, `separator`, `onDanger`     |
+| `colors.status.*`           | `ok`, `warn`/`warnText`/`warnBorder`/`warnSurface`, `error`/`errorText`/`errorBorder`/`errorSurface`/`errorDivider`/`errorSunken`, `idle`                                                                                                                                 |
+| `space[n]`                  | en px, la clave es el valor: 0, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 80                                                                                                                                                                                    |
+| `typography.fontSize[n]`    | 11, 12, 13, 14 (base), 15, 16, 18, 20, 24 (h1), 28 (nombre de app)                                                                                                                                                                                                        |
+| `typography.fontFamily`     | `sans` (Geist), `mono` (Geist Mono)                                                                                                                                                                                                                                       |
+| `typography.fontWeight`     | `regular` 400, `medium` 500, `semibold` 600                                                                                                                                                                                                                               |
+| `typography.letterSpacing`  | `tighter` -0.03em (h1), `tight` -0.02em, `snug` -0.01em                                                                                                                                                                                                                   |
+| `radius`                    | `xs` 4 (badge), `sm` 5, `md` 6 (controles), `lg` 8 (tarjetas, avisos), `xl` 12 (diálogos), `full`                                                                                                                                                                         |
+| `control`                   | alturas: `xs` 28, `sm` 32, `md` 36, `lg` 40, `xl` 48, `tab` 44, `badge` 20, `badgeLg` 24                                                                                                                                                                                  |
+| `shadows`                   | `focusRing`, `modal`, `menu`                                                                                                                                                                                                                                              |
+| `layout`                    | `maxWidth` 1248px, `gutter` clamp(16px, 3vw, 24px), `authWidth` 360px                                                                                                                                                                                                     |
+| `zIndex`, `transition.fast` |                                                                                                                                                                                                                                                                           |
 
 Geist y Geist Mono están empaquetadas (`themes/fonts.ts`, `@fontsource-variable/*`): nada
 de Google Fonts ni CDN. El foco con teclado es el global (`2px solid` claro, offset 2px);
@@ -311,51 +325,52 @@ un `href` lo esperan **ya resuelto** con `resolve()`.
 
 **Átomos**
 
-| Componente   | Props                                                                                                                                                                                                                                                                     |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Button`     | `variant` `primary`·`secondary`·`ghost`·`danger` (primary) · `size` `xs` 28·`sm` 32·`md` 36·`lg` 40 (md) · `loading` · `iconOnly` (pasá `aria-label`) · `fullWidth` · atributos de `<button>` (`type` = `button`) · `children`                                            |
-| `LinkButton` | `href` · `variant` · `size` · `iconOnly` · `fullWidth` · atributos de `<a>` · `children`. Para una acción que navega ("Desplegar" → Deploys)                                                                                                                              |
-| `Input`      | `inputSize` `sm` 32·`md` 36·`lg` 40 · `mono` (Geist Mono 13) · `bind:value` · atributos de `<input>`                                                                                                                                                                      |
-| `Select`     | `inputSize` · `bind:value` · `children` (`<option>`) · atributos de `<select>`                                                                                                                                                                                            |
-| `Textarea`   | `mono` · `bind:value` · atributos de `<textarea>`                                                                                                                                                                                                                         |
-| `Checkbox`   | `label` o `children` · `bind:checked` · atributos de `<input>`                                                                                                                                                                                                            |
-| `Switch`     | `bind:checked` · atributos de `<input>` (`role="switch"`). Va dentro del `<label>` de la pantalla, o con `aria-label`                                                                                                                                                     |
-| `Badge`      | `tone` `neutral`·`ok`·`warn`·`error`·`mono` ("compose")·`strong` ("nuevo") · `shape` `tag`·`pill` · `size` `sm` 20·`md` 24 · `dot` (`true` o un `StatusTone`) · `children`                                                                                                |
-| `StatusDot`  | `status` `ok`·`warn`·`bad`·`idle` (anillo) · `size` 6·8 · `pulse` ("en vivo") · `label` (si el punto es la única pista)                                                                                                                                                   |
-| `Mono`       | `tone` `inherit`·`primary`·`secondary`·`tertiary`·`disabled` · `size` `inherit`·11·12·13·14 · `truncate` · `title` · `children`. Para slugs, imágenes, digests, redes, claves                                                                                             |
-| `Icon`       | `name` (`plus`, `search`, `more`, `chevronRight`, `chevronDown`, `chevronUpDown`, `arrowLeft`, `arrowUpRight`, `copy`, `check`, `x`, `lock`, `download`, `upload`, `refresh`, `trash`, `logOut`, `shield`, `globe`, `alert`, `clock`, `external`) · `size` (16) · `label` |
-| `Avatar`     | `name` · `size` `sm` 28·`md` 32                                                                                                                                                                                                                                           |
-| `Logo`       | `size` (22)                                                                                                                                                                                                                                                               |
-| `Spinner`    | `size` `sm`·`md`·`lg` · `label`                                                                                                                                                                                                                                           |
+| Componente   | Props                                                                                                                                                                                                                                                                                                                                  |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Button`     | `variant` `primary`·`secondary`·`ghost`·`danger` (primary) · `size` `xs` 28·`sm` 32·`md` 36·`lg` 40 (md) · `loading` (spinner, `aria-disabled` y el clic no hace nada; NO es `disabled`, así no pierde el foco ni el nombre) · `iconOnly` (pasá `aria-label`) · `fullWidth` · atributos de `<button>` (`type` = `button`) · `children` |
+| `LinkButton` | `href` · `variant` · `size` · `iconOnly` · `fullWidth` · atributos de `<a>` · `children`. Para una acción que navega ("Desplegar" → Deploys)                                                                                                                                                                                           |
+| `Input`      | `inputSize` `sm` 32·`md` 36·`lg` 40 · `mono` (Geist Mono 13) · `bind:value` · atributos de `<input>`                                                                                                                                                                                                                                   |
+| `Select`     | `inputSize` · `bind:value` · `children` (`<option>`) · atributos de `<select>`                                                                                                                                                                                                                                                         |
+| `Textarea`   | `mono` · `bind:value` · atributos de `<textarea>`                                                                                                                                                                                                                                                                                      |
+| `Checkbox`   | `label` o `children` · `bind:checked` · atributos de `<input>`                                                                                                                                                                                                                                                                         |
+| `Switch`     | `bind:checked` · atributos de `<input>` (`role="switch"`). Va dentro del `<label>` de la pantalla, o con `aria-label`                                                                                                                                                                                                                  |
+| `Badge`      | `tone` `neutral`·`ok`·`warn`·`error`·`mono` ("compose")·`strong` ("nuevo") · `shape` `tag`·`pill` · `size` `sm` 20·`md` 24 · `dot` (`true` o un `StatusTone`) · `children`                                                                                                                                                             |
+| `StatusDot`  | `status` `ok`·`warn`·`bad`·`idle` (anillo) · `size` 6·8 · `pulse` ("en vivo") · `label` (si el punto es la única pista)                                                                                                                                                                                                                |
+| `Mono`       | `tone` `inherit`·`primary`·`secondary`·`tertiary`·`disabled` · `size` `inherit`·11·12·13·14 · `truncate` · `title` · `children`. Para slugs, imágenes, digests, redes, claves                                                                                                                                                          |
+| `Icon`       | `name` (`plus`, `search`, `more`, `chevronRight`, `chevronDown`, `chevronUpDown`, `arrowLeft`, `arrowUpRight`, `copy`, `check`, `x`, `lock`, `download`, `upload`, `refresh`, `trash`, `logOut`, `shield`, `globe`, `alert`, `clock`, `external`) · `size` (16) · `label`                                                              |
+| `Avatar`     | `name` · `size` `sm` 28·`md` 32                                                                                                                                                                                                                                                                                                        |
+| `Logo`       | `size` (22)                                                                                                                                                                                                                                                                                                                            |
+| `Spinner`    | `size` `sm`·`md`·`lg` · `label` · `decorative` (sin `role="status"`: cuando otro elemento ya anuncia la carga)                                                                                                                                                                                                                         |
 
 **Moléculas**
 
-| Componente         | Props                                                                                                                                                                                                                                                                                              |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Field`            | `label` · `hint` · `error` · `optional` ("· opcional") · `children(a11y)`: `{#snippet children(a11y)}<Input {...a11y} />{/snippet}`                                                                                                                                                                |
-| `SearchInput`      | `label` (el `aria-label`) · `inputSize` · `bind:value` · atributos de `<input>`                                                                                                                                                                                                                    |
-| `CodeInput`        | `value` · `label` · `length` (6) · `disabled` · `focusOnMount` · `oninput(value)` · `oncomplete(value)` · el `a11y` de `Field`                                                                                                                                                                     |
-| `Banner`           | `tone` `info`·`warn`·`error` · `title` (en 500) · `body` (gris) · `dot` · `action` (snippet: botones a la derecha)                                                                                                                                                                                 |
-| `Card`             | `title` · `description` · `headingLevel` 2·3 · `tone` `default`·`danger`·`highlight` · `flush` (encabezado en franja y contenido al borde, para tablas o `<dl>`) · `aside` (snippet, solo `flush`) · `note` (texto del pie) · `footer` (snippet: botones del pie, `size="sm"`) · `id` · `children` |
-| `List` / `ListRow` | `List`: `label` · `children`. `ListRow`: `href` (la fila entera es un link) · `muted` · `height` `sm` 44·`md` 52·`lg` 56 · `class` · `children`                                                                                                                                                    |
-| `Table`            | `framed` (true; `false` dentro de una `Card flush`) · `minWidth` · `caption` · `children` (`<thead>`/`<tbody>` planos). Clases: `cellEnd`, `cellActions`, `cellMono`, `rowMuted`                                                                                                                   |
-| `Tabs`             | `label` · `items: NavItem[]` (`{ href, label, active }`). La nav subrayada del header                                                                                                                                                                                                              |
-| `SubNav`           | `label` · `items: NavItem[]`. `SubNavLayout`: lo mismo + `children` (nav de 180 px a la izquierda, contenido a la derecha: Ajustes, Configuración)                                                                                                                                                 |
-| `Breadcrumb`       | `label` · `homeHref` · `homeLabel` · `items: BreadcrumbItem[]` (`{ label, href?, initial? }`)                                                                                                                                                                                                      |
-| `Menu`             | `label` · `items: MenuEntry[]` (`{ kind: 'action', id, label, onSelect, icon?, tone?: 'danger', disabled? }`, `{ kind: 'link', id, label, href, icon? }`, `{ kind: 'separator', id }`) · `variant` `ghost` (los ⋯ de una fila) · `bare` · `trigger` (snippet) · `align` · `header` (snippet)       |
-| `Modal`            | `open` · `title` · `description` · `size` `sm`·`md`·`lg` · `onClose` (Escape o clic en el fondo) · `children` · `footer` (snippet). Es un `<dialog>` nativo: foco atrapado y devuelto                                                                                                              |
-| `ConfirmDialog`    | `open` · `title` · `body` · `confirmLabel` · `cancelLabel` · `loading` · `tone` `danger`·`primary` · `onConfirm` · `onCancel`                                                                                                                                                                      |
-| `CopyButton`       | `value` · `label` · `iconOnly` · `variant` · `size`                                                                                                                                                                                                                                                |
-| `SegmentedControl` | `label` o `labelledBy` · `name` · `options: ChoiceOption<T>[]` (`{ value, label, disabled? }`) · `value` · `disabled` · `onChange`                                                                                                                                                                 |
-| `RadioGroup`       | lo mismo que `SegmentedControl` + `direction` `row`·`column`                                                                                                                                                                                                                                       |
-| `EmptyState`       | `title` · `body` · `icon` · `action` (snippet)                                                                                                                                                                                                                                                     |
-| `ComingSoon`       | `phase` 2·3 · `feature` ("El historial de deploys"). Ver [Fase 2/3](#endpoints-de-las-fases-2-y-3-unavailableerror)                                                                                                                                                                                |
-| `ErrorState`       | `title` · `body` · `retryLabel` · `onRetry`                                                                                                                                                                                                                                                        |
-| `LoadingState`     | `label`                                                                                                                                                                                                                                                                                            |
-| `PageHeader`       | `title` (el h1) · `subtitle` · `meta` ("10 apps") · `titleSize` `md` 24·`lg` 28 · `badges` · `details` · `actions` (snippets)                                                                                                                                                                      |
-| `Pagination`       | `page` · `totalPages` · `label` · `prevLabel` · `nextLabel` · `onPageChange`                                                                                                                                                                                                                       |
-| `Toaster`          | va en el layout raíz; se usa con `toast.success/error/info(title, description?)` de `@/shared/ui/stores`                                                                                                                                                                                           |
-| `LocaleSwitcher`   | `label`                                                                                                                                                                                                                                                                                            |
+| Componente         | Props                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Field`            | `label` · `hint` · `error` · `optional` ("· opcional") · `children(a11y)`: `{#snippet children(a11y)}<Input {...a11y} />{/snippet}`                                                                                                                                                                                                                                                                                                                                                                                                |
+| `SearchInput`      | `label` (el `aria-label`) · `inputSize` · `bind:value` · atributos de `<input>`                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `CodeInput`        | `value` · `label` · `length` (6) · `disabled` · `focusOnMount` · `oninput(value)` · `oncomplete(value)` · el `a11y` de `Field`. Se queda solo con los dígitos: pegar "123 456" funciona                                                                                                                                                                                                                                                                                                                                            |
+| `Banner`           | `tone` `info`·`warn`·`error` · `title` (en 500) · `body` (gris) · `dot` · `action` (snippet: botones a la derecha)                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `Card`             | `title` · `description` · `headingLevel` 2·3 · `tone` `default`·`danger`·`highlight` · `flush` (encabezado en franja y contenido al borde, para tablas o `<dl>`) · `aside` (snippet, solo `flush`) · `note` (texto del pie) · `footer` (snippet: botones del pie, `size="sm"`) · `id` · `children`                                                                                                                                                                                                                                 |
+| `List` / `ListRow` | `List`: `label` · `children`. `ListRow`: `href` (la fila entera es un link) · `muted` · `height` `sm` 44·`md` 52·`lg` 56 · `class` · `children`                                                                                                                                                                                                                                                                                                                                                                                    |
+| `Table`            | `framed` (true; `false` dentro de una `Card flush`) · `minWidth` · `caption` · `children` (`<thead>`/`<tbody>` planos). Clases: `cellEnd`, `cellActions`, `cellMono`, `rowMuted`                                                                                                                                                                                                                                                                                                                                                   |
+| `Tabs`             | `label` · `items: NavItem[]` (`{ href, label, active }`). La nav subrayada del header                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `SubNav`           | `label` · `items: NavItem[]`. `SubNavLayout`: lo mismo + `children` (nav de 180 px a la izquierda, contenido a la derecha: Ajustes, Configuración)                                                                                                                                                                                                                                                                                                                                                                                 |
+| `Breadcrumb`       | `label` · `homeHref` · `homeLabel` · `items: BreadcrumbItem[]`: un link `{ label, href?, initial? }` (`kind: 'link'` opcional) o un selector `{ kind: 'menu', label, ariaLabel, items: MenuEntry[], initial? }` (el botón con chevron del diseño que abre un `Menu`: "auditfy ⌄" → los otros proyectos). El último item es la página actual                                                                                                                                                                                        |
+| `Menu`             | `label` · `items: MenuEntry[]` (`{ kind: 'action', id, label, onSelect, icon?, tone?: 'danger', disabled? }`, `{ kind: 'link', id, label, href, icon? }`, `{ kind: 'separator', id }`) · `variant` `ghost` (los ⋯ de una fila) · `bare` · `trigger` (snippet) · `triggerClass` (clase extra del botón) · `align` `start`·`end` · `header` (snippet). El panel va en el top layer (`popover`): no lo recorta el `overflow` de una `List`, `Card` o `Table`; se da vuelta hacia arriba si no entra abajo y no se sale de la pantalla |
+| `Modal`            | `open` · `title` · `description` · `size` `sm`·`md`·`lg` · `onClose` (Escape, clic en el fondo, o cualquier cierre del `<dialog>`) · `children` · `footer` (snippet). `<dialog>` nativo: foco atrapado y devuelto al que lo abrió; si ese elemento ya no está (la fila que se borró), al h1 de `main` o a `main`. Una selección de texto que termina sobre el fondo no lo cierra                                                                                                                                                   |
+| `ConfirmDialog`    | `open` · `title` · `body` · `confirmLabel` · `cancelLabel` · `loading` · `tone` `danger`·`primary` · `error` (un `Banner` de error adentro del diálogo: el `not_empty` de borrar un proyecto) · `children` (contenido extra bajo el `body`) · `onConfirm` · `onCancel`                                                                                                                                                                                                                                                             |
+| `CopyButton`       | `value` · `label` · `target` (id del elemento que muestra el valor) · `iconOnly` · `variant` · `size`. Si no se puede copiar (HTTP sin `localhost`, permiso denegado) dice "No se pudo copiar", muestra un toast y selecciona el texto de `target` para copiarlo a mano: pasalo siempre que el valor esté en pantalla                                                                                                                                                                                                              |
+| `SegmentedControl` | `label` o `labelledBy` · `name` · `options: ChoiceOption<T>[]` (`{ value, label, disabled? }`) · `value` · `disabled` · `onChange`                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `RadioGroup`       | lo mismo que `SegmentedControl` + `direction` `row`·`column`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `EmptyState`       | `title` · `body` · `icon` · `action` (snippet)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `ComingSoon`       | `phase` 2·3 · `feature` ("El historial de deploys"). Ver [Fase 2/3](#endpoints-de-las-fases-2-y-3-unavailableerror)                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `ErrorState`       | `title` · `body` · `retryLabel` · `onRetry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `LoadingState`     | `label` (se anuncia una sola vez)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `PageHeader`       | `title` (el h1) · `subtitle` · `meta` ("10 apps") · `titleSize` `md` 24·`lg` 28 · `badges` · `details` · `actions` (snippets)                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `Pagination`       | `page` · `totalPages` · `label` · `prevLabel` · `nextLabel` · `onPageChange`. Para listas con total (`Paginated<T>`)                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `LoadMore`         | `hasMore` · `loading` · `onLoadMore` · `label` ("Cargar más") · `doneLabel` (lo que se ve al final; sin esto, nada). La variante por cursor de `Pagination`: ver [Paginación](#paginación)                                                                                                                                                                                                                                                                                                                                         |
+| `Toaster`          | va en el layout raíz; se usa con `toast.success/error/info(title, description?)` de `@/shared/ui/stores`. Los avisos se van a los 4 s (en pausa con el puntero o el foco encima); `toast.error` se queda hasta que se cierra. Una sola región `aria-live` polite                                                                                                                                                                                                                                                                   |
+| `LocaleSwitcher`   | `label`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 **Organismos**
 
@@ -366,13 +381,30 @@ un `href` lo esperan **ya resuelto** con `resolve()`.
 | `AuthLayout`  | `appName` · `host` · `width` `sm` 360·`md` 440 · `children`. Las pantallas de acceso                                                    |
 
 Clases y helpers: `srOnly`, `textLink` (link dentro de un texto), `truncate`, `firstError`,
-`formatDate`, `formatDateTime`, `formatNumber`, `formatRelative`.
+`formatDate`, `formatDateTime`, `formatNumber`, `formatRelative` y `describeError(error)`
+(el texto para el usuario de cualquier error de `@/shared/domain`: "revisa
+MUELLE_PANEL_ORIGIN", "Llega con la Fase 2", "No se pudo contactar a muelle", …; los errores
+propios de un módulo los traduce el módulo y caen acá para el resto).
+
+### Paginación
+
+- **Con total** (`Paginated<T>` de `@/shared/domain`, páginas numeradas): `<Pagination>`.
+- **Por cursor** (`/audit?before=`): `CursorPage<T>` de `@/shared/domain`
+  (`{ items, nextCursor: string | null }`, con `emptyCursorPage`, `hasNextPage` y
+  `flattenCursorPages`). El repositorio devuelve una página; el viewModel usa
+  `createInfiniteQuery` con `initialPageParam: null` y
+  `getNextPageParam: (page) => page.nextCursor ?? undefined`, junta
+  las páginas con `flattenCursorPages(query.data?.pages)` y pone al pie
+  `<LoadMore hasMore={query.hasNextPage} loading={query.isFetchingNextPage} onLoadMore={() => query.fetchNextPage()} />`.
 
 ### HTTP y errores
 
-- `http.get/post/put/patch/delete(path, { query, body, signal })` de
+- `http.get/post/put/patch/delete(path, { query, body, signal, timeoutMs })` de
   `@/shared/data/http/client`, con `path` sin `/api/v1` (`http.get('/projects')`). Manda la
   cookie (`credentials: 'same-origin'`) y JSON; un 204 devuelve `null`.
+- Toda petición se corta a los 30 s (`timeoutMs` para otro valor; un stream SSE no pasa por
+  `http`). El corte llega como `UnavailableError` ("El servidor tardó demasiado en
+  responder"); un `signal` propio que se aborta sigue siendo un `AbortError`.
 - El backend siempre responde `{"error":{"code","message"}}`: llega como
   `ApiError(status, code, message)`.
 - Un 401 en una ruta con sesión limpia el cache y manda a `/login`; un 403
@@ -386,23 +418,34 @@ Clases y helpers: `srOnly`, `textLink` (link dentro de un texto), `truncate`, `f
       El 422 `invalid` trae `"<campo>: <motivo>"`; sale como `ValidationError` con `field` y
       `message` = el motivo. El viewModel lo pone en el campo del formulario.
     - `phase`: ver abajo.
+    - Siempre, en cualquier endpoint: 403 `bad_origin` → `BadOriginError` (el panel no está
+      en `MUELLE_PANEL_ORIGIN`) y 401 `ambiguous_session` → `AmbiguousSessionError` (dos
+      cookies de sesión). `describeError` les da el texto que dice qué hacer.
     - Sin mapa: 401 `UnauthorizedError`, 403 `ForbiddenError`, 404 `NotFoundError`,
-      409 `ConflictError`, 423/429 `RateLimitedError`, 5xx y red `UnavailableError`, el resto
-      `UnexpectedError`. Una respuesta con otra forma es `ContractError` (`parseOrThrow`).
+      409 `ConflictError`, 423/429 `RateLimitedError`, 5xx, red y timeout `UnavailableError`,
+      el resto `UnexpectedError`. Una respuesta con otra forma es `ContractError`
+      (`parseOrThrow`).
+- `shouldRetry` (el `retry` de las queries) reintenta dos veces solo lo que puede andar
+  la próxima: red, timeout y 5xx. Un 4xx, un `ContractError` o una fase pendiente, no.
 
 ### Endpoints de las fases 2 y 3: `UnavailableError`
 
 Deploys, status, logs, rollback y dominios (spec §7, §8, §9, §10), y en Ajustes registries,
 Cloudflare, IP pública, email ACME y `panel_allowed_cidrs`, todavía no existen en el backend.
 
-1. El repositorio de esas rutas pasa `{ phase: 2 }` (o `3`) en su `DomainErrorMap`: un 404 o
-   405 se vuelve `UnavailableError` con `phase`. Ojo: el backend responde igual
-   `not_found` a una ruta que no existe y a un recurso que no existe; en estos endpoints el
-   404 se lee como "la ruta todavía no existe".
+1. El repositorio de esas rutas pasa `{ phase: 2 }` (o `3`) en su `DomainErrorMap`. Se
+   decide por el `code`, no por el status:
+    - 404 `no_route` (la ruta no existe) y 405 `method_not_allowed` (existe con otro
+      método) → `UnavailableError` con `phase`;
+    - 404 `not_found` es un recurso que no existe (un deploy borrado): sigue siendo
+      `notFound` / `NotFoundError`, con o sin `phase`.
 2. El viewModel lo detecta con `pendingPhase(error)` de `@/shared/domain` (`2 | 3 | null`).
 3. La pantalla muestra `<ComingSoon phase={vm.pendingPhase} feature={…} />` en vez de un
    error. `shouldRetry` no reintenta estos errores.
-4. Con `pnpm dev:mock`, los handlers de MSW responden con datos y no aparece.
+4. Con `pnpm dev:mock`, los handlers de MSW responden con datos y no aparece. Una ruta de
+   `/api/v1` sin handler contesta 404 `no_route`, como el backend (el `http.all` del final
+   de `handlers/index.ts`). Para ver el `<ComingSoon>` con mocks, o probarlo en un test,
+   alcanza con no registrar el handler o con `server.use(http.get(api('/…'), () => noRoute()))`.
 
 Un `UnavailableError` sin `phase` es un backend caído o sin red: eso sí es un error
 (`ErrorState` con reintento).
@@ -420,20 +463,31 @@ rechaza campos desconocidos): mientras no existan, no se mandan.
   de `auth`. Devuelve `Me`: `username`, `totpEnabled` y `needsTotpSetup`. El guard ya lo dejó
   en el cache.
 - El barrel también exporta `authKeys`, `loadSessionState` (para guards), `landingFor` y
-  `SessionShell`. Cerrar sesión vacía todo el cache de TanStack Query.
+  `SessionShell`.
+- Entrar (login, código, setup, invitación) y salir vacían todo el cache de TanStack
+  Query: nada de la sesión anterior queda a la vista. Activar el 2FA invalida `me`.
+- Cerrar sesión solo cuenta como hecho si sale bien o si el backend dice 401 (la sesión ya
+  no existía). Cualquier otro error (red, 5xx, `bad_origin`) muestra un toast y deja al
+  usuario donde estaba: la cookie sigue viva.
+- "Volver" en el paso del código cierra la sesión a medias (el 401 `mfa_required` de esa
+  respuesta es lo esperado).
+- `/setup?token=` e `/invite/<token>` sacan el token de la URL apenas lo leen
+  (`replaceState` a `/setup` e `/invite`): no queda en el historial ni en un pantallazo.
+- Un 401 en `/2fa` es una sesión que se cayó: manda a `/login` como en el resto del panel.
 
 ### MSW
 
 ```
 src/mocks/
   api.ts            api('/projects'), apiError(status, code, message), invalid(campo, motivo),
-                    notFound(), noContent()
+                    notFound() (404 not_found), noRoute() (404 no_route), noContent()
   session.ts        requireSession(): la respuesta 401/403 si no hay sesión completa, o undefined;
                     sessionUser()
   db/persist.ts     loadPersisted / savePersisted (sessionStorage en el navegador)
   db/<módulo>.ts    los datos del módulo
   handlers/<módulo>.ts
-  handlers/index.ts junta todos (ya importa los de F1)
+  handlers/index.ts junta todos (ya importa los de F1) y termina con un http.all que
+                    contesta 404 no_route a cualquier /api/v1 sin handler
 ```
 
 Un handler típico:
@@ -453,7 +507,9 @@ http.post(api('/projects'), async ({ request }) => {
   `src/cmd/http/server.go`).
 - Cada `db/<módulo>.ts` exporta un objeto con `reset()`; los tests de integración lo llaman
   en `beforeEach`, junto con `authDb.reset()`, y hacen
-  `server.listen({ onUnhandledRequest: 'error' })`.
+  `server.listen({ onUnhandledRequest: 'error' })`. Ojo: por el `http.all` del final, una
+  ruta de `/api/v1` que el test no mockeó no dispara `onUnhandledRequest`, contesta
+  `no_route`; el test lo ve como el `notFound` del mapa (o `UnavailableError` con `phase`).
 - Los usuarios y las invitaciones viven en `db/auth.ts` (`authDb.state.users`,
   `authDb.addInvite(token)`): el mock de `identity` los usa en vez de tener otra lista.
 - `server.use(…)` dentro de un test para un caso puntual (un 422, un 404, `HttpResponse.error()`).
@@ -465,8 +521,43 @@ http.post(api('/projects'), async ({ request }) => {
   en la consola de `pnpm dev`; es interno de la librería y no aparece en el build.
 - Chrome anota en la consola cada respuesta 4xx de `fetch` ("Failed to load resource"): un
   401 de `/auth/me` en `/login` es esperado, no un error de la app.
-- `pnpm test:e2e` construye con mocks en `./build`; para el build que se embebe, `pnpm build`.
-  `static/mockServiceWorker.js` se copia al build, pero no hace nada si nadie lo registra.
+- `pnpm test:e2e` construye en `build-e2e/` (ignorado): `mock` con MSW y `prod` igual al de
+  `pnpm build`, y los sirve con `scripts/serve-build.mjs` (como Go: archivo o `200.html`, y
+  la CSP como header). `./build` no se toca. Con un servidor viejo en el puerto 4173,
+  Playwright lo reusa: cerralo antes.
+- `static/mockServiceWorker.js` solo queda en un build con `VITE_USE_MOCKS=1`: el adapter
+  (`svelte.config.js`) lo borra de cualquier otro.
+
+### CSP
+
+El panel corre bajo una CSP estricta: nada en línea ni `eval`, todo del mismo origen.
+
+- **La política** está en `svelte.config.js` (`kit.csp`, modo `hash`): `default-src`,
+  `script-src`, `style-src`, `img-src`, `font-src`, `connect-src` y `worker-src` en
+  `'self'`, `object-src 'none'`, `base-uri 'none'` y `form-action 'self'`. El build la
+  escribe como `<meta http-equiv>` en el `200.html`, con el hash del script de arranque de
+  SvelteKit, y `style-src-attr 'unsafe-hashes'` con el hash del único `style` en línea que
+  hay (el `#svelte-announcer` de SvelteKit).
+- **Lo que tiene que mandar Go (F2)** como header `Content-Security-Policy` en cada
+  respuesta del panel: el contenido de `build/csp-header.txt`, que el build escribe con la
+  política del `<meta>` más `frame-ancestors 'none'` (un `<meta>` no puede llevarlo). El
+  hash cambia en cada build: Go lo lee del embed al arrancar, no lo copia a mano. Un header
+  con otra política no sirve: el navegador aplica las dos, y sin el hash el script de
+  arranque no corre. Recordá `//go:embed all:build` (sin `all:` se pierde `_app/`) y que
+  adapter-static vacía `build/` en cada build (también un `.keep`).
+- **Qué rompe la CSP** (lo atrapa `e2e/csp.e2e.ts`, que falla con cualquier violación):
+    - un `style="…"` fijo en un template (va una clase de `styles.css.ts`; `style:prop={x}`
+      sí se puede: Svelte lo aplica por CSSOM);
+    - `{@html}` con `<script>` o atributos `on…`, `eval`, `new Function`;
+    - imágenes o fuentes `data:` o de otro origen (Vite no mete assets en línea:
+      `assetsInlineLimit: 0`);
+    - crear un schema de Zod antes de `@/shared/data/zodSetup` (Zod sin JIT: con JIT prueba
+      un `new Function` que la CSP reporta). Es el primer import de `hooks.client.ts`: que
+      siga primero.
+- Una pantalla nueva con algo raro (CodeMirror, un gráfico) se suma al recorrido de
+  `e2e/csp.e2e.ts`.
+- `pnpm dev` aplica la misma política como header, con `'unsafe-inline'` en los estilos
+  (Vite los inyecta así). Una violación de scripts aparece igual en la consola.
 
 ---
 

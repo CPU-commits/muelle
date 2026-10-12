@@ -142,7 +142,10 @@ Los módulos del frontend reflejan los del backend:
    - opciones de proyecto (renombrar, borrar con confirmación; `not_empty` → mensaje claro);
    - el link "Variables · N" va a la página de variables del stage;
    - el estado ("Corriendo 2/2") y el último deploy son de la Fase 2: quedan como un slot que llena F2. Por ahora muestran el `kind` y, si es service, la imagen del spec.
-3. **Header de la app** en `apps/[a]/+layout.svelte`: nombre, kind, imagen y badge de cambios pendientes, según el diseño.
+3. **Header de la app** (decisión de la review de F0):
+   - el layout `apps/[a]/+layout.svelte` solo llena el `ShellHeader`: cambia los items del breadcrumb por selectores de proyecto, stage y app (`{ kind: 'menu', label, ariaLabel, items }` de `Breadcrumb`) y deja los tabs. **No dibuja un h1 ni nada en `main`**;
+   - cada página pone su propio encabezado en `main`, como en el diseño. El header grande (nombre, kind, imagen, badge de cambios pendientes y las acciones de deploy) es de Resumen, que hace F1-deploy-ingress;
+   - para eso, `catalog` exporta desde su barrel una query del resumen de la app (nombre, kind, imagen, cambios pendientes) y un componente chico que lo muestra, para que Resumen y las otras páginas los usen.
 4. **Configuración** (form app): formulario TanStack Form + Zod que replica las reglas de `appspec` del backend:
    - imagen, puerto, réplicas, comando y healthcheck (`http`, `bun-http`, `command`, `none`, con sus campos);
    - volúmenes, recursos y `deploy_timeout_s`;
@@ -203,7 +206,7 @@ Los módulos del frontend reflejan los del backend:
    - **Logs en vivo:** SSE `…/logs?service&tail&follow`.
 2. **Módulo `ingress`:** dominios (`GET/POST …/domains`, `PATCH/DELETE …/domains/{hostname}`, `adopt`, `retry`), con el estado de DNS y del certificado y `proxied`.
 3. **MSW:** handlers con datos realistas que recorren los estados (deploy `queued` → `running` → `succeeded`/`failed`, log en streaming, dominio en `error` con "Adoptar").
-4. **Backend real:** un 404 de estas rutas → `UnavailableError` → `EmptyState` "Llega con la Fase 2" (o 3), sin errores en consola.
+4. **Backend real:** un 404 `no_route` (o 405 `method_not_allowed`) de estas rutas → `UnavailableError` con `phase` → `ComingSoon` "Llega con la Fase 2" (o 3), sin errores en consola. Un 404 `not_found` sigue siendo "no existe".
 5. **Tests:** dominio, mappers, integración contra MSW (también el `UnavailableError`) y viewModels.
 
 ### Task F2: Integración
@@ -214,7 +217,7 @@ Los módulos del frontend reflejan los del backend:
    - `web/embed.go` (paquete `web`, `//go:embed all:build`), con un `web/build/.keep` versionado para que `go build` funcione sin el panel compilado;
    - `src/cmd/http` sirve el SPA: las rutas que no son `/api/` entregan archivos de `build` con cache, y `200.html` como fallback;
    - si no hay build, responde un 503 en texto claro, "panel no compilado: cd web && pnpm build";
-   - headers de seguridad para el panel: `Content-Security-Policy` (`default-src 'self'`; `style-src 'self' 'unsafe-inline'` solo si hace falta; `img-src 'self' data:`; `connect-src 'self'`; `frame-ancestors 'none'`), `Referrer-Policy: same-origin` y `X-Frame-Options: DENY`;
+   - headers de seguridad para el panel: `Content-Security-Policy` con el contenido de `build/csp-header.txt` (lo escribe el build: la política del `<meta>` del `200.html`, con el hash del script de arranque, más `frame-ancestors 'none'`; se lee del embed al arrancar porque el hash cambia en cada build; ver "CSP" en `web/CLAUDE.md`), `Referrer-Policy: same-origin` y `X-Frame-Options: DENY`;
    - tests del handler.
 4. **CI:** un job de `web` (`pnpm install --frozen-lockfile`, `pnpm verify`, `pnpm build`) antes del build de Go, que embebe el panel.
 5. **e2e real:** Playwright contra `muelle serve` con el panel embebido. Recorre setup → login → crear proyecto, stage y app → editar variables → crear token.

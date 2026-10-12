@@ -7,7 +7,9 @@
 
 	// El detalle de una app: el header del AppShell cambia el logo por "proyecto / stage
 	// / app" y la nav por los tabs de la app. Lo arma F0 con los parámetros de la ruta;
-	// F1-catalog lo enriquece (selectores, nombre, kind, imagen, cambios pendientes).
+	// F1-catalog cambia los items por selectores (`kind: 'menu'`). El layout solo llena
+	// el ShellHeader: el encabezado de `main` (h1, kind, imagen, acciones) es de cada
+	// página (ver "Quién dibuja el header de una app" en web/CLAUDE.md).
 	let { params, children }: LayoutProps = $props()
 </script>
 
