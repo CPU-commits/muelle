@@ -1,0 +1,110 @@
+package usecases
+
+import (
+	"context"
+	"errors"
+	"sync"
+
+	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
+	"github.com/CPU-commits/muelle/src/internal/identity/domain/repository"
+	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
+	"github.com/CPU-commits/muelle/src/package/clock"
+	sharedrepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
+)
+
+// Login verifica usuario y contraseña. Sin 2FA abre una sesión completa; con
+// 2FA abre una sesión pendiente de 5 minutos que CompleteTOTP cambia por una
+// completa.
+//
+// El bloqueo progresivo de la contraseña es por usuario e IP
+// (service.LoginLockout) y se aplica igual a nombres que no existen: ni la
+// respuesta ni los tiempos revelan qué usuarios hay.
+type Login struct {
+	tx      sharedrepo.Transactor
+	users   repository.UserRepository
+	hasher  service.PasswordHasher
+	limiter *service.LoginLimiter
+	lockout *service.LoginLockout
+	clock   clock.Clock
+	issuer  sessionIssuer
+	audit   *LoginAudit
+	// dummy es un hash para verificar cuando el usuario no existe, así el login
+	// tarda lo mismo y no revela qué nombres existen.
+	dummy func() (string, error)
+}
+
+func NewLogin(tx sharedrepo.Transactor, users repository.UserRepository, sessions repository.SessionRepository,
+	hasher service.PasswordHasher, limiter *service.LoginLimiter, lockout *service.LoginLockout,
+	la *LoginAudit, c clock.Clock) *Login {
+	return &Login{
+		tx: tx, users: users, hasher: hasher, limiter: limiter, lockout: lockout, clock: c,
+		issuer: sessionIssuer{sessions: sessions, clock: c},
+		audit:  la,
+		dummy:  sync.OnceValues(func() (string, error) { return hasher.Hash("muelle-usuario-inexistente") }),
+	}
+}
+
+func (uc *Login) Execute(ctx context.Context, in dto.LoginInput) (dto.SessionOutput, error) {
+	if !uc.limiter.Allow(in.IP) {
+		return dto.SessionOutput{}, service.ErrRateLimited
+	}
+	// Un par bloqueado no gasta el hasher, exista el usuario o no.
+	if uc.lockout.Locked(in.Username, in.IP) {
+		return dto.SessionOutput{}, service.ErrLocked
+	}
+	u, err := uc.users.GetByUsername(ctx, in.Username)
+	if errors.Is(err, sharedrepo.ErrNotFound) {
+		if h, err := uc.dummy(); err == nil {
+			uc.hasher.Verify(h, in.Password)
+		}
+		return dto.SessionOutput{}, uc.fail(ctx, in)
+	}
+	if err != nil {
+		return dto.SessionOutput{}, err
+	}
+	ok, err := uc.hasher.Verify(u.PasswordHash, in.Password)
+	if err != nil {
+		return dto.SessionOutput{}, err
+	}
+	if !ok {
+		return dto.SessionOutput{}, uc.fail(ctx, in)
+	}
+	// La decisión final se toma bajo el mutex del bloqueo: un intento que
+	// esperó al hasher mientras otros bloqueaban el par responde "bloqueado"
+	// sin cambiar nada, igual que uno malo. Una contraseña correcta reinicia
+	// los fallos de la contraseña; los del código TOTP se cuentan aparte, por
+	// usuario (CompleteTOTP).
+	if !uc.lockout.Succeed(in.Username, in.IP) {
+		return dto.SessionOutput{}, service.ErrLocked
+	}
+	var out dto.SessionOutput
+	err = uc.tx.InTx(ctx, func(ctx context.Context) error {
+		var err error
+		if out, err = uc.issuer.issue(ctx, u, u.HasTOTP(), in.IP, in.UserAgent); err != nil {
+			return err
+		}
+		if !u.HasTOTP() { // con 2FA, el login se completa (y se audita) en CompleteTOTP
+			uc.audit.login(ctx, u, in.IP, false)
+		}
+		return nil
+	})
+	if err != nil {
+		return dto.SessionOutput{}, err
+	}
+	return out, nil
+}
+
+// fail registra el fallo (en el bloqueo y en la auditoría) y devuelve el
+// error que corresponde. Un intento rechazado porque el par ya estaba
+// bloqueado no se audita; el fallo que lo bloquea, sí (auth.locked).
+func (uc *Login) fail(ctx context.Context, in dto.LoginInput) error {
+	wasLocked, locked := uc.lockout.Fail(in.Username, in.IP)
+	if wasLocked {
+		return service.ErrLocked
+	}
+	uc.audit.failed(ctx, in.Username, in.IP, "credentials")
+	if locked {
+		uc.audit.locked(ctx, in.Username, in.IP, "credentials")
+	}
+	return service.ErrInvalidCredentials
+}

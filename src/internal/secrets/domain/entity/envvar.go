@@ -1,0 +1,139 @@
+package entity
+
+import (
+	"bytes"
+	"maps"
+	"slices"
+	"time"
+	"unicode/utf8"
+
+	"github.com/CPU-commits/muelle/src/shared/domain/validate"
+)
+
+const (
+	MaxVars       = 500      // variables por dueño
+	MaxValueBytes = 64 << 10 // bytes por valor
+	// MaxOwnerBytes es el total por dueño (claves + valores). Sin él, 500
+	// valores de 64 KiB darían un GET de 32 MB. No alcanza por sí solo para
+	// el ARG_MAX de Linux: una app recibe la mezcla de su stage y la suya
+	// (hasta 2 MiB), así que el deploy (Fase 2) tiene que revisar el tamaño
+	// de la mezcla antes de entregarla.
+	MaxOwnerBytes = 1 << 20
+)
+
+// EnvVar es una variable con su valor en claro. El valor en claro solo vive
+// en memoria: se guarda cifrado (EncryptedEnvVar).
+type EnvVar struct {
+	Key       string
+	Value     []byte
+	Secret    bool
+	UpdatedAt time.Time
+}
+
+// EncryptedEnvVar es una variable tal como se guarda: Ciphertext va cifrado
+// con la AAD de su dueño y su clave (domain/service.AAD).
+type EncryptedEnvVar struct {
+	Key        string
+	Ciphertext []byte
+	Secret     bool
+	UpdatedAt  time.Time
+}
+
+// NewEnvVar valida la clave y el valor. field es el campo del cuerpo donde
+// viene la variable ("vars" o "set"), para que el error lo nombre.
+//
+// El valor tiene que ser texto UTF-8 válido y sin NUL: las respuestas JSON no
+// pueden llevar UTF-8 inválido (GET fallaría con un 500), y el entorno de un
+// proceso no puede llevar NUL (el deploy no podría entregarla).
+func NewEnvVar(field, key string, value []byte, secret bool, at time.Time) (EnvVar, error) {
+	if err := validate.EnvKey(field, key); err != nil {
+		return EnvVar{}, err
+	}
+	if len(value) > MaxValueBytes {
+		return EnvVar{}, validate.Errorf(field, "el valor de %q supera 64 KiB", key)
+	}
+	if !utf8.Valid(value) {
+		return EnvVar{}, validate.Errorf(field, "el valor de %q no es UTF-8 válido", key)
+	}
+	if bytes.IndexByte(value, 0) >= 0 {
+		return EnvVar{}, validate.Errorf(field, "el valor de %q no puede contener el carácter NUL", key)
+	}
+	return EnvVar{Key: key, Value: value, Secret: secret, UpdatedAt: at}, nil
+}
+
+// NewEnvVars arma las variables de vars ordenadas por clave, todas con el
+// mismo secret. No revisa MaxVars: eso depende de la operación (CheckCount).
+func NewEnvVars(field string, vars map[string]string, secret bool, at time.Time) ([]EnvVar, error) {
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	out := make([]EnvVar, 0, len(keys))
+	for _, k := range keys {
+		v, err := NewEnvVar(field, k, []byte(vars[k]), secret, at)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// CheckCount revisa que un dueño no quede con más de MaxVars variables.
+func CheckCount(field string, n int) error {
+	if n > MaxVars {
+		return validate.Errorf(field, "máximo %d variables", MaxVars)
+	}
+	return nil
+}
+
+// Size es lo que ocupa la variable en el entorno: clave + valor, en bytes.
+func (v EnvVar) Size() int { return len(v.Key) + len(v.Value) }
+
+// TotalSize suma el Size de vars.
+func TotalSize(vars []EnvVar) int {
+	n := 0
+	for _, v := range vars {
+		n += v.Size()
+	}
+	return n
+}
+
+// CheckTotals revisa que un dueño que queda con count variables que suman
+// size bytes (claves + valores) no supere MaxVars ni MaxOwnerBytes.
+func CheckTotals(field string, count, size int) error {
+	if err := CheckCount(field, count); err != nil {
+		return err
+	}
+	if size > MaxOwnerBytes {
+		return validate.Errorf(field, "las variables suman más de 1 MiB (claves y valores)")
+	}
+	return nil
+}
+
+// CheckLimits revisa los límites de un dueño que queda con vars.
+func CheckLimits(field string, vars []EnvVar) error {
+	return CheckTotals(field, len(vars), TotalSize(vars))
+}
+
+// PatchTotals devuelve cuántas variables y cuántos bytes (claves + valores)
+// le quedan a un dueño después de agregar o reemplazar set y borrar unset.
+// current es clave → bytes de lo que ya tiene, así que no hace falta
+// descifrar lo guardado para medirlo. No modifica current.
+func PatchTotals(current map[string]int, set []EnvVar, unset []string) (count, size int) {
+	sizes := maps.Clone(current)
+	if sizes == nil {
+		sizes = map[string]int{}
+	}
+	for _, k := range unset {
+		delete(sizes, k)
+	}
+	for _, v := range set {
+		sizes[v.Key] = v.Size()
+	}
+	for _, n := range sizes {
+		size += n
+	}
+	return len(sizes), size
+}

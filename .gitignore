@@ -1,0 +1,9 @@
+/muelle
+*.db
+*.db-shm
+*.db-wal
+/data/
+/tmp/
+.env
+*.key
+muelle_master_key
