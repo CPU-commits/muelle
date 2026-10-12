@@ -21,6 +21,7 @@
 		copyInput,
 		copyRow,
 		createdText,
+		creator,
 		expiredText,
 		group,
 		groupCount,
@@ -30,6 +31,7 @@
 		headerText,
 		metaCell,
 		nameCell,
+		nameLine,
 		scopeCell,
 		screen,
 		snippet,
@@ -52,17 +54,19 @@
 {#snippet tokenRow(row: TokenRow, expired: boolean)}
 	<ListRow height="lg" muted={expired}>
 		<span class={nameCell}>
-			<Mono>{row.token.name}</Mono>
-			{#if row.isNew}
-				<Badge tone="strong" shape="pill">{m.identity_tokens_new()}</Badge>
+			<span class={nameLine}>
+				<Mono>{row.token.name}</Mono>
+				{#if row.isNew}
+					<Badge tone="strong" shape="pill">{m.identity_tokens_new()}</Badge>
+				{/if}
+			</span>
+			{#if row.creator}
+				<span class={creator}>{row.creator}</span>
 			{/if}
 		</span>
 		<span class={scopeCell}><Mono size={13} tone="secondary">{row.scope}</Mono></span>
 		<span class={metaCell}>{row.lastUsed}</span>
 		<span class={[metaCell, expired && expiredText]}>{row.expiry}</span>
-		{#if row.creator}
-			<span class={metaCell}>{row.creator}</span>
-		{/if}
 		<Button
 			variant="ghost"
 			size="sm"

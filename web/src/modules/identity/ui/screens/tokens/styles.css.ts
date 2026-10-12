@@ -88,9 +88,16 @@ export const groupCount = style({
 	color: theme.colors.text.tertiary,
 })
 
+// El nombre (con "nuevo") y, debajo, quién lo creó.
 export const nameCell = style({
 	flex: '1 1 200px',
 	minWidth: 0,
+	display: 'flex',
+	flexDirection: 'column',
+	gap: theme.space[2],
+})
+
+export const nameLine = style({
 	display: 'flex',
 	flexWrap: 'wrap',
 	alignItems: 'center',
@@ -99,14 +106,19 @@ export const nameCell = style({
 	overflowWrap: 'anywhere',
 })
 
+export const creator = style({
+	fontSize: theme.typography.fontSize[12],
+	color: theme.colors.text.tertiary,
+})
+
 export const scopeCell = style({
-	flex: '1 1 180px',
+	flex: '1 1 200px',
 	minWidth: 0,
 	overflowWrap: 'anywhere',
 })
 
 export const metaCell = style({
-	flex: '1 1 130px',
+	flex: '1 1 140px',
 	fontSize: theme.typography.fontSize[13],
 	color: theme.colors.text.tertiary,
 })
