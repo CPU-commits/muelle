@@ -76,3 +76,18 @@ export const initial = style({
 	fontSize: theme.typography.fontSize[11],
 	fontWeight: theme.typography.fontWeight.regular,
 })
+
+// El selector ("auditfy ⇅"): la misma forma del segmento, como botón.
+export const selector = style({
+	border: 'none',
+	background: 'transparent',
+	cursor: 'pointer',
+	selectors: {
+		'&[aria-expanded="true"]': { backgroundColor: theme.colors.background.raised },
+	},
+})
+
+export const chevron = style({
+	display: 'flex',
+	color: theme.colors.text.tertiary,
+})

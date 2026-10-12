@@ -29,7 +29,11 @@ export { default as Textarea } from './components/atoms/textarea/Textarea.svelte
 export { default as Banner } from './components/molecules/banner/Banner.svelte'
 export type { BannerTone } from './components/molecules/banner/styles.css'
 export { default as Breadcrumb } from './components/molecules/breadcrumb/Breadcrumb.svelte'
-export type { BreadcrumbItem } from './components/molecules/breadcrumb/types'
+export type {
+	BreadcrumbItem,
+	BreadcrumbLink,
+	BreadcrumbMenu,
+} from './components/molecules/breadcrumb/types'
 export { default as Card } from './components/molecules/card/Card.svelte'
 export type { CardTone } from './components/molecules/card/styles.css'
 export { default as CodeInput } from './components/molecules/codeInput/CodeInput.svelte'
