@@ -100,15 +100,16 @@ export class SectionSaver<V> {
 }
 
 /**
- * El formulario de una tarjeta. Valida al salir de un campo y, después del primer
- * intento de guardar, en cada cambio (`revalidateLogic`), con las mismas reglas que el
- * backend.
+ * El formulario de una tarjeta, con las mismas reglas que el backend. Valida al guardar
+ * y, después, en cada cambio (`revalidateLogic`). No al salir de un campo: un error que
+ * aparece o desaparece con el blur corre el botón "Guardar" entre el mousedown y el
+ * mouseup, y el clic se pierde.
  */
 export function createSectionForm<V>(app: () => ServiceApp, def: SectionDef<V>) {
 	const saver = new SectionSaver(app, def)
 	const form = createForm(() => ({
 		defaultValues: untrack(() => def.values(app())),
-		validationLogic: revalidateLogic({ mode: 'blur', modeAfterSubmission: 'change' }),
+		validationLogic: revalidateLogic(),
 		validators: {
 			onDynamic: ({ value }: { value: V }) => saver.validate(value),
 		},
