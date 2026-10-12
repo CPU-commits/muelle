@@ -198,6 +198,8 @@ export class EnvEditorViewModel {
 		toast.success(m.secrets_add_success(), savedKeyNote(this.kind, key))
 		this.newKey = ''
 		this.newValue = ''
+		// La siguiente vuelve a ser secreta: olvidarse de marcarla expondría su valor.
+		this.newSecret = true
 		return true
 	}
 

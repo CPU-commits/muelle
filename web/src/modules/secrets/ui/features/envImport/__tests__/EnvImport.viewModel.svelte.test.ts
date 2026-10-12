@@ -122,7 +122,10 @@ describe('EnvImportViewModel', () => {
 		expect(importer.open).toBe(false)
 		expect(importer.text).toBe('')
 		expect(editor.savedChanges).toBe(1)
-		expect(toasts.items.at(-1)).toMatchObject({ title: m.secrets_import_success() })
+		expect(toasts.items.at(-1)).toMatchObject({
+			title: m.secrets_import_success(),
+			description: m.secrets_imported_app(),
+		})
 	})
 
 	it('reemplazar todas pide confirmar antes de borrar las que no están', async () => {

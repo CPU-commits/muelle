@@ -129,6 +129,13 @@ export const updatedCell = style({
 	color: theme.colors.text.tertiary,
 })
 
+// Los ⋯ siempre al final de la fila, también cuando las columnas envuelven en un teléfono.
+export const rowActions = style({
+	display: 'inline-flex',
+	flex: 'none',
+	marginLeft: 'auto',
+})
+
 // --- Editar -----------------------------------------------------------------------
 
 export const editForm = style({

@@ -9,7 +9,7 @@ import {
 	patchLimitProblem,
 	planImport,
 } from '../../../domain'
-import { dotenvIssueMessage, limitMessage, savedNote } from '../../components/secretsMessages'
+import { dotenvIssueMessage, importedNote, limitMessage } from '../../components/secretsMessages'
 import type { EnvEditorViewModel } from '../envEditor'
 
 // "Importar .env": el texto pegado se parsea mientras se escribe, se compara con las
@@ -157,7 +157,7 @@ export class EnvImportViewModel {
 			return true
 		})
 		if (!applied) return false
-		toast.success(m.secrets_import_success(), savedNote(this.#editor.kind))
+		toast.success(m.secrets_import_success(), importedNote(this.#editor.kind))
 		this.close()
 		return true
 	}

@@ -156,7 +156,7 @@ describe('EnvEditorViewModel', () => {
 			})
 		})
 
-		it('sin marcar como secreta manda secret: false', async () => {
+		it('sin marcar como secreta manda secret: false, y la siguiente vuelve a ser secreta', async () => {
 			const vm = await mount()
 			vm.setNewKey('PUBLIC_URL')
 			vm.setNewValue('https://x')
@@ -165,6 +165,7 @@ describe('EnvEditorViewModel', () => {
 			await vm.submitAdd()
 
 			expect(lastPatch()).toMatchObject({ secret: false })
+			expect(vm.newSecret).toBe(true)
 		})
 
 		it('un 422 del backend queda junto al formulario, con su motivo', async () => {

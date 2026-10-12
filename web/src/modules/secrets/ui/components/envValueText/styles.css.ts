@@ -35,7 +35,7 @@ export const masked = style({
 })
 
 export const mask = style({
-	letterSpacing: '0.05em',
+	whiteSpace: 'nowrap',
 })
 
 // El candado, más apagado que el texto (como en el diseño).

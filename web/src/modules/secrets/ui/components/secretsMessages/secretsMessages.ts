@@ -116,6 +116,11 @@ export function savedNote(kind: EnvOwnerKind): string {
 	return kind === 'app' ? m.secrets_saved_app() : m.secrets_saved_stage()
 }
 
+/** Lo mismo para varias variables (importar un .env). */
+export function importedNote(kind: EnvOwnerKind): string {
+	return kind === 'app' ? m.secrets_imported_app() : m.secrets_imported_stage()
+}
+
 export function savedKeyNote(kind: EnvOwnerKind, key: string): string {
 	return kind === 'app' ? m.secrets_saved_key_app({ key }) : m.secrets_saved_key_stage({ key })
 }

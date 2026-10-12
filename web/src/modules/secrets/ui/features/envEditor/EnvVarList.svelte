@@ -21,6 +21,7 @@
 		listSection,
 		listTitle,
 		noResults,
+		rowActions,
 		searchBox,
 		updatedCell,
 		valueCell,
@@ -74,10 +75,12 @@
 					>
 						{formatRelative(envVar.updatedAt)}
 					</time>
-					<Menu
-						label={m.secrets_row_options({ key: envVar.key })}
-						items={vm.menuFor(envVar)}
-					/>
+					<span class={rowActions}>
+						<Menu
+							label={m.secrets_row_options({ key: envVar.key })}
+							items={vm.menuFor(envVar)}
+						/>
+					</span>
 				</ListRow>
 			{/each}
 		</List>
