@@ -27,7 +27,8 @@ type Server struct {
 
 // NewServer arma el mux y el Kit, y registra los errores comunes:
 // repository.ErrNotFound 404 not_found, ErrConflict 409 conflict, ErrNotEmpty 409 not_empty,
-// entity.ErrUnauthenticated 401 unauthenticated, entity.ErrForbidden 403 forbidden.
+// entity.ErrUnauthenticated 401 unauthenticated, entity.ErrForbidden 403 forbidden,
+// entity.ErrDockerUnavailable 503 docker_unavailable.
 // Hace panic si falta Auth o PanelOrigin: sin ellos ningún endpoint
 // autenticado ni ninguna escritura del panel podría funcionar.
 func NewServer(c Config) *Server {
@@ -48,6 +49,7 @@ func NewServer(c Config) *Server {
 	k.RegisterError(repository.ErrNotEmpty, http.StatusConflict, "not_empty", "primero hay que borrar lo que contiene")
 	k.RegisterError(entity.ErrUnauthenticated, http.StatusUnauthorized, "unauthenticated", "inicia sesión")
 	k.RegisterError(entity.ErrForbidden, http.StatusForbidden, "forbidden", "no tienes permiso para esta operación")
+	k.RegisterError(entity.ErrDockerUnavailable, http.StatusServiceUnavailable, "docker_unavailable", "Docker no responde; reintenta en unos segundos")
 	return &Server{mux: mux, kit: k, origin: c.PanelOrigin}
 }
 

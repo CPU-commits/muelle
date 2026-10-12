@@ -59,6 +59,8 @@ func newTestServer(t *testing.T) *Server {
 		"not_empty":       repository.ErrNotEmpty,
 		"unauthenticated": entity.ErrUnauthenticated,
 		"forbidden":       entity.ErrForbidden,
+
+		"docker_unavailable": entity.ErrDockerUnavailable,
 	}
 	k.HandlePublic("GET /api/v1/fail/{code}", func(w http.ResponseWriter, r *http.Request) {
 		k.Fail(w, r, fmt.Errorf("envuelto: %w", common[r.PathValue("code")]))
@@ -168,6 +170,8 @@ func TestCommonErrors(t *testing.T) {
 		"not_empty":       http.StatusConflict,
 		"unauthenticated": http.StatusUnauthorized,
 		"forbidden":       http.StatusForbidden,
+
+		"docker_unavailable": http.StatusServiceUnavailable,
 	}
 	for code, status := range want {
 		w := do(s, "GET", "/api/v1/fail/"+code, "")
