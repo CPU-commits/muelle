@@ -58,7 +58,9 @@ func (s *Server) Kit() *utils.Kit { return s.kit }
 // rechaza con 403 bad_origin las peticiones que modifican algo, sin Bearer y con un Origin distinto de PanelOrigin.
 // Una petición que no coincide con ninguna ruta responde en JSON, en vez del
 // texto plano del ServeMux: 405 method_not_allowed (con el header Allow) si la
-// ruta existe con otro método, y 404 not_found si no.
+// ruta existe con otro método, y 404 no_route si no. no_route es distinto de
+// not_found (un recurso que no existe en una ruta que sí existe): el panel lo
+// usa para saber que un endpoint todavía no está en el backend.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -88,7 +90,7 @@ func (s *Server) notMatched(w http.ResponseWriter, r *http.Request, h http.Handl
 		utils.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "método no permitido")
 		return
 	}
-	utils.WriteError(w, http.StatusNotFound, "not_found", "no existe")
+	utils.WriteError(w, http.StatusNotFound, "no_route", "la ruta no existe")
 }
 
 // originAllowed protege contra CSRF: toda petición que modifica algo y no

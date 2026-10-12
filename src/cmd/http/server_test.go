@@ -201,18 +201,24 @@ func TestMethodNotAllowedIsJSON(t *testing.T) {
 	}
 }
 
-// Una ruta que no existe responde el mismo JSON de error que el resto de la API.
+// Una ruta que no existe responde el mismo JSON de error que el resto de la
+// API, con el código no_route: el panel lo distingue de un recurso que no
+// existe (not_found) para saber que el endpoint todavía no está en el backend.
 func TestUnmatchedRouteIsJSON(t *testing.T) {
 	s := newTestServer(t)
-	for _, path := range []string{"/api/v1/no-existe", "/api/v1/projects", "/otra-cosa"} {
+	for _, path := range []string{"/api/v1/no-existe", "/api/v1/projects", "/otra-cosa", "/api/v1/projects/auditfy/stages/x/apps/y/deploys"} {
 		w := do(s, "GET", path, "")
 		if w.Code != http.StatusNotFound || w.Header().Get("Content-Type") != "application/json" {
 			t.Errorf("%s: %d %v %s", path, w.Code, w.Header(), w.Body.String())
 			continue
 		}
-		if got := strings.TrimSpace(w.Body.String()); got != `{"error":{"code":"not_found","message":"no existe"}}` {
+		if got := strings.TrimSpace(w.Body.String()); got != `{"error":{"code":"no_route","message":"la ruta no existe"}}` {
 			t.Errorf("%s: body=%s", path, got)
 		}
+	}
+	// Un recurso que no existe en una ruta que sí existe sigue siendo not_found.
+	if w := do(s, "GET", "/api/v1/fail/not_found", ""); w.Code != http.StatusNotFound || errorCode(t, w) != "not_found" {
+		t.Fatalf("recurso inexistente: %d %s", w.Code, w.Body.String())
 	}
 	// Las rutas registradas siguen respondiendo.
 	if w := do(s, "GET", "/api/v1/ping", ""); w.Code != http.StatusOK {
