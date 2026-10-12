@@ -3,6 +3,8 @@ export type { Email } from './email'
 export { isEmail, parseEmail } from './email'
 export type { DomainErrorCode, RoadmapPhase, UnavailableOptions } from './errors'
 export {
+	AmbiguousSessionError,
+	BadOriginError,
 	ConflictError,
 	DomainError,
 	ForbiddenError,

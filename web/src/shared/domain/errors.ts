@@ -59,6 +59,28 @@ export class ConflictError extends DomainError {
 	}
 }
 
+/**
+ * `bad_origin`: el backend rechazó una escritura porque el `Origin` no es el de
+ * `MUELLE_PANEL_ORIGIN`. Es de configuración, no del usuario.
+ */
+export class BadOriginError extends ForbiddenError {
+	constructor(options?: ErrorOptions) {
+		super('El panel no está en el origen configurado (MUELLE_PANEL_ORIGIN)', options)
+		this.name = 'BadOriginError'
+	}
+}
+
+/**
+ * `ambiguous_session`: el navegador mandó más de una cookie de sesión (otra app de un
+ * subdominio plantó la suya). Se arregla borrando las cookies del panel.
+ */
+export class AmbiguousSessionError extends UnauthorizedError {
+	constructor(options?: ErrorOptions) {
+		super('Hay más de una cookie de sesión', options)
+		this.name = 'AmbiguousSessionError'
+	}
+}
+
 /** Demasiados intentos (429) o un bloqueo temporal: hay que esperar, no reintentar ya. */
 export class RateLimitedError extends DomainError {
 	constructor(message: string, options?: ErrorOptions) {

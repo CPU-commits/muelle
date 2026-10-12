@@ -24,8 +24,17 @@ export function invalid(field: string, reason: string) {
 	return apiError(422, 'invalid', `${field}: ${reason}`)
 }
 
+/** Un recurso que no existe (un proyecto, un deploy). */
 export function notFound() {
 	return apiError(404, 'not_found', 'no existe')
+}
+
+/**
+ * Una ruta que no existe, como responde el backend a lo que todavía no implementa (Fase
+ * 2/3). `handlers/index.ts` la devuelve para toda ruta de la API sin handler.
+ */
+export function noRoute() {
+	return apiError(404, 'no_route', 'no existe la ruta')
 }
 
 export function noContent(): HttpResponse<null> {

@@ -1,4 +1,6 @@
 import {
+	AmbiguousSessionError,
+	BadOriginError,
 	ConflictError,
 	ForbiddenError,
 	NotFoundError,
@@ -9,7 +11,7 @@ import {
 	UnexpectedError,
 	ValidationError,
 } from '@/shared/domain'
-import { ApiError, NetworkError } from './errors'
+import { ApiError, NetworkError, RequestTimeoutError } from './errors'
 
 // La frontera donde el status HTTP muere (regla 4 del CLAUDE.md). Cada repositorio pasa
 // sus errores por acá: arriba nadie ve un 404, ven un error de dominio con su `code`.
@@ -26,10 +28,20 @@ export interface DomainErrorMap {
 	readonly fields?: Readonly<Record<string, string>>
 	/**
 	 * Endpoints de una fase que el backend todavía no tiene (deploys, dominios, registries…).
-	 * Un 404 o 405 ahí quiere decir que la RUTA no existe: se traduce a
-	 * `UnavailableError` con `phase`, y la pantalla muestra <ComingSoon>.
+	 * Si la RUTA no existe (404 `no_route`, o 405 `method_not_allowed` si existe con otro
+	 * método) se traduce a `UnavailableError` con `phase`, y la pantalla muestra
+	 * <ComingSoon>. Un 404 `not_found` es un recurso que no existe: eso no cambia.
 	 */
 	readonly phase?: RoadmapPhase
+}
+
+// Lo que manda el backend cuando la ruta no existe o no acepta ese método (cmd/http).
+const MISSING_ROUTE_CODES = new Set(['no_route', 'method_not_allowed'])
+
+// Códigos que cualquier endpoint puede devolver y que no dependen del módulo.
+const SHARED_CODES: Readonly<Record<string, (error: ApiError) => Error>> = {
+	bad_origin: (error) => new BadOriginError({ cause: error }),
+	ambiguous_session: (error) => new AmbiguousSessionError({ cause: error }),
 }
 
 const FIELD_MESSAGE = /^([A-Za-z0-9_.[\]-]+): (.+)$/s
@@ -45,13 +57,16 @@ export function toDomainError(error: unknown, map: DomainErrorMap = {}): unknown
 	if (error instanceof NetworkError) {
 		return new UnavailableError('No se pudo contactar al servidor', { cause: error })
 	}
+	if (error instanceof RequestTimeoutError) {
+		return new UnavailableError('El servidor tardó demasiado en responder', { cause: error })
+	}
 	// Un ContractError, un AbortError o un error de dominio ya traducido pasan tal cual.
 	if (!(error instanceof ApiError)) return error
 
-	const byCode = map.codes?.[error.code]
+	const byCode = map.codes?.[error.code] ?? SHARED_CODES[error.code]
 	if (byCode) return byCode(error)
 
-	if (map.phase !== undefined && (error.status === 404 || error.status === 405)) {
+	if (map.phase !== undefined && MISSING_ROUTE_CODES.has(error.code)) {
 		return new UnavailableError(`Llega con la Fase ${map.phase}`, {
 			phase: map.phase,
 			cause: error,

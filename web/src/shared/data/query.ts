@@ -1,8 +1,6 @@
 import { QueryClient } from '@tanstack/svelte-query'
 import { type DomainErrorCode, isDomainError, pendingPhase } from '@/shared/domain'
-import { ApiError } from '@/shared/data/http/errors'
-
-const NON_RETRYABLE_STATUS = [400, 401, 403, 404, 409, 422, 423, 429]
+import { ApiError, ContractError } from '@/shared/data/http/errors'
 
 // Cuando una query falla, lo que llega acá NO es un ApiError: el repositorio ya lo
 // tradujo a un error de dominio (un 404 es un `ProjectNotFound`). Mirar solo el status
@@ -14,14 +12,18 @@ const NON_RETRYABLE_CODES: readonly DomainErrorCode[] = [
 	'forbidden',
 	'conflict',
 	'rate_limited',
+	// Lo que no es 5xx ni red (un 400 `invalid_json`, un 410): reintentar da lo mismo.
+	'unexpected',
 ]
 
-// Un 4xx no se arregla reintentando, ni un endpoint de una fase que todavía no existe.
-// Solo se reintentan errores de red y 5xx.
+// Un 4xx no se arregla reintentando, ni un endpoint de una fase que todavía no existe, ni
+// una respuesta con otra forma (ContractError: el backend cambió). Solo se reintentan
+// errores de red, timeouts y 5xx.
 export function shouldRetry(failureCount: number, error: unknown): boolean {
 	if (pendingPhase(error) !== null) return false
+	if (error instanceof ContractError) return false
 	if (isDomainError(error) && NON_RETRYABLE_CODES.includes(error.code)) return false
-	if (error instanceof ApiError && NON_RETRYABLE_STATUS.includes(error.status)) return false
+	if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false
 	return failureCount < 2
 }
 

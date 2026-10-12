@@ -1,4 +1,5 @@
-import type { RequestHandler } from 'msw'
+import { http, type RequestHandler } from 'msw'
+import { api, noRoute } from '../api'
 import { adminHandlers } from './admin'
 import { authHandlers } from './auth'
 import { catalogHandlers } from './catalog'
@@ -18,4 +19,7 @@ export const handlers: RequestHandler[] = [
 	...adminHandlers,
 	...deployHandlers,
 	...ingressHandlers,
+	// Lo que nadie mockea responde como el backend a una ruta que no existe: 404 `no_route`
+	// (un repositorio de Fase 2/3 lo lee como "todavía no existe"). Va último.
+	http.all(api('/*'), () => noRoute()),
 ]

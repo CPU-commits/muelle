@@ -46,6 +46,19 @@ export class NetworkError extends Error {
 	}
 }
 
+/** La petición no terminó en `timeoutMs` (30 s por defecto, ver `HttpOptions`). */
+export class RequestTimeoutError extends Error {
+	readonly path: string
+	readonly timeoutMs: number
+
+	constructor(path: string, timeoutMs: number) {
+		super(`La petición a ${path} no respondió en ${timeoutMs} ms`)
+		this.name = 'RequestTimeoutError'
+		this.path = path
+		this.timeoutMs = timeoutMs
+	}
+}
+
 export class ContractError extends Error {
 	readonly detail: string
 

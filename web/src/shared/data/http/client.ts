@@ -1,7 +1,10 @@
 import { config } from '@/shared/data/config'
-import { type ApiError, apiErrorFromResponse, NetworkError } from './errors'
+import { type ApiError, apiErrorFromResponse, NetworkError, RequestTimeoutError } from './errors'
 
 export const API_PREFIX = '/api/v1'
+
+/** Lo que espera el cliente una respuesta antes de cortar (`timeoutMs` lo cambia). */
+export const DEFAULT_TIMEOUT_MS = 30_000
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -17,6 +20,8 @@ export interface HttpOptions {
 	 * defecto `true`: un 401 manda al login (ver `configureHttp`).
 	 */
 	redirectOn401?: boolean
+	/** Corta la petición si no terminó en este tiempo (por defecto 30 s). */
+	timeoutMs?: number
 }
 
 // El cliente no conoce el router: recibe qué hacer al arrancar la app (`configureHttp`
@@ -70,17 +75,26 @@ async function request<T>(method: HttpMethod, path: string, options: HttpOptions
 		headers['Content-Type'] = 'application/json'
 		init.body = JSON.stringify(options.body)
 	}
-	if (options.signal) init.signal = options.signal
+	// El timeout se suma a la señal de quien llama (TanStack Query cancela las queries que
+	// ya no se miran): la primera que salte corta la petición, y la razón dice cuál fue.
+	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+	const timeout = AbortSignal.timeout(timeoutMs)
+	init.signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
 
 	let response: Response
+	let raw: string
 	try {
 		response = await fetch(apiUrl(path, options.query), init)
+		raw = await response.text()
 	} catch (cause) {
+		if (timeout.aborted && !options.signal?.aborted) {
+			throw new RequestTimeoutError(path, timeoutMs)
+		}
 		if (cause instanceof DOMException && cause.name === 'AbortError') throw cause
+		if (options.signal?.aborted) throw options.signal.reason
 		throw new NetworkError(cause)
 	}
 
-	const raw = await response.text()
 	const payload: unknown = raw ? parseJson(raw) : null
 
 	if (response.ok) return payload as T

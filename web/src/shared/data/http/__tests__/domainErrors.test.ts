@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+	AmbiguousSessionError,
+	BadOriginError,
 	ConflictError,
 	ForbiddenError,
 	NotFoundError,
@@ -11,7 +13,7 @@ import {
 	ValidationError,
 } from '@/shared/domain'
 import { toDomainError, withDomainErrors } from '../domainErrors'
-import { ApiError, ContractError, NetworkError } from '../errors'
+import { ApiError, ContractError, NetworkError, RequestTimeoutError } from '../errors'
 
 const apiError = (status: number, code: string, message = 'mensaje') =>
 	new ApiError(status, code, message)
@@ -74,14 +76,43 @@ describe('toDomainError', () => {
 		expect(error).toBeInstanceOf(ProjectNotFound)
 	})
 
-	it('en un endpoint de Fase 2/3, un 404 o 405 es "todavía no existe"', () => {
-		const notYet = toDomainError(apiError(404, 'not_found'), { phase: 2 })
+	it('en un endpoint de Fase 2/3, la ruta que no existe es "todavía no existe"', () => {
+		const notYet = toDomainError(apiError(404, 'no_route'), { phase: 2 })
 		const method = toDomainError(apiError(405, 'method_not_allowed'), { phase: 3 })
 
 		expect(notYet).toBeInstanceOf(UnavailableError)
 		expect(pendingPhase(notYet)).toBe(2)
 		expect(pendingPhase(method)).toBe(3)
 		expect(pendingPhase(toDomainError(apiError(503, 'unknown'), { phase: 2 }))).toBeNull()
+	})
+
+	it('en un endpoint de Fase 2/3, un recurso que no existe sigue siendo not_found', () => {
+		const missing = toDomainError(apiError(404, 'not_found'), {
+			phase: 2,
+			notFound: () => new ProjectNotFound('no existe el deploy 9'),
+		})
+
+		expect(missing).toBeInstanceOf(ProjectNotFound)
+		expect(pendingPhase(missing)).toBeNull()
+	})
+
+	it('sin fase, una ruta inexistente es un NotFoundError común', () => {
+		expect(pendingPhase(toDomainError(apiError(404, 'no_route')))).toBeNull()
+		expect(toDomainError(apiError(404, 'no_route'))).toBeInstanceOf(NotFoundError)
+	})
+
+	it('bad_origin y ambiguous_session tienen su propio error, en cualquier módulo', () => {
+		expect(toDomainError(apiError(403, 'bad_origin'))).toBeInstanceOf(BadOriginError)
+		expect(toDomainError(apiError(400, 'ambiguous_session'))).toBeInstanceOf(
+			AmbiguousSessionError,
+		)
+	})
+
+	it('una petición que tardó demasiado es un servicio no disponible', () => {
+		const error = toDomainError(new RequestTimeoutError('/projects', 30_000))
+
+		expect(error).toBeInstanceOf(UnavailableError)
+		expect(pendingPhase(error)).toBeNull()
 	})
 
 	it('deja pasar lo que no es un ApiError', () => {
