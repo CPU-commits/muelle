@@ -7,7 +7,7 @@ import { identityDb } from '@/mocks/db/identity'
 import { server } from '@/mocks/server'
 import { pendingPhase, UnavailableError, ValidationError } from '@/shared/domain'
 import { adminUseCases } from '../container'
-import { InvalidCidr, RegistryExists, TotpRequiredFirst } from '../domain'
+import { AUDIT_PAGE_SIZE, InvalidCidr, RegistryExists, TotpRequiredFirst } from '../domain'
 
 // Recorre el módulo entero contra el backend simulado (src/mocks/handlers/admin.ts). Los
 // mocks responden como el backend con las Fases 2 y 3; con `server.use` se simula el de la
@@ -136,14 +136,22 @@ describe('settings', () => {
 describe('auditoría', () => {
 	it('pagina con before, de la más nueva a la más vieja, sin details', async () => {
 		const first = await adminUseCases.listAudit()
-		const second = await adminUseCases.listAudit({ before: first.nextBefore })
+		const pages = [first]
+		let next = first.nextBefore
+		while (next !== null) {
+			const page = await adminUseCases.listAudit({ before: next })
+			pages.push(page)
+			next = page.nextBefore
+		}
 
-		expect(first.events).toHaveLength(25)
+		expect(first.events).toHaveLength(AUDIT_PAGE_SIZE)
 		expect(first.events[0]?.id).toBe(MOCK_AUDIT_SEED_COUNT)
-		expect(first.nextBefore).toBe(MOCK_AUDIT_SEED_COUNT - 24)
-		expect(second.events).toHaveLength(MOCK_AUDIT_SEED_COUNT - 25)
-		expect(second.events.at(-1)?.id).toBe(1)
-		expect(second.nextBefore).toBeNull()
+		expect(first.nextBefore).toBe(MOCK_AUDIT_SEED_COUNT - AUDIT_PAGE_SIZE + 1)
+		const ids = pages.flatMap((page) => page.events.map((event) => event.id))
+		// Todos, una sola vez, en orden: el último pedido viene vacío o incompleto.
+		expect(ids).toEqual(
+			Array.from({ length: MOCK_AUDIT_SEED_COUNT }, (_, i) => MOCK_AUDIT_SEED_COUNT - i),
+		)
 		expect(first.events[0]).not.toHaveProperty('details')
 	})
 

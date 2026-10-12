@@ -12,6 +12,7 @@ export type {
 export { PROXY_SETTINGS_PHASE } from './entities/settings'
 export type { PortProblem } from './errors/adminErrors'
 export {
+	InvalidAcmeEmail,
 	InvalidCidr,
 	InvalidIpAddress,
 	InvalidPort,

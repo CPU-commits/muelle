@@ -67,6 +67,13 @@ export class InvalidPort extends ValidationError {
 	}
 }
 
+export class InvalidAcmeEmail extends ValidationError {
+	constructor() {
+		super('No es un email válido', 'acmeEmail')
+		this.name = 'InvalidAcmeEmail'
+	}
+}
+
 export class InvalidRegistryHost extends ValidationError {
 	constructor() {
 		super('Un host como ghcr.io o registry.example.com:5000', 'host')

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ValidationError } from '@/shared/domain'
 import {
+	InvalidAcmeEmail,
 	InvalidIpAddress,
 	InvalidPort,
 	makeReplaceCloudflareToken,
@@ -38,8 +38,8 @@ describe('ajustes de proxy y DNS', () => {
 		const error = await update('ops@').catch((caught: unknown) => caught)
 
 		expect(settings.patches).toEqual([{ acmeEmail: 'ops@tudominio.cl' }])
-		expect(error).toBeInstanceOf(ValidationError)
-		expect((error as ValidationError).field).toBe('acmeEmail')
+		expect(error).toBeInstanceOf(InvalidAcmeEmail)
+		expect((error as InvalidAcmeEmail).field).toBe('acmeEmail')
 	})
 
 	it('puertos: los dos, distintos', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { makeListAudit } from '../..'
+import { AUDIT_PAGE_SIZE, makeListAudit } from '../..'
 import {
 	fakeAuditEvents,
 	InMemoryAuditRepository,
@@ -29,6 +29,6 @@ describe('listAudit', () => {
 		const audit = new InMemoryAuditRepository([])
 
 		await expect(makeListAudit({ audit })()).resolves.toEqual({ events: [], nextBefore: null })
-		expect(audit.queries).toEqual([{ limit: 25 }])
+		expect(audit.queries).toEqual([{ limit: AUDIT_PAGE_SIZE }])
 	})
 })
