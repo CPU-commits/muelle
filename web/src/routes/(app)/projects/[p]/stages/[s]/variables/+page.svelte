@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { resolve } from '$app/paths'
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
-	import { Breadcrumb, EmptyState, PageHeader, ShellHeader } from '@/shared/ui'
+	import { Breadcrumb, ShellHeader } from '@/shared/ui'
+	import { StageVariablesScreen } from '@/modules/secrets'
 	import type { PageProps } from './$types'
 
 	let { params }: PageProps = $props()
 </script>
 
-<!-- Placeholder de F0: lo reemplaza F1-secrets con las variables del stage. -->
 <ShellHeader>
 	{#snippet breadcrumb()}
 		<Breadcrumb
@@ -22,5 +22,7 @@
 	{/snippet}
 </ShellHeader>
 
-<PageHeader title={m.nav_stage_variables()} />
-<EmptyState icon="clock" title={m.common_wip_title()} body={m.common_wip_body()} />
+<!-- El `key`: al cambiar de stage la pantalla arranca de cero (sin un .env a medio importar). -->
+{#key `${params.p}/${params.s}`}
+	<StageVariablesScreen project={params.p} stage={params.s} />
+{/key}
