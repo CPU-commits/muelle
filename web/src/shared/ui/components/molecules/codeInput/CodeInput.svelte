@@ -55,6 +55,8 @@
 		element.focus()
 	}
 
+	// Sin `maxlength`: el navegador cortaría "123 456" (pegado como lo muestran las apps)
+	// en "123 45" antes de que se puedan sacar los espacios. Se limpia y se corta acá.
 	function handleInput(event: Event & { currentTarget: HTMLInputElement }): void {
 		const digits = event.currentTarget.value.replace(/\D/g, '').slice(0, length)
 		event.currentTarget.value = digits
@@ -74,7 +76,6 @@
 		inputmode="numeric"
 		autocomplete="one-time-code"
 		pattern="[0-9]*"
-		maxlength={length}
 		aria-label={label}
 		{disabled}
 		{value}

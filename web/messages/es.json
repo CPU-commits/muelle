@@ -18,6 +18,7 @@
 	"common_required": "Este campo es obligatorio",
 	"common_error_generic": "Algo salió mal. Vuelve a intentar.",
 	"common_unavailable": "No se pudo contactar a muelle. Revisa la conexión y vuelve a intentar.",
+	"common_copy_failed_short": "No se pudo copiar",
 	"common_copy_failed": "No se pudo copiar. Selecciónalo y cópialo a mano.",
 	"common_load_more": "Cargar más",
 	"common_no_more": "No hay más",

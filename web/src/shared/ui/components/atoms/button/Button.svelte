@@ -18,6 +18,10 @@
 	type Props = HTMLButtonAttributes & {
 		variant?: ButtonVariant
 		size?: ButtonSize
+		/**
+		 * Mientras carga no responde al clic, pero no se deshabilita: un botón `disabled`
+		 * pierde el foco y el lector de pantalla se queda sin dónde estar.
+		 */
 		loading?: boolean
 		/** Cuadrado, para un ícono solo. Pasale `aria-label`. */
 		iconOnly?: boolean
@@ -34,15 +38,27 @@
 		disabled = false,
 		type = 'button',
 		class: className,
+		onclick,
 		children,
 		...rest
 	}: Props = $props()
+
+	// Cargando, un clic (o el Enter que manda un formulario) no hace nada: preventDefault
+	// también frena el submit de un type="submit".
+	function handleClick(event: MouseEvent & { currentTarget: EventTarget & HTMLButtonElement }) {
+		if (loading) {
+			event.preventDefault()
+			return
+		}
+		onclick?.(event)
+	}
 </script>
 
 <button
 	{...rest}
 	{type}
-	disabled={disabled || loading}
+	{disabled}
+	aria-disabled={loading || undefined}
 	aria-busy={loading}
 	class={[
 		base,
@@ -52,9 +68,10 @@
 		fullWidth && fullWidthClass,
 		className,
 	]}
+	onclick={handleClick}
 >
 	{#if loading}
-		<span class={spinnerSlot}><Spinner size="sm" /></span>
+		<span class={spinnerSlot}><Spinner size="sm" decorative /></span>
 	{/if}
 	<span class={[content, loading && contentHidden]}>{@render children()}</span>
 </button>

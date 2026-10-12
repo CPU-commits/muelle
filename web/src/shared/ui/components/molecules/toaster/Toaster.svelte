@@ -15,11 +15,31 @@
 	} from './styles.css'
 
 	const DOT_BY_TONE: Record<ToastTone, StatusTone> = { success: 'ok', error: 'bad', info: 'idle' }
+
+	// Si el foco sale de un aviso hacia otro aviso, la cuenta sigue en pausa.
+	function onFocusOut(event: FocusEvent & { currentTarget: HTMLElement }): void {
+		const next = event.relatedTarget
+		if (!(next instanceof Node) || !event.currentTarget.parentElement?.contains(next)) {
+			toasts.resume()
+		}
+	}
 </script>
 
-<div aria-live="polite" class={region}>
+<!-- Una sola región viva (polite): cada aviso nuevo se lee una vez, sin roles anidados
+     que lo anuncien de nuevo. -->
+<div aria-live="polite" aria-relevant="additions" class={region}>
 	{#each toasts.items as item (item.id)}
-		<div class={toast} role={item.tone === 'error' ? 'alert' : 'status'}>
+		<!-- Pausar con el puntero encima es un extra del mouse; con teclado lo hacen
+		     focusin/focusout. Un role acá volvería a anidar roles en la región viva. -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class={toast}
+			data-toast={item.tone}
+			onmouseenter={() => toasts.pause()}
+			onmouseleave={() => toasts.resume()}
+			onfocusin={() => toasts.pause()}
+			onfocusout={onFocusOut}
+		>
 			<span class={dot}><StatusDot status={DOT_BY_TONE[item.tone]} /></span>
 			<div class={content}>
 				<p class={titleClass}>{item.title}</p>

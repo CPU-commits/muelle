@@ -110,8 +110,9 @@ export const content = style({
 	gap: theme.space[6],
 })
 
-// Mientras carga, el contenido ocupa su lugar sin verse: el botón no cambia de ancho.
-export const contentHidden = style({ visibility: 'hidden' })
+// Mientras carga, el contenido ocupa su lugar sin verse (el botón no cambia de ancho) y
+// sigue siendo su nombre accesible: con `visibility: hidden` el botón se quedaría sin nombre.
+export const contentHidden = style({ opacity: 0 })
 
 export const spinnerSlot = style({
 	position: 'absolute',
