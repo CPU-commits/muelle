@@ -66,3 +66,37 @@ test('de una app a Proyectos, al stage y entre tabs, sin errores', async ({ page
 
 	expect(errors).toEqual([])
 })
+
+// Resumen, Deploys, Logs y Dominios (F1-deploy-ingress): de cada una a Proyectos, de vuelta
+// con el historial y a las variables del stage, con sus streams y su polling corriendo.
+// Ningún pedido puede salir con los params vacíos (`/projects/undefined/…`).
+for (const { path, heading } of [
+	{ path: '', heading: 'api' },
+	{ path: '/deploys', heading: 'Deploys' },
+	{ path: '/logs', heading: 'Logs' },
+	{ path: '/dominios', heading: 'Dominios' },
+]) {
+	test(`de ${heading} (app) a Proyectos y al stage, sin errores`, async ({ page }) => {
+		const errors = watchErrors(page)
+		page.on('request', (request) => {
+			if (request.url().includes('/undefined')) errors.push(`pedido: ${request.url()}`)
+		})
+		await login(page)
+
+		await page.goto(`/projects/auditfy/stages/staging/apps/api${path}`)
+		await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+
+		await page.getByRole('link', { name: 'muelle, inicio' }).click()
+		await expect(page.getByRole('heading', { name: 'Proyectos' })).toBeVisible()
+		await expect(tabs(page)).toHaveCount(0)
+
+		await page.goBack()
+		await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+
+		await location(page).getByRole('link', { name: 'staging' }).click()
+		await expect(page.getByRole('heading', { name: 'Variables del stage' })).toBeVisible()
+		await expect(tabs(page)).toHaveCount(0)
+
+		expect(errors).toEqual([])
+	})
+}
