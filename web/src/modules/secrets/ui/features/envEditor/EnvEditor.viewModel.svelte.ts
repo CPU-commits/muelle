@@ -95,6 +95,7 @@ export class EnvEditorViewModel {
 
 	focusRequest = $state.raw<FocusRequest | null>(null)
 
+	#focusSeq = 0
 	readonly #owner: () => EnvOwner
 	readonly #overridden: () => ReadonlySet<string>
 	readonly #client = useQueryClient()
@@ -186,8 +187,14 @@ export class EnvEditorViewModel {
 		return this.focusRequest && this.focusRequest.key === null ? this.focusRequest.seq : 0
 	}
 
+	/** La vista ya movió el foco: el pedido se olvida (un re-render no lo repite). */
+	focusDone = (seq: number): void => {
+		if (this.focusRequest?.seq === seq) this.focusRequest = null
+	}
+
 	#focus(key: string | null): void {
-		this.focusRequest = { key, seq: (this.focusRequest?.seq ?? 0) + 1 }
+		this.#focusSeq += 1
+		this.focusRequest = { key, seq: this.#focusSeq }
 	}
 
 	// --- Agregar ---------------------------------------------------------------------

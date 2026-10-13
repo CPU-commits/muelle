@@ -45,7 +45,7 @@
 				id={`${id}-title`}
 				class={listTitle}
 				tabindex="-1"
-				{@attach focusOnRequest(() => vm.headingFocusSeq)}
+				{@attach focusOnRequest(() => vm.headingFocusSeq, vm.focusDone)}
 			>
 				{title}
 			</h2>
@@ -86,7 +86,11 @@
 					</time>
 					<span
 						class={rowActions}
-						{@attach focusOnRequest(() => vm.focusSeqFor(envVar.key), 'button')}
+						{@attach focusOnRequest(
+							() => vm.focusSeqFor(envVar.key),
+							vm.focusDone,
+							'button',
+						)}
 					>
 						<Menu
 							label={m.secrets_row_options({ key: envVar.key })}

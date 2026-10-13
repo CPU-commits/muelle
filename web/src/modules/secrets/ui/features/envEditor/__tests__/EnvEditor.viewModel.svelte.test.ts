@@ -414,6 +414,19 @@ describe('EnvEditorViewModel', () => {
 			expect(vm.headingFocusSeq).toBe(0)
 		})
 
+		it('un pedido cumplido se olvida: un re-render de la fila no vuelve a mover el foco', async () => {
+			const vm = await mount()
+			vm.openEdit(byKey(vm, 'PORT'))
+			vm.closeEdit()
+			const seq = vm.focusSeqFor('PORT')
+
+			vm.focusDone(seq - 1)
+			expect(vm.focusSeqFor('PORT')).toBe(seq)
+			vm.focusDone(seq)
+			expect(vm.focusSeqFor('PORT')).toBe(0)
+			expect(vm.focusRequest).toBeNull()
+		})
+
 		it('si la fila se borró, va al título de la lista', async () => {
 			const vm = await mount()
 			vm.askDelete(byKey(vm, 'PORT'))
