@@ -1,6 +1,9 @@
 package settings
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -8,7 +11,9 @@ import (
 // clearEnv aísla el test del entorno del que lo ejecuta (un valor vacío cuenta como no definido).
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"MUELLE_LISTEN", "MUELLE_DATA_DIR", "MUELLE_MASTER_KEY_FILE", "MUELLE_PANEL_ORIGIN", "MUELLE_SECURE_COOKIES"} {
+	for _, k := range []string{"MUELLE_LISTEN", "MUELLE_DATA_DIR", "MUELLE_MASTER_KEY_FILE", "MUELLE_PANEL_ORIGIN", "MUELLE_SECURE_COOKIES",
+		"MUELLE_INIT_PUBLIC_IP", "MUELLE_INIT_PUBLIC_IPV6", "MUELLE_INIT_ACME_EMAIL", "MUELLE_INIT_PROXY_HTTP_PORT",
+		"MUELLE_INIT_PROXY_HTTPS_PORT", "MUELLE_INIT_CLOUDFLARE_TOKEN_FILE", "MUELLE_INIT_CADDY_IMAGE"} {
 		t.Setenv(k, "")
 	}
 }
@@ -150,5 +155,94 @@ func TestLoadRejectsBadBool(t *testing.T) {
 	t.Setenv("MUELLE_SECURE_COOKIES", "quizás")
 	if _, err := Load(); err == nil {
 		t.Fatal("debió fallar")
+	}
+}
+
+// La configuración inicial de install (MUELLE_INIT_*, Fase 5) se valida al
+// arrancar: un valor que no sirve impide arrancar, con el nombre de la variable.
+func TestLoadInit(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("MUELLE_PANEL_ORIGIN", "https://panel.tudominio.cl:8443")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(c.Init, Init{}) {
+		t.Fatalf("sin MUELLE_INIT_*: %+v", c.Init)
+	}
+
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("cf-token-1234567890abcdef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MUELLE_INIT_PUBLIC_IP", "203.0.113.7")
+	t.Setenv("MUELLE_INIT_PUBLIC_IPV6", "2001:db8::7")
+	t.Setenv("MUELLE_INIT_ACME_EMAIL", "tu@correo.cl")
+	t.Setenv("MUELLE_INIT_PROXY_HTTP_PORT", "8080")
+	t.Setenv("MUELLE_INIT_PROXY_HTTPS_PORT", "8443")
+	t.Setenv("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE", tokenFile)
+	t.Setenv("MUELLE_INIT_CADDY_IMAGE", "ghcr.io/cpu-commits/muelle-caddy:v0.1.0")
+	c, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Init{
+		PublicIP: "203.0.113.7", PublicIPv6: "2001:db8::7", ACMEEmail: "tu@correo.cl",
+		ProxyHTTPPort: 8080, ProxyHTTPSPort: 8443, CloudflareToken: "cf-token-1234567890abcdef",
+		CaddyImage: "ghcr.io/cpu-commits/muelle-caddy:v0.1.0",
+	}
+	if !reflect.DeepEqual(c.Init, want) {
+		t.Fatalf("Init=%+v\nesperaba %+v", c.Init, want)
+	}
+}
+
+func TestLoadRejectsBadInit(t *testing.T) {
+	for key, value := range map[string]string{
+		"MUELLE_INIT_PUBLIC_IP":             "203.0.113",
+		"MUELLE_INIT_PUBLIC_IPV6":           "203.0.113.7",
+		"MUELLE_INIT_ACME_EMAIL":            "sin-arroba",
+		"MUELLE_INIT_PROXY_HTTP_PORT":       "ochenta",
+		"MUELLE_INIT_PROXY_HTTPS_PORT":      "70000",
+		"MUELLE_INIT_CLOUDFLARE_TOKEN_FILE": "/no/existe/token",
+		"MUELLE_INIT_CADDY_IMAGE":           "-mala",
+	} {
+		clearEnv(t)
+		t.Setenv("MUELLE_PANEL_ORIGIN", "https://panel.tudominio.cl")
+		t.Setenv(key, value)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("%s=%q: el error debe nombrar la variable: %v", key, value, err)
+		}
+	}
+	// Los puertos del proxy tienen que ser distintos (con los por defecto, 80 y 443).
+	clearEnv(t)
+	t.Setenv("MUELLE_PANEL_ORIGIN", "https://panel.tudominio.cl")
+	t.Setenv("MUELLE_INIT_PROXY_HTTP_PORT", "443")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "MUELLE_INIT_PROXY_HTTPS_PORT") {
+		t.Errorf("puertos iguales: %v", err)
+	}
+	// Un archivo de token vacío es un error, no "sin token".
+	empty := filepath.Join(t.TempDir(), "vacio")
+	os.WriteFile(empty, []byte("\n"), 0o600)
+	clearEnv(t)
+	t.Setenv("MUELLE_PANEL_ORIGIN", "https://panel.tudominio.cl")
+	t.Setenv("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE", empty)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "MUELLE_INIT_CLOUDFLARE_TOKEN_FILE") {
+		t.Errorf("token vacío: %v", err)
+	}
+}
+
+// panel_domain sale del origen: el host si es un dominio, "" si es una IP o
+// localhost (desarrollo, sin proxy).
+func TestPanelDomain(t *testing.T) {
+	for origin, want := range map[string]string{
+		"https://panel.tudominio.cl":      "panel.tudominio.cl",
+		"https://panel.tudominio.cl:8443": "panel.tudominio.cl",
+		"http://127.0.0.1:18080":          "",
+		"http://localhost:8080":           "",
+		"https://[2001:db8::1]":           "",
+	} {
+		if got := (Settings{PanelOrigin: origin}).PanelDomain(); got != want {
+			t.Errorf("PanelDomain(%q) = %q, esperaba %q", origin, got, want)
+		}
 	}
 }

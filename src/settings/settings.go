@@ -9,6 +9,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
 
 type Settings struct {
@@ -17,6 +19,40 @@ type Settings struct {
 	MasterKeyFile string // MUELLE_MASTER_KEY_FILE, por defecto "/run/secrets/muelle_master_key"
 	PanelOrigin   string // MUELLE_PANEL_ORIGIN, obligatorio, ej. "https://panel.tudominio.cl"
 	SecureCookies bool   // MUELLE_SECURE_COOKIES, por defecto true
+
+	// Init es la configuración inicial que install le pasa al primer arranque
+	// (MUELLE_INIT_*, Fase 5). admin la guarda solo en las claves que todavía
+	// no están: después mandan los cambios del panel.
+	Init Init
+
+	// Version es la de este binario (main.version, por -ldflags al compilar
+	// la imagen). No viene del entorno: la pone main después de Load.
+	Version string
+}
+
+// Init son las variables MUELLE_INIT_* que escribe install en el servicio de
+// muelle. Lo que no está queda en cero.
+type Init struct {
+	PublicIP        string // MUELLE_INIT_PUBLIC_IP (IPv4)
+	PublicIPv6      string // MUELLE_INIT_PUBLIC_IPV6
+	ACMEEmail       string // MUELLE_INIT_ACME_EMAIL
+	ProxyHTTPPort   int    // MUELLE_INIT_PROXY_HTTP_PORT (el proxy usa 80 si no está)
+	ProxyHTTPSPort  int    // MUELLE_INIT_PROXY_HTTPS_PORT (443 si no está)
+	CloudflareToken string // el contenido de MUELLE_INIT_CLOUDFLARE_TOKEN_FILE (un secreto Swarm)
+	CaddyImage      string // MUELLE_INIT_CADDY_IMAGE: fija la imagen de muelle-caddy
+}
+
+// PanelDomain es el host de PanelOrigin si es un dominio (el que enruta
+// Caddy, settings panel_domain); "" si es una IP o localhost (desarrollo).
+func (s Settings) PanelDomain() string {
+	u, err := url.Parse(s.PanelOrigin)
+	if err != nil {
+		return ""
+	}
+	if host := u.Hostname(); validate.Hostname("", host) == nil {
+		return host
+	}
+	return ""
 }
 
 func Load() (Settings, error) {
@@ -40,7 +76,74 @@ func Load() (Settings, error) {
 	if strings.HasPrefix(c.PanelOrigin, "https://") && !c.SecureCookies {
 		return Settings{}, errors.New("MUELLE_SECURE_COOKIES: no puede ser false con un MUELLE_PANEL_ORIGIN https")
 	}
+	init, err := loadInit()
+	if err != nil {
+		return Settings{}, err
+	}
+	c.Init = init
 	return c, nil
+}
+
+// loadInit lee y valida MUELLE_INIT_*. Los errores empiezan con el nombre de
+// la variable (validate.Error usa el nombre como campo).
+func loadInit() (Init, error) {
+	var in Init
+	text := []struct {
+		key   string
+		dst   *string
+		check func(field, s string) error
+	}{
+		{"MUELLE_INIT_PUBLIC_IP", &in.PublicIP, validate.IPv4},
+		{"MUELLE_INIT_PUBLIC_IPV6", &in.PublicIPv6, validate.IPv6},
+		{"MUELLE_INIT_ACME_EMAIL", &in.ACMEEmail, validate.Email},
+		{"MUELLE_INIT_CADDY_IMAGE", &in.CaddyImage, validate.ImageRef},
+	}
+	for _, v := range text {
+		s := os.Getenv(v.key)
+		if s == "" {
+			continue
+		}
+		if err := v.check(v.key, s); err != nil {
+			return Init{}, err
+		}
+		*v.dst = s
+	}
+	for key, dst := range map[string]*int{"MUELLE_INIT_PROXY_HTTP_PORT": &in.ProxyHTTPPort, "MUELLE_INIT_PROXY_HTTPS_PORT": &in.ProxyHTTPSPort} {
+		s := os.Getenv(key)
+		if s == "" {
+			continue
+		}
+		n, err := strconv.Atoi(s)
+		if err != nil || strconv.Itoa(n) != s {
+			return Init{}, fmt.Errorf("%s: %q no es un puerto", key, s)
+		}
+		if err := validate.Port(key, n); err != nil {
+			return Init{}, err
+		}
+		*dst = n
+	}
+	http, https := in.ProxyHTTPPort, in.ProxyHTTPSPort
+	if http == 0 {
+		http = 80
+	}
+	if https == 0 {
+		https = 443
+	}
+	if http == https {
+		return Init{}, fmt.Errorf("MUELLE_INIT_PROXY_HTTPS_PORT: no puede ser el mismo que el puerto HTTP del proxy (%d)", http)
+	}
+	if path := os.Getenv("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE"); path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return Init{}, fmt.Errorf("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE: %w", err)
+		}
+		token := strings.TrimSpace(string(b))
+		if token == "" || strings.ContainsAny(token, " \t\r\n") {
+			return Init{}, fmt.Errorf("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE: %s no tiene un token (una sola línea, sin espacios)", path)
+		}
+		in.CloudflareToken = token
+	}
+	return in, nil
 }
 
 // validateOrigin exige el origen canónico (esquema + host[:puerto]), tal como
