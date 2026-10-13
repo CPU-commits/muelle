@@ -1,6 +1,7 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import type { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { UnavailableError } from '@/shared/domain'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
@@ -30,9 +31,7 @@ vi.mock('@/modules/auth/container', () => ({
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }))
 
 async function mountViewModel(): Promise<{ vm: SessionShellViewModel; client: QueryClient }> {
-	const client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
+	const client = createQueryClient({ retry: false })
 	let vm: SessionShellViewModel | undefined
 	await render(SessionShellHarness, {
 		client,

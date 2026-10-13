@@ -1,6 +1,6 @@
-import { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import type { InviteViewModel } from '..'
 import { InvalidInvite } from '../../../../domain'
@@ -30,7 +30,7 @@ vi.mock('$app/navigation', () => ({ goto: mocks.goto, replaceState: mocks.replac
 const values = { username: 'soporte', password: 'clave-de-soporte', passwordRepeat: '' }
 
 async function mountViewModel(token: string | null): Promise<InviteViewModel> {
-	const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+	const client = createQueryClient({ retry: false })
 	let vm: InviteViewModel | undefined
 	await render(InviteHarness, { client, token, onReady: (instance) => (vm = instance) })
 	if (!vm) throw new Error('el harness no expuso el viewModel')

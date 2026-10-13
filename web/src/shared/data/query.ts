@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import { type DefaultOptions, QueryClient } from '@tanstack/svelte-query'
 import { type DomainErrorCode, isDomainError, pendingPhase } from '@/shared/domain'
 import { ApiError, ContractError } from '@/shared/data/http/errors'
 
@@ -27,16 +27,33 @@ export function shouldRetry(failureCount: number, error: unknown): boolean {
 	return failureCount < 2
 }
 
+type QueryDefaults = NonNullable<DefaultOptions['queries']>
+
+const QUERY_DEFAULTS: QueryDefaults = {
+	staleTime: 30_000,
+	refetchOnWindowFocus: false,
+	retry: shouldRetry,
+	// Por defecto TanStack solo avisa cambios de las propiedades que ya se leyeron. Un
+	// viewModel que mira `data` primero (y `error` recién cuando deja de "cargar") no se
+	// enteraba del error: `data` no cambia, nadie avisa, y la pantalla quedaba cargando.
+	// Con 'all' cualquier cambio del resultado llega.
+	notifyOnChangeProps: 'all',
+}
+
+/**
+ * Un QueryClient con las opciones del panel. Los tests de viewModels usan este, con lo que
+ * cambie el test encima: `createQueryClient({ retry: false })`.
+ */
+export function createQueryClient(queries: QueryDefaults = {}): QueryClient {
+	return new QueryClient({
+		defaultOptions: {
+			queries: { ...QUERY_DEFAULTS, ...queries },
+			mutations: { retry: false },
+		},
+	})
+}
+
 // Un único QueryClient de módulo es seguro porque la app es SPA: no hay requests de
 // servidor concurrentes que puedan compartir cache entre usuarios. Al cerrar sesión se
 // vacía (`queryClient.clear()`), para que el siguiente usuario no vea datos del anterior.
-export const queryClient = new QueryClient({
-	defaultOptions: {
-		queries: {
-			staleTime: 30_000,
-			refetchOnWindowFocus: false,
-			retry: shouldRetry,
-		},
-		mutations: { retry: false },
-	},
-})
+export const queryClient = createQueryClient()

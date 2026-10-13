@@ -1,6 +1,7 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import type { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import type { LoginStep, LoginViewModel } from '..'
 import { AccountLocked, InvalidCode, InvalidCredentials, SessionExpired } from '../../../../domain'
@@ -33,9 +34,7 @@ vi.mock('$app/navigation', () => ({ goto: mocks.goto }))
 let client: QueryClient
 
 async function mountViewModel(initialStep?: LoginStep): Promise<LoginViewModel> {
-	client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
+	client = createQueryClient({ retry: false })
 	let vm: LoginViewModel | undefined
 	await render(LoginHarness, {
 		client,
