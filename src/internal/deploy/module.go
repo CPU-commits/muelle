@@ -1,0 +1,97 @@
+// Package deploy es el módulo de los deploys (Fase 2): render del compose,
+// cola por app, resolución de digests, docker stack deploy, convergencia, log,
+// rollback, reconciliación al arrancar, estado y logs en vivo de las apps, y
+// los registries con sus credenciales (§5.1, §6, §7 y §10 del spec). module.go
+// es el único lugar que conoce todas sus piezas.
+//
+// Esqueleto de la etapa de contratos: RemoveApp ya funciona (lo usa catalog al
+// borrar una app); las rutas todavía no existen (404 no_route). El contrato
+// está en docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md.
+package deploy
+
+import (
+	"context"
+	"log/slog"
+
+	"github.com/CPU-commits/muelle/src/cmd/cron"
+	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	"github.com/CPU-commits/muelle/src/internal/deploy/app/dto"
+	"github.com/CPU-commits/muelle/src/internal/deploy/app/usecases"
+	"github.com/CPU-commits/muelle/src/internal/deploy/domain/service"
+	outservice "github.com/CPU-commits/muelle/src/internal/deploy/infra/out/service"
+	"github.com/CPU-commits/muelle/src/package/audit"
+	"github.com/CPU-commits/muelle/src/package/cipher"
+	"github.com/CPU-commits/muelle/src/package/clock"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
+)
+
+type Deps struct {
+	DB     *sqlite.DB
+	Cipher cipher.Cipher // contraseñas de los registries (registries:password:<id>)
+	Clock  clock.Clock
+	Audit  audit.Recorder
+	Log    *slog.Logger
+	Docker docker.Engine
+	// Env son las variables de la app (secrets.Module).
+	Env service.EnvResolver
+	// Ingress es la red del stage y las rutas de Caddy (ingress.Module).
+	Ingress service.Ingress
+}
+
+type Module struct {
+	removeApp *usecases.RemoveApp
+	log       *slog.Logger
+}
+
+// New arma el módulo. DB, Docker, Env e Ingress son obligatorios; Clock y Log, opcionales.
+func New(d Deps) *Module {
+	switch {
+	case d.DB == nil:
+		panic("deploy.New: falta Deps.DB")
+	case d.Docker == nil:
+		panic("deploy.New: falta Deps.Docker")
+	case d.Env == nil:
+		panic("deploy.New: falta Deps.Env")
+	case d.Ingress == nil:
+		panic("deploy.New: falta Deps.Ingress")
+	}
+	if d.Clock == nil {
+		d.Clock = clock.System{}
+	}
+	if d.Log == nil {
+		d.Log = slog.Default()
+	}
+	return &Module{
+		removeApp: usecases.NewRemoveApp(outservice.NewDockerStacks(d.Docker)),
+		log:       d.Log,
+	}
+}
+
+// RegisterRoutes registra los errores y las rutas del módulo. Fase 2 (ver el
+// contrato): POST/GET …/apps/{a}/deploys, GET …/deploys/{id}, …/log y
+// …/log/stream, POST …/apps/{a}/rollback, GET …/apps/{a}/status y …/logs
+// (AccessToken), y /api/v1/registries (AccessSession). El esqueleto no
+// registra nada.
+func (m *Module) RegisterRoutes(k *utils.Kit) {}
+
+// Jobs son las tareas periódicas. Fase 2: ninguna obligatoria (la retención de
+// los últimos 20 deploys por app se hace al cerrar cada deploy).
+func (m *Module) Jobs() []cron.Job { return nil }
+
+// Run corre los workers de deploy hasta que ctx se cancela y vuelve cuando
+// todos terminaron (el contenedor lo espera antes de cerrar la base). Fase 2:
+// primero la reconciliación al arrancar (§7): guarda manager_node_id si no
+// está, cierra los deploys running según el estado real de Swarm y retoma los
+// queued; después, un worker por app con un deploy a la vez. El esqueleto no
+// tiene nada que correr.
+func (m *Module) Run(ctx context.Context) {}
+
+// RemoveApp borra lo que la app tiene en Swarm: docker stack rm de
+// proyecto_stage_app (los volúmenes quedan). La llama catalog al borrar la app,
+// antes de borrar la fila; un stack que no existe no es un error. Docker caído
+// o sin Swarm: un error que envuelve entity.ErrDockerUnavailable (503), y la
+// app no se borra. Fase 2: también detiene el worker de la app.
+func (m *Module) RemoveApp(ctx context.Context, project, stage, app string) error {
+	return m.removeApp.Execute(ctx, dto.AppRef{Project: project, Stage: stage, App: app})
+}
