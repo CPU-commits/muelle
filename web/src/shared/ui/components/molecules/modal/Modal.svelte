@@ -66,7 +66,12 @@
 		return () => {
 			closingFromProp = true
 			if (node.open) node.close()
+			// Nada del <dialog> cerrado queda referenciado: `lastFocused` es un botón de
+			// adentro, y por él seguía vivo el diálogo entero (con la URL de una invitación o
+			// lo escrito en sus campos). Ver "no retiene lo que mostró" en el test.
 			element = undefined
+			lastFocused = null
+			pressedOnBackdrop = false
 			restoreFocus(opener)
 		}
 	}

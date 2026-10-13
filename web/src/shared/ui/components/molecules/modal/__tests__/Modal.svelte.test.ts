@@ -253,3 +253,41 @@ describe('Modal dismissible (por defecto)', () => {
 		expect(text('closes')).toBe('1')
 	})
 })
+
+// Un modal cerrado no tiene que quedar vivo en memoria: el de la URL de una invitación o
+// un token nuevo lleva un secreto, y lo escrito en sus campos también. vitest lanza
+// Chromium con --expose-gc (vite.config.ts) para forzar el GC.
+describe('Modal no retiene lo que mostró', () => {
+	const gc = (globalThis as { gc?: () => void }).gc
+	const nextTask = () => new Promise((done) => setTimeout(done, 0))
+
+	async function collect(): Promise<void> {
+		// Las WeakRef recién leídas viven hasta el final de la tarea: el GC va en otra.
+		for (let i = 0; i < 3; i++) {
+			await nextTask()
+			gc?.()
+		}
+	}
+
+	it('abrir y cerrar varias veces no deja ningún <dialog> ni su contenido vivo', async () => {
+		expect(gc, 'falta --expose-gc en el Chromium de vitest').toBeTypeOf('function')
+		const screen = await render(ModalHarness)
+		const refs: WeakRef<Element>[] = []
+
+		for (let round = 0; round < 5; round++) {
+			await screen.getByRole('button', { name: 'abrir' }).click()
+			const input = screen.getByRole('textbox', { name: 'adentro' })
+			await input.fill(`https://muelle.example/invite/secreto-${round}`)
+			refs.push(new WeakRef(dialog() as HTMLDialogElement), new WeakRef(input.element()))
+			// El foco pasa por un botón del pie (el último que lo tuvo es el que se retenía).
+			await screen.getByRole('button', { name: 'cerrar' }).click()
+			await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument()
+		}
+		// Svelte guarda el último evento delegado (el clic en "cerrar", con su target) hasta el
+		// próximo: un clic cualquiera en la página lo suelta, como pasa al seguir usándola.
+		await userEvent.click(screen.getByRole('heading', { name: 'Variables' }))
+		await collect()
+
+		expect(refs.filter((ref) => ref.deref() !== undefined)).toHaveLength(0)
+	})
+})

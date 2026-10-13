@@ -115,6 +115,10 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
   harness cuando hace falta un contexto (ver `molecules/menu/__tests__/`). Un harness que
   mide posiciones importa `@/shared/ui/themes/global.css` (sin el `box-sizing` global las
   medidas no son las del panel).
+- Memoria: el Chromium de vitest corre con `--expose-gc`, así que un test puede guardar
+  `WeakRef`s, forzar `globalThis.gc()` en otra tarea y ver qué quedó vivo (ver "no retiene
+  lo que mostró" en `molecules/modal/__tests__/Modal.svelte.test.ts`). Para lo que muestra un
+  secreto (una URL de invitación, un token), que un componente cerrado no deje referencias.
 
 ## Antes de decir que terminaste
 

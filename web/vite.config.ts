@@ -62,7 +62,11 @@ export default defineConfig(({ mode }) => {
 						name: 'client',
 						browser: {
 							enabled: true,
-							provider: playwright(),
+							// `--expose-gc`: los tests de memoria (Modal.svelte.test.ts) fuerzan un GC
+							// con `globalThis.gc()` para ver qué quedó retenido.
+							provider: playwright({
+								launchOptions: { args: ['--js-flags=--expose-gc'] },
+							}),
 							instances: [{ browser: 'chromium', headless: true }],
 						},
 						include: ['src/**/*.svelte.{test,spec}.{js,ts}'],
