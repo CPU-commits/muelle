@@ -4,10 +4,19 @@ Deploy manager ultraligero sobre Docker Swarm: panel web + API, secretos, stages
 
 - Diseño: [`docs/superpowers/specs/2026-10-09-muelle-design.md`](docs/superpowers/specs/2026-10-09-muelle-design.md)
 - Plan de la Fase 1: [`docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`](docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md)
+- Contrato de las Fases 2, 3 y 5 (API, puertos entre módulos, install): [`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md`](docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md)
 
 ## Estado
 
-Fase 1 (Base): API REST de usuarios, sesiones, 2FA, tokens de API, proyectos, stages, apps, variables cifradas, settings, auditoría y backups. Todavía no despliega nada.
+Fase 1 (Base): API REST de usuarios, sesiones, 2FA, tokens de API, proyectos, stages, apps, variables cifradas, settings, auditoría y backups.
+
+Etapa de contratos de las Fases 2, 3 y 5:
+- el cliente de Docker compartido, con su fake;
+- los esqueletos de `deploy` e `ingress`. Crear un stage ya crea su red overlay, y borrar una app hace `docker stack rm`;
+- los ajustes del proxy y el DNS en `/settings`;
+- las migraciones reservadas.
+
+Todavía no despliega nada.
 
 ## Estructura (spec §4.1)
 
@@ -20,8 +29,10 @@ src/
 │   ├── identity/   usuarios, sesiones, 2FA, invitaciones, tokens de API
 │   ├── catalog/    proyectos, stages y apps
 │   ├── secrets/    variables cifradas de stage y app
-│   └── admin/      settings, auditoría, backup y limpieza periódica
-├── shared/         dominio común y container.New, que arma todo
+│   ├── admin/      settings, auditoría, backup y limpieza periódica
+│   ├── deploy/     (Fase 2) deploys, registries, estado y logs de las apps
+│   └── ingress/    (Fase 3) redes de stage, dominios, Cloudflare y muelle-caddy
+├── shared/         dominio común, nombres de Docker, el cliente de Docker y container.New, que arma todo
 ├── package/        interfaces finas: cipher, clock, audit
 └── settings/       carga y validación de MUELLE_*
 ```
@@ -112,16 +123,17 @@ Hallazgos de la revisión de código que las próximas fases deben respetar.
 - Verificar que los nombres de `secrets:`/`configs:` de compose (`<stack>_<name>`) no pasen de 64 caracteres.
 - Rechazar volúmenes externos, o con `name:` explícito que apunte a `muelle_*`.
 - Comprobar que el tamaño del env mezclado stage+app cabe en el `ARG_MAX` de Linux.
-- Conectar `secrets.ResolveEnv` (recibe un `AppID`).
-- Reemplazar `validateCompose` por la validación real de compose-go, incluyendo nombres de servicio únicos por stage.
-- El borrado de una app agrega `docker stack rm`.
+- `secrets.ResolveEnv` ya está conectado al deploy (puerto `EnvResolver`), igual que `docker stack rm` al borrar una app.
+- Reemplazar `validateCompose` por la validación real de compose-go, incluyendo nombres de servicio únicos por stage. La parte pura (parsear, las restricciones de §6.3, los nombres de los servicios) va en un paquete de `shared/domain`, para que catalog la use al guardar y deploy al renderizar sin importarse.
 
 **Fase 2, worker de deploy**
 - Las goroutines nunca deben usar el ctx de una transacción después de que `InTx` retorna; derivar de un ctx externo (`context.WithoutCancel`).
 
 **Fase 3**
-- Crear un stage agrega la red overlay y conecta Caddy.
-- El pool de direcciones de la overlay debe ser privado (RFC1918/ULA) para que se pueda confiar en `X-Real-IP`.
+- Crear un stage ya crea la red overlay y conecta Caddy (etapa de contratos).
+- El pool de direcciones de la overlay debe ser privado (RFC1918/ULA) para que se pueda confiar en `X-Real-IP` (`docker.Network.Subnets`).
+- Las IPs permitidas del panel van con el matcher `client_ip` de Caddy, no `remote_ip` (contrato §3.4).
+- Docker 29 arranca sin puertos un contenedor cuyo arranque falló con `ErrPortInUse`: muelle-caddy se recrea, nunca se rearranca (`Container.PublishedPorts`).
 
 **Fase 5 / install**
 - Considerar el prefijo `__Host-` en el nombre de la cookie de sesión cuando las cookies son Secure.

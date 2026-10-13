@@ -1,7 +1,8 @@
 # muelle — Diseño
 
 > Deploy manager ultraligero sobre Docker Swarm: panel web + API, secretos, stages y proxy con certificados automáticos.
-> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
+> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1) y 2026-10-13 (etapa de contratos de las Fases 2, 3 y 5) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
+> La API, los puertos entre módulos y la configuración de install de las Fases 2, 3 y 5 están en detalle en [`2026-10-10-contrato-http-fases-2-3.md`](2026-10-10-contrato-http-fases-2-3.md).
 > "muelle" es un nombre provisional.
 
 ## 1. Contexto y objetivo
@@ -105,7 +106,7 @@ Pasos:
 3. Crea la red `muelle_panel`.
 4. Genera una clave maestra de 32 bytes, la guarda como secreto Swarm `muelle_master_key` e **imprime la clave una sola vez** para que el usuario la respalde.
 5. Detecta la IP pública si no se pasó `--public-ip` (vía `https://1.1.1.1/cdn-cgi/trace`) y la imprime.
-6. Despliega el stack `muelle` (solo el servicio muelle). Los flags de instalación se le pasan como configuración inicial y muelle los guarda en settings en su primer arranque.
+6. Despliega el stack `muelle` (solo el servicio muelle). Los flags de instalación se le pasan como configuración inicial (variables `MUELLE_INIT_*`; el token de Cloudflare, como el secreto Swarm `muelle_init_cloudflare_token`), y muelle guarda en settings cada valor que todavía no está. El detalle está en el contrato de las fases 2 y 3, §5.
 7. En ese primer arranque, muelle crea el contenedor muelle-caddy (§3.1) y envía la ruta del panel.
 8. Imprime una URL de setup de un solo uso (`https://panel…/setup?token=…`, vence en 24 h) para crear el primer usuario.
 9. Sobre el dominio del panel: con `--cloudflare-token`, muelle crea su registro DNS y usa DNS-01; sin token, el registro DNS tiene que existir de antemano y se usa HTTP-01 (que exige `--http-port 80`).
@@ -141,13 +142,14 @@ src/
 │   ├── catalog/        proyectos, stages y apps (el spec de formulario es un value object)
 │   ├── secrets/        variables cifradas de stage y app: leer enmascaradas, PUT, PATCH, mezclar
 │   ├── admin/          settings, auditoría, backup y limpieza periódica
-│   ├── deploy/         (Fase 2) render, cola de deploys, cliente de Docker, rollback, reconciliación
-│   └── ingress/        (Fase 3) dominios, Cloudflare, contenedor muelle-caddy y sus rutas
+│   ├── deploy/         (Fase 2) render, cola de deploys, rollback, reconciliación, registries, estado y logs de las apps
+│   └── ingress/        (Fase 3) red de cada stage, dominios, Cloudflare, contenedor muelle-caddy y sus rutas
 ├── shared/
 │   ├── domain/         errores comunes, Transactor, Principal y alcance de tokens, reglas de validación
 │   └── infra/
 │       ├── container/  container.New(settings): arma todo; lo usan main y los tests de integración
-│       └── out/        sqlite (conexión, migraciones, Transactor, registro de auditoría), crypto (AES-256-GCM)
+│       └── out/        sqlite (conexión, migraciones, Transactor, registro de auditoría), crypto (AES-256-GCM),
+│                       docker (cliente compartido por deploy, ingress e install, con su fake dockertest)
 ├── package/            interfaces finas: cipher, clock, audit
 └── settings/           carga y validación de MUELLE_*
 web/                    (Fase 4) SvelteKit con adapter-static, embebido con go:embed
@@ -176,7 +178,7 @@ web/                    (Fase 4) SvelteKit con adapter-static, embebido con go:e
 | TOTP | `identity` (puerto `TOTP`) | `github.com/pquerna/otp` |
 | Render | `deploy/domain/service` (Fase 2) | App (formulario o compose) + variables + dominios → compose final validado, con `github.com/compose-spec/compose-go/v2`; funciones puras |
 | Deployer | `deploy/app` + worker en `deploy/infra/in` (Fase 2) | Cola por app, resolución de digests, `docker stack deploy`, espera de convergencia, log de deploy, reconciliación al arrancar |
-| Docker | `deploy/infra/out/service/docker` (Fase 2) | SDK oficial (moby): servicios, tareas, logs en vivo, stats, inspección de distribución |
+| Docker | `shared/infra/out/docker` | SDK oficial (moby): servicios, tareas, logs en vivo, stats, inspección de distribución, redes, contenedores, secretos de Swarm, y `docker stack deploy/rm` por el CLI. Lo comparten deploy, ingress e install; cada módulo pide solo las partes que usa, y los tests usan el fake `dockertest` |
 | Proxy | `ingress/infra/out/service/caddy` (Fase 3) | Ciclo de vida de muelle-caddy (crear o recrear según imagen y puertos, conectar y desconectar redes de stage) y configuración: rutas → JSON de Caddy, `POST /load` por el socket unix, mutex global |
 | DNS | `ingress/infra/out/service/cloudflare` (Fase 3) | Cliente mínimo propio de la API de Cloudflare (zonas y registros) |
 | API | `cmd/http` + `infra/in/http` de cada módulo | REST `/api/v1`, autenticación por sesión o token, SSE para logs; sirve el SPA embebido |
@@ -208,17 +210,17 @@ proyecto (auditfy)
 | `stages` | `id`, `project_id`, `slug` (único por proyecto), `created_at` |
 | `apps` | `id`, `stage_id`, `slug` (único por stage), `kind` (`service`\|`compose`), `spec` (JSON, solo si es `service`), `compose_yaml` (solo si es `compose`), `deploy_timeout_s` (por defecto 300), `storage_node_id` (nodo donde viven sus volúmenes), `config_changed_at`, `last_deployed_at` |
 | `env_vars` | `id`, `stage_id` o `app_id` (exactamente uno, con borrado en cascada), `key`, `value` (cifrado, siempre), `secret` (bool), `updated_at`; única la clave por dueño |
-| `domains` | `id`, `app_id`, `hostname` (único global), `target_service`, `target_port`, `proxied` (bool), `tls_mode` (`cloudflare`\|`http`), `cf_zone_id`, `cf_record_id` (nulo si muelle no maneja el registro), `status` (`pending`\|`active`\|`error`), `last_error`, `cert_issuer`, `cert_expires_at` |
-| `deploys` | `id`, `app_id`, `status` (`queued`\|`running`\|`succeeded`\|`failed`\|`superseded`), `images` (JSON `servicio → ref@digest`), `trigger` (`panel`\|`api`\|`rollback`), `actor_type` (`user`\|`token`), `actor_id`, `error`, `log` (texto, truncado a 256 KB), `created_at`, `started_at`, `finished_at` |
-| `registries` | `id`, `host` (único), `username`, `password` (cifrado) |
+| `domains` | `id`, `app_id` (una app con dominios no se borra), `hostname` (único global), `target_service`, `target_port`, `proxied` (bool), `tls_mode` (`cloudflare`\|`http`), `cf_zone_id`, `cf_record_id` y `cf_record_id_aaaa` (nulos si muelle no maneja el registro), `status` (`pending`\|`active`\|`error`), `last_error_code` (`record_exists`\|`cloudflare`\|`certificate`, solo con `error`), `last_error`, `cert_issuer`, `cert_expires_at`, `created_at`, `updated_at` |
+| `deploys` | `id`, `app_id`, `status` (`queued`\|`running`\|`succeeded`\|`failed`\|`superseded`), `images` (JSON `servicio → ref@digest`), `config_images` (las refs de la configuración que leyó el deploy), `trigger` (`panel`\|`api`\|`rollback`), `actor_type` (`user`\|`token`), `actor_id`, `actor_name` (copiado al crear), `superseded_by`, `error`, `log` (texto, truncado a 256 KB), `created_at`, `started_at`, `finished_at` |
+| `registries` | `id`, `host` (único), `username`, `password` (cifrado), `created_at`, `updated_at` |
 | `users` | `id`, `username` (único), `password_hash`, `totp_secret` (cifrado, nulo si no tiene 2FA), `totp_pending` (cifrado, generado pero sin confirmar), `created_by`, `created_at` |
 | `invites` | `id`, `token_hash`, `created_by`, `expires_at`, `used_at` |
 | `sessions` | `id_hash`, `user_id`, `mfa_pending` (contraseña correcta, falta el código TOTP), `created_at`, `last_seen_at`, `expires_at`, `user_agent`, `ip` |
 | `api_tokens` | `id`, `name`, `token_hash`, `project_id`, `stage_id` (nulo = todo el proyecto), `created_by`, `last_used_at`, `expires_at` (opcional) |
 | `audit_events` | `id`, `actor_type`, `actor_id`, `action`, `target`, `details` (JSON, sin valores secretos), `at` |
-| `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain`, `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` |
+| `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `cloudflare_zones`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain` (el host de `MUELLE_PANEL_ORIGIN`, de solo lectura), `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` (vacío: la imagen de Caddy de la misma versión de muelle) y las del registro DNS del panel (`panel_cf_*`, de ingress) |
 
-La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con una migración de la Fase 2, y `domains` con una de la Fase 3.
+La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con la migración `0002_deploy.sql`, y `domains` con `0003_ingress.sql`. Las dos las reservó la etapa de contratos; cada fase edita la suya, en vez de agregar otra, mientras no haya una versión publicada.
 
 ### 5.2 Reglas
 
@@ -327,7 +329,7 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
 - **La configuración generada siempre incluye `admin.listen` apuntando al socket**; si se omitiera, Caddy volvería a su admin por defecto en TCP.
 - **Rutas:**
   - Una por dominio: `hostname → reverse_proxy <proyecto>_<stage>_<app>_<servicio>:<puerto>`, usando el nombre DNS de Swarm (IP virtual del servicio).
-  - El panel: `panel_domain → muelle_muelle:8080`. Si hay `panel_allowed_cidrs`, va con un matcher `remote_ip`.
+  - El panel: `panel_domain → muelle_muelle:8080`. Si hay `panel_allowed_cidrs`, va con un matcher `client_ip` (no `remote_ip`, que con el panel `proxied` vería el edge de Cloudflare): usa la IP real que resuelve `trusted_proxies`, la misma que muelle recibe en `X-Real-IP`.
   - Un servicio que es destino de un dominio pero todavía no existe (antes de su primer deploy) responde `502` hasta que exista. La ruta igual se crea.
 - **TLS** (políticas de automatización por dominio):
   - `tls_mode: cloudflare` → emisor ACME con el desafío DNS `cloudflare` y el token incluido en el JSON.
@@ -335,7 +337,7 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
   - Email ACME tomado de settings.
   - Nota: el token de Cloudflare queda en el `autosave.json` del volumen `muelle_caddy_config`.
 - **IP real del cliente:** `servers.trusted_proxies` con los rangos de IP de Cloudflare (lista estática dentro de muelle, que se actualiza con cada versión) y `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`. En la ruta del panel, Caddy reenvía a muelle la IP real en `X-Real-IP` (`header_up X-Real-IP {client_ip}`). muelle confía en ese header porque Caddy es el único otro miembro de `muelle_panel`, la única red de muelle: lo acepta solo si la conexión viene de loopback o de una dirección privada (RFC 1918, ULA), y si no usa la IP de la conexión. Por eso el puerto de muelle (`MUELLE_LISTEN`, `:8080`) nunca se publica.
-- Las escrituras a Caddy pasan por un mutex global. Si fallan, el panel muestra "proxy desincronizado" y se reintenta con backoff (1 s, 2 s, 4 s… hasta 60 s). Además, cada 5 minutos un proceso reenvía todo.
+- Las escrituras a Caddy pasan por un mutex global. Si fallan, el panel muestra "proxy desincronizado" (`GET /proxy`) y se reintenta con backoff (1 s, 2 s, 4 s… hasta 60 s). Además, cada 5 minutos un proceso reenvía todo.
 - **Verificación de certificados:** cada hora, y 30 s después de crear un dominio, muelle se conecta por TLS a `muelle-caddy:443` con SNI = hostname a través de `muelle_panel`. Lee el emisor y el vencimiento del certificado servido y actualiza `cert_issuer`/`cert_expires_at`. Si el certificado es inválido o vence en menos de 14 días, el dominio pasa a `error`.
 
 ## 9. DNS (Cloudflare)
@@ -366,7 +368,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 | Variables | `GET …/stages/{s}/env`, `PUT …/stages/{s}/env`, `PATCH …/stages/{s}/env`; lo mismo en `…/apps/{a}/env`. `GET` enmascara los secretos. `PUT` reemplaza todo el set (`{"vars": {"K": "v"}, "secret": true}`, donde `secret` aplica a todas por defecto). `PATCH` hace upsert o borra (`{"set": {...}, "unset": ["K"]}`) |
 | Deploys | `POST …/apps/{a}/deploys`, `GET …/apps/{a}/deploys`, `GET …/deploys/{id}`, `GET …/deploys/{id}/log?offset=N` → `{chunk, next_offset, status}`, `GET …/deploys/{id}/log/stream` (SSE), `POST …/apps/{a}/rollback` |
 | Dominios | `GET/POST …/apps/{a}/domains`, `PATCH/DELETE …/domains/{hostname}`, `POST …/domains/{hostname}/adopt`, `POST …/domains/{hostname}/retry` |
-| Estado | `GET …/apps/{a}/status` (por servicio: réplicas deseadas y corriendo, tareas con estado y error, CPU% y RAM actuales) |
+| Estado | `GET …/apps/{a}/status` (por servicio: réplicas deseadas y corriendo, tareas con estado y error, CPU% y RAM actuales); `GET /proxy` (estado del proxy) |
 | Logs | `GET …/apps/{a}/logs?service=<s>&tail=200&follow=1` (SSE; no se guarda nada) |
 | Administración | `/users` (incluye `DELETE /users/{username}` y `DELETE /users/{username}/totp` para quien perdió su teléfono), `/invites`, `/tokens`, `/registries`, `/settings`, `/audit` |
 | Sesión | `POST /auth/login`, `POST /auth/totp`, `POST /auth/logout`, `POST /auth/setup`, `POST /auth/invite/{token}`, `GET /auth/me`, `POST /auth/totp/setup`, `POST /auth/totp/enable` |
@@ -546,7 +548,9 @@ Cada fase deja algo que se puede probar de punta a punta:
    1. **Base compartida** (secuencial): `settings`, `package/`, `shared/domain`, SQLite con la migración inicial (las tablas de la Fase 1, §5.1; `deploys`/`registries` y `domains` llegan con migraciones de las fases 2 y 3), `crypto` y el esqueleto de `cmd/http`.
    2. **Módulos** (en paralelo): `identity`, `catalog`, `secrets` y `admin`, cada uno completo con sus tests.
    3. **Integración** (secuencial): el contenedor, `main.go`, el cron, la prueba de punta a punta, CI y el README.
-2. **Deploy:** el módulo `deploy` (`docker`, `render` y `deployer`). Apps de formulario y compose desplegables por API, con log, rollback y reconciliación.
-3. **Proxy y DNS:** el módulo `ingress`: el contenedor muelle-caddy, las rutas, `dns` de Cloudflare, la verificación de certificados, el estado y los logs en vivo.
+2. **Deploy:** el módulo `deploy` (`render` y `deployer`, sobre el cliente compartido `shared/infra/out/docker`). Apps de formulario y compose desplegables por API, con log, rollback, reconciliación, registries, y el estado y los logs en vivo de cada app.
+3. **Proxy y DNS:** el módulo `ingress`: el contenedor muelle-caddy, las rutas, `dns` de Cloudflare, la verificación de certificados y el estado del proxy.
+
+Antes de las Fases 2, 3 y 5, una etapa de contratos (secuencial) dejó el cliente de Docker compartido, los nombres (`shared/domain/naming`), las migraciones reservadas, los esqueletos de `deploy` e `ingress` con sus puertos, los ajustes del proxy en `/settings` y el contrato HTTP. Después, las tres fases corren en paralelo.
 4. **Panel:** el SPA de Svelte sobre la API ya existente.
 5. **Distribución:** `install`, las imágenes (muelle y Caddy) y la GitHub Action. Después, la migración de auditfy.
