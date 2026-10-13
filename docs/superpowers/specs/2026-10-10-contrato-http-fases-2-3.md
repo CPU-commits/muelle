@@ -109,7 +109,7 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 
 | Momento | Qué | Dónde |
 |---|---|---|
-| `container.New` | Migra, verifica la clave maestra y guarda los ajustes de arranque: `panel_domain` siempre, y `MUELLE_INIT_*` solo si la clave falta (§5.2) | `admin.ApplyStartupSettings` (hecho) |
+| `container.New` | Migra, verifica la clave maestra y guarda los ajustes de arranque: `panel_domain` siempre, y `MUELLE_INIT_*` solo en el primer arranque de la base (§5.2) | `admin.ApplyStartupSettings` (hecho) |
 | `main` → `cron.Run(bgCtx, c.Jobs)` | Corre cada job **al arrancar** y después según su intervalo | `cmd/cron` |
 | `main` → `c.Run(bgCtx)` | `deploy.Run` e `ingress.Run` en paralelo; vuelve cuando los dos terminaron | `container.Run` (hecho) |
 
@@ -672,7 +672,12 @@ Después se reinicia muelle (`docker service update --force muelle_muelle`), o s
 
 ### 5.2 La configuración inicial: `MUELLE_INIT_*`
 
-install despliega el servicio con estas variables. `settings.Load` las valida: si una no sirve, muelle no arranca y el error nombra la variable. En **cada** arranque, `admin.ApplyStartupSettings` guarda cada valor que no es cero **solo si la clave todavía no está** en settings. Así, después del primer arranque mandan los cambios del panel. Si guardó algo, deja un evento `settings.init` con las claves, sin valores.
+install despliega el servicio con estas variables. `settings.Load` las valida en cada arranque: si una no sirve, muelle no arranca y el error nombra la variable.
+
+**Se aplican una sola vez**, en el primer arranque de la base: `admin.ApplyStartupSettings` guarda en la misma transacción la marca `init_applied`, y en los arranques siguientes no mira `MUELLE_INIT_*`. En ese primer arranque guarda cada valor que no es cero si la clave todavía no está, y deja un evento `settings.init` con las claves, sin valores.
+
+- **Por qué una marca, y no "si la clave falta":** las variables y el secreto del token quedan en el servicio. Sin la marca, lo que el admin borra en el panel volvería con cualquier reinicio (`docker service update --image`, un nodo que se reinicia). Borrar el token (`cloudflare_token: ""`) borra la clave, así que un token quitado, quizás por filtrado, volvería a usarse en Caddy y en el DNS.
+- **Una reinstalación sobre el mismo volumen `muelle_data`** ya tuvo su primer arranque: los flags de install no cambian ningún ajuste. install lo avisa ("la base ya existe: cambia los ajustes en el panel").
 
 | Flag de install | Variable | Clave de settings |
 |---|---|---|
@@ -692,7 +697,7 @@ install despliega el servicio con estas variables. `settings.Load` las valida: s
 - `MUELLE_MASTER_KEY_FILE=/run/secrets/muelle_master_key`
 - `MUELLE_SECURE_COOKIES` sin definir (`true`)
 
-**El token:** nunca va en una variable de entorno (se vería en `docker inspect`), sino en un secreto Swarm. Lo único que se pasa es la ruta del archivo. El token guardado no cambia si después se cambia en el panel. install puede quitar el secreto del servicio cuando muelle ya lo guardó (`settings.init` en la auditoría, o `cloudflare_token_set`), pero no es obligatorio.
+**El token:** nunca va en una variable de entorno (se vería en `docker inspect`), sino en un secreto Swarm. Lo único que se pasa es la ruta del archivo. Después del primer arranque, el secreto no se vuelve a leer como ajuste: cambiar o quitar el token en el panel es definitivo. install puede quitar el secreto del servicio cuando muelle ya lo guardó (`settings.init` en la auditoría, o `cloudflare_token_set`), pero no es obligatorio. Si lo quita, quita también `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE` en el mismo `docker service update`: `settings.Load` lee el archivo en cada arranque, y si falta, muelle no arranca.
 
 ### 5.3 El stack de muelle
 

@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/CPU-commits/muelle/src/internal/admin/app/dto"
+	"github.com/CPU-commits/muelle/src/internal/admin/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/admin/domain/repository"
 	"github.com/CPU-commits/muelle/src/package/audit"
 	"github.com/CPU-commits/muelle/src/package/cipher"
@@ -30,15 +31,27 @@ func NewApplyStartupSettings(settings repository.SettingsRepository, c cipher.Ci
 // Execute, en una transacción:
 //   - panel_domain se escribe siempre con in.PanelDomain (el host de
 //     MUELLE_PANEL_ORIGIN): no se edita en el panel, así nunca hay dos fuentes;
-//   - cada valor de in.Init que no es cero se guarda solo si la clave no
-//     existe: install lo pasa una vez y después mandan los cambios del panel.
-//     El token va cifrado (settings:cloudflare_token). Si guardó algo, deja un
-//     evento settings.init con las claves (sin valores), con actor system.
+//   - in.Init se aplica solo en el primer arranque de la base, el que guarda
+//     la marca entity.KeyInitApplied. install deja montado el secreto del
+//     token y las variables MUELLE_INIT_*, así que sin la marca un reinicio
+//     devolvería lo que el admin borró en el panel (un token filtrado, por
+//     ejemplo). En ese arranque, cada valor que no es cero se guarda si la
+//     clave no existe; el token va cifrado (settings:cloudflare_token). Si
+//     guardó algo, deja un evento settings.init con las claves (sin valores),
+//     con actor system.
 //
 // Los valores ya vienen validados (settings.Load, MUELLE_INIT_*).
 func (u *ApplyStartupSettings) Execute(ctx context.Context, in dto.StartupSettings) error {
 	return u.tx.InTx(ctx, func(ctx context.Context) error {
 		if err := u.settings.Set(ctx, shared.SettingPanelDomain, []byte(in.PanelDomain), false); err != nil {
+			return err
+		}
+		// La marca se guarda primero: si ya estaba, este no es el primer arranque.
+		err := u.settings.Insert(ctx, entity.KeyInitApplied, []byte(shared.FormatBool(true)), false)
+		switch {
+		case errors.Is(err, sharedrepo.ErrConflict):
+			return nil
+		case err != nil:
 			return err
 		}
 		i := in.Init

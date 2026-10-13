@@ -56,7 +56,8 @@ type PatchSettingsInput struct {
 }
 
 // InitialSettings es la configuración inicial de install (MUELLE_INIT_*, Fase
-// 5): cada valor que no es cero se guarda solo si la clave todavía no está.
+// 5). Se aplica solo en el primer arranque de la base: cada valor que no es
+// cero se guarda si la clave todavía no está.
 type InitialSettings struct {
 	PublicIP        string
 	PublicIPv6      string

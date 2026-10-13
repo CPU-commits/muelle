@@ -21,8 +21,8 @@ type Settings struct {
 	SecureCookies bool   // MUELLE_SECURE_COOKIES, por defecto true
 
 	// Init es la configuración inicial que install le pasa al primer arranque
-	// (MUELLE_INIT_*, Fase 5). admin la guarda solo en las claves que todavía
-	// no están: después mandan los cambios del panel.
+	// (MUELLE_INIT_*, Fase 5). admin la aplica solo en el primer arranque de
+	// la base: después mandan los cambios del panel, aunque las variables sigan.
 	Init Init
 
 	// Version es la de este binario (main.version, por -ldflags al compilar

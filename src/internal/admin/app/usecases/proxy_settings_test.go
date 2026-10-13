@@ -371,3 +371,67 @@ func TestApplyStartupSettings(t *testing.T) {
 		t.Fatalf("panel_domain=%q", out.PanelDomain)
 	}
 }
+
+// Lo que el panel borra no vuelve con el próximo arranque: install suele
+// dejar montado el secreto del token (y las variables MUELLE_INIT_*), y un
+// reinicio cualquiera (docker service update, el nodo que se reinicia) no
+// puede devolver un token que el admin quitó, quizás porque se filtró.
+func TestApplyStartupSettingsOnlyOnFirstBoot(t *testing.T) {
+	e := newProxyEnv(t)
+	apply := NewApplyStartupSettings(e.repo, e.cipher, e.rec, e.db)
+	ctx := context.Background()
+	init := dto.InitialSettings{PublicIP: "203.0.113.7", ACMEEmail: "tu@correo.cl", CloudflareToken: "cf-token-1234567890abcdef"}
+	boot := func() dto.SettingsOutput {
+		t.Helper()
+		if err := apply.Execute(ctx, dto.StartupSettings{PanelDomain: "panel.tudominio.cl", Init: init}); err != nil {
+			t.Fatal(err)
+		}
+		out, err := e.get.Execute(ctx, dto.GetSettingsInput{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if out := boot(); !out.CloudflareTokenSet || out.PublicIP != "203.0.113.7" {
+		t.Fatalf("primer arranque: %+v", out)
+	}
+
+	// El admin quita el token y la IP, y muelle se reinicia dos veces.
+	if _, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr(""), PublicIP: ptr("")}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		if out := boot(); out.CloudflareTokenSet || out.PublicIP != "" || out.ACMEEmail != "tu@correo.cl" {
+			t.Fatalf("arranque %d después de quitar el token: %+v", i+2, out)
+		}
+	}
+	if _, ok := e.raw(t, entity.SettingCloudflareToken); ok {
+		t.Fatal("el token volvió a la base")
+	}
+	if n := len(admintestEvents(t, e)); n != 2 {
+		t.Fatalf("eventos: %d (settings.init una sola vez + el PATCH)", n)
+	}
+}
+
+// Una base que arrancó sin MUELLE_INIT_* ya tuvo su primer arranque: las
+// variables que se agreguen después no hacen nada (los ajustes se cambian en
+// el panel).
+func TestApplyStartupSettingsLateInitIsIgnored(t *testing.T) {
+	e := newProxyEnv(t)
+	apply := NewApplyStartupSettings(e.repo, e.cipher, e.rec, e.db)
+	ctx := context.Background()
+	if err := apply.Execute(ctx, dto.StartupSettings{PanelDomain: "panel.tudominio.cl"}); err != nil {
+		t.Fatal(err)
+	}
+	late := dto.InitialSettings{PublicIP: "203.0.113.7", CloudflareToken: "cf-token-1234567890abcdef"}
+	if err := apply.Execute(ctx, dto.StartupSettings{PanelDomain: "panel.tudominio.cl", Init: late}); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := e.get.Execute(ctx, dto.GetSettingsInput{})
+	if out.CloudflareTokenSet || out.PublicIP != "" || out.PanelDomain != "panel.tudominio.cl" {
+		t.Fatalf("MUELLE_INIT_* después del primer arranque: %+v", out)
+	}
+	if n := len(admintestEvents(t, e)); n != 0 {
+		t.Fatalf("eventos: %d", n)
+	}
+}

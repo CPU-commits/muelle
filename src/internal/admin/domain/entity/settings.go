@@ -7,6 +7,11 @@ import shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 const (
 	// KeyMasterKeyCheck guarda un valor de control cifrado para detectar una clave maestra distinta.
 	KeyMasterKeyCheck = "master_key_check"
+	// KeyInitApplied marca que la configuración inicial de install
+	// (MUELLE_INIT_*) ya se aplicó: se guarda en el primer arranque de la
+	// base, y desde ahí esas variables no hacen nada. Sin la marca, lo que el
+	// admin borra en el panel (el token de Cloudflare) volvería en cada reinicio.
+	KeyInitApplied = "init_applied"
 )
 
 // MasterKeyCheckAAD liga el valor de control a su fila.

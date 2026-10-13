@@ -100,8 +100,8 @@ func (m *Module) VerifyMasterKey(ctx context.Context) error { return m.verify.Ex
 
 // ApplyStartupSettings lo llama el contenedor en cada arranque, después de
 // VerifyMasterKey: escribe panel_domain (el host de MUELLE_PANEL_ORIGIN si es
-// un dominio, si no "") y guarda la configuración inicial de install
-// (MUELLE_INIT_*) solo en las claves que todavía no están.
+// un dominio, si no "") y, solo en el primer arranque de la base (la clave
+// init_applied), guarda la configuración inicial de install (MUELLE_INIT_*).
 func (m *Module) ApplyStartupSettings(ctx context.Context, panelDomain string, init InitialSettings) error {
 	return m.startup.Execute(ctx, dto.StartupSettings{PanelDomain: panelDomain, Init: init})
 }
