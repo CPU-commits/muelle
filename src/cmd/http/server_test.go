@@ -62,6 +62,8 @@ func newTestServer(t *testing.T) *Server {
 
 		"docker_unavailable": entity.ErrDockerUnavailable,
 		"not_implemented":    entity.ErrNotImplemented,
+
+		"cloudflare_unavailable": entity.ErrCloudflareUnavailable,
 	}
 	k.HandlePublic("GET /api/v1/fail/{code}", func(w http.ResponseWriter, r *http.Request) {
 		k.Fail(w, r, fmt.Errorf("envuelto: %w", common[r.PathValue("code")]))
@@ -174,6 +176,8 @@ func TestCommonErrors(t *testing.T) {
 
 		"docker_unavailable": http.StatusServiceUnavailable,
 		"not_implemented":    http.StatusNotImplemented,
+
+		"cloudflare_unavailable": http.StatusBadGateway,
 	}
 	for code, status := range want {
 		w := do(s, "GET", "/api/v1/fail/"+code, "")

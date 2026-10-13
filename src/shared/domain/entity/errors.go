@@ -16,4 +16,10 @@ var (
 	// responde como 501 not_implemented. Una ruta que todavía no existe no
 	// llega acá: responde 404 no_route.
 	ErrNotImplemented = errors.New("todavía no está implementado")
+
+	// ErrCloudflareUnavailable: la API de Cloudflare no respondió o respondió
+	// con un error que no es del pedido (5xx, sin red). cmd/http lo responde
+	// como 502 cloudflare_unavailable. Un token o un registro rechazados no
+	// son esto: son un *validate.Error (422) o el estado error del dominio (§9).
+	ErrCloudflareUnavailable = errors.New("Cloudflare no responde")
 )
