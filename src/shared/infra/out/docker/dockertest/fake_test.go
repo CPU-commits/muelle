@@ -382,3 +382,17 @@ func TestFakeReturnsCopies(t *testing.T) {
 		t.Fatalf("ListServices devolvió el mapa interno: %v", got.Labels)
 	}
 }
+
+func TestFakeInspectImage(t *testing.T) {
+	f := New()
+	ctx := context.Background()
+	if _, err := f.InspectImage(ctx, "caddy:x"); !errors.Is(err, docker.ErrNotFound) {
+		t.Fatalf("imagen que falta: %v", err)
+	}
+	if err := f.PullImage(ctx, "caddy:x", nil); err != nil {
+		t.Fatal(err)
+	}
+	if img, err := f.InspectImage(ctx, "caddy:x"); err != nil || img.ID == "" || img.RepoTags[0] != "caddy:x" {
+		t.Fatalf("imagen bajada: %+v %v", img, err)
+	}
+}

@@ -379,9 +379,36 @@ func (c *Client) ListNetworks(ctx context.Context, labels map[string]string) ([]
 	return out, nil
 }
 
+// networkByText reconoce los errores de las redes de Swarm que el daemon no
+// marca con un código propio y solo se distinguen por el texto (Docker 29):
+//   - borrar una red con un contenedor conectado, o con las tareas de un stack
+//     recién borrado: 400 "… is in use by task …";
+//   - borrar una red recién borrada, que el nodo todavía conoce por nombre:
+//     "network … not found";
+//   - desconectar un contenedor que ya no está conectado: 500 "… is not connected to network …".
+func networkByText(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "is in use by"):
+		return fmt.Errorf("docker: %s: %w: %w", op, ErrConflict, err)
+	case strings.Contains(msg, "is not connected to network"), strings.Contains(msg, "not found"):
+		if !cerrdefs.IsNotFound(err) {
+			return fmt.Errorf("docker: %s: %w: %w", op, ErrNotFound, err)
+		}
+	}
+	return nil
+}
+
 func (c *Client) RemoveNetwork(ctx context.Context, nameOrID string) error {
 	_, err := c.api.NetworkRemove(ctx, nameOrID, client.NetworkRemoveOptions{})
-	return wrapNetwork("borrando la red "+nameOrID, err, ErrConflict)
+	op := "borrando la red " + nameOrID
+	if e := networkByText(op, err); e != nil {
+		return e
+	}
+	return wrapNetwork(op, err, ErrConflict)
 }
 
 func (c *Client) ConnectNetwork(ctx context.Context, net, ctr string, aliases []string) error {
@@ -393,7 +420,11 @@ func (c *Client) ConnectNetwork(ctx context.Context, net, ctr string, aliases []
 
 func (c *Client) DisconnectNetwork(ctx context.Context, net, ctr string) error {
 	_, err := c.api.NetworkDisconnect(ctx, net, client.NetworkDisconnectOptions{Container: ctr})
-	return wrapNetwork("desconectando "+ctr+" de "+net, err, ErrNotFound)
+	op := "desconectando " + ctr + " de " + net
+	if e := networkByText(op, err); e != nil {
+		return e
+	}
+	return wrapNetwork(op, err, ErrNotFound)
 }
 
 // --- Contenedores --------------------------------------------------------------------
@@ -544,6 +575,14 @@ func (c *Client) RemoveVolume(ctx context.Context, name string, force bool) erro
 }
 
 // --- Imágenes ------------------------------------------------------------------------
+
+func (c *Client) InspectImage(ctx context.Context, ref string) (Image, error) {
+	res, err := c.api.ImageInspect(ctx, ref)
+	if err != nil {
+		return Image{}, wrap("inspeccionando la imagen "+ref, err)
+	}
+	return Image{ID: res.ID, RepoTags: res.RepoTags, RepoDigests: res.RepoDigests}, nil
+}
 
 func (c *Client) DistributionDigest(ctx context.Context, ref string, auth *RegistryAuth) (string, error) {
 	enc, err := encodeRegistryAuth(auth)

@@ -125,6 +125,21 @@ func TestErrorMapping(t *testing.T) {
 		"DELETE /networks/auditfy_staging": func(w http.ResponseWriter, r *http.Request) {
 			apiError(w, http.StatusForbidden, "error while removing network: network auditfy_staging has active endpoints")
 		},
+		// Una red overlay attachable con un contenedor conectado tiene una tarea de Swarm: el daemon responde 400.
+		"DELETE /networks/auditfy_production": func(w http.ResponseWriter, r *http.Request) {
+			apiError(w, http.StatusBadRequest, "rpc error: code = FailedPrecondition desc = network naidvm70mi5cd0a271hnzv0rw is in use by task derwfmwgprla2fdbq980fqug9")
+		},
+		// Justo después de borrarla, el nodo todavía la conoce por nombre y el cluster ya no.
+		"DELETE /networks/recien_borrada": func(w http.ResponseWriter, r *http.Request) {
+			apiError(w, http.StatusInternalServerError, "network rrko0zuejk03zm9yn937txnfm not found")
+		},
+		// En una overlay, desconectar dos veces es un 500 con este texto.
+		"POST /networks/auditfy_production/disconnect": func(w http.ResponseWriter, r *http.Request) {
+			apiError(w, http.StatusInternalServerError, "container aa22cfaa5766 is not connected to network auditfy_production")
+		},
+		"DELETE /networks/mala": func(w http.ResponseWriter, r *http.Request) {
+			apiError(w, http.StatusBadRequest, "invalid network name")
+		},
 		"POST /networks/auditfy_staging/connect": func(w http.ResponseWriter, r *http.Request) {
 			apiError(w, http.StatusForbidden, "endpoint with name muelle-caddy already exists in network auditfy_staging")
 		},
@@ -146,6 +161,12 @@ func TestErrorMapping(t *testing.T) {
 	_, err = c.CreateNetwork(ctx, NetworkSpec{Name: "auditfy_staging", Driver: "overlay"})
 	check(t, "red repetida", err, ErrConflict)
 	check(t, "red en uso", c.RemoveNetwork(ctx, "auditfy_staging"), ErrConflict)
+	check(t, "red de swarm en uso por una tarea", c.RemoveNetwork(ctx, "auditfy_production"), ErrConflict)
+	check(t, "red recién borrada", c.RemoveNetwork(ctx, "recien_borrada"), ErrNotFound)
+	check(t, "overlay: no conectado", c.DisconnectNetwork(ctx, "auditfy_production", "muelle-caddy"), ErrNotFound)
+	if err := c.RemoveNetwork(ctx, "mala"); err == nil || errors.Is(err, ErrConflict) {
+		t.Errorf("un 400 que no es \"en uso\" no es ErrConflict: %v", err)
+	}
 	check(t, "ya conectado", c.ConnectNetwork(ctx, "auditfy_staging", "muelle-caddy", nil), ErrConflict)
 	check(t, "no conectado", c.DisconnectNetwork(ctx, "auditfy_staging", "muelle-caddy"), ErrNotFound)
 	_, err = c.InspectContainer(ctx, "muelle-caddy")
@@ -283,4 +304,30 @@ func TestSwarmNotActiveIsUnavailable(t *testing.T) {
 	})
 	_, err := c.ListServices(context.Background(), nil)
 	check(t, "sin swarm", err, ErrUnavailable)
+}
+
+// InspectImage mira el nodo local, no el registry: ingress lo usa para saber
+// si tiene que bajar la imagen de muelle-caddy antes de crearlo.
+func TestInspectImage(t *testing.T) {
+	c, _ := newFakeAPIClient(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /images/ghcr.io/cpu-commits/muelle-caddy:v1/json": func(w http.ResponseWriter, r *http.Request) {
+			apiJSON(w, map[string]any{
+				"Id":          "sha256:111",
+				"RepoTags":    []string{"ghcr.io/cpu-commits/muelle-caddy:v1"},
+				"RepoDigests": []string{"ghcr.io/cpu-commits/muelle-caddy@sha256:222"},
+			})
+		},
+		"GET /images/ghcr.io/cpu-commits/muelle-caddy:v2/json": func(w http.ResponseWriter, r *http.Request) {
+			apiError(w, http.StatusNotFound, "No such image: ghcr.io/cpu-commits/muelle-caddy:v2")
+		},
+	})
+	img, err := c.InspectImage(context.Background(), "ghcr.io/cpu-commits/muelle-caddy:v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.ID != "sha256:111" || len(img.RepoTags) != 1 || img.RepoDigests[0] != "ghcr.io/cpu-commits/muelle-caddy@sha256:222" {
+		t.Fatalf("imagen: %+v", img)
+	}
+	_, err = c.InspectImage(context.Background(), "ghcr.io/cpu-commits/muelle-caddy:v2")
+	check(t, "imagen que no está en el nodo", err, ErrNotFound)
 }

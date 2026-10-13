@@ -822,6 +822,18 @@ func copyAuth(a *docker.RegistryAuth) *docker.RegistryAuth {
 	return &c
 }
 
+func (f *Fake) InspectImage(ctx context.Context, ref string) (docker.Image, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.begin("InspectImage", ref); err != nil {
+		return docker.Image{}, err
+	}
+	if !f.images[ref] {
+		return docker.Image{}, notFound("imagen en el nodo", ref)
+	}
+	return docker.Image{ID: "sha256:" + ref, RepoTags: []string{ref}}, nil
+}
+
 func (f *Fake) DistributionDigest(ctx context.Context, ref string, auth *docker.RegistryAuth) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

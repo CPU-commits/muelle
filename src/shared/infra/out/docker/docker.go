@@ -263,14 +263,21 @@ type Network struct {
 type Networks interface {
 	// CreateNetwork devuelve el id de la red nueva; ErrConflict si ya existe una con ese nombre.
 	CreateNetwork(ctx context.Context, spec NetworkSpec) (id string, err error)
+	// InspectNetwork: ojo, una red de Swarm recién creada puede venir sin
+	// Driver ni Subnets durante unos milisegundos (el allocator de Swarm
+	// todavía no la procesó); Scope y Attachable ya vienen bien.
 	InspectNetwork(ctx context.Context, nameOrID string) (Network, error)
 	// ListNetworks devuelve las redes que tienen todas las etiquetas pedidas (nil: todas).
 	ListNetworks(ctx context.Context, labels map[string]string) ([]Network, error)
-	// RemoveNetwork: ErrNotFound si no existe, ErrConflict si algo sigue conectado.
+	// RemoveNetwork: ErrNotFound si no existe, ErrConflict si algo sigue
+	// conectado (un contenedor, o las tareas de un stack que se está borrando:
+	// Swarm las suelta unos segundos después de docker stack rm).
 	RemoveNetwork(ctx context.Context, nameOrID string) error
 	// ConnectNetwork conecta un contenedor en caliente; ErrConflict si ya está conectado.
 	ConnectNetwork(ctx context.Context, network, container string, aliases []string) error
-	// DisconnectNetwork: ErrNotFound si el contenedor o la red no existen, o no estaba conectado.
+	// DisconnectNetwork: ErrNotFound si el contenedor o la red no existen, o
+	// no estaba conectado (una overlay a la que el nodo nunca se conectó
+	// también da "red no existe").
 	DisconnectNetwork(ctx context.Context, network, container string) error
 }
 
@@ -369,7 +376,18 @@ type RegistryAuth struct {
 	Password string
 }
 
+// Image es una imagen del nodo local.
+type Image struct {
+	ID          string
+	RepoTags    []string
+	RepoDigests []string // ref@sha256:… de los registries de los que se bajó
+}
+
 type Images interface {
+	// InspectImage busca la imagen en el nodo local, sin ir al registry:
+	// ErrNotFound si no está (ingress la baja con PullImage antes de crear
+	// muelle-caddy).
+	InspectImage(ctx context.Context, ref string) (Image, error)
 	// DistributionDigest consulta el registry (GET /distribution/{ref}/json,
 	// §7 paso 2) y devuelve el digest del manifiesto ("sha256:…"). auth nil es
 	// anónimo. ErrNotFound si la imagen o el tag no existen, ErrDenied si no hay acceso.
