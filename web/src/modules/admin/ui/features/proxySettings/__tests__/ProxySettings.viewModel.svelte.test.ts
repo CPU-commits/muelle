@@ -44,8 +44,25 @@ function saved(proxy: Partial<ProxySettings>): Settings {
 	return { require2fa: false, proxy: { ...PROXY, ...proxy }, panelAccess: null }
 }
 
+let client: QueryClient
+
+/** Si `secret` quedó en algún lado del cache de TanStack (queries o mutaciones). */
+async function cacheHolds(secret: string): Promise<boolean> {
+	// Una mutación con `gcTime: 0` se borra en el tick siguiente a quedarse sin observers.
+	await new Promise((resolve) => setTimeout(resolve, 20))
+	const mutations = client
+		.getMutationCache()
+		.getAll()
+		.map((mutation) => mutation.state)
+	const queries = client
+		.getQueryCache()
+		.getAll()
+		.map((query) => query.state.data)
+	return JSON.stringify([mutations, queries]).includes(secret)
+}
+
 async function mountViewModel(): Promise<ProxySettingsViewModel> {
-	const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+	client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
 	let vm: ProxySettingsViewModel | undefined
 	await render(ProxySettingsHarness, {
 		client,
@@ -132,5 +149,22 @@ describe('ProxySettingsViewModel', () => {
 		expect(mocks.replaceCloudflareToken).toHaveBeenCalledWith('cf-secreto')
 		expect(vm.cloudflareOpen).toBe(false)
 		expect(vm.cloudflareToken).toBe('')
+		expect(await cacheHolds('cf-secreto')).toBe(false)
+	})
+
+	it('si guardar el token falla, tampoco queda en el cache ni en el campo', async () => {
+		mocks.replaceCloudflareToken.mockRejectedValueOnce(
+			new ValidationError('el token no ve ninguna zona', 'cloudflareToken'),
+		)
+		const vm = await mountViewModel()
+
+		vm.openCloudflare()
+		vm.setField('cloudflareToken', 'cf-malo')
+		await vm.saveCloudflare()
+
+		expect(vm.errors).toEqual({ cloudflareToken: 'el token no ve ninguna zona' })
+		expect(vm.cloudflareOpen).toBe(true)
+		expect(vm.cloudflareToken).toBe('')
+		expect(await cacheHolds('cf-malo')).toBe(false)
 	})
 })

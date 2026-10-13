@@ -46,8 +46,25 @@ const CREATED: CreatedApiToken = {
 	secret: 'mk_secreto',
 }
 
+let client: QueryClient
+
+/** Si `secret` quedó en algún lado del cache de TanStack (queries o mutaciones). */
+async function cacheHolds(secret: string): Promise<boolean> {
+	// Una mutación con `gcTime: 0` se borra en el tick siguiente a quedarse sin observers.
+	await new Promise((resolve) => setTimeout(resolve, 20))
+	const mutations = client
+		.getMutationCache()
+		.getAll()
+		.map((mutation) => mutation.state)
+	const queries = client
+		.getQueryCache()
+		.getAll()
+		.map((query) => query.state.data)
+	return JSON.stringify([mutations, queries]).includes(secret)
+}
+
 async function mountViewModel(): Promise<CreateTokenModalViewModel> {
-	const client = new QueryClient({
+	client = new QueryClient({
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	})
 	let vm: CreateTokenModalViewModel | undefined
@@ -108,6 +125,8 @@ describe('CreateTokenModalViewModel', () => {
 			expiresOn: '2026-12-31',
 		})
 		expect(mocks.onCreated).toHaveBeenCalledWith(CREATED)
+		// El valor en claro solo llega a la pantalla: no queda en el cache.
+		expect(await cacheHolds('mk_secreto')).toBe(false)
 	})
 
 	it('un error de validación va a su campo y se limpia al escribir', async () => {

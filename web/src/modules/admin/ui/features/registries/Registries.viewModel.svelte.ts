@@ -130,6 +130,9 @@ export class RegistriesViewModel {
 		if (!dialog || this.isSaving) return
 		this.errors = {}
 		const input = { host: this.host, username: this.username, password: this.password }
+		// La contraseña no se queda en ningún lado: ni en el campo ni en el cache de
+		// mutaciones. Si algo falla, se escribe de nuevo.
+		this.password = ''
 		try {
 			if (dialog.mode === 'add') {
 				await this.#add.mutateAsync(input)
@@ -139,7 +142,6 @@ export class RegistriesViewModel {
 				toast.success(m.admin_registry_updated())
 			}
 			this.dialog = null
-			this.password = ''
 		} catch (error) {
 			const fieldError = adminFieldError(error)
 			if (fieldError && REGISTRY_FIELDS.includes(fieldError.field)) {
@@ -147,6 +149,9 @@ export class RegistriesViewModel {
 				return
 			}
 			toast.error(m.admin_save_error(), adminErrorMessage(error))
+		} finally {
+			this.#add.reset()
+			this.#update.reset()
 		}
 	}
 

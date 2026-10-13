@@ -31,8 +31,25 @@ vi.mock('@/modules/admin/container', () => ({
 	},
 }))
 
+let client: QueryClient
+
+/** Si `secret` quedó en algún lado del cache de TanStack (queries o mutaciones). */
+async function cacheHolds(secret: string): Promise<boolean> {
+	// Una mutación con `gcTime: 0` se borra en el tick siguiente a quedarse sin observers.
+	await new Promise((resolve) => setTimeout(resolve, 20))
+	const mutations = client
+		.getMutationCache()
+		.getAll()
+		.map((mutation) => mutation.state)
+	const queries = client
+		.getQueryCache()
+		.getAll()
+		.map((query) => query.state.data)
+	return JSON.stringify([mutations, queries]).includes(secret)
+}
+
 async function mountViewModel(): Promise<RegistriesViewModel> {
-	const client = new QueryClient({
+	client = new QueryClient({
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	})
 	let vm: RegistriesViewModel | undefined
@@ -86,6 +103,22 @@ describe('RegistriesViewModel', () => {
 		expect(vm.dialog).toBeNull()
 		expect(vm.password).toBe('')
 		expect(success).toHaveBeenCalledWith(m.admin_registry_added())
+		expect(await cacheHolds('secreto')).toBe(false)
+	})
+
+	it('la contraseña no queda en el cache ni en el campo, aunque guardar falle', async () => {
+		mocks.updateRegistry.mockRejectedValueOnce(new Error('boom'))
+		const vm = await mountViewModel()
+		const registry = vm.registries[0]
+		if (!registry) throw new Error('falta el registry')
+
+		vm.openEdit(registry)
+		vm.setField('password', 'clave-nueva')
+		await vm.submit()
+
+		expect(vm.dialog).toEqual({ mode: 'edit', host: 'ghcr.io' })
+		expect(vm.password).toBe('')
+		expect(await cacheHolds('clave-nueva')).toBe(false)
 	})
 
 	it('un host inválido o repetido va al campo host', async () => {

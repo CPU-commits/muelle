@@ -163,14 +163,18 @@ export class ProxySettingsViewModel {
 
 	saveCloudflare = async (): Promise<void> => {
 		if (this.#cloudflare.isPending) return
-		const saved = await this.#save(
-			() => this.#cloudflare.mutateAsync(this.cloudflareToken),
-			m.admin_cf_saved(),
-			() => {},
-		)
-		if (saved) {
-			this.cloudflareOpen = false
-			this.cloudflareToken = ''
+		const token = this.cloudflareToken
+		// El token no se queda en ningún lado: ni en el campo ni en el cache de mutaciones.
+		this.cloudflareToken = ''
+		try {
+			const saved = await this.#save(
+				() => this.#cloudflare.mutateAsync(token),
+				m.admin_cf_saved(),
+				() => {},
+			)
+			if (saved) this.cloudflareOpen = false
+		} finally {
+			this.#cloudflare.reset()
 		}
 	}
 

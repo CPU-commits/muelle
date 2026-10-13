@@ -37,8 +37,25 @@ const USERS: User[] = [
 	{ username: 'ana', totpEnabled: false, createdAt: new Date('2026-10-10T13:00:00Z') },
 ]
 
+let client: QueryClient
+
+/** Si `secret` quedó en algún lado del cache de TanStack (queries o mutaciones). */
+async function cacheHolds(secret: string): Promise<boolean> {
+	// Una mutación con `gcTime: 0` se borra en el tick siguiente a quedarse sin observers.
+	await new Promise((resolve) => setTimeout(resolve, 20))
+	const mutations = client
+		.getMutationCache()
+		.getAll()
+		.map((mutation) => mutation.state)
+	const queries = client
+		.getQueryCache()
+		.getAll()
+		.map((query) => query.state.data)
+	return JSON.stringify([mutations, queries]).includes(secret)
+}
+
 async function mountViewModel(): Promise<UsersSectionViewModel> {
-	const client = new QueryClient({
+	client = new QueryClient({
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	})
 	// El guard de `(app)` ya dejó al usuario de la sesión en el cache.
@@ -146,6 +163,7 @@ describe('UsersSectionViewModel', () => {
 
 		expect(vm.invite?.url).toBe('http://panel/invite/abc')
 		expect(vm.inviteExpiry).toContain('24')
+		expect(await cacheHolds('invite/abc')).toBe(false)
 		vm.closeInvite()
 		expect(vm.invite).toBeNull()
 	})

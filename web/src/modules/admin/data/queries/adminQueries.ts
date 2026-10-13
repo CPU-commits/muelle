@@ -80,8 +80,15 @@ export function updateProxyPortsMutation(client: QueryClient) {
 	)
 }
 
+// El token de Cloudflare y la contraseña de un registry van en las variables de la
+// mutación: `gcTime: 0` las saca del cache de mutaciones apenas el viewModel hace `reset()`.
+const SECRET = { gcTime: 0 } as const
+
 export function replaceCloudflareTokenMutation(client: QueryClient) {
-	return settingsMutation(client, (token: string) => adminUseCases.replaceCloudflareToken(token))
+	return {
+		...settingsMutation(client, (token: string) => adminUseCases.replaceCloudflareToken(token)),
+		...SECRET,
+	}
 }
 
 function registryMutation<TInput, TResult>(
@@ -100,11 +107,17 @@ function registryMutation<TInput, TResult>(
 }
 
 export function addRegistryMutation(client: QueryClient) {
-	return registryMutation(client, (input: RegistryInput) => adminUseCases.addRegistry(input))
+	return {
+		...registryMutation(client, (input: RegistryInput) => adminUseCases.addRegistry(input)),
+		...SECRET,
+	}
 }
 
 export function updateRegistryMutation(client: QueryClient) {
-	return registryMutation(client, (input: RegistryInput) => adminUseCases.updateRegistry(input))
+	return {
+		...registryMutation(client, (input: RegistryInput) => adminUseCases.updateRegistry(input)),
+		...SECRET,
+	}
 }
 
 export function removeRegistryMutation(client: QueryClient) {
