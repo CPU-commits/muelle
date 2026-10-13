@@ -144,7 +144,7 @@ describe('log', () => {
 		expect(logPageFromDto(dto)).toEqual({ chunk: 'a\n', nextOffset: 2, status: 'running' })
 	})
 
-	it('appLogLineFromDto saca el nivel del texto', () => {
+	it('appLogLineFromDto lee el nivel sin tocar el texto', () => {
 		expect(
 			appLogLineFromDto({
 				time: '2026-10-10T14:31:51.517Z',
@@ -156,7 +156,7 @@ describe('log', () => {
 			time: new Date('2026-10-10T14:31:51.517Z'),
 			task: 'api.2',
 			stream: 'stdout',
-			text: 'consulta lenta',
+			text: 'WARN consulta lenta',
 			level: 'warn',
 		})
 	})

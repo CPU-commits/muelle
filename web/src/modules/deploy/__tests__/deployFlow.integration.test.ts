@@ -290,8 +290,9 @@ describe('logs en vivo', () => {
 		expect(new Set(lines.map((line) => line.task))).toEqual(new Set(['api.1', 'api.2']))
 		expect(lines.some((line) => line.level === 'warn')).toBe(true)
 		expect(lines.some((line) => line.level === 'error')).toBe(true)
-		// El prefijo del nivel no queda en el mensaje.
-		expect(lines.every((line) => !/^(INFO|WARN|ERROR) /.test(line.text))).toBe(true)
+		// El texto llega entero (el nivel solo da color) y sin escapes ANSI.
+		expect(lines.some((line) => line.text.startsWith('WARN '))).toBe(true)
+		expect(lines.every((line) => !line.text.includes(String.fromCharCode(27)))).toBe(true)
 	})
 
 	it('un servicio que no existe corta el stream antes de abrir', async () => {

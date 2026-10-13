@@ -1,5 +1,6 @@
 import type { Brand } from '@/shared/domain'
 import type { DeployStatus } from '../value-objects/deployStatus'
+import { stripAnsi } from './appLogs'
 
 // El log de un deploy (spec §7): texto, una línea por evento, cada una con su timestamp.
 // Los valores de variables `secret` ya llegan reemplazados por `***`.
@@ -70,7 +71,9 @@ export function logLineTone(text: string): LogTone {
 	return 'normal'
 }
 
-export function parseLogLine(raw: string, n: number): LogLine {
+export function parseLogLine(input: string, n: number): LogLine {
+	// El stderr de `docker stack deploy` puede traer colores de terminal.
+	const raw = stripAnsi(input)
 	const match = TIMESTAMP.exec(raw)
 	const time = match?.[1] ? new Date(match[1]) : null
 	const valid = time !== null && !Number.isNaN(time.getTime())

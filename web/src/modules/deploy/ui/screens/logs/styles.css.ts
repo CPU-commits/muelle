@@ -73,13 +73,9 @@ export const task = style({
 	textOverflow: 'ellipsis',
 })
 
-export const level = style({
-	flex: 'none',
-	width: '5ch',
-})
-
+// El nivel no va en una columna: pinta la línea (el texto, que nunca se recorta, ya lo dice).
 export const levels = styleVariants({
-	info: { color: theme.colors.text.tertiary },
+	info: { color: theme.colors.text.primary },
 	warn: { color: theme.colors.status.warnText },
 	error: { color: theme.colors.status.errorText },
 })
@@ -87,7 +83,6 @@ export const levels = styleVariants({
 export const message = style({
 	flex: '1 1 28ch',
 	minWidth: 0,
-	color: theme.colors.text.primary,
 	whiteSpace: 'pre-wrap',
 	wordBreak: 'break-word',
 })

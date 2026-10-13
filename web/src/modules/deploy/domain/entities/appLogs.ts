@@ -9,8 +9,9 @@ export interface AppLogLine {
 	/** La tarea que la escribió (`api.1`), si Docker lo dice. */
 	readonly task: string | null
 	readonly stream: LogStream
-	/** El mensaje, sin el nivel si venía como prefijo (`WARN …`) o en JSON. */
+	/** La línea tal cual la escribió la app, sin los escapes ANSI. Nunca se recorta. */
 	readonly text: string
+	/** De qué color se pinta (ver `parseAppLogText`). */
 	readonly level: LogLevel
 }
 
@@ -48,40 +49,62 @@ function levelFromWord(word: unknown): LogLevel | null {
 	return typeof word === 'string' ? (LEVEL_WORDS[word.toLowerCase()] ?? null) : null
 }
 
-// `WARN algo`, `[warn] algo`, `ERROR: algo`.
-const LEVEL_PREFIX = /^\s*\[?([a-z]+)\]?:?\s+(.*)$/is
-// `level=warn` en logfmt.
-const LOGFMT_LEVEL = /\blevel=("?)([a-z]+)\1/i
+// Los escapes de terminal que traen los logs con color: CSI (`ESC [ … letra`: colores,
+// cursor), OSC (`ESC ] … BEL` o `ESC ] … ESC \`: títulos, links) y los de dos caracteres.
+const ANSI = new RegExp(
+	[
+		String.raw`\u001b\[[0-?]*[ -/]*[@-~]`,
+		String.raw`\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)`,
+		String.raw`\u001b[@-Z\\-_]`,
+	].join('|'),
+	'g',
+)
 
-function fromJson(raw: string): { level: LogLevel | null; text: string } | null {
-	if (!raw.startsWith('{')) return null
+/** La línea sin los escapes ANSI (colores, cursor, links de terminal). */
+export function stripAnsi(raw: string): string {
+	return raw.includes('\u001b') ? raw.replace(ANSI, '') : raw
+}
+
+// Solo cuentan como nivel los tokens que una app escribe como nivel, no las palabras del
+// mensaje ("error: relation …", "Error al conectar" son texto):
+// - en mayúsculas y sueltos al principio de la línea, después de lo que suele ir antes
+//   (fecha, hora, `[api]`): `WARN …`, `2026/10/10 14:00 ERROR …`;
+// - entre corchetes, en cualquier caja: `[warn]`, `[ERROR]`;
+// - `level=` (logfmt) y el campo `level`/`lvl`/`severity` de una línea JSON.
+const UPPERCASE_LEVEL =
+	/^(?:[\d\s:./T+-]+|\[[^\]]*\]\s*)*(TRACE|DEBUG|INFO|NOTICE|WARN(?:ING)?|ERROR|ERR|FATAL|PANIC|CRIT(?:ICAL)?)(?=[\s:]|$)/
+const BRACKETED_LEVEL =
+	/\[(trace|debug|info|notice|warn(?:ing)?|error|err|fatal|panic|crit(?:ical)?)\]/i
+const LOGFMT_LEVEL = /(?:^|\s)(?:level|lvl|severity)=("?)([a-z]+)\1(?=\s|$)/i
+
+function levelFromJson(raw: string): LogLevel | null | undefined {
+	if (!raw.startsWith('{')) return undefined
 	try {
 		const value: unknown = JSON.parse(raw)
-		if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+		if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
 		const record = value as Record<string, unknown>
-		const level = levelFromWord(record.level ?? record.lvl ?? record.severity)
-		const message = record.msg ?? record.message
-		return { level, text: typeof message === 'string' ? message : raw }
+		return levelFromWord(record.level ?? record.lvl ?? record.severity)
 	} catch {
-		return null
+		return undefined
 	}
 }
 
 /**
- * Saca el nivel de una línea y lo que se muestra como mensaje. Docker no tiene niveles:
- * se leen de lo que escribió la app (JSON con `level`, `level=` de logfmt o un prefijo
- * `WARN`). Sin pistas, es `info`, también en stderr (muchas apps loguean todo ahí).
+ * El nivel de una línea y su texto. Docker no tiene niveles: se leen de lo que escribió
+ * la app, solo de tokens que son un nivel (ver arriba). Sin pistas, `info`, también en
+ * stderr (muchas apps loguean todo ahí). El texto es la línea entera sin los escapes
+ * ANSI: el nivel da color, no se corta nada.
  */
 export function parseAppLogText(raw: string): { level: LogLevel; text: string } {
-	const json = fromJson(raw)
-	if (json) return { level: json.level ?? 'info', text: json.text }
-
-	const prefix = LEVEL_PREFIX.exec(raw)
-	const prefixLevel = levelFromWord(prefix?.[1])
-	if (prefix && prefixLevel) return { level: prefixLevel, text: prefix[2] ?? '' }
-
-	const logfmt = LOGFMT_LEVEL.exec(raw)
-	return { level: levelFromWord(logfmt?.[2]) ?? 'info', text: raw }
+	const text = stripAnsi(raw)
+	const json = levelFromJson(text)
+	if (json !== undefined) return { level: json ?? 'info', text }
+	const level =
+		levelFromWord(UPPERCASE_LEVEL.exec(text)?.[1]) ??
+		levelFromWord(BRACKETED_LEVEL.exec(text)?.[1]) ??
+		levelFromWord(LOGFMT_LEVEL.exec(text)?.[2]) ??
+		'info'
+	return { level, text }
 }
 
 /** Suma líneas y se queda con las últimas `cap`. */

@@ -17,7 +17,6 @@
 	import { type LogsProps, LogsViewModel } from './Logs.viewModel.svelte.ts'
 	import {
 		box,
-		level,
 		levels,
 		line,
 		lineError,
@@ -157,10 +156,9 @@
 								<span class={task} title={keyed.line.task ?? undefined}>
 									{keyed.line.task ?? ''}
 								</span>
-								<span class={[level, levels[keyed.line.level]]}
-									>{keyed.line.level}</span
+								<span class={[message, levels[keyed.line.level]]}
+									>{keyed.line.text}</span
 								>
-								<span class={message}>{keyed.line.text}</span>
 							</li>
 						{/each}
 					</ol>

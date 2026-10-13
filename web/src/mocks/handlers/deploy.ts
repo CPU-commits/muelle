@@ -297,6 +297,9 @@ const LOG_POOL: readonly string[] = [
 	'WARN token expirado · usuario u_8f2a · 401',
 	'INFO POST /v1/auth/refresh 200 · 12 ms',
 	'{"level":"info","msg":"GET /v1/findings?audit=a7f2c&page=2 200 · 27 ms"}',
+	// Con colores de terminal (el panel los saca) y en logfmt.
+	'\u001b[33mWARN\u001b[0m cola de exports con 12 pendientes',
+	'time=2026-10-10T14:32:07Z level=error msg="no se pudo subir e_33e" retry=2',
 ]
 
 /** Cada cuánto llega una línea nueva a los logs en vivo. */

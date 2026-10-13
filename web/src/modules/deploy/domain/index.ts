@@ -14,6 +14,7 @@ export {
 	logTasks,
 	matchesFilter,
 	parseAppLogText,
+	stripAnsi,
 } from './entities/appLogs'
 export type {
 	AppHealth,
