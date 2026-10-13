@@ -1,7 +1,13 @@
 import type { ApiError } from '@/shared/data/http/errors'
 import { type DomainErrorMap, withDomainErrors } from '@/shared/data/http/domainErrors'
-import type { EnvField, EnvRepository } from '../../domain'
-import { EnvLimitExceeded, EnvOutOfScope, EnvOwnerNotFound, utf8Length } from '../../domain'
+import type { EnvField, EnvLimit, EnvRepository } from '../../domain'
+import {
+	EnvLimitExceeded,
+	EnvOutOfScope,
+	EnvOwnerNotFound,
+	EnvRejected,
+	utf8Length,
+} from '../../domain'
 import { envHttpDataSource } from '../datasources/envHttpDataSource'
 import { envFromDto, patchPayload, replacePayload } from '../mappers/envMapper'
 
@@ -17,15 +23,38 @@ function assertBodyFits(body: unknown, field: EnvField): void {
 	}
 }
 
+// Un 422 `invalid` trae `"<campo>: <motivo>"`, con `vars`, `set` o `unset` como campo.
+const FIELD_REASON = /^(vars|set|unset): (.+)$/s
+
+// Los motivos de `entity.CheckCount`, `CheckTotals` y del tope de `unset` en PatchEnv: el
+// panel los revisa antes de mandar, salvo cuando no puede (el tamaño de las secretas).
+const LIMIT_REASONS: readonly { pattern: RegExp; limit: EnvLimit }[] = [
+	{ pattern: /^máximo \d+ (variables|claves)$/, limit: 'count' },
+	{ pattern: /suman más de 1 MiB/, limit: 'size' },
+]
+
+/**
+ * Un 422 nunca llega a la pantalla con el texto del backend (en español, y sin traducir):
+ * un límite conocido es `EnvLimitExceeded`; cualquier otro motivo, `EnvRejected`. Los dos
+ * conservan el campo.
+ */
+function invalidEnv(error: ApiError): Error {
+	const match = FIELD_REASON.exec(error.message)
+	const field = match?.[1] as EnvField | undefined
+	const reason = match?.[2] ?? error.message
+	const known = LIMIT_REASONS.find(({ pattern }) => pattern.test(reason))
+	if (known && field) return new EnvLimitExceeded(known.limit, field)
+	return new EnvRejected(field, reason, cause(error))
+}
+
 // secrets no tiene mapper_errors.go propio: usa los comunes de cmd/http. Un 404 es que el
-// proyecto, el stage o la app no existen; un 422 `invalid` trae `vars`, `set` o `unset`
-// como campo (`"set: clave \"X\" inválida: …"`).
+// proyecto, el stage o la app no existen; un 422 `invalid`, ver `invalidEnv`.
 const ENV_ERRORS: DomainErrorMap = {
 	codes: {
+		invalid: invalidEnv,
 		out_of_scope: (error) => new EnvOutOfScope(cause(error)),
 	},
 	notFound: (error) => new EnvOwnerNotFound(cause(error)),
-	fields: { vars: 'vars', set: 'set', unset: 'unset' },
 }
 
 export const httpEnvRepository: EnvRepository = {

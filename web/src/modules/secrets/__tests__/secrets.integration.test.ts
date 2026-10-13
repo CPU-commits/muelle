@@ -12,6 +12,7 @@ import {
 	appOwner,
 	EnvLimitExceeded,
 	EnvOutOfScope,
+	EnvRejected,
 	EnvOwnerNotFound,
 	InvalidEnvKey,
 	MAX_VALUE_BYTES,
@@ -170,24 +171,41 @@ describe('errores', () => {
 		).rejects.toBeInstanceOf(InvalidEnvKey)
 	})
 
-	it('un 422 del backend llega como ValidationError con su campo (vars, set o unset)', async () => {
-		// Una regla que el panel no conoce: el handler responde como lo haría el backend.
+	function rejectPatchWith(message: string) {
 		server.use(
 			http.patch(api('/projects/:p/stages/:s/apps/:a/env'), () =>
-				HttpResponse.json(
-					{ error: { code: 'invalid', message: 'unset: máximo 500 claves' } },
-					{ status: 422 },
-				),
+				HttpResponse.json({ error: { code: 'invalid', message } }, { status: 422 }),
 			),
 		)
+	}
 
-		const error = await secretsUseCases
-			.patchEnv({ owner: apiApp, unset: ['A'], secret: true })
+	const patchError = () =>
+		secretsUseCases
+			.patchEnv({ owner: apiApp, set: [['A', '1']], secret: true })
 			.catch((caught: unknown) => caught)
 
+	it('los motivos conocidos del backend llegan como EnvLimitExceeded, con su campo', async () => {
+		rejectPatchWith('set: máximo 500 variables')
+		await expect(patchError()).resolves.toMatchObject({ limit: 'count', field: 'set' })
+
+		rejectPatchWith('unset: máximo 500 claves')
+		const unset = await patchError()
+		expect(unset).toBeInstanceOf(EnvLimitExceeded)
+		expect(unset).toMatchObject({ limit: 'count', field: 'unset' })
+
+		rejectPatchWith('vars: las variables suman más de 1 MiB (claves y valores)')
+		await expect(patchError()).resolves.toMatchObject({ limit: 'size', field: 'vars' })
+	})
+
+	it('un 422 que el panel no conoce es EnvRejected: conserva el campo, no muestra el texto', async () => {
+		// Una regla que el panel no conoce: el handler responde como lo haría el backend.
+		rejectPatchWith('set: una regla nueva del backend')
+
+		const error = await patchError()
+
+		expect(error).toBeInstanceOf(EnvRejected)
 		expect(error).toBeInstanceOf(ValidationError)
-		expect((error as ValidationError).field).toBe('unset')
-		expect((error as ValidationError).message).toBe('máximo 500 claves')
+		expect(error).toMatchObject({ field: 'set', reason: 'una regla nueva del backend' })
 	})
 
 	it('el límite de 1 MiB del dueño lo revisa el backend cuando no se conocen las secretas', async () => {
@@ -204,11 +222,8 @@ describe('errores', () => {
 			.patchEnv({ owner: staging, set: [['MORE', big]], secret: true, current })
 			.catch((caught: unknown) => caught)
 
-		expect(error).toBeInstanceOf(ValidationError)
-		expect(error).toMatchObject({
-			field: 'set',
-			message: 'las variables suman más de 1 MiB (claves y valores)',
-		})
+		expect(error).toBeInstanceOf(EnvLimitExceeded)
+		expect(error).toMatchObject({ limit: 'size', field: 'set' })
 	})
 
 	it('un cuerpo de más de 1 MiB no se manda', async () => {

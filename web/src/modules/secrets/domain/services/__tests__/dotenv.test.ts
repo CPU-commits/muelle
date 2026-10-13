@@ -140,11 +140,48 @@ describe('parseDotenv', () => {
 	})
 
 	it('un texto vacío no tiene nada', () => {
-		expect(parseDotenv('')).toEqual({ entries: [], issues: [], duplicates: [] })
-		expect(parseDotenv('\n\n# solo comentarios\n')).toEqual({
-			entries: [],
-			issues: [],
-			duplicates: [],
-		})
+		const nothing = { entries: [], issues: [], duplicates: [], swallowed: [] }
+		expect(parseDotenv('')).toEqual(nothing)
+		expect(parseDotenv('\n\n# solo comentarios\n')).toEqual(nothing)
+	})
+
+	it('unas comillas sin cerrar se marcan en la línea donde abren, y avisa las variables que se tragaron', () => {
+		const parsed = parseDotenv('A=1\nPEM="-----BEGIN-----\nB=2\nexport C=3\nabc==')
+
+		expect(parsed.issues).toEqual([{ line: 2, problem: 'unterminated_quote', key: 'PEM' }])
+		expect(parsed.swallowed).toEqual([
+			{ line: 3, key: 'PEM', looksLike: 'B' },
+			{ line: 4, key: 'PEM', looksLike: 'C' },
+		])
+		expect(parsed.entries.map((entry) => entry.key)).toEqual(['A'])
+	})
+
+	it('un valor de varias líneas que cierra bien también avisa las líneas con forma de KEY=', () => {
+		const parsed = parseDotenv('MSG="hola\nNEXT=2\nchau"\nB=1')
+
+		expect(parsed.issues).toEqual([])
+		expect(values('MSG="hola\nNEXT=2\nchau"')).toEqual({ MSG: 'hola\nNEXT=2\nchau' })
+		expect(parsed.swallowed).toEqual([{ line: 2, key: 'MSG', looksLike: 'NEXT' }])
+		// El relleno de base64 de una clave PEM no parece una variable.
+		expect(parseDotenv('PEM="-----BEGIN-----\nQUJD==\n-----END-----"').swallowed).toEqual([])
+	})
+
+	it('en comillas dobles, \\$ es un $ (como compose y godotenv)', () => {
+		expect(values('A="cuesta \\$5 y \\${HOME}"')).toEqual({ A: 'cuesta $5 y ${HOME}' })
+		expect(values("B='\\$literal'")).toEqual({ B: '\\$literal' })
+	})
+
+	it('solo recorta espacios ASCII: un espacio de no separación es parte del valor', () => {
+		const nbsp = String.fromCharCode(0xa0)
+
+		expect(values(`A=${nbsp}x${nbsp}`)).toEqual({ A: `${nbsp}x${nbsp}` })
+		expect(values(`B=x${nbsp}#no-es-comentario`)).toEqual({ B: `x${nbsp}#no-es-comentario` })
+		expect(values('C= \t x \t ')).toEqual({ C: 'x' })
+		expect(parseDotenv(`${nbsp}D=1`).issues).toEqual([
+			{ line: 1, problem: 'invalid_key', key: `${nbsp}D` },
+		])
+		expect(parseDotenv(`E="x"${nbsp}`).issues).toEqual([
+			{ line: 1, problem: 'trailing_text', key: 'E' },
+		])
 	})
 })

@@ -49,6 +49,25 @@ export function knownEnvSize(vars: readonly EnvVar[]): number {
 	return size
 }
 
+/**
+ * Si dos listas del mismo dueño son iguales: mismas claves, marcas, valores y fechas. El
+ * backend no reescribe lo que no cambia (ni siquiera la fecha), así que comparar la lista
+ * de antes y la de después de un PATCH dice si cambió algo, también en las secretas.
+ */
+export function sameEnv(a: readonly EnvVar[], b: readonly EnvVar[]): boolean {
+	if (a.length !== b.length) return false
+	const byKey = new Map(b.map((envVar) => [envVar.key as string, envVar]))
+	return a.every((envVar) => {
+		const other = byKey.get(envVar.key)
+		return (
+			other !== undefined &&
+			other.secret === envVar.secret &&
+			other.value === envVar.value &&
+			other.updatedAt.getTime() === envVar.updatedAt.getTime()
+		)
+	})
+}
+
 /** Las claves de `vars` que también están en `other` (las que la app pisa del stage). */
 export function overlappingKeys(vars: readonly EnvVar[], other: readonly EnvVar[]): Set<string> {
 	const keys = envKeys(other)

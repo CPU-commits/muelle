@@ -74,6 +74,20 @@ export class EnvLimitExceeded extends ValidationError {
 	}
 }
 
+/**
+ * Un 422 con un motivo que el panel no conoce (una regla nueva del backend). Conserva el
+ * campo y el motivo para logs; la pantalla muestra un texto propio, traducido.
+ */
+export class EnvRejected extends ValidationError {
+	readonly reason: string
+
+	constructor(field: EnvField | undefined, reason: string, options?: ErrorOptions) {
+		super(`El backend rechazó las variables: ${reason}`, field, options)
+		this.name = 'EnvRejected'
+		this.reason = reason
+	}
+}
+
 /** 404 `not_found`: el proyecto, el stage o la app no existen (o los borraron). */
 export class EnvOwnerNotFound extends NotFoundError {
 	constructor(options?: ErrorOptions) {

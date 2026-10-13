@@ -21,6 +21,7 @@ export {
 	findEnvVar,
 	knownEnvSize,
 	overlappingKeys,
+	sameEnv,
 	sortEnvVars,
 } from './entities/envVar'
 export type { EnvField, EnvKeyProblem, EnvLimit, EnvValueProblem } from './errors/secretsErrors'
@@ -30,6 +31,7 @@ export {
 	EnvLimitExceeded,
 	EnvOutOfScope,
 	EnvOwnerNotFound,
+	EnvRejected,
 	InvalidEnvKey,
 	InvalidEnvValue,
 } from './errors/secretsErrors'
@@ -39,6 +41,7 @@ export type {
 	DotenvEntry,
 	DotenvIssue,
 	DotenvProblem,
+	DotenvSwallowed,
 	ParsedDotenv,
 } from './services/dotenv'
 export { parseDotenv } from './services/dotenv'

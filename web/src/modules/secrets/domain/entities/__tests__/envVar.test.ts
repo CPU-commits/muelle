@@ -7,6 +7,7 @@ import {
 	findEnvVar,
 	knownEnvSize,
 	overlappingKeys,
+	sameEnv,
 	sortEnvVars,
 } from '../envVar'
 
@@ -66,5 +67,18 @@ describe('envVar', () => {
 		expect([...overlappingKeys(app, stage)]).toEqual(['LOG_LEVEL'])
 		expect(findEnvVar(app, 'PORT')).toMatchObject({ value: '3000' })
 		expect(findEnvVar(app, 'NOPE')).toBeUndefined()
+	})
+
+	it('sameEnv: igual si tienen las mismas claves, marcas, valores y fechas', () => {
+		const later = new Date('2026-10-05T12:00:00Z')
+		const before = [plain('PORT', '3000'), secret('JWT')]
+		expect(sameEnv(before, [secret('JWT'), plain('PORT', '3000')])).toBe(true)
+		expect(sameEnv(before, [plain('PORT', '8080'), secret('JWT')])).toBe(false)
+		expect(sameEnv(before, [plain('PORT', '3000')])).toBe(false)
+		expect(sameEnv(before, [plain('PORT', '3000'), plain('JWT', 'x')])).toBe(false)
+		// Una secreta reescrita con otro valor solo se nota en la fecha.
+		expect(
+			sameEnv(before, [plain('PORT', '3000'), { ...secret('JWT'), updatedAt: later }]),
+		).toBe(false)
 	})
 })
