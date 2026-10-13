@@ -510,9 +510,7 @@ func (c *Client) InspectContainer(ctx context.Context, nameOrID string) (Contain
 				out.Ports = append(out.Ports, pb)
 			}
 		}
-		slices.SortFunc(out.Ports, func(a, b PortBinding) int {
-			return strings.Compare(fmt.Sprintf("%05d/%s", a.ContainerPort, a.Protocol), fmt.Sprintf("%05d/%s", b.ContainerPort, b.Protocol))
-		})
+		out.Ports = sortedPorts(out.Ports)
 	}
 	for _, m := range r.Mounts {
 		if m.Type == mount.TypeVolume {
@@ -524,8 +522,28 @@ func (c *Client) InspectContainer(ctx context.Context, nameOrID string) (Contain
 			out.Networks = append(out.Networks, name)
 		}
 		slices.Sort(out.Networks)
+		// Un puerto expuesto que no se publica viene con bindings nulos.
+		for port, bindings := range ns.Ports {
+			for _, b := range bindings {
+				hp, _ := strconv.Atoi(b.HostPort)
+				pb := PortBinding{HostPort: hp, ContainerPort: int(port.Num()), Protocol: string(port.Proto())}
+				if b.HostIP.IsValid() {
+					pb.HostIP = b.HostIP.String()
+				}
+				out.PublishedPorts = append(out.PublishedPorts, pb)
+			}
+		}
+		out.PublishedPorts = sortedPorts(out.PublishedPorts)
 	}
 	return out, nil
+}
+
+// sortedPorts ordena por puerto del contenedor, protocolo e IP del host.
+func sortedPorts(ports []PortBinding) []PortBinding {
+	slices.SortFunc(ports, func(a, b PortBinding) int {
+		return strings.Compare(fmt.Sprintf("%05d/%s %s", a.ContainerPort, a.Protocol, a.HostIP), fmt.Sprintf("%05d/%s %s", b.ContainerPort, b.Protocol, b.HostIP))
+	})
+	return ports
 }
 
 // StartContainer reconoce un puerto del host ocupado por el texto: el daemon

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -113,8 +114,25 @@ func TestFakeBusyHostPort(t *testing.T) {
 	if err := f.StartContainer(ctx, "c"); err != nil {
 		t.Fatal(err)
 	}
-	if c, _ := f.InspectContainer(ctx, "c"); !c.Running || len(c.Ports) != 0 {
-		t.Fatalf("rearrancado después de un puerto ocupado: %+v (sin puertos, como Docker)", c)
+	if c, _ := f.InspectContainer(ctx, "c"); !c.Running || len(c.Ports) != 1 || len(c.PublishedPorts) != 0 {
+		t.Fatalf("rearrancado después de un puerto ocupado: %+v (sin publicar sus puertos, como Docker)", c)
+	}
+	// Uno nuevo con el mismo puerto sí lo publica: el otro no lo tiene tomado.
+	if _, err := f.CreateContainer(ctx, docker.ContainerSpec{Name: "d", Image: "caddy:x",
+		Ports: []docker.PortBinding{{HostPort: 443, ContainerPort: 443}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.StartContainer(ctx, "d"); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := f.InspectContainer(ctx, "d"); !reflect.DeepEqual(d.PublishedPorts, d.Ports) || len(d.Ports) != 1 {
+		t.Fatalf("corriendo publica sus puertos: %+v", d)
+	}
+	if err := f.StopContainer(ctx, "d", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := f.InspectContainer(ctx, "d"); len(d.PublishedPorts) != 0 || len(d.Ports) != 1 {
+		t.Fatalf("detenido no publica nada: %+v", d)
 	}
 	// Un contenedor corriendo no se borra sin force.
 	if err := f.RemoveContainer(ctx, "c", false); !errors.Is(err, docker.ErrConflict) {

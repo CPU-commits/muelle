@@ -398,10 +398,23 @@ func TestIntegrationPortInUse(t *testing.T) {
 	if err := start(names[1]); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := c.InspectContainer(ctx, names[1]); err != nil || len(got.Ports) != 1 || got.Ports[0].HostPort != port {
+	got, err := c.InspectContainer(ctx, names[1])
+	if err != nil || len(got.Ports) != 1 || got.Ports[0].HostPort != port || len(got.PublishedPorts) == 0 || got.PublishedPorts[0].HostPort != port {
 		t.Fatalf("el contenedor que tomó el puerto: %+v %v", got, err)
 	}
 	if err := start(names[2]); !errors.Is(err, docker.ErrPortInUse) {
 		t.Fatalf("puerto que publica otro contenedor: %v, esperaba ErrPortInUse", err)
+	}
+	// Rearrancarlo nunca le da el puerto: o falla igual, o (Docker 29) corre
+	// sin publicarlo, y eso se ve en PublishedPorts.
+	err = c.StartContainer(ctx, names[2])
+	if !errors.Is(err, docker.ErrPortInUse) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := c.InspectContainer(ctx, names[2])
+		if err != nil || !got.Running || len(got.Ports) != 1 || len(got.PublishedPorts) != 0 {
+			t.Fatalf("rearrancado tras ErrPortInUse: %+v %v", got, err)
+		}
 	}
 }

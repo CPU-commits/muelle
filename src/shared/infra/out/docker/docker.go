@@ -333,9 +333,15 @@ type Container struct {
 	Health        string // "", "starting", "healthy" o "unhealthy"
 	StartedAt     time.Time
 	RestartPolicy string
-	Ports         []PortBinding
-	Mounts        []Mount
-	Networks      []string // nombres de las redes conectadas, ordenados
+	// Ports son los que se pidieron al crearlo (HostConfig), corra o no.
+	Ports []PortBinding
+	// PublishedPorts son los que Docker publica de verdad mientras corre
+	// (NetworkSettings.Ports), una entrada por dirección (IPv4 e IPv6 por
+	// separado); vacío si no corre. Un contenedor que corre con Ports pero
+	// sin PublishedPorts quedó mal (ver StartContainer): se recrea.
+	PublishedPorts []PortBinding
+	Mounts         []Mount
+	Networks       []string // nombres de las redes conectadas, ordenados
 }
 
 // Stats es una muestra del consumo de un contenedor.
@@ -352,8 +358,9 @@ type Containers interface {
 	InspectContainer(ctx context.Context, nameOrID string) (Container, error)
 	// StartContainer: ErrPortInUse si un puerto del host está tomado (el
 	// contenedor queda creado y detenido). Ojo: Docker 29 arranca sin los
-	// puertos un contenedor así si se lo vuelve a arrancar; hay que borrarlo
-	// y crearlo de nuevo (el fake de dockertest hace lo mismo).
+	// puertos un contenedor así si se lo vuelve a arrancar (Container.Ports
+	// los sigue listando, PublishedPorts no); hay que borrarlo y crearlo de
+	// nuevo. El fake de dockertest hace lo mismo.
 	StartContainer(ctx context.Context, nameOrID string) error
 	// StopContainer espera hasta timeout antes de matarlo.
 	StopContainer(ctx context.Context, nameOrID string, timeout time.Duration) error

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -361,5 +362,42 @@ func TestStartContainerPortInUse(t *testing.T) {
 	})
 	if err := c.StartContainer(context.Background(), "muelle-caddy"); err == nil || errors.Is(err, ErrPortInUse) {
 		t.Fatalf("otro error: %v", err)
+	}
+}
+
+// Ports son los que se pidieron al crear el contenedor (HostConfig) y
+// PublishedPorts los que Docker publica de verdad mientras corre
+// (NetworkSettings.Ports): un contenedor rearrancado tras ErrPortInUse corre
+// sin publicarlos, y así se nota.
+func TestInspectContainerPorts(t *testing.T) {
+	c, _ := newFakeAPIClient(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /containers/muelle-caddy/json": func(w http.ResponseWriter, r *http.Request) {
+			apiJSON(w, map[string]any{
+				"Id": "abc", "Name": "/muelle-caddy",
+				"Config": map[string]any{"Image": "caddy:x"},
+				"State":  map[string]any{"Status": "running", "Running": true},
+				"HostConfig": map[string]any{"PortBindings": map[string]any{
+					"80/tcp":  []map[string]string{{"HostPort": "80"}},
+					"443/tcp": []map[string]string{{"HostPort": "443"}},
+				}},
+				"NetworkSettings": map[string]any{"Ports": map[string]any{
+					"80/tcp":   []map[string]string{{"HostIp": "0.0.0.0", "HostPort": "80"}, {"HostIp": "::", "HostPort": "80"}},
+					"443/tcp":  nil,
+					"2019/tcp": nil,
+				}},
+			})
+		},
+	})
+	got, err := c.InspectContainer(context.Background(), "muelle-caddy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPorts := []PortBinding{{HostPort: 80, ContainerPort: 80, Protocol: "tcp"}, {HostPort: 443, ContainerPort: 443, Protocol: "tcp"}}
+	wantPublished := []PortBinding{
+		{HostIP: "0.0.0.0", HostPort: 80, ContainerPort: 80, Protocol: "tcp"},
+		{HostIP: "::", HostPort: 80, ContainerPort: 80, Protocol: "tcp"},
+	}
+	if !reflect.DeepEqual(got.Ports, wantPorts) || !reflect.DeepEqual(got.PublishedPorts, wantPublished) {
+		t.Fatalf("Ports %+v\nPublishedPorts %+v", got.Ports, got.PublishedPorts)
 	}
 }

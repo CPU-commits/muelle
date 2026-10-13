@@ -649,6 +649,7 @@ func copyContainer(c *docker.Container) docker.Container {
 	out.Cmd = slices.Clone(c.Cmd)
 	out.Labels = maps.Clone(c.Labels)
 	out.Ports = slices.Clone(c.Ports)
+	out.PublishedPorts = slices.Clone(c.PublishedPorts)
 	out.Mounts = slices.Clone(c.Mounts)
 	out.Networks = slices.Clone(c.Networks)
 	return out
@@ -716,12 +717,13 @@ func (f *Fake) StartContainer(ctx context.Context, nameOrID string) error {
 	// Como Docker 29: un contenedor cuyo arranque falló por un puerto
 	// ocupado, si se vuelve a arrancar, corre sin publicar sus puertos.
 	if f.portFailed[c.ID] {
-		c.Ports = nil
+		c.Running, c.Status, c.StartedAt = true, "running", f.Now()
+		return nil
 	}
 	for _, p := range c.Ports {
 		busy := f.busyPorts[p.HostPort]
 		for _, other := range f.containers {
-			if other != c && other.Running && slices.ContainsFunc(other.Ports, func(o docker.PortBinding) bool { return o.HostPort == p.HostPort }) {
+			if other != c && slices.ContainsFunc(other.PublishedPorts, func(o docker.PortBinding) bool { return o.HostPort == p.HostPort }) {
 				busy = true
 			}
 		}
@@ -732,6 +734,7 @@ func (f *Fake) StartContainer(ctx context.Context, nameOrID string) error {
 		}
 	}
 	c.Running, c.Status, c.StartedAt = true, "running", f.Now()
+	c.PublishedPorts = slices.Clone(c.Ports)
 	return nil
 }
 
@@ -745,7 +748,7 @@ func (f *Fake) StopContainer(ctx context.Context, nameOrID string, timeout time.
 	if c == nil {
 		return notFound("contenedor", nameOrID)
 	}
-	c.Running, c.Status = false, "exited"
+	c.Running, c.Status, c.PublishedPorts = false, "exited", nil
 	return nil
 }
 
