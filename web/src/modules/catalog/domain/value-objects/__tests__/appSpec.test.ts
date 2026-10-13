@@ -74,6 +74,16 @@ describe('appSpec', () => {
 		expect(firstField(spec({ image: 'a'.repeat(5000) }))).toBe('image')
 	})
 
+	it('el límite de 255 es del path del repositorio, sin el registro (distribution/reference)', () => {
+		const longRegistry = `${'r'.repeat(200)}.example.com`
+		expect(isValidImage(`${longRegistry}/team/${'a'.repeat(50)}:v1`)).toBe(true)
+		expect(isValidImage(`ghcr.io/${'a'.repeat(255)}`)).toBe(true)
+		expect(isValidImage(`ghcr.io/${'a'.repeat(256)}`)).toBe(false)
+		// Sin registro, el path es `library/<nombre>` (docker.io).
+		expect(isValidImage('a'.repeat(247))).toBe(true)
+		expect(isValidImage('a'.repeat(248))).toBe(false)
+	})
+
 	it('nombra los campos como el backend (TestParseRejects de appspec_test.go)', () => {
 		const withHealth = (healthcheck: Healthcheck) => spec({ healthcheck })
 		const cases: [string, AppSpec, string][] = [

@@ -116,7 +116,7 @@ const DIGEST = '[A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{
 const REFERENCE = new RegExp(
 	`^((?:${DOMAIN}/)?${PATH_COMPONENT}(?:/${PATH_COMPONENT})*)(?::(${TAG}))?(?:@(${DIGEST}))?$`,
 )
-const NAME_MAX_LENGTH = 255
+const REPOSITORY_PATH_MAX_LENGTH = 255
 const DIGEST_HEX_LENGTH: Readonly<Record<string, number>> = { sha256: 64, sha384: 96, sha512: 128 }
 
 function isValidDigest(digest: string): boolean {
@@ -156,7 +156,9 @@ export function isValidImage(image: string): boolean {
 
 	const match = REFERENCE.exec(`${domain}/${remainder}`)
 	if (!match) return false
-	if ((match[1] ?? '').length > NAME_MAX_LENGTH) return false
+	// El límite es del path del repositorio, sin el registro (`repo.path` en Parse).
+	const path = (match[1] ?? '').slice(domain.length + 1)
+	if (path.length > REPOSITORY_PATH_MAX_LENGTH) return false
 	return match[3] === undefined || isValidDigest(match[3])
 }
 
