@@ -130,15 +130,41 @@ describe('CreateTokenModalViewModel', () => {
 	})
 
 	it('un error de validación va a su campo y se limpia al escribir', async () => {
-		mocks.createToken.mockRejectedValue(new InvalidTokenName('empty'))
 		const vm = await mountViewModel()
+		vm.setProject('auditfy')
 
 		await vm.submit()
 		expect(vm.errors).toEqual({ name: m.common_required() })
-		expect(mocks.onCreated).not.toHaveBeenCalled()
+		expect(mocks.createToken).not.toHaveBeenCalled()
 
 		vm.setName('ci')
 		expect(vm.errors).toEqual({})
+	})
+
+	it('un error del caso de uso también va a su campo', async () => {
+		mocks.createToken.mockRejectedValue(new InvalidTokenName('invisible'))
+		const vm = await mountViewModel()
+		vm.setName('ci')
+		vm.setProject('auditfy')
+
+		await vm.submit()
+
+		expect(vm.errors).toEqual({ name: m.identity_error_token_name_invisible() })
+		expect(mocks.onCreated).not.toHaveBeenCalled()
+	})
+
+	it('marca todos los campos mal de una vez, sin mandar nada', async () => {
+		const vm = await mountViewModel()
+		vm.setExpiresOn('2020-01-01')
+
+		await vm.submit()
+
+		expect(vm.errors).toEqual({
+			name: m.common_required(),
+			project: m.identity_error_token_project(),
+			expiresOn: m.identity_error_token_expiry_past(),
+		})
+		expect(mocks.createToken).not.toHaveBeenCalled()
 	})
 
 	it('un 422 del backend va al campo con su motivo', async () => {
@@ -146,6 +172,8 @@ describe('CreateTokenModalViewModel', () => {
 			new ValidationError('debe estar entre 0 y 3650', 'expiresOn'),
 		)
 		const vm = await mountViewModel()
+		vm.setName('ci')
+		vm.setProject('auditfy')
 
 		await vm.submit()
 
@@ -155,6 +183,7 @@ describe('CreateTokenModalViewModel', () => {
 	it('si el proyecto se borró, lo dice en el campo y recarga la lista', async () => {
 		mocks.createToken.mockRejectedValue(new TokenScopeNotFound())
 		const vm = await mountViewModel()
+		vm.setName('ci')
 		vm.setProject('auditfy')
 
 		await vm.submit()

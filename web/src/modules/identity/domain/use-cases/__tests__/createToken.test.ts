@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+	createTokenProblems,
 	InvalidTokenExpiry,
 	InvalidTokenName,
 	makeCreateToken,
@@ -63,6 +64,25 @@ describe('createToken', () => {
 			InvalidTokenExpiry,
 		)
 		expect(repo.calls.create).toBe(0)
+	})
+
+	it('createTokenProblems junta todos los problemas, no solo el primero', () => {
+		const problems = createTokenProblems(
+			{ name: '', project: '', stage: '', expiresOn: '2026-10-10' },
+			TODAY,
+		)
+
+		expect(problems.map((problem) => problem.constructor)).toEqual([
+			InvalidTokenName,
+			MissingTokenProject,
+			InvalidTokenExpiry,
+		])
+		expect(
+			createTokenProblems(
+				{ name: 'ci', project: 'auditfy', stage: '', expiresOn: '' },
+				TODAY,
+			),
+		).toEqual([])
 	})
 
 	it('un proyecto o stage que no existe vuelve como TokenScopeNotFound', async () => {

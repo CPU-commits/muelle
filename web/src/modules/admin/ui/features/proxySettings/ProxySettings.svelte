@@ -223,7 +223,7 @@
 					{...a11y}
 					type="password"
 					mono
-					autocomplete="off"
+					autocomplete="new-password"
 					spellcheck={false}
 					value={vm.cloudflareToken}
 					oninput={(event) => vm.setField('cloudflareToken', event.currentTarget.value)}

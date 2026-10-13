@@ -32,7 +32,7 @@ export interface AuditPage {
 	readonly nextBefore: AuditEventId | null
 }
 
-export const AUDIT_PAGE_SIZE = 10
+export const AUDIT_PAGE_SIZE = 25
 
 /**
  * El backend pagina por id (`before` = el id más chico ya visto) y no dice si hay más:

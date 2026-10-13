@@ -4,6 +4,8 @@ import { UnavailableError } from '@/shared/domain'
 import { createTokenMutation, scopeProjectsQuery, scopeStagesQuery } from '../../../data'
 import {
 	type CreatedApiToken,
+	type CreateTokenInput,
+	createTokenProblems,
 	expiryInputRange,
 	type ProjectRef,
 	type StageRef,
@@ -120,15 +122,18 @@ export class CreateTokenModalViewModel {
 
 	submit = async (): Promise<void> => {
 		if (!this.canSubmit) return
-		this.errors = {}
 		this.formError = null
+		const input = {
+			name: this.name,
+			project: this.project,
+			stage: this.stage,
+			expiresOn: this.expiresOn,
+		}
+		// Todos los campos mal se marcan a la vez, antes de mandar nada.
+		this.errors = this.#problems(input)
+		if (Object.keys(this.errors).length > 0) return
 		try {
-			const created = await this.#create.mutateAsync({
-				name: this.name,
-				project: this.project,
-				stage: this.stage,
-				expiresOn: this.expiresOn,
-			})
+			const created = await this.#create.mutateAsync(input)
 			this.#params.onCreated(created)
 		} catch (error) {
 			// El proyecto o el stage se borró mientras el modal estaba abierto.
@@ -140,6 +145,15 @@ export class CreateTokenModalViewModel {
 			// El valor en claro no se queda en el cache de mutaciones.
 			this.#create.reset()
 		}
+	}
+
+	#problems(input: CreateTokenInput): FieldErrors {
+		const errors: FieldErrors = {}
+		for (const problem of createTokenProblems(input)) {
+			const fieldError = tokenFieldError(problem)
+			if (fieldError) errors[fieldError.field] = fieldError.message
+		}
+		return errors
 	}
 
 	#clear(field: TokenFormField): void {

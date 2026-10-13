@@ -38,7 +38,7 @@ export type {
 export type { CreateInvite } from './use-cases/createInvite'
 export { makeCreateInvite } from './use-cases/createInvite'
 export type { CreateToken, CreateTokenInput } from './use-cases/createToken'
-export { makeCreateToken } from './use-cases/createToken'
+export { createTokenProblems, makeCreateToken } from './use-cases/createToken'
 export type { DeleteUser, DeleteUserInput } from './use-cases/deleteUser'
 export { makeDeleteUser } from './use-cases/deleteUser'
 export type { ListScopeProjects } from './use-cases/listScopeProjects'
