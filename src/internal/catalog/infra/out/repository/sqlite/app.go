@@ -107,8 +107,8 @@ func (r *AppRepository) Update(ctx context.Context, a entity.App) error {
 	return nil
 }
 
-// Delete borra la app y, en cascada, sus variables.
-// Delete borra la app. Con dominios (domains.app_id es RESTRICT) devuelve ErrNotEmpty.
+// Delete borra la app y, en cascada, sus variables y deploys. Con dominios
+// (domains.app_id es RESTRICT) devuelve ErrNotEmpty.
 func (r *AppRepository) Delete(ctx context.Context, id int64) error {
 	res, err := r.db.Conn(ctx).ExecContext(ctx, `DELETE FROM apps WHERE id = ?`, id)
 	if sqlitedb.IsForeignKey(err) {
