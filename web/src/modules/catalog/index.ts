@@ -15,4 +15,11 @@ export type {
 	StageSlug,
 } from './domain'
 export { appRefFrom, appStackName, stageNetwork } from './domain'
-export { AppBreadcrumb, AppChangesBadge, AppConfigScreen, AppIdentity, ProjectsScreen } from './ui'
+export {
+	AppBreadcrumb,
+	AppChangesBadge,
+	AppConfigScreen,
+	AppIdentity,
+	ProjectsScreen,
+	StageBreadcrumb,
+} from './ui'
