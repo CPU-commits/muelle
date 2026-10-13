@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -8,15 +9,17 @@ import (
 )
 
 // Claves de la tabla settings de las fases 2, 3 y 5 (§5.1 del spec). Las
-// escribe admin (PATCH /settings y la configuración inicial de install) salvo
-// donde se indica, y las leen ingress y deploy desde sus adaptadores SQL. El
-// valor de cada una se guarda en texto, con el formato de ProxySettings.Encode.
+// escribe admin (PATCH /settings, y al arrancar la configuración inicial de
+// install, MUELLE_INIT_*) salvo donde se indica, y las leen ingress y deploy
+// desde sus adaptadores SQL. El valor de cada una se guarda en texto, con el
+// formato de ProxySettings.Encode.
 const (
 	// SettingCloudflareToken va cifrado (encrypted=1) con la AAD
 	// SettingCloudflareTokenAAD. Es de solo escritura: GET /settings solo dice si está.
 	SettingCloudflareToken = "cloudflare_token"
 	// SettingCloudflareZones es cuántas zonas ve el token, en decimal. La
-	// escribe ingress cada vez que verifica el token; si no está, no se sabe.
+	// escribe admin al guardar un token (con lo que responde ingress al
+	// verificarlo) y la puede actualizar ingress; si no está, no se sabe.
 	SettingCloudflareZones = "cloudflare_zones"
 	// SettingPublicIP es la IPv4 pública (forma canónica) de los registros A.
 	SettingPublicIP = "public_ip"
@@ -24,9 +27,10 @@ const (
 	SettingPublicIPv6 = "public_ipv6"
 	// SettingACMEEmail es el email de la cuenta ACME de Caddy.
 	SettingACMEEmail = "acme_email"
-	// SettingPanelDomain es el host del panel (sin esquema ni puerto). Solo lo
-	// escribe la configuración inicial (MUELLE_INIT_PANEL_DOMAIN): tiene que
-	// coincidir con el host de MUELLE_PANEL_ORIGIN.
+	// SettingPanelDomain es el host del panel (sin esquema ni puerto). No se
+	// edita: admin lo escribe en cada arranque con el host de
+	// MUELLE_PANEL_ORIGIN, o vacío si ese host no es un dominio (una IP o
+	// localhost, en desarrollo). Así nunca hay dos fuentes que no coincidan.
 	SettingPanelDomain = "panel_domain"
 	// SettingPanelAllowedCIDRs es un arreglo JSON de prefijos normalizados
 	// (validate.CIDRs); [] = sin restricción.
@@ -38,7 +42,9 @@ const (
 	// publica muelle-caddy, en decimal (§3.1).
 	SettingProxyHTTPPort  = "proxy_http_port"
 	SettingProxyHTTPSPort = "proxy_https_port"
-	// SettingCaddyImage es la imagen de muelle-caddy (ref completa con tag).
+	// SettingCaddyImage fija la imagen de muelle-caddy (ref completa con tag).
+	// Vacío (lo normal): la de esta versión de muelle (naming.CaddyImageFor).
+	// Solo lo escribe la configuración inicial (MUELLE_INIT_CADDY_IMAGE).
 	SettingCaddyImage = "caddy_image"
 )
 
@@ -83,10 +89,17 @@ func DefaultProxySettings() ProxySettings {
 	}
 }
 
+// CaddyImageOr es la imagen de muelle-caddy: la fijada en caddy_image o, si
+// no hay, def (la de esta versión, naming.CaddyImageFor).
+func (p ProxySettings) CaddyImageOr(def string) string { return cmp.Or(p.CaddyImage, def) }
+
 // Enabled dice si ingress maneja muelle-caddy: solo con el dominio del panel
-// y la imagen de Caddy, que configura install. En desarrollo, sin ellos,
-// muelle no crea el contenedor ni toca los puertos del host.
-func (p ProxySettings) Enabled() bool { return p.PanelDomain != "" && p.CaddyImage != "" }
+// y una imagen de Caddy (CaddyImageOr(def)). En desarrollo, con un origen que
+// es una IP y un binario sin versión, muelle no crea el contenedor ni toca
+// los puertos del host.
+func (p ProxySettings) Enabled(def string) bool {
+	return p.PanelDomain != "" && p.CaddyImageOr(def) != ""
+}
 
 // DecodeProxySettings arma los ajustes con los valores guardados (clave →
 // valor en texto, como los tiene la tabla settings) y el token ya descifrado.

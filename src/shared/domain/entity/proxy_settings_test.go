@@ -113,22 +113,26 @@ func TestProxySettingsChangedKeys(t *testing.T) {
 	}
 }
 
-// ingress maneja muelle-caddy solo si install configuró el dominio del panel y
-// la imagen de Caddy; en desarrollo (sin ellos) no toca los puertos del host.
+// ingress maneja muelle-caddy solo con el dominio del panel y una imagen de
+// Caddy: la fijada en caddy_image o la de esta versión de muelle. En
+// desarrollo (un origen con IP y un binario sin versión) no toca los puertos del host.
 func TestProxySettingsEnabled(t *testing.T) {
+	const def = "ghcr.io/cpu-commits/muelle-caddy:v0.2.0"
 	p := fullProxySettings()
-	if !p.Enabled() {
-		t.Fatal("con dominio e imagen debe estar activo")
+	if !p.Enabled("") || p.CaddyImageOr(def) != p.CaddyImage {
+		t.Fatal("con dominio e imagen fijada debe estar activo y usar la fijada")
 	}
-	for _, off := range []func(*ProxySettings){
-		func(p *ProxySettings) { p.PanelDomain = "" },
-		func(p *ProxySettings) { p.CaddyImage = "" },
-	} {
-		q := fullProxySettings()
-		off(&q)
-		if q.Enabled() {
-			t.Errorf("%+v no debería estar activo", q)
-		}
+	p.CaddyImage = ""
+	if !p.Enabled(def) || p.CaddyImageOr(def) != def {
+		t.Fatal("sin imagen fijada usa la de la versión")
+	}
+	if p.Enabled("") {
+		t.Fatal("sin imagen fijada ni de versión no está activo")
+	}
+	p = fullProxySettings()
+	p.PanelDomain = ""
+	if p.Enabled(def) {
+		t.Fatal("sin dominio del panel no está activo")
 	}
 }
 

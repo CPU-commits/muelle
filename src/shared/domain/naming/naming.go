@@ -10,6 +10,7 @@
 package naming
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -119,3 +120,23 @@ const (
 	MuelleImage = "ghcr.io/cpu-commits/muelle"
 	CaddyImage  = "ghcr.io/cpu-commits/muelle-caddy"
 )
+
+// releaseRe es una versión publicada: v<mayor>.<menor>.<parche>, con un sufijo opcional (-rc.1).
+var releaseRe = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
+
+// MuelleImageFor es la imagen de muelle de esa versión, o "" si no es una
+// versión publicada (un binario de desarrollo, "dev").
+func MuelleImageFor(version string) string { return imageFor(MuelleImage, version) }
+
+// CaddyImageFor es la imagen de muelle-caddy que va con esa versión de muelle
+// (se publican juntas, con el mismo tag), o "" si no es una versión publicada.
+// Es la que usa ingress cuando el setting caddy_image está vacío: así,
+// actualizar muelle actualiza también Caddy.
+func CaddyImageFor(version string) string { return imageFor(CaddyImage, version) }
+
+func imageFor(repo, version string) string {
+	if !releaseRe.MatchString(version) {
+		return ""
+	}
+	return repo + ":" + version
+}

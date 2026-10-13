@@ -129,3 +129,24 @@ func TestInfraNames(t *testing.T) {
 		t.Errorf("Upstream = %q", got)
 	}
 }
+
+// Las imágenes de una versión publicada (v1.2.3, con sufijo opcional) llevan
+// ese tag; un binario de desarrollo no tiene imagen por defecto.
+func TestImagesForVersion(t *testing.T) {
+	for version, want := range map[string][2]string{
+		"v0.1.0":       {"ghcr.io/cpu-commits/muelle:v0.1.0", "ghcr.io/cpu-commits/muelle-caddy:v0.1.0"},
+		"v1.12.3-rc.1": {"ghcr.io/cpu-commits/muelle:v1.12.3-rc.1", "ghcr.io/cpu-commits/muelle-caddy:v1.12.3-rc.1"},
+		"":             {"", ""},
+		"dev":          {"", ""},
+		"(devel)":      {"", ""},
+		"v1.2":         {"", ""},
+		"v1.2.3 x":     {"", ""},
+	} {
+		if got := MuelleImageFor(version); got != want[0] {
+			t.Errorf("MuelleImageFor(%q) = %q, esperaba %q", version, got, want[0])
+		}
+		if got := CaddyImageFor(version); got != want[1] {
+			t.Errorf("CaddyImageFor(%q) = %q, esperaba %q", version, got, want[1])
+		}
+	}
+}
