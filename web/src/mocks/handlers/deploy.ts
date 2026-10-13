@@ -209,6 +209,9 @@ function sseEvent(event: string, data: string, id?: string): Uint8Array {
 	return encoder.encode(`${lines.join('\n')}\n\n`)
 }
 
+/** El backend manda un comentario `: ping` cada ~15 s en los dos streams SSE. */
+const SSE_HEARTBEAT_MS = 15_000
+
 const SSE_HEADERS = {
 	'content-type': 'text/event-stream',
 	'cache-control': 'no-cache',
@@ -313,36 +316,53 @@ const APP_LOG_TICK_MS = 1100
 /** Para que un stream olvidado no quede corriendo para siempre en la pestaña. */
 const APP_LOG_MAX_MS = 15 * 60_000
 
-function appLogLine(app: MockApp, service: string, sequence: number, time: number): string {
+/** El máximo de `tail` (y de lo que se manda de una vez con `since`). */
+const MAX_LOG_TAIL = 5000
+
+/** La línea `sequence` se escribió en `sequence * APP_LOG_TICK_MS`: es la misma en cada stream. */
+function appLogLine(app: MockApp, service: string, sequence: number): string {
 	const slot = (sequence % app.replicas) + 1
 	return JSON.stringify({
-		time: new Date(time).toISOString(),
+		time: new Date(sequence * APP_LOG_TICK_MS).toISOString(),
 		task: `${service}.${slot}`,
 		stream: sequence % 11 === 9 ? 'stderr' : 'stdout',
 		line: LOG_POOL[sequence % LOG_POOL.length],
 	})
 }
 
+/** Desde dónde: las últimas `tail` líneas, o todo lo escrito desde `since` (inclusivo, como Docker). */
+type LogStart = { readonly tail: number } | { readonly since: number }
+
 function appLogStream(
 	request: Request,
 	app: MockApp,
 	service: string,
-	tail: number,
+	start: LogStart,
 	follow: boolean,
 ) {
 	return sseResponse(request, async (send, isOpen) => {
 		const now = Date.now()
-		let sequence = Math.floor(now / APP_LOG_TICK_MS)
-		for (let back = tail; back > 0; back -= 1) {
-			const time = now - back * APP_LOG_TICK_MS
-			if (!send(sseEvent('log', appLogLine(app, service, sequence - back, time)))) return
+		const last = Math.floor(now / APP_LOG_TICK_MS)
+		const first =
+			'since' in start
+				? Math.max(Math.ceil(start.since / APP_LOG_TICK_MS), last - MAX_LOG_TAIL + 1)
+				: last - start.tail + 1
+		for (let sequence = first; sequence <= last; sequence += 1) {
+			if (!send(sseEvent('log', appLogLine(app, service, sequence)))) return
 		}
 		if (!follow) return
 		const until = now + APP_LOG_MAX_MS
+		let sequence = last
+		let heartbeat = now
 		while (isOpen() && Date.now() < until) {
-			await delay(APP_LOG_TICK_MS)
 			sequence += 1
-			if (!send(sseEvent('log', appLogLine(app, service, sequence, Date.now())))) return
+			await delay(Math.max(0, sequence * APP_LOG_TICK_MS - Date.now()))
+			if (!send(sseEvent('log', appLogLine(app, service, sequence)))) return
+			// El comentario de cada ~15 s del backend (las líneas ya mantienen viva la conexión).
+			if (Date.now() - heartbeat >= SSE_HEARTBEAT_MS) {
+				heartbeat = Date.now()
+				if (!send(encoder.encode(': ping\n\n'))) return
+			}
 		}
 	})
 }
@@ -478,11 +498,18 @@ export const deployHandlers: RequestHandler[] = [
 		if (!app.services.includes(service)) {
 			return apiError(404, 'not_found', `no existe el servicio "${service}"`)
 		}
-		const tail = Number(url.searchParams.get('tail') ?? '200')
-		if (!Number.isInteger(tail) || tail < 0 || tail > 5000) {
-			return invalid('tail', 'tiene que ser un entero entre 0 y 5000')
-		}
 		const follow = url.searchParams.get('follow') === '1'
-		return appLogStream(request, app, service, tail, follow)
+		// Al reconectar el panel manda `since` (la hora de la última línea) en vez de `tail`.
+		const sinceParam = url.searchParams.get('since')
+		if (sinceParam !== null) {
+			const since = Date.parse(sinceParam)
+			if (Number.isNaN(since)) return invalid('since', 'tiene que ser una fecha RFC 3339')
+			return appLogStream(request, app, service, { since }, follow)
+		}
+		const tail = Number(url.searchParams.get('tail') ?? '200')
+		if (!Number.isInteger(tail) || tail < 0 || tail > MAX_LOG_TAIL) {
+			return invalid('tail', `tiene que ser un entero entre 0 y ${MAX_LOG_TAIL}`)
+		}
+		return appLogStream(request, app, service, { tail }, follow)
 	}),
 ]

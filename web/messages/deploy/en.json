@@ -102,18 +102,23 @@
 	"deploy_logs_all_tasks": "All tasks",
 	"deploy_logs_tail": "Initial lines",
 	"deploy_logs_tail_option": "Last {count}",
-	"deploy_logs_live": "Live",
-	"deploy_logs_paused": "Paused",
-	"deploy_logs_toggle": "Follow the logs live",
 	"deploy_logs_clear": "Clear",
 	"deploy_logs_lines": "Log lines",
-	"deploy_logs_new_lines": "{count} new lines while paused",
+	"deploy_logs_new_lines": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "1 new line while paused",
+				"countPlural=*": "{count} new lines while paused"
+			}
+		}
+	],
 	"deploy_logs_connecting": "Connecting…",
 	"deploy_logs_waiting": "Waiting for lines…",
 	"deploy_logs_no_match": "No line matches the filter.",
-	"deploy_logs_lost_title": "The connection to the logs dropped.",
-	"deploy_logs_lost_body": "Reconnect to keep following: earlier lines stay.",
-	"deploy_logs_reconnect": "Reconnect",
+	"deploy_logs_lost_title": "The log connection dropped.",
+	"deploy_logs_reconnect": "Reconnect now",
 	"deploy_logs_capped": "The last {cap} lines are kept.",
 	"deploy_row_status": "{health} · {running}/{desired}",
 	"deploy_row_status_service": "{health} · {service} {running}/{desired}",
@@ -127,5 +132,10 @@
 	"deploy_superseded_by": "Superseded by #{id}",
 	"deploy_memory_with_limit": "MB each · limit {limit}",
 	"deploy_usage_sampled": "{sampled} of {total} replicas measured (only those on muelle’s node)",
-	"deploy_healthcheck": "Healthcheck"
+	"deploy_healthcheck": "Healthcheck",
+	"deploy_logs_pause": "Pause",
+	"deploy_logs_resume": "Resume",
+	"deploy_logs_new_lines_announce": "There are new lines",
+	"deploy_logs_unreachable_title": "Could not connect to the logs.",
+	"deploy_logs_retrying_body": "It retries on its own in a few seconds; earlier lines stay."
 }

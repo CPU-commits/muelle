@@ -31,7 +31,31 @@ describe('streamAppLogs', () => {
 		expect(repo.appLogQueries).toEqual([{ service: 'api', tail: 200 }])
 	})
 
-	it('acepta tail 0 para reconectar sin repetir', async () => {
+	it('al reconectar pasa since (y tail queda para el backend que lo ignore)', async () => {
+		const repo = new InMemoryDeployRepository()
+		const since = new Date('2026-10-10T14:31:51.517Z')
+		await collect(
+			makeStreamAppLogs({ deploys: repo })(
+				{ app: APP, service: 'api', tail: 200, since },
+				new AbortController().signal,
+			),
+		)
+		expect(repo.appLogQueries).toEqual([{ service: 'api', tail: 200, since }])
+	})
+
+	it('una fecha inválida en since es un error de validación', async () => {
+		const stream = makeStreamAppLogs({ deploys: new InMemoryDeployRepository() })
+		await expect(
+			collect(
+				stream(
+					{ app: APP, service: 'api', tail: 200, since: new Date('no') },
+					new AbortController().signal,
+				),
+			),
+		).rejects.toThrow(ValidationError)
+	})
+
+	it('acepta tail 0 (solo lo nuevo)', async () => {
 		const repo = new InMemoryDeployRepository()
 		await collect(
 			makeStreamAppLogs({ deploys: repo })(

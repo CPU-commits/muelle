@@ -4,16 +4,24 @@ export type {
 	AppLogLine,
 	AppLogsQuery,
 	LogLevel,
+	ResumePoint,
 	LogStream,
 	LogTail,
 } from './entities/appLogs'
 export {
+	advanceResumePoint,
 	appendCapped,
 	DEFAULT_LOG_TAIL,
+	isRepeatedAfterResume,
 	LOG_TAILS,
+	lineKey,
 	logTasks,
+	MAX_LOG_TAIL,
 	matchesFilter,
 	parseAppLogText,
+	RECONNECT_BASE_MS,
+	RECONNECT_MAX_MS,
+	reconnectDelayMs,
 	stripAnsi,
 } from './entities/appLogs'
 export type {

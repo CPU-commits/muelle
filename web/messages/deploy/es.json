@@ -102,18 +102,23 @@
 	"deploy_logs_all_tasks": "Todas las tareas",
 	"deploy_logs_tail": "Líneas iniciales",
 	"deploy_logs_tail_option": "Últimas {count}",
-	"deploy_logs_live": "En vivo",
-	"deploy_logs_paused": "Pausado",
-	"deploy_logs_toggle": "Seguir los logs en vivo",
 	"deploy_logs_clear": "Limpiar",
 	"deploy_logs_lines": "Líneas de log",
-	"deploy_logs_new_lines": "{count} líneas nuevas en pausa",
+	"deploy_logs_new_lines": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "1 línea nueva en pausa",
+				"countPlural=*": "{count} líneas nuevas en pausa"
+			}
+		}
+	],
 	"deploy_logs_connecting": "Conectando…",
 	"deploy_logs_waiting": "Esperando líneas…",
 	"deploy_logs_no_match": "Ninguna línea coincide con el filtro.",
 	"deploy_logs_lost_title": "Se cortó la conexión con los logs.",
-	"deploy_logs_lost_body": "Reconecta para seguir: las líneas de antes se quedan.",
-	"deploy_logs_reconnect": "Reconectar",
+	"deploy_logs_reconnect": "Reconectar ahora",
 	"deploy_logs_capped": "Se guardan las últimas {cap} líneas.",
 	"deploy_row_status": "{health} · {running}/{desired}",
 	"deploy_row_status_service": "{health} · {service} {running}/{desired}",
@@ -127,5 +132,10 @@
 	"deploy_superseded_by": "Reemplazado por #{id}",
 	"deploy_memory_with_limit": "MB c/u · límite {limit}",
 	"deploy_usage_sampled": "{sampled} de {total} réplicas medidas (solo las del nodo de muelle)",
-	"deploy_healthcheck": "Healthcheck"
+	"deploy_healthcheck": "Healthcheck",
+	"deploy_logs_pause": "Pausar",
+	"deploy_logs_resume": "Reanudar",
+	"deploy_logs_new_lines_announce": "Hay líneas nuevas",
+	"deploy_logs_unreachable_title": "No se pudo conectar a los logs.",
+	"deploy_logs_retrying_body": "Se vuelve a intentar sola en unos segundos; las líneas de antes se quedan."
 }

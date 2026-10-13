@@ -4,7 +4,7 @@ import { api, apiError } from '@/mocks/api'
 import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { deployDb } from '@/mocks/db/deploy'
 import { server } from '@/mocks/server'
-import { pendingPhase, UnavailableError, ValidationError } from '@/shared/domain'
+import { pendingPhase, UnauthorizedError, UnavailableError, ValidationError } from '@/shared/domain'
 import { deployUseCases } from '../container'
 import {
 	type AppLogEvent,
@@ -298,6 +298,48 @@ describe('logs en vivo', () => {
 		// El texto llega entero (el nivel solo da color) y sin escapes ANSI.
 		expect(lines.some((line) => line.text.startsWith('WARN '))).toBe(true)
 		expect(lines.every((line) => !line.text.includes(String.fromCharCode(27)))).toBe(true)
+	})
+
+	it('con since trae todo lo escrito desde ahí, inclusive, y nada de antes', async () => {
+		const first = new AbortController()
+		const before = (
+			await collect(
+				deployUseCases.streamAppLogs({ app: APP, service: 'api', tail: 100 }, first.signal),
+				101,
+			)
+		).flatMap((event) => (event.kind === 'line' ? [event.line] : []))
+		first.abort()
+		const since = before.at(-3)?.time
+		if (!since) throw new Error('sin hora')
+
+		const second = new AbortController()
+		const after = (
+			await collect(
+				deployUseCases.streamAppLogs(
+					{ app: APP, service: 'api', tail: 100, since },
+					second.signal,
+				),
+				4,
+			)
+		).flatMap((event) => (event.kind === 'line' ? [event.line] : []))
+		second.abort()
+
+		// La línea de `since` vuelve (inclusivo: el panel la descarta) y siguen las que venían.
+		expect(after.map((line) => line.time?.getTime())).toEqual(
+			before.slice(-3).map((line) => line.time?.getTime()),
+		)
+		expect(after.map((line) => line.text)).toEqual(before.slice(-3).map((line) => line.text))
+	})
+
+	it('si el stream no abre porque la sesión venció, es UnauthorizedError (y no se reintenta)', async () => {
+		authDb.reset()
+		const result = collect(
+			deployUseCases.streamAppLogs(
+				{ app: APP, service: 'api', tail: 100 },
+				new AbortController().signal,
+			),
+		)
+		await expect(result).rejects.toBeInstanceOf(UnauthorizedError)
 	})
 
 	it('un servicio que no existe corta el stream antes de abrir', async () => {

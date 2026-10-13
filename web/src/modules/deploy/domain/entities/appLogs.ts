@@ -1,4 +1,4 @@
-// Los logs en vivo de un servicio (`GET …/apps/{a}/logs?service&tail&follow`, SSE): lo
+// Los logs en vivo de un servicio (`GET …/apps/{a}/logs?service&tail|since&follow`, SSE): lo
 // que Docker devuelve de sus tareas. muelle no guarda nada (spec §10).
 
 export type LogStream = 'stdout' | 'stderr'
@@ -20,7 +20,7 @@ export type AppLogEvent =
 	| { readonly kind: 'open' }
 	| { readonly kind: 'line'; readonly line: AppLogLine }
 
-/** "Últimas N" del selector de líneas iniciales. `0` = solo lo nuevo (al reconectar). */
+/** "Últimas N" del selector de líneas iniciales. `0` = solo lo nuevo. */
 export const LOG_TAILS = [100, 200, 500] as const
 export type LogTail = (typeof LOG_TAILS)[number] | 0
 export const DEFAULT_LOG_TAIL: LogTail = 200
@@ -28,7 +28,15 @@ export const DEFAULT_LOG_TAIL: LogTail = 200
 export interface AppLogsQuery {
 	readonly service: string
 	readonly tail: LogTail
+	/**
+	 * Al reconectar: solo lo escrito desde este momento (inclusivo), en vez de `tail`.
+	 * Así no se pierde lo que pasó mientras estaba cortado ni se repite lo de antes.
+	 */
+	readonly since?: Date
 }
+
+/** El máximo de `tail` que acepta el backend. */
+export const MAX_LOG_TAIL = 5000
 
 const LEVEL_WORDS: Record<string, LogLevel> = {
 	trace: 'info',
@@ -133,4 +141,55 @@ export function logTasks(lines: readonly AppLogLine[]): string[] {
 	const tasks = new Set<string>()
 	for (const line of lines) if (line.task) tasks.add(line.task)
 	return [...tasks].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+}
+
+/** Lo que identifica una línea dentro de un mismo instante (para no repetirla). */
+export function lineKey(line: AppLogLine): string {
+	return `${line.task ?? ''}|${line.stream}|${line.text}`
+}
+
+/** Desde dónde seguir al reconectar: la hora de la última línea y las de ese instante. */
+export interface ResumePoint {
+	readonly since: Date
+	readonly seen: ReadonlySet<string>
+}
+
+/** El punto de reconexión después de recibir `line` (las líneas sin hora no lo mueven). */
+export function advanceResumePoint(
+	point: ResumePoint | null,
+	line: AppLogLine,
+): ResumePoint | null {
+	if (!line.time) return point
+	const key = lineKey(line)
+	const time = line.time.getTime()
+	if (!point || time > point.since.getTime()) return { since: line.time, seen: new Set([key]) }
+	if (time === point.since.getTime() && !point.seen.has(key)) {
+		return { since: point.since, seen: new Set([...point.seen, key]) }
+	}
+	return point
+}
+
+/**
+ * Al reconectar con `since` (inclusivo) vuelve a llegar lo del último instante que ya se
+ * tenía: es repetida una línea de antes de `since`, o de ese mismo milisegundo y ya vista.
+ */
+export function isRepeatedAfterResume(line: AppLogLine, point: ResumePoint): boolean {
+	if (!line.time) return false
+	const time = line.time.getTime()
+	const from = point.since.getTime()
+	return time < from || (time === from && point.seen.has(lineKey(line)))
+}
+
+/** La primera espera antes de reconectar un stream de logs que se cortó. */
+export const RECONNECT_BASE_MS = 1000
+/** La espera más larga entre dos intentos. */
+export const RECONNECT_MAX_MS = 30_000
+
+/** Lo que se espera antes del intento `attempt` (0, 1, 2…): 1, 2, 4, 8, 16 y 30 s de ahí en más. */
+export function reconnectDelayMs(
+	attempt: number,
+	baseMs: number = RECONNECT_BASE_MS,
+	maxMs: number = RECONNECT_MAX_MS,
+): number {
+	return Math.min(maxMs, baseMs * 2 ** Math.max(0, Math.floor(attempt)))
 }

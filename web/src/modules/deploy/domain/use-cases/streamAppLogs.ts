@@ -6,8 +6,10 @@ import type { AppRef } from '../value-objects/appRef'
 export interface StreamAppLogsInput {
 	readonly app: AppRef
 	readonly service: string
-	/** Cuántas líneas viejas traer antes de seguir; `0` al reconectar. */
+	/** Cuántas líneas viejas traer antes de seguir. */
 	readonly tail: LogTail
+	/** Al reconectar: seguir desde la hora de la última línea recibida (en vez de `tail`). */
+	readonly since?: Date | null
 }
 
 export type StreamAppLogs = (
@@ -25,6 +27,14 @@ export function makeStreamAppLogs({ deploys }: Pick<DeployDeps, 'deploys'>): Str
 		const service = input.service.trim()
 		if (!service) throw new ValidationError('elige un servicio', 'service')
 		if (!isLogTail(input.tail)) throw new ValidationError('cantidad de líneas inválida', 'tail')
-		yield* deploys.streamAppLogs(input.app, { service, tail: input.tail }, signal)
+		const since = input.since ?? null
+		if (since && Number.isNaN(since.getTime())) {
+			throw new ValidationError('fecha inválida', 'since')
+		}
+		yield* deploys.streamAppLogs(
+			input.app,
+			{ service, tail: input.tail, ...(since ? { since } : {}) },
+			signal,
+		)
 	}
 }

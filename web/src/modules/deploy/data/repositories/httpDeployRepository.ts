@@ -1,7 +1,13 @@
 import type { ApiError } from '@/shared/data/http/errors'
-import { type DomainErrorMap, withDomainErrors } from '@/shared/data/http/domainErrors'
+import {
+	type DomainErrorMap,
+	toDomainError,
+	withDomainErrors,
+} from '@/shared/data/http/domainErrors'
+import { UnauthorizedError } from '@/shared/domain'
 import {
 	type AppLogEvent,
+	type AppRef,
 	asLogOffset,
 	type DeployLogEvent,
 	DeployNotFound,
@@ -49,6 +55,16 @@ const ROLLBACK_ERRORS: DomainErrorMap = {
 		no_previous_deploy: (error) => new NoPreviousDeploy(cause(error)),
 		conflict: (error) => new NoPreviousDeploy(cause(error)),
 	},
+}
+
+/** Si la sesión se cayó: el 401 sale como `UnauthorizedError` (y el cliente ya mandó al login). */
+async function probeSession(app: AppRef): Promise<void> {
+	try {
+		await deployHttpDataSource.status(app)
+	} catch (error) {
+		const translated = toDomainError(error, DEPLOY_ERRORS)
+		if (translated instanceof UnauthorizedError) throw translated
+	}
 }
 
 /** Un stream que no abre, se corta o manda algo que no se entiende: falla como stream. */
@@ -154,6 +170,7 @@ export const httpDeployRepository: DeployRepository = {
 				app,
 				query.service,
 				query.tail,
+				query.since ?? null,
 				signal,
 			)) {
 				if (item.kind === 'open') {
@@ -165,7 +182,13 @@ export const httpDeployRepository: DeployRepository = {
 				if (event) yield event
 			}
 		} catch (error) {
-			throw streamFailure(error, opened)
+			const failure = streamFailure(error, opened)
+			// Un EventSource no deja ver el status: si no abrió, se pregunta por la sesión. Un
+			// 401 ahí lo maneja el cliente HTTP (manda al login) y no se reintenta más.
+			if (failure instanceof LogStreamFailed && !failure.opened && !signal.aborted) {
+				await probeSession(app)
+			}
+			throw failure
 		}
 	},
 }

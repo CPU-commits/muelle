@@ -10,6 +10,7 @@
 		PageHeader,
 		SearchInput,
 		Select,
+		srOnly,
 		StatusDot,
 	} from '@/shared/ui'
 	import { clockTimeMs } from '../../components/labels/deployLabels'
@@ -99,30 +100,39 @@
 					>
 				{/each}
 			</Select>
-			<Button
-				variant="secondary"
-				aria-pressed={!vm.paused}
-				aria-label={m.deploy_logs_toggle()}
-				onclick={vm.togglePause}
-			>
+			<Button variant="secondary" onclick={vm.togglePause}>
 				<StatusDot status={vm.paused ? 'idle' : 'ok'} pulse={!vm.paused} />
-				{vm.paused ? m.deploy_logs_paused() : m.deploy_logs_live()}
+				{vm.paused ? m.deploy_logs_resume() : m.deploy_logs_pause()}
 			</Button>
 			<Button variant="ghost" onclick={vm.clear}>{m.deploy_logs_clear()}</Button>
 		</div>
 
-		{#if vm.connection === 'lost'}
-			<Banner tone="warn" title={m.deploy_logs_lost_title()} body={m.deploy_logs_lost_body()}>
+		<!-- El banner sigue montado entre intentos: se anuncia una vez, no en cada uno. -->
+		{#if vm.problem}
+			<Banner
+				tone="warn"
+				title={vm.problem === 'dropped'
+					? m.deploy_logs_lost_title()
+					: m.deploy_logs_unreachable_title()}
+				body={m.deploy_logs_retrying_body()}
+			>
 				{#snippet action()}
-					<Button variant="secondary" size="sm" onclick={vm.reconnect}>
+					<Button
+						variant="secondary"
+						size="sm"
+						loading={vm.connection === 'connecting'}
+						onclick={vm.reconnect}
+					>
 						{m.deploy_logs_reconnect()}
 					</Button>
 				{/snippet}
 			</Banner>
 		{/if}
 
-		<p class={status} role="status">
-			{#if vm.connection === 'connecting'}
+		<!-- Se anuncia una vez; la cuenta, que cambia con cada línea, queda fuera. -->
+		<p class={srOnly} role="status">{vm.announcement}</p>
+		<p class={status}>
+			{#if vm.connection === 'connecting' && !vm.problem}
 				<span>{m.deploy_logs_connecting()}</span>
 			{/if}
 			{#if vm.paused && vm.pending.length > 0}

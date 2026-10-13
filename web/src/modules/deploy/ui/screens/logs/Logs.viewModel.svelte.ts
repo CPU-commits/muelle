@@ -1,18 +1,25 @@
 import { createQuery, type CreateQueryResult } from '@tanstack/svelte-query'
 import { untrack } from 'svelte'
-import { pendingPhase, type RoadmapPhase } from '@/shared/domain'
+import { m } from '@/shared/ui/i18n/paraglide/messages'
+import { pendingPhase, type RoadmapPhase, UnauthorizedError } from '@/shared/domain'
 import { appStatusQuery, streamAppLogs } from '../../../data'
 import {
+	advanceResumePoint,
 	appendCapped,
 	type AppLogLine,
 	type AppRef,
 	type AppStatus,
 	DEFAULT_LOG_TAIL,
+	isRepeatedAfterResume,
 	LOG_LINE_CAP,
 	LOG_TAILS,
 	type LogTail,
 	logTasks,
 	matchesFilter,
+	RECONNECT_BASE_MS,
+	RECONNECT_MAX_MS,
+	reconnectDelayMs,
+	type ResumePoint,
 } from '../../../domain'
 
 export interface LogsProps {
@@ -31,16 +38,43 @@ export interface KeyedLine {
  * - `idle`: todavía no hay servicio que seguir.
  * - `connecting`: abriendo el stream.
  * - `live`: conectado.
- * - `lost`: se cortó (o no abrió): se ofrece reconectar.
+ * - `retrying`: se cortó (o no abrió) y espera para volver a intentar.
+ * - `asleep`: cerrado porque la pestaña lleva un rato oculta; sigue al volver.
+ * - `stopped`: la sesión venció (el cliente HTTP ya mandó al login).
  */
-export type LogConnection = 'idle' | 'connecting' | 'live' | 'lost'
+export type LogConnection = 'idle' | 'connecting' | 'live' | 'retrying' | 'asleep' | 'stopped'
+
+/** Por qué no está en vivo: se cortó estando abierto, o no llegó a abrir. */
+export type LogProblem = 'dropped' | 'unreachable'
+
+/** Las esperas de la pantalla (los tests las acortan). */
+export interface LogTiming {
+	/** La primera espera antes de reconectar; después se duplica. */
+	readonly reconnectBaseMs: number
+	readonly reconnectMaxMs: number
+	/** Con la pestaña oculta más que esto, se cierra el stream. */
+	readonly hiddenCloseMs: number
+	/** Un stream que estuvo abierto al menos esto vuelve a empezar la espera desde 1 s. */
+	readonly stableStreamMs: number
+}
+
+export const DEFAULT_LOG_TIMING: LogTiming = {
+	reconnectBaseMs: RECONNECT_BASE_MS,
+	reconnectMaxMs: RECONNECT_MAX_MS,
+	hiddenCloseMs: 30_000,
+	stableStreamMs: 10_000,
+}
 
 /** Cada cuánto se pintan las líneas que llegaron (un log ruidoso no repinta por línea). */
 export const LOG_FLUSH_MS = 100
 
+type ConnectOutcome = 'closed' | 'asleep' | 'unauthorized'
+
 // Logs (App-Logs.dc.html): en vivo por SSE desde Docker, por servicio. Pausar congela lo
 // que se ve y guarda lo que llega; reanudar lo suma. En memoria quedan las últimas
-// LOG_LINE_CAP líneas (también mientras está en pausa).
+// LOG_LINE_CAP líneas (también en pausa). Si el stream se corta, vuelve a conectar solo
+// (1, 2, 4… hasta 30 s) desde la hora de la última línea; con la pestaña oculta más de
+// 30 s lo cierra y lo retoma al volver.
 export class LogsViewModel {
 	selectedService = $state<string | null>(null)
 	tail = $state<LogTail>(DEFAULT_LOG_TAIL)
@@ -51,6 +85,8 @@ export class LogsViewModel {
 	/** Autoscroll: true mientras quien lee está al final. */
 	follow = $state(true)
 	connection = $state<LogConnection>('idle')
+	/** Cómo terminó la última conexión, hasta que otra abre. */
+	problem = $state<LogProblem | null>(null)
 	lines = $state.raw<readonly KeyedLine[]>([])
 	/** Lo que llegó en pausa, todavía sin mostrar. */
 	pending = $state.raw<readonly KeyedLine[]>([])
@@ -59,12 +95,18 @@ export class LogsViewModel {
 	readonly cap = LOG_LINE_CAP
 
 	readonly #props: () => LogsProps
-	#session = $state(0)
-	/** La próxima conexión es una reconexión: mantiene las líneas y pide `tail=0`. */
-	#resume = false
+	readonly #timing: LogTiming
 	#sequence = 0
 	#incoming: KeyedLine[] = []
 	#flushTimer: ReturnType<typeof setTimeout> | null = null
+	/** La hora de la última línea y las que llegaron en ese instante: desde ahí se reconecta. */
+	#resumePoint: ResumePoint | null = null
+	#hiddenTimer: ReturnType<typeof setTimeout> | null = null
+	#asleep = false
+	/** Cierra el stream abierto (la pestaña lleva oculta un rato). */
+	#closeForHidden: (() => void) | null = null
+	/** Corta la espera en curso: el backoff, o la pestaña oculta. */
+	#wake: (() => void) | null = null
 
 	// Se crean en el constructor: la query lee `#props`, que un inicializador de campo
 	// todavía no tendría, y los derivados leen la query.
@@ -81,8 +123,9 @@ export class LogsViewModel {
 		return this.lines.filter((keyed) => matchesFilter(keyed.line, filter))
 	})
 
-	constructor(props: () => LogsProps) {
+	constructor(props: () => LogsProps, timing: Partial<LogTiming> = {}) {
 		this.#props = props
+		this.#timing = { ...DEFAULT_LOG_TIMING, ...timing }
 		this.status = createQuery(() => appStatusQuery(this.ref))
 		this.services = $derived((this.status.data?.services ?? []).map((service) => service.name))
 		this.service = $derived(
@@ -90,20 +133,27 @@ export class LogsViewModel {
 				? this.selectedService
 				: (this.services[0] ?? null),
 		)
+
+		// Otra app, otro servicio u otras líneas iniciales: otro stream, de cero.
 		$effect(() => {
+			const ref = this.ref
 			const service = this.service
 			const tail = this.tail
-			void this.#session
 			if (service === null) return
 			const controller = new AbortController()
-			untrack(() => {
-				const resume = this.#resume
-				this.#resume = false
-				void this.#run(service, resume ? 0 : tail, resume, controller.signal)
-			})
+			untrack(() => void this.#run(ref, service, tail, controller.signal))
 			return () => {
 				controller.abort()
 				this.#cancelFlush()
+			}
+		})
+
+		$effect(() => {
+			untrack(this.#onVisibility)
+			document.addEventListener('visibilitychange', this.#onVisibility)
+			return () => {
+				document.removeEventListener('visibilitychange', this.#onVisibility)
+				this.#clearHiddenTimer()
 			}
 		})
 	}
@@ -138,6 +188,14 @@ export class LogsViewModel {
 		return this.lines.length >= LOG_LINE_CAP
 	}
 
+	/**
+	 * Para el lector de pantalla. No lleva la cuenta (cambia con cada línea): se anuncia una
+	 * vez cuando empiezan a juntarse líneas en pausa.
+	 */
+	get announcement(): string {
+		return this.paused && this.pending.length > 0 ? m.deploy_logs_new_lines_announce() : ''
+	}
+
 	selectService = (service: string): void => {
 		if (service === this.service) return
 		this.selectedService = service
@@ -170,53 +228,167 @@ export class LogsViewModel {
 		this.follow = true
 	}
 
+	/** Vacía la vista. Al reconectar sigue desde la última línea: lo limpiado no vuelve. */
 	clear = (): void => {
 		this.#incoming = []
 		this.lines = []
 		this.pending = []
 	}
 
-	/** Vuelve a conectar sin perder lo que ya se ve ni repetirlo (`tail=0`). */
+	/** "Reconectar ahora": no espera lo que faltaba del backoff. */
 	reconnect = (): void => {
-		this.#resume = true
-		this.#session += 1
+		this.#wake?.()
 	}
 
 	retry = (): void => {
 		void this.status.refetch()
 	}
 
-	async #run(
-		service: string,
-		tail: LogTail,
-		resume: boolean,
-		signal: AbortSignal,
-	): Promise<void> {
-		if (!resume) {
-			this.#incoming = []
-			this.lines = []
-			this.pending = []
-		}
-		this.connection = 'connecting'
-		try {
-			for await (const event of streamAppLogs({ app: this.ref, service, tail }, signal)) {
-				if (signal.aborted) return
-				if (event.kind === 'open') this.connection = 'live'
-				else this.#enqueue(event.line)
+	async #run(ref: AppRef, service: string, tail: LogTail, signal: AbortSignal): Promise<void> {
+		this.#incoming = []
+		this.lines = []
+		this.pending = []
+		this.#resumePoint = null
+		this.problem = null
+		let attempt = 0
+		while (!signal.aborted) {
+			if (this.#asleep) {
+				this.connection = 'asleep'
+				await this.#waitForWake(null, signal)
+				continue
 			}
-			// El servidor cerró el stream: para seguir hay que reconectar.
-			if (!signal.aborted) this.connection = 'lost'
-		} catch {
-			if (!signal.aborted) this.connection = 'lost'
-		} finally {
-			if (!signal.aborted) this.#flush()
+			const started = Date.now()
+			const outcome = await this.#connect(ref, service, tail, signal)
+			if (signal.aborted) return
+			if (outcome === 'unauthorized') {
+				this.connection = 'stopped'
+				this.problem = null
+				return
+			}
+			if (outcome === 'asleep') continue
+			// Uno que anduvo un buen rato no hereda la espera larga de cortes anteriores.
+			if (this.problem === 'dropped' && Date.now() - started >= this.#timing.stableStreamMs) {
+				attempt = 0
+			}
+			this.connection = 'retrying'
+			const { reconnectBaseMs, reconnectMaxMs } = this.#timing
+			await this.#waitForWake(
+				reconnectDelayMs(attempt, reconnectBaseMs, reconnectMaxMs),
+				signal,
+			)
+			attempt += 1
 		}
 	}
 
+	/** Una conexión, hasta que se corta, se cierra por la pestaña oculta o `outer` se aborta. */
+	async #connect(
+		ref: AppRef,
+		service: string,
+		tail: LogTail,
+		outer: AbortSignal,
+	): Promise<ConnectOutcome> {
+		const controller = new AbortController()
+		const abort = (): void => controller.abort()
+		outer.addEventListener('abort', abort, { once: true })
+		let asleep = false
+		const closeForHidden = (): void => {
+			asleep = true
+			controller.abort()
+		}
+		this.#closeForHidden = closeForHidden
+		// Con líneas ya vistas se sigue desde la última (`since` es inclusivo: lo de ese
+		// instante que ya estaba se descarta). Sin ninguna, `tail` de nuevo.
+		const resume = this.#resumePoint
+		let opened = false
+		this.connection = 'connecting'
+		try {
+			const input = { app: ref, service, tail, ...(resume ? { since: resume.since } : {}) }
+			for await (const event of streamAppLogs(input, controller.signal)) {
+				if (controller.signal.aborted) break
+				if (event.kind === 'open') {
+					opened = true
+					this.connection = 'live'
+					this.problem = null
+				} else if (!resume || !isRepeatedAfterResume(event.line, resume)) {
+					this.#enqueue(event.line)
+				}
+			}
+		} catch (error) {
+			if (error instanceof UnauthorizedError) return 'unauthorized'
+		} finally {
+			outer.removeEventListener('abort', abort)
+			// El stream de antes termina de cerrar cuando el nuevo ya arrancó: no le borra el suyo.
+			if (this.#closeForHidden === closeForHidden) this.#closeForHidden = null
+			if (!outer.aborted) this.#flush()
+		}
+		if (asleep) return 'asleep'
+		// "Se cortó" solo si estuvo abierto (en esta conexión o antes de la racha de intentos).
+		if (!outer.aborted)
+			this.problem = opened || this.problem === 'dropped' ? 'dropped' : 'unreachable'
+		return 'closed'
+	}
+
+	/** Espera `ms` (o hasta que la despierten, si es null), `reconnect()` o el abort. */
+	#waitForWake(ms: number | null, signal: AbortSignal): Promise<void> {
+		return new Promise((resolve) => {
+			if (signal.aborted) {
+				resolve()
+				return
+			}
+			let timer: ReturnType<typeof setTimeout> | null = null
+			const done = (): void => {
+				if (timer !== null) clearTimeout(timer)
+				signal.removeEventListener('abort', done)
+				if (this.#wake === done) this.#wake = null
+				resolve()
+			}
+			if (ms !== null) timer = setTimeout(done, ms)
+			signal.addEventListener('abort', done, { once: true })
+			this.#wake = done
+		})
+	}
+
+	#onVisibility = (): void => {
+		if (document.visibilityState === 'hidden') {
+			this.#hiddenTimer ??= setTimeout(this.#sleep, this.#timing.hiddenCloseMs)
+			return
+		}
+		this.#clearHiddenTimer()
+		// Lo que llegó con la pestaña oculta (los timers ahí van frenados) se pinta ya.
+		this.#flush()
+		if (this.#asleep) {
+			this.#asleep = false
+			this.#wake?.()
+		}
+	}
+
+	#sleep = (): void => {
+		this.#hiddenTimer = null
+		this.#asleep = true
+		this.#closeForHidden?.()
+		// Si estaba esperando para reintentar, que vaya a dormir en vez de conectar.
+		this.#wake?.()
+	}
+
+	#clearHiddenTimer(): void {
+		if (this.#hiddenTimer !== null) clearTimeout(this.#hiddenTimer)
+		this.#hiddenTimer = null
+	}
+
 	#enqueue(line: AppLogLine): void {
+		this.#remember(line)
 		this.#sequence += 1
 		this.#incoming.push({ key: this.#sequence, line })
+		// Con la pestaña oculta el timer se frena y esto podría crecer sin tope: se queda con
+		// las últimas (recortar de a tandas, no en cada línea).
+		if (this.#incoming.length > LOG_LINE_CAP * 2) {
+			this.#incoming = this.#incoming.slice(-LOG_LINE_CAP)
+		}
 		this.#flushTimer ??= setTimeout(this.#flush, LOG_FLUSH_MS)
+	}
+
+	#remember(line: AppLogLine): void {
+		this.#resumePoint = advanceResumePoint(this.#resumePoint, line)
 	}
 
 	#flush = (): void => {
