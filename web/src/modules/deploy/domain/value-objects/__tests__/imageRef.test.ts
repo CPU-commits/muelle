@@ -4,10 +4,12 @@ import {
 	imageName,
 	imageTag,
 	isValidImageOverride,
+	isValidImageRef,
 	parseImageOverride,
 	shortDigest,
 	splitImageRef,
 } from '../imageRef'
+import oracle from './imageRefOracle.json'
 
 const DIGEST = `sha256:9b2de1f4${'0'.repeat(48)}5d17c07a`
 
@@ -24,14 +26,49 @@ describe('splitImageRef', () => {
 	})
 })
 
-describe('parseImageOverride', () => {
+// La regla es la del backend (validate.ImageRef de fase-23-base): lo que uno acepta y el
+// otro no es un 422 que el panel podría haber evitado, o un deploy que el panel frena sin
+// razón. imageRefOracle.json salió de correr el código de Go con estas entradas.
+describe('isValidImageRef: igual que el backend', () => {
+	it.each(oracle.cases.map((entry) => [entry.input, entry.valid] as const))(
+		'%j → %s',
+		(input, valid) => {
+			expect(isValidImageRef(input)).toBe(valid)
+		},
+	)
+
 	it.each([
-		'ghcr.io/aumi-app/backend-app:sha-3f9c2e1',
-		'nats:2.10-alpine',
-		'localhost:5000/org/app:v1',
-		`redis@${'sha256:' + 'a'.repeat(64)}`,
-	])('acepta %s', (raw) => {
-		expect(parseImageOverride(`  ${raw} `)).toBe(raw)
+		['Ghcr.io/Foo/Bar:Latest', false],
+		['a//b', false],
+		['a::b', false],
+		['a:b:c', false],
+		['a/../b', false],
+		['a', true],
+		['nginx:1.0-', true],
+		// El host puede llevar mayúsculas; el repositorio no.
+		['Ghcr.io/foo/bar:Latest', true],
+		['ghcr.io/Foo/bar', false],
+		// El digest va en hexa minúscula, con el largo de su algoritmo.
+		[`redis@sha256:${'a'.repeat(64)}`, true],
+		[`redis@sha256:${'A'.repeat(64)}`, false],
+		[`redis@sha256:${'a'.repeat(63)}`, false],
+		// Un id de 64 hexa suelto no es un nombre.
+		['a'.repeat(64), false],
+		[`${'a'.repeat(64)}:tag`, true],
+		// La defensa extra del backend.
+		['--help', false],
+		['${X}', false],
+		['a'.repeat(513), false],
+	] as const)('%j → %s', (input, valid) => {
+		expect(isValidImageRef(input)).toBe(valid)
+	})
+})
+
+describe('parseImageOverride', () => {
+	it('recorta espacios y devuelve la referencia', () => {
+		expect(parseImageOverride('  ghcr.io/aumi-app/backend-app:sha-3f9c2e1 ')).toBe(
+			'ghcr.io/aumi-app/backend-app:sha-3f9c2e1',
+		)
 	})
 
 	it.each(['', '   ', 'con espacio:tag', 'app:tag;rm -rf /', '-app:tag', 'app:', '$(id)'])(

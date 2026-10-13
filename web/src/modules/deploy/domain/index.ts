@@ -104,6 +104,7 @@ export {
 	imageName,
 	imageTag,
 	isValidImageOverride,
+	isValidImageRef,
 	parseImageOverride,
 	shortDigest,
 	splitImageRef,

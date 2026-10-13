@@ -233,6 +233,29 @@ describe('desplegar y seguir el log', () => {
 	})
 })
 
+describe('el mock valida la imagen como el backend', () => {
+	// Directo contra el endpoint, sin el chequeo del panel: el 422 lo tiene que dar el mock.
+	it.each([
+		['Ghcr.io/Foo/Bar:Latest', 422],
+		['a//b', 422],
+		['a::b', 422],
+		['a:b:c', 422],
+		['a/../b', 422],
+		['api', 202],
+		['nginx:1.0-', 202],
+	] as const)('%j → %i', async (image, expected) => {
+		const response = await fetch(
+			`http://localhost/api/v1/projects/auditfy/stages/staging/apps/api/deploys`,
+			{
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ image }),
+			},
+		)
+		expect(response.status).toBe(expected)
+	})
+})
+
 describe('rollback', () => {
 	it('vuelve a las imágenes del succeeded anterior al actual', async () => {
 		const { id } = await deployUseCases.rollback(APP)

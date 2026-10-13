@@ -1,0 +1,345 @@
+{
+	"source": "validate.ImageRef de fase-23-base: reference.ParseNormalizedNamed (github.com/distribution/reference v0.6.0, go-digest v1.0.0) más el corte de 512, el - inicial y el $",
+	"cases": [
+		{
+			"input": "nginx",
+			"valid": true
+		},
+		{
+			"input": "nginx:1.27",
+			"valid": true
+		},
+		{
+			"input": "nginx:1.0-",
+			"valid": true
+		},
+		{
+			"input": "nginx:Latest",
+			"valid": true
+		},
+		{
+			"input": "nginx:-x",
+			"valid": false
+		},
+		{
+			"input": "nginx:_x",
+			"valid": true
+		},
+		{
+			"input": "nginx:.x",
+			"valid": false
+		},
+		{
+			"input": "a",
+			"valid": true
+		},
+		{
+			"input": "a:b",
+			"valid": true
+		},
+		{
+			"input": "a:b:c",
+			"valid": false
+		},
+		{
+			"input": "a::b",
+			"valid": false
+		},
+		{
+			"input": "a//b",
+			"valid": false
+		},
+		{
+			"input": "a/../b",
+			"valid": false
+		},
+		{
+			"input": "a/./b",
+			"valid": false
+		},
+		{
+			"input": "a/b/c/d",
+			"valid": true
+		},
+		{
+			"input": "a__b",
+			"valid": true
+		},
+		{
+			"input": "a___b",
+			"valid": false
+		},
+		{
+			"input": "a.b",
+			"valid": true
+		},
+		{
+			"input": "a..b",
+			"valid": false
+		},
+		{
+			"input": "a_b",
+			"valid": true
+		},
+		{
+			"input": "a-b",
+			"valid": true
+		},
+		{
+			"input": "a--b",
+			"valid": true
+		},
+		{
+			"input": "a-",
+			"valid": false
+		},
+		{
+			"input": "-a",
+			"valid": false
+		},
+		{
+			"input": "a.",
+			"valid": false
+		},
+		{
+			"input": ".a",
+			"valid": false
+		},
+		{
+			"input": "A",
+			"valid": false
+		},
+		{
+			"input": "Nginx",
+			"valid": false
+		},
+		{
+			"input": "Ghcr.io/Foo/Bar:Latest",
+			"valid": false
+		},
+		{
+			"input": "Ghcr.io/foo/bar:latest",
+			"valid": true
+		},
+		{
+			"input": "Ghcr.io/foo/bar:Latest",
+			"valid": true
+		},
+		{
+			"input": "ghcr.io/Foo/bar",
+			"valid": false
+		},
+		{
+			"input": "ghcr.io/aumi-app/backend-app:sha-3f9c2e1",
+			"valid": true
+		},
+		{
+			"input": "ghcr.io/aumi-app/backend-app:sha-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"valid": true
+		},
+		{
+			"input": "localhost:5000/org/app:v1",
+			"valid": true
+		},
+		{
+			"input": "localhost/app",
+			"valid": true
+		},
+		{
+			"input": "localhost:5000",
+			"valid": true
+		},
+		{
+			"input": "localhost",
+			"valid": true
+		},
+		{
+			"input": "Localhost/app",
+			"valid": true
+		},
+		{
+			"input": "registry:5000/a/b@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+			"valid": true
+		},
+		{
+			"input": "ghcr.io/x/y:tag@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+			"valid": true
+		},
+		{
+			"input": "redis@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"valid": true
+		},
+		{
+			"input": "redis@sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			"valid": false
+		},
+		{
+			"input": "redis@sha256:aaaa",
+			"valid": false
+		},
+		{
+			"input": "redis@sha512:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"valid": true
+		},
+		{
+			"input": "redis@sha384:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"valid": true
+		},
+		{
+			"input": "redis@md5:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"valid": false
+		},
+		{
+			"input": "redis@sha256:",
+			"valid": false
+		},
+		{
+			"input": "redis@",
+			"valid": false
+		},
+		{
+			"input": "redis:tag@",
+			"valid": false
+		},
+		{
+			"input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"valid": false
+		},
+		{
+			"input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:tag",
+			"valid": true
+		},
+		{
+			"input": "docker.io/nginx",
+			"valid": true
+		},
+		{
+			"input": "index.docker.io/library/nginx",
+			"valid": true
+		},
+		{
+			"input": "docker.io/Library/nginx",
+			"valid": false
+		},
+		{
+			"input": "[::1]:5000/app",
+			"valid": true
+		},
+		{
+			"input": "[::1]/app",
+			"valid": true
+		},
+		{
+			"input": "1.2.3.4:5000/app",
+			"valid": true
+		},
+		{
+			"input": "my-registry.example.com:443/team/app:2024.10.10",
+			"valid": true
+		},
+		{
+			"input": "example.com/-app",
+			"valid": false
+		},
+		{
+			"input": "example.com:/app",
+			"valid": false
+		},
+		{
+			"input": "example.com:abc/app",
+			"valid": false
+		},
+		{
+			"input": "exa_mple.com/app",
+			"valid": true
+		},
+		{
+			"input": "-exa.com/app",
+			"valid": false
+		},
+		{
+			"input": "exa-.com/app",
+			"valid": false
+		},
+		{
+			"input": "app:",
+			"valid": false
+		},
+		{
+			"input": "app :tag",
+			"valid": false
+		},
+		{
+			"input": "nginx latest",
+			"valid": false
+		},
+		{
+			"input": "${X}",
+			"valid": false
+		},
+		{
+			"input": "--help",
+			"valid": false
+		},
+		{
+			"input": "a\u0000b",
+			"valid": false
+		},
+		{
+			"input": "../../containers/json?",
+			"valid": false
+		},
+		{
+			"input": "app/",
+			"valid": false
+		},
+		{
+			"input": "/app",
+			"valid": false
+		},
+		{
+			"input": "app//",
+			"valid": false
+		},
+		{
+			"input": "ghcr.io//app",
+			"valid": false
+		},
+		{
+			"input": "ghcr.io/app/",
+			"valid": false
+		},
+		{
+			"input": "ghcr.io/a:b/c",
+			"valid": false
+		},
+		{
+			"input": "ghcr.io:5000",
+			"valid": true
+		},
+		{
+			"input": "ghcr.io:5000/",
+			"valid": false
+		},
+		{
+			"input": "a/b:c/d",
+			"valid": false
+		},
+		{
+			"input": "ünicode",
+			"valid": false
+		},
+		{
+			"input": "app:tag_with.dots-and_123",
+			"valid": true
+		},
+		{
+			"input": "app:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"valid": true
+		},
+		{
+			"input": "app:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"valid": false
+		}
+	]
+}

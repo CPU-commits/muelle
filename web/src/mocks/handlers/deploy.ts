@@ -1,4 +1,7 @@
 import { delay, http, HttpResponse, type RequestHandler } from 'msw'
+// La misma regla que el backend (validate.ImageRef): el mock rechaza lo mismo. Se importa
+// el archivo del dominio y no el barrel, que trae la UI.
+import { isValidImageRef } from '@/modules/deploy/domain/value-objects/imageRef'
 import { api, apiError, invalid } from '../api'
 import { deployDb, type DeployView, hashHex, type MockApp, type MockDeploy } from '../db/deploy'
 import { requireSession, sessionUser } from '../session'
@@ -136,8 +139,6 @@ function statusDto(app: MockApp, now: number) {
 
 // --- Cuerpo de POST …/deploys ------------------------------------------------
 
-const IMAGE_REF = /^[a-z0-9][a-z0-9._\-/:]*[a-z0-9_](@sha256:[a-f0-9]{64})?$/i
-
 type DeployBody = { image?: unknown; images?: unknown }
 
 function currentImages(app: MockApp, now: number): Record<string, string> {
@@ -163,7 +164,7 @@ function imagesFromBody(
 		if (app.services.length !== 1 || app.services[0] !== app.app) {
 			return invalid('image', 'una app compose recibe images por servicio')
 		}
-		if (typeof body.image !== 'string' || !IMAGE_REF.test(body.image)) {
+		if (typeof body.image !== 'string' || !isValidImageRef(body.image)) {
 			return invalid('image', 'no es una referencia de imagen válida')
 		}
 		return { [app.app]: body.image.split('@')[0] ?? body.image }
@@ -176,7 +177,7 @@ function imagesFromBody(
 			if (!app.services.includes(service)) {
 				return invalid(`images.${service}`, 'el servicio no existe en la app')
 			}
-			if (typeof ref !== 'string' || !IMAGE_REF.test(ref)) {
+			if (typeof ref !== 'string' || !isValidImageRef(ref)) {
 				return invalid(`images.${service}`, 'no es una referencia de imagen válida')
 			}
 			images[service] = ref.split('@')[0] ?? ref
