@@ -18,6 +18,8 @@
 	"common_required": "This field is required",
 	"common_error_generic": "Something went wrong. Please try again.",
 	"common_unavailable": "Couldn't reach muelle. Check your connection and try again.",
+	"common_server_error": "muelle responded with an error. Try again in a moment.",
+	"common_timeout": "muelle took too long to respond. Try again in a moment.",
 	"common_copy_failed_short": "Couldn't copy",
 	"common_copy_failed": "Couldn't copy. Select it and copy it by hand.",
 	"common_load_more": "Load more",

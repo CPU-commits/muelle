@@ -115,6 +115,16 @@ describe('toDomainError', () => {
 		expect(pendingPhase(error)).toBeNull()
 	})
 
+	it('un UnavailableError dice por qué: la red, un timeout o un 5xx de muelle', () => {
+		const reason = (error: unknown) => (error as UnavailableError).reason
+
+		expect(reason(toDomainError(new NetworkError(new Error('offline'))))).toBe('network')
+		expect(reason(toDomainError(new RequestTimeoutError('/projects', 30_000)))).toBe('timeout')
+		expect(reason(toDomainError(apiError(500, 'internal')))).toBe('server')
+		expect(reason(toDomainError(apiError(503, 'unknown')))).toBe('server')
+		expect(reason(toDomainError(apiError(404, 'no_route'), { phase: 2 }))).toBeNull()
+	})
+
 	it('deja pasar lo que no es un ApiError', () => {
 		const contract = new ContractError('auth.me', 'username: requerido')
 		expect(toDomainError(contract)).toBe(contract)

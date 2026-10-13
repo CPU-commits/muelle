@@ -23,6 +23,19 @@ describe('describeError', () => {
 		expect(describeError(new UnavailableError('caído'))).toBe(m.common_unavailable())
 	})
 
+	it('no le pide revisar la conexión a quien recibió un 5xx o un timeout', () => {
+		expect(describeError(new UnavailableError('red', { reason: 'network' }))).toBe(
+			m.common_unavailable(),
+		)
+		expect(describeError(new UnavailableError('500', { reason: 'server' }))).toBe(
+			m.common_server_error(),
+		)
+		expect(m.common_server_error()).toContain('muelle respondió con un error')
+		expect(describeError(new UnavailableError('lento', { reason: 'timeout' }))).toBe(
+			m.common_timeout(),
+		)
+	})
+
 	it('tiene un texto para permisos y límites, y uno genérico para el resto', () => {
 		expect(describeError(new ForbiddenError('no'))).toBe(m.common_forbidden())
 		expect(describeError(new RateLimitedError('espera'))).toBe(m.common_rate_limited())

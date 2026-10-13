@@ -55,10 +55,16 @@ function validationError(error: ApiError, fields: DomainErrorMap['fields']): Val
 
 export function toDomainError(error: unknown, map: DomainErrorMap = {}): unknown {
 	if (error instanceof NetworkError) {
-		return new UnavailableError('No se pudo contactar al servidor', { cause: error })
+		return new UnavailableError('No se pudo contactar al servidor', {
+			reason: 'network',
+			cause: error,
+		})
 	}
 	if (error instanceof RequestTimeoutError) {
-		return new UnavailableError('El servidor tardó demasiado en responder', { cause: error })
+		return new UnavailableError('El servidor tardó demasiado en responder', {
+			reason: 'timeout',
+			cause: error,
+		})
 	}
 	// Un ContractError, un AbortError o un error de dominio ya traducido pasan tal cual.
 	if (!(error instanceof ApiError)) return error
@@ -91,7 +97,10 @@ export function toDomainError(error: unknown, map: DomainErrorMap = {}): unknown
 		case 502:
 		case 503:
 		case 504:
-			return new UnavailableError('El servicio no está disponible', { cause: error })
+			return new UnavailableError('El servicio no está disponible', {
+				reason: 'server',
+				cause: error,
+			})
 		default:
 			return new UnexpectedError(`Error inesperado (${error.status} ${error.code})`, {
 				cause: error,

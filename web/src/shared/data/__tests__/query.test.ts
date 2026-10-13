@@ -31,6 +31,12 @@ describe('shouldRetry', () => {
 		expect(shouldRetry(2, error)).toBe(false)
 	})
 
+	it('no reintenta un timeout: serían dos esperas más de 30 s', () => {
+		expect(shouldRetry(0, new UnavailableError('lento', { reason: 'timeout' }))).toBe(false)
+		expect(shouldRetry(0, new UnavailableError('500', { reason: 'server' }))).toBe(true)
+		expect(shouldRetry(0, new UnavailableError('red', { reason: 'network' }))).toBe(true)
+	})
+
 	it('no reintenta un endpoint de una fase que todavía no existe', () => {
 		expect(shouldRetry(0, new UnavailableError('Llega con la Fase 2', { phase: 2 }))).toBe(
 			false,

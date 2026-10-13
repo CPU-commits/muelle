@@ -89,26 +89,33 @@ export class RateLimitedError extends DomainError {
 	}
 }
 
+/** Por qué no se pudo: sin red, muelle tardó demasiado o muelle respondió un 5xx. */
+export type UnavailableReason = 'network' | 'timeout' | 'server'
+
 export interface UnavailableOptions extends ErrorOptions {
 	/** La fase en la que llega el endpoint, si no responde porque todavía no existe. */
 	phase?: RoadmapPhase
+	reason?: UnavailableReason
 }
 
 /**
  * El backend no puede atender. Dos casos, que la UI distingue con `phase`:
- * - `phase === null`: caído o sin red (5xx, error de red). Se reintenta.
+ * - `phase === null`: caído o sin red. `reason` dice cuál: `network`, `server` (un 5xx)
+ *   o `timeout`. Se reintenta, salvo un timeout.
  * - `phase === 2 | 3`: el endpoint es de una fase que el backend todavía no tiene (un 404
  *   de una ruta de deploys, dominios, registries…). No se reintenta y la pantalla
  *   muestra <ComingSoon phase={…} />.
  */
 export class UnavailableError extends DomainError {
 	readonly phase: RoadmapPhase | null
+	readonly reason: UnavailableReason | null
 
 	constructor(message: string, options: UnavailableOptions = {}) {
-		const { phase, ...errorOptions } = options
+		const { phase, reason, ...errorOptions } = options
 		super('unavailable', message, errorOptions)
 		this.name = 'UnavailableError'
 		this.phase = phase ?? null
+		this.reason = reason ?? null
 	}
 }
 
