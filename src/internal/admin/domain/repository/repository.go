@@ -18,6 +18,8 @@ type SettingsRepository interface {
 	// Insert guarda el valor solo si la clave no existe; si existe devuelve
 	// repository.ErrConflict y no toca nada.
 	Insert(ctx context.Context, key string, value []byte, encrypted bool) error
+	// Delete borra la clave; si no existe no es un error.
+	Delete(ctx context.Context, key string) error
 }
 
 // AuditRepository lista y purga los eventos. Escribirlos es del audit.Recorder.

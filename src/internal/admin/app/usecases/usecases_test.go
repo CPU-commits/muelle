@@ -36,7 +36,16 @@ func newEnv(t *testing.T) *env {
 }
 
 func (e *env) patch() *PatchSettings {
-	return NewPatchSettings(adminrepo.NewSettingsRepository(e.db), adminsvc.NewTOTPStatus(e.db), e.rec, e.db)
+	return NewPatchSettings(adminrepo.NewSettingsRepository(e.db), adminsvc.NewTOTPStatus(e.db), testCipher(), nil, e.rec, e.db)
+}
+
+// testCipher es el cifrador con la clave de prueba de todo el paquete.
+func testCipher() *crypto.Cipher {
+	c, err := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
+	if err != nil {
+		panic(err)
+	}
+	return c
 }
 
 func asUser(id int64) context.Context {
@@ -48,12 +57,12 @@ func ptr[T any](v T) *T { return &v }
 func TestSettingsRequire2FA(t *testing.T) {
 	e := newEnv(t)
 	repo := adminrepo.NewSettingsRepository(e.db)
-	get := NewGetSettings(repo)
+	get := NewGetSettings(repo, testCipher())
 	patch := e.patch()
 	noTOTP := admintest.InsertUser(t, e.db, "sin", false)
 	withTOTP := admintest.InsertUser(t, e.db, "con", true)
 
-	out, err := get.Execute(context.Background())
+	out, err := get.Execute(context.Background(), dto.GetSettingsInput{})
 	if err != nil || out.Require2FA {
 		t.Fatalf("require_2fa debe empezar en false: %+v err=%v", out, err)
 	}
@@ -63,7 +72,7 @@ func TestSettingsRequire2FA(t *testing.T) {
 	if !errors.Is(err, service.ErrTOTPRequiredFirst) {
 		t.Fatalf("err=%v", err)
 	}
-	if out, _ := get.Execute(context.Background()); out.Require2FA {
+	if out, _ := get.Execute(context.Background(), dto.GetSettingsInput{}); out.Require2FA {
 		t.Fatal("no debía guardarse")
 	}
 

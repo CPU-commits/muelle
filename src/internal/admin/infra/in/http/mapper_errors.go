@@ -11,4 +11,5 @@ import (
 // ErrWrongMasterKey no está: solo ocurre al arrancar, nunca en una petición.
 func registerErrors(k *utils.Kit) {
 	k.RegisterError(service.ErrTOTPRequiredFirst, http.StatusConflict, "totp_required_first", service.ErrTOTPRequiredFirst.Error())
+	k.RegisterError(service.ErrWouldLockOut, http.StatusConflict, "would_lock_out", service.ErrWouldLockOut.Error())
 }
