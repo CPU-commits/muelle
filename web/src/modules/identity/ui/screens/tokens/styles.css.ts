@@ -107,7 +107,7 @@ export const nameCell = style({
 // "nuevo" queda al lado del nombre aunque sea largo: el nombre corta, el badge no salta.
 export const nameLine = style({
 	display: 'flex',
-	alignItems: 'center',
+	alignItems: 'flex-start',
 	gap: theme.space[8],
 	minWidth: 0,
 	fontWeight: theme.typography.fontWeight.medium,
