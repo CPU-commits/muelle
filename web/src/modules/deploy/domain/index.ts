@@ -23,6 +23,7 @@ export type {
 	ServiceHealth,
 	ServiceStatus,
 	ServiceTask,
+	ServiceUsage,
 	TaskHealth,
 } from './entities/appStatus'
 export {
@@ -32,6 +33,7 @@ export {
 	replicaCount,
 	serviceHealth,
 	serviceNodes,
+	serviceUsage,
 	shortTaskId,
 	taskLabel,
 	weakestService,

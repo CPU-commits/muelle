@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import {
+		Banner,
 		Button,
 		ComingSoon,
 		CopyButton,
@@ -68,6 +69,7 @@
 </script>
 
 <div class={page}>
+	<p class={srOnly} role="status">{vm.announcement}</p>
 	<PageHeader title={m.nav_app_deploys()} subtitle={m.deploy_deploys_subtitle()}>
 		{#snippet actions()}
 			<Button disabled={!vm.deploys.isSuccess} onclick={vm.openDeploy}>
@@ -98,6 +100,9 @@
 			{/snippet}
 		</EmptyState>
 	{:else}
+		{#if vm.linkedMissing !== null}
+			<Banner tone="warn" title={m.deploy_linked_missing({ id: vm.linkedMissing })} />
+		{/if}
 		<div class={layout}>
 			<section class={history} aria-label={m.deploy_history()}>
 				<ul class={historyList}>
@@ -113,7 +118,9 @@
 									<DeployStatusDot status={deploy.status} />
 									<span class={rowId}>{m.deploy_id({ id: deploy.id })}</span>
 									<span class={[rowLabel, deployStatusTextTones[deploy.status]]}>
-										{statusLabel(deploy.status)}
+										{deploy.supersededBy
+											? m.deploy_superseded_by({ id: deploy.supersededBy })
+											: statusLabel(deploy.status)}
 									</span>
 									<span class={rowWhen}>{formatRelative(deploy.createdAt)}</span>
 								</span>
@@ -135,7 +142,7 @@
 			</section>
 
 			{#if vm.selected && vm.selectedStatus}
-				<section class={logPanel} aria-labelledby={logTitleId}>
+				<section class={logPanel} aria-labelledby={logTitleId} {@attach vm.revealOnSelect}>
 					<div class={logHeader}>
 						<div class={logMeta}>
 							<h2 id={logTitleId} class={logTitle}>

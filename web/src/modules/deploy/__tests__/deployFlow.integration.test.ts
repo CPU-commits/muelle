@@ -61,7 +61,12 @@ describe('estado e historial', () => {
 		expect(appHealth(status)).toBe('running')
 		const [service] = status.services
 		expect(service).toMatchObject({ name: 'api', desiredReplicas: 2, runningReplicas: 2 })
-		expect(service?.cpuPercent).toBeGreaterThan(0)
+		// Solo se miden las tareas del nodo de muelle: la réplica 2 corre en worker-1.
+		const [first, second] = service?.tasks ?? []
+		expect(first?.cpuPercent).toBeGreaterThan(0)
+		expect(first?.memoryBytes).toBeGreaterThan(0)
+		expect(second?.node).toBe('worker-1')
+		expect(second?.cpuPercent).toBeNull()
 		expect(service?.memoryLimitBytes).toBe(512 * 1024 * 1024)
 		expect(service?.tasks.map((task) => task.state)).toEqual([
 			'running',

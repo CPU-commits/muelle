@@ -15,8 +15,15 @@
 		rowMuted,
 		StatusDot,
 		Table,
+		TextLink,
 	} from '@/shared/ui'
-	import { serviceNodes, shortDigest, shortTaskId, taskLabel } from '../../../domain'
+	import {
+		serviceNodes,
+		serviceUsage,
+		shortDigest,
+		shortTaskId,
+		taskLabel,
+	} from '../../../domain'
 	import { DeployDialog } from '../../features/deployDialog'
 	import { RollbackDialog } from '../../features/rollbackDialog'
 	import {
@@ -47,6 +54,7 @@
 		muted,
 		ofTotal,
 		page,
+		sampledNote,
 		taskError,
 		taskId,
 		taskState,
@@ -136,6 +144,7 @@
 		{#each vm.services as service, index (service.name)}
 			{@const image = vm.imageOf(service.name)}
 			{@const nodes = serviceNodes(service)}
+			{@const usage = serviceUsage(service)}
 			<Card
 				flush
 				title={m.deploy_service_title({ name: service.name })}
@@ -162,26 +171,35 @@
 					<div class={metric}>
 						<dt class={term}>{m.deploy_cpu()}</dt>
 						<dd class={bigValue}>
-							{#if service.cpuPercent === null}
+							{#if usage.cpuPercent === null}
 								{m.deploy_none()}
 							{:else}
-								{percentNumber(service.cpuPercent)}
+								{percentNumber(usage.cpuPercent)}
 								<span class={unit}>{m.deploy_cpu_unit()}</span>
 							{/if}
 						</dd>
+						{#if usage.sampled > 0 && usage.sampled < usage.current}
+							<dd class={sampledNote}>
+								{m.deploy_usage_sampled({
+									sampled: usage.sampled,
+									total: usage.current,
+								})}
+							</dd>
+						{/if}
 					</div>
 					<div class={metric}>
 						<dt class={term}>{m.deploy_memory()}</dt>
 						<dd class={bigValue}>
-							{#if service.memoryBytes === null || service.runningReplicas === 0}
+							{#if usage.memoryPerTaskBytes === null}
 								{m.deploy_none()}
 							{:else}
-								{megabytesNumber(service.memoryBytes / service.runningReplicas)}
+								{megabytesNumber(usage.memoryPerTaskBytes)}
 								<span class={unit}>
-									{m.deploy_memory_unit_each()}{#if service.memoryLimitBytes !== null}
-										· {m.deploy_memory_limit({
-											limit: megabytesText(service.memoryLimitBytes),
-										})}{/if}
+									{service.memoryLimitBytes === null
+										? m.deploy_memory_unit_each()
+										: m.deploy_memory_with_limit({
+												limit: megabytesText(service.memoryLimitBytes),
+											})}
 								</span>
 							{/if}
 						</dd>
@@ -192,9 +210,8 @@
 							<dd class={inlineValue}>
 								{#if vm.last}
 									<StatusDot status={statusTone(vm.last.status)} />
-									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() + `?deploy=`; la regla no acepta query strings -->
-									<a class={deployLink} href={vm.deployHref(vm.last.id)}
-										>{m.deploy_id({ id: vm.last.id })}</a
+									<TextLink class={deployLink} href={vm.deployHref(vm.last.id)}
+										>{m.deploy_id({ id: vm.last.id })}</TextLink
 									>
 									<span class={muted}>
 										{m.deploy_last_deploy_meta({
@@ -237,6 +254,12 @@
 							{/if}
 						</dd>
 					</div>
+					{#if vm.healthcheck && index === 0}
+						<div class={metric}>
+							<dt class={term}>{m.deploy_healthcheck()}</dt>
+							<dd class={inlineValue}><Mono size={13}>{vm.healthcheck}</Mono></dd>
+						</div>
+					{/if}
 					<div class={metric}>
 						<dt class={term}>{m.deploy_node()}</dt>
 						<dd class={inlineValue}>
@@ -312,7 +335,7 @@
 	kind={vm.kind}
 	services={vm.serviceNames}
 	currentImages={vm.currentImages}
-	onDeployed={(id) => void vm.onQueued(id)}
+	onDeployed={() => void vm.onQueued()}
 	onClose={vm.closeDeploy}
 />
 
@@ -321,6 +344,6 @@
 	app={vm.ref}
 	target={vm.rollbackTarget}
 	historyComplete={vm.historyComplete}
-	onDone={(id) => void vm.onQueued(id)}
+	onDone={() => void vm.onQueued()}
 	onClose={vm.closeRollback}
 />

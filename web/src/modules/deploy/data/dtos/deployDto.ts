@@ -21,14 +21,15 @@ export const taskDtoSchema = z.object({
 	node: z.string().nullish(),
 	since: timestamp.nullish(),
 	error: z.string().nullish(),
+	// Solo las tareas del nodo de muelle se miden: el resto, null.
+	cpu_percent: z.number().nonnegative().nullish(),
+	memory_bytes: z.number().nonnegative().nullish(),
 })
 
 export const serviceStatusDtoSchema = z.object({
 	name: z.string().min(1),
 	replicas_desired: z.number().int().nonnegative(),
 	replicas_running: z.number().int().nonnegative(),
-	cpu_percent: z.number().nonnegative().nullish(),
-	memory_bytes: z.number().nonnegative().nullish(),
 	memory_limit_bytes: z.number().nonnegative().nullish(),
 	tasks: z.array(taskDtoSchema),
 })
@@ -45,11 +46,14 @@ export const deployDtoSchema = z.object({
 	images: z.record(z.string(), z.string()),
 	trigger: z.enum(DEPLOY_TRIGGERS),
 	actor_type: z.enum(ACTOR_TYPES),
-	actor_name: z.string().nullish(),
+	// Una copia del nombre al crear el deploy: nunca null, puede ser "".
+	actor_name: z.string(),
 	error: z.string().nullish(),
 	created_at: timestamp,
 	started_at: timestamp.nullish(),
 	finished_at: timestamp.nullish(),
+	// El deploy más nuevo que dejó a este `superseded`.
+	superseded_by: z.number().int().positive().nullish(),
 })
 
 /** `GET …/apps/{a}/deploys`: del más nuevo al más viejo. */

@@ -5,7 +5,9 @@ import {
 	type CreateDeployInput,
 	type Deploy,
 	type DeployAccepted,
+	type DeployId,
 	type FollowDeployLogInput,
+	hasActiveDeploy,
 	latestDeploy,
 	type StreamAppLogsInput,
 } from '../../domain'
@@ -15,6 +17,7 @@ export const deployKeys = {
 	app: (app: AppRef): QueryKey => ['deploy', app.project, app.stage, app.app],
 	status: (app: AppRef): QueryKey => [...deployKeys.app(app), 'status'],
 	list: (app: AppRef): QueryKey => [...deployKeys.app(app), 'list'],
+	one: (app: AppRef, id: DeployId): QueryKey => [...deployKeys.app(app), 'one', id],
 }
 
 /** Cada cuánto se refresca el estado en el Resumen (con la pestaña visible). */
@@ -23,29 +26,58 @@ export const STATUS_REFRESH_MS = 5_000
 /** Cada cuánto se refresca el historial mientras hay un deploy en cola o corriendo. */
 export const ACTIVE_DEPLOY_REFRESH_MS = 3_000
 
-// svelte-query devuelve un resultado "tracked": solo avisa de los cambios en las
-// propiedades que alguien ya leyó. Un viewModel que lee `data` en un `$derived` antes de
-// mirar `error` se pierde el error (queda `pending` para siempre). Con 'all' avisa de
-// todo cambio; estas queries son chicas y no se refrescan tan seguido.
-const NOTIFY_ALL = 'all' as const
+export interface QueryToggles {
+	/** Cada cuánto refrescar (ms), o `false` para nunca. Sin él, no se refresca solo. */
+	readonly refreshEvery?: number | false
+	/** `false` para no pedir nada (una fila de Proyectos fuera de la vista, un id vacío). */
+	readonly enabled?: boolean
+}
+
+function toggles({ refreshEvery, enabled }: QueryToggles) {
+	return {
+		...(refreshEvery !== undefined ? { refetchInterval: refreshEvery } : {}),
+		...(enabled !== undefined ? { enabled } : {}),
+		// TanStack no refresca con la pestaña oculta (refetchIntervalInBackground: false).
+		refetchIntervalInBackground: false,
+	}
+}
 
 /** El estado de la app en Swarm. Lo usa el Resumen, Logs (servicios) y Proyectos (F2). */
-export function appStatusQuery(app: AppRef) {
+export function appStatusQuery(app: AppRef, options: QueryToggles = {}) {
 	return queryOptions({
 		queryKey: deployKeys.status(app),
 		queryFn: ({ signal }) => deployUseCases.getAppStatus(app, signal),
 		staleTime: STATUS_REFRESH_MS,
-		notifyOnChangeProps: NOTIFY_ALL,
+		...toggles(options),
 	})
 }
 
 /** El historial, del más nuevo al más viejo. */
-export function deploysQuery(app: AppRef) {
+export function deploysQuery(app: AppRef, options: QueryToggles = {}) {
 	return queryOptions({
 		queryKey: deployKeys.list(app),
 		queryFn: ({ signal }) => deployUseCases.listDeploys(app, signal),
 		staleTime: 10_000,
-		notifyOnChangeProps: NOTIFY_ALL,
+		...toggles(options),
+	})
+}
+
+/** El historial para la pantalla Deploys: se refresca solo mientras hay uno en curso. */
+export function liveDeploysQuery(app: AppRef) {
+	return queryOptions({
+		...deploysQuery(app),
+		refetchInterval: (query) =>
+			hasActiveDeploy(query.state.data ?? []) ? ACTIVE_DEPLOY_REFRESH_MS : false,
+	})
+}
+
+/** Un deploy por id (el `?deploy=` que ya no está en los últimos 20, o que no existe). */
+export function deployQuery(app: AppRef, id: DeployId | null, options: QueryToggles = {}) {
+	return queryOptions({
+		queryKey: deployKeys.one(app, id ?? (0 as DeployId)),
+		queryFn: ({ signal }) => deployUseCases.getDeploy(app, id ?? (0 as DeployId), signal),
+		staleTime: 10_000,
+		...toggles({ ...options, enabled: (options.enabled ?? true) && id !== null }),
 	})
 }
 
@@ -53,9 +85,9 @@ export function deploysQuery(app: AppRef) {
  * El último deploy (de cualquier estado), o null si nunca hubo. Comparte el cache con
  * `deploysQuery`: es la misma petición con un `select`.
  */
-export function lastDeployQuery(app: AppRef) {
+export function lastDeployQuery(app: AppRef, options: QueryToggles = {}) {
 	return queryOptions({
-		...deploysQuery(app),
+		...deploysQuery(app, options),
 		select: (deploys: readonly Deploy[]): Deploy | null => latestDeploy(deploys),
 	})
 }

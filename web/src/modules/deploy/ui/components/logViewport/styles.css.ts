@@ -13,9 +13,12 @@ export const scroller = style({
 	overflowX: 'hidden',
 	backgroundColor: theme.colors.background.page,
 	fontFamily: theme.typography.fontFamily.mono,
-	fontSize: '12.5px',
-	lineHeight: '1.8',
+	fontSize: theme.typography.fontSize[12],
+	lineHeight: theme.typography.lineHeight.relaxed,
 	overscrollBehavior: 'contain',
+	// El navegador no corre la vista por su cuenta cuando cambia el alto de las líneas
+	// (el seguimiento del final lo maneja el componente).
+	overflowAnchor: 'none',
 	selectors: {
 		'&:focus-visible': {
 			outlineOffset: '-2px',

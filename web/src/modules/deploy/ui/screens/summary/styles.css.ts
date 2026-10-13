@@ -94,10 +94,6 @@ export const inlineValue = style({
 
 export const deployLink = style({
 	fontFamily: theme.typography.fontFamily.mono,
-	textDecoration: 'none',
-	selectors: {
-		'&:hover': { textDecoration: 'underline', textUnderlineOffset: '3px' },
-	},
 })
 
 export const muted = style({
@@ -110,6 +106,12 @@ export const digestRow = style({
 	gap: theme.space[6],
 	minWidth: 0,
 	margin: `-${theme.space[4]} 0`,
+})
+
+// "1 de 2 réplicas medidas": el backend solo mide las tareas del nodo de muelle.
+export const sampledNote = style({
+	fontSize: theme.typography.fontSize[12],
+	color: theme.colors.text.tertiary,
 })
 
 export const taskId = style({

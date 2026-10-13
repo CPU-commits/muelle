@@ -39,6 +39,7 @@ function deployDto(deploy: MockDeploy, current: DeployView) {
 		created_at: new Date(deploy.createdAt).toISOString(),
 		started_at: iso(current.startedAt),
 		finished_at: iso(current.finishedAt),
+		superseded_by: current.status === 'superseded' ? (deploy.supersededBy ?? null) : null,
 	}
 }
 
@@ -73,15 +74,24 @@ function statusDto(app: MockApp, now: number) {
 		services: app.services.map((service, index) => {
 			const tasks: Record<string, unknown>[] = []
 			for (let slot = 1; slot <= app.replicas; slot += 1) {
+				// La réplica 2 corre en otro nodo: el backend no la mide (solo el nodo de muelle).
+				const local = slot !== 2
+				const cpu =
+					1.8 +
+					0.9 * wave(now, 9000, seedPhase + index + slot) +
+					0.3 * wave(now, 2300, slot)
+				const memory = (298 + 5 * wave(now, 13_000, seedPhase + slot)) * 1024 * 1024
 				tasks.push({
 					id: hashHex(`${current.id}-${service}-${slot}`, 25),
 					slot,
 					state: 'running',
 					desired_state: 'running',
 					health: 'healthy',
-					node: 'manager-1',
+					node: local ? 'manager-1' : 'worker-1',
 					since: iso(finished - (app.replicas - slot) * 14_000),
 					error: null,
+					cpu_percent: local ? Math.round(Math.max(0.1, cpu) * 10) / 10 : null,
+					memory_bytes: local ? Math.round(memory) : null,
 				})
 			}
 			if (starting) {
@@ -122,14 +132,10 @@ function statusDto(app: MockApp, now: number) {
 						failed.scenario === 'healthcheck' ? 'unhealthy container' : 'no such image',
 				})
 			}
-			const cpu = 3.6 + 1.8 * wave(now, 9000, seedPhase + index) + 0.6 * wave(now, 2300, 1)
-			const memory = (298 + 5 * wave(now, 13_000, seedPhase)) * 1024 * 1024 * app.replicas
 			return {
 				name: service,
 				replicas_desired: app.replicas,
 				replicas_running: app.replicas,
-				cpu_percent: Math.round(Math.max(0.1, cpu) * 10) / 10,
-				memory_bytes: Math.round(memory),
 				memory_limit_bytes: deployDb.memoryLimit,
 				tasks,
 			}

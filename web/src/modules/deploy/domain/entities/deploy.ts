@@ -14,7 +14,7 @@ export interface ServiceImage extends ResolvedImage {
 
 export interface DeployActor {
 	readonly type: ActorType
-	/** El usuario o el nombre del token; null si ya no existe. */
+	/** El usuario o el nombre del token al crear el deploy; null si el backend no lo guardó. */
 	readonly name: string | null
 }
 
@@ -30,6 +30,8 @@ export interface Deploy {
 	readonly createdAt: Date
 	readonly startedAt: Date | null
 	readonly finishedAt: Date | null
+	/** Si quedó `superseded`: el deploy más nuevo que lo reemplazó. */
+	readonly supersededBy: DeployId | null
 }
 
 /** Lo que responde `POST …/deploys` y `POST …/rollback` (202). */

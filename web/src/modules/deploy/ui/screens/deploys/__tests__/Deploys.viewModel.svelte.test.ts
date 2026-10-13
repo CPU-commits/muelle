@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { UnavailableError } from '@/shared/domain'
 import {
 	asDeployId,
 	asLogOffset,
+	DeployNotFound,
 	type DeployLogEvent,
 	type FollowDeployLogInput,
 } from '../../../../domain'
@@ -13,6 +15,7 @@ import { DeploysViewModel } from '../Deploys.viewModel.svelte.ts'
 const mocks = vi.hoisted(() => ({
 	listDeploys: vi.fn(),
 	getAppStatus: vi.fn(),
+	getDeploy: vi.fn(),
 	followDeployLog: vi.fn(),
 	goto: vi.fn(),
 }))
@@ -21,7 +24,7 @@ vi.mock('@/modules/deploy/container', () => ({
 	deployUseCases: {
 		getAppStatus: mocks.getAppStatus,
 		listDeploys: mocks.listDeploys,
-		getDeploy: vi.fn(),
+		getDeploy: mocks.getDeploy,
 		createDeploy: vi.fn(),
 		rollback: vi.fn(),
 		followDeployLog: mocks.followDeployLog,
@@ -122,7 +125,7 @@ describe('DeploysViewModel', () => {
 		expect(vm.isActive).toBe(true)
 	})
 
-	it('elegir otro deploy corta el seguimiento anterior y actualiza la URL', async () => {
+	it('elegir otro deploy corta el seguimiento anterior (sin tocar la URL)', async () => {
 		const signals: AbortSignal[] = []
 		mocks.followDeployLog.mockImplementation(async function* (
 			_input: FollowDeployLogInput,
@@ -142,10 +145,7 @@ describe('DeploysViewModel', () => {
 		expect(signals[0]?.aborted).toBe(true)
 		expect(vm.selected?.id).toBe(143)
 		expect(vm.follow).toBe(true)
-		expect(mocks.goto).toHaveBeenCalledWith(
-			'/projects/auditfy/stages/staging/apps/api/deploys?deploy=143',
-			{ replaceState: true, noScroll: true, keepFocus: true },
-		)
+		expect(mocks.goto).not.toHaveBeenCalled()
 	})
 
 	it('un error del log se muestra y se puede reintentar', async () => {
@@ -194,5 +194,67 @@ describe('DeploysViewModel', () => {
 		expect(vm.deployOpen).toBe(false)
 		await vi.waitFor(() => expect(vm.selected?.id).toBe(145))
 		expect(vm.services).toEqual(['api'])
+	})
+
+	it('un ?deploy= más viejo que el historial se pide aparte y se abre', async () => {
+		mocks.getDeploy.mockResolvedValue(makeDeploy(100))
+		const { vm } = await mountViewModel(
+			() => new DeploysViewModel(() => ({ ...PROPS, deployParam: '100' })),
+		)
+
+		await vi.waitFor(() => expect(vm.selected?.id).toBe(100))
+		expect(mocks.getDeploy.mock.calls[0]?.[1]).toBe(100)
+		expect(vm.linkedMissing).toBeNull()
+	})
+
+	it('un ?deploy= que ya no existe avisa y muestra el más reciente', async () => {
+		mocks.getDeploy.mockRejectedValue(new DeployNotFound())
+		const { vm } = await mountViewModel(
+			() => new DeploysViewModel(() => ({ ...PROPS, deployParam: '9999' })),
+		)
+
+		await vi.waitFor(() => expect(vm.linkedMissing).toBe(9999))
+		await vi.waitFor(() => expect(vm.selected?.id).toBe(144))
+	})
+
+	it('anuncia cuando el deploy que se sigue en vivo termina', async () => {
+		mocks.followDeployLog.mockImplementation(
+			scripted([
+				{ kind: 'status', status: 'running' },
+				{ kind: 'status', status: 'succeeded' },
+			]),
+		)
+		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
+
+		await vi.waitFor(() =>
+			expect(vm.announcement).toBe(m.deploy_announce_succeeded({ id: 144 })),
+		)
+	})
+
+	it('los chunks que llegan juntos se pintan en un solo frame', async () => {
+		const many = Array.from({ length: 200 }, (_, index) => chunk(`línea ${index}\n`, index + 1))
+		mocks.followDeployLog.mockImplementation(scripted(many, { hold: true }))
+		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
+
+		await vi.waitFor(() => expect(vm.log.lines).toHaveLength(200))
+		expect(vm.log.lines.at(-1)?.text).toBe('línea 199')
+	})
+
+	it('desmontar la pantalla corta el stream', async () => {
+		const signals: AbortSignal[] = []
+		mocks.followDeployLog.mockImplementation(async function* (
+			_input: FollowDeployLogInput,
+			signal: AbortSignal,
+		) {
+			signals.push(signal)
+			yield* []
+			await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve()))
+		})
+		const { unmount } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
+		await vi.waitFor(() => expect(signals).toHaveLength(1))
+
+		unmount()
+
+		expect(signals[0]?.aborted).toBe(true)
 	})
 })

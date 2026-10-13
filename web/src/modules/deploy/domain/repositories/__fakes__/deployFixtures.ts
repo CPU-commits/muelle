@@ -25,6 +25,7 @@ export function makeDeploy(id: number, overrides: Partial<Omit<Deploy, 'id'>> = 
 		createdAt: new Date('2026-10-10T14:00:00Z'),
 		startedAt: new Date('2026-10-10T14:00:01Z'),
 		finishedAt: new Date('2026-10-10T14:00:53Z'),
+		supersededBy: null,
 		...overrides,
 	}
 }
@@ -39,6 +40,8 @@ export function makeTask(overrides: Partial<ServiceTask> = {}): ServiceTask {
 		node: 'manager-1',
 		since: new Date('2026-10-10T14:00:40Z'),
 		error: null,
+		cpuPercent: 1.7,
+		memoryBytes: 155 * 1024 * 1024,
 		...overrides,
 	}
 }
@@ -48,8 +51,6 @@ export function makeService(overrides: Partial<ServiceStatus> = {}): ServiceStat
 		name: 'api',
 		desiredReplicas: 2,
 		runningReplicas: 2,
-		cpuPercent: 3.4,
-		memoryBytes: 310 * 1024 * 1024,
 		memoryLimitBytes: 512 * 1024 * 1024,
 		tasks: [makeTask({ slot: 1 }), makeTask({ id: 'w81zt0c', slot: 2 })],
 		...overrides,

@@ -1,12 +1,11 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import type { QueryClient } from '@tanstack/svelte-query'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import ViewModelHarness from './ViewModelHarness.svelte'
 
-/** Un QueryClient sin reintentos, para que un error llegue enseguida. */
+/** El QueryClient de la app sin reintentos, para que un error llegue enseguida. */
 export function testClient(): QueryClient {
-	return new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
+	return createQueryClient({ retry: false })
 }
 
 /** Monta el viewModel que devuelve `create` y lo devuelve, con su QueryClient. */

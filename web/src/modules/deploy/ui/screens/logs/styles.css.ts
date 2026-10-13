@@ -50,6 +50,10 @@ export const line = style({
 	flexWrap: 'wrap',
 	columnGap: theme.space[16],
 	padding: `0 ${theme.space[16]}`,
+	// Hasta 5000 líneas: las que están fuera de la vista no se pintan (y `auto` recuerda
+	// el alto de cada una para que la vista no salte).
+	contentVisibility: 'auto',
+	containIntrinsicSize: 'auto 20px',
 	selectors: {
 		'&:hover': { backgroundColor: theme.colors.background.hover },
 	},

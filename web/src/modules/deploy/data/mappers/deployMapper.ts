@@ -37,6 +37,8 @@ export function taskFromDto(dto: TaskDto): ServiceTask {
 		node: dto.node ?? null,
 		since: dateOrNull(dto.since),
 		error: dto.error || null,
+		cpuPercent: dto.cpu_percent ?? null,
+		memoryBytes: dto.memory_bytes ?? null,
 	}
 }
 
@@ -45,8 +47,6 @@ export function serviceStatusFromDto(dto: ServiceStatusDto): ServiceStatus {
 		name: dto.name,
 		desiredReplicas: dto.replicas_desired,
 		runningReplicas: dto.replicas_running,
-		cpuPercent: dto.cpu_percent ?? null,
-		memoryBytes: dto.memory_bytes ?? null,
 		memoryLimitBytes: dto.memory_limit_bytes ?? null,
 		tasks: dto.tasks.map(taskFromDto),
 	}
@@ -69,6 +69,7 @@ export function deployFromDto(dto: DeployDto): Deploy {
 		createdAt: new Date(dto.created_at),
 		startedAt: dateOrNull(dto.started_at),
 		finishedAt: dateOrNull(dto.finished_at),
+		supersededBy: dto.superseded_by ? asDeployId(dto.superseded_by) : null,
 	}
 }
 

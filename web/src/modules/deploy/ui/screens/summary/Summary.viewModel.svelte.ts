@@ -2,6 +2,7 @@ import { goto } from '$app/navigation'
 import { resolve } from '$app/paths'
 import { createQuery, type CreateQueryResult } from '@tanstack/svelte-query'
 import { pendingPhase, type RoadmapPhase } from '@/shared/domain'
+import { withQuery } from '@/shared/ui'
 import { appStatusQuery, deploysQuery, STATUS_REFRESH_MS } from '../../../data'
 import {
 	allTasks,
@@ -42,6 +43,11 @@ export interface SummaryProps {
 	readonly pendingChanges?: boolean
 	/** A dónde lleva esa marca (ya resuelto con `resolve()`); sin él, no es un link. */
 	readonly pendingChangesHref?: string
+	/**
+	 * Del catálogo (F2): el healthcheck del spec, ya como texto ("GET /health · cada 10 s").
+	 * Sin él, no se muestra la métrica.
+	 */
+	readonly healthcheck?: string | null
 }
 
 export interface TaskRow {
@@ -77,16 +83,12 @@ export class SummaryViewModel {
 
 	constructor(props: () => SummaryProps) {
 		this.#props = props
-		this.status = createQuery(() => ({
-			...appStatusQuery(this.ref),
-			refetchInterval: this.refreshInterval,
-			refetchIntervalInBackground: false,
-		}))
-		this.deploys = createQuery(() => ({
-			...deploysQuery(this.ref),
-			refetchInterval: this.refreshInterval,
-			refetchIntervalInBackground: false,
-		}))
+		this.status = createQuery(() =>
+			appStatusQuery(this.ref, { refreshEvery: this.refreshInterval }),
+		)
+		this.deploys = createQuery(() =>
+			deploysQuery(this.ref, { refreshEvery: this.refreshInterval }),
+		)
 		this.tasks = $derived(
 			this.status.data
 				? allTasks(this.status.data).map(({ service, task }) => ({
@@ -120,6 +122,10 @@ export class SummaryViewModel {
 
 	get pendingChanges(): boolean {
 		return this.#props().pendingChanges ?? false
+	}
+
+	get healthcheck(): string | null {
+		return this.#props().healthcheck ?? null
 	}
 
 	get pendingChangesHref(): string | null {
@@ -213,7 +219,7 @@ export class SummaryViewModel {
 	}
 
 	/** Deploys con ese deploy elegido (`?deploy=144`). */
-	deployHref = (id: DeployId): string => `${this.deploysHref}?deploy=${id}`
+	deployHref = (id: DeployId): string => withQuery(this.deploysHref, { deploy: id })
 
 	refresh = (): void => {
 		void this.status.refetch()
@@ -236,11 +242,14 @@ export class SummaryViewModel {
 		this.rollbackOpen = false
 	}
 
-	/** Encolado: a Deploys, con su log abierto. */
-	onQueued = async (id: DeployId): Promise<void> => {
+	/**
+	 * Encolado: a Deploys, que abre el más reciente. La mutation ya refrescó el historial
+	 * antes de volver, así que el más reciente es este.
+	 */
+	onQueued = async (): Promise<void> => {
 		this.deployOpen = false
 		this.rollbackOpen = false
-		// eslint-disable-next-line svelte/no-navigation-without-resolve -- deployHref es resolve() + `?deploy=`; la regla no acepta query strings
-		await goto(this.deployHref(id))
+		const { project: p, stage: s, app: a } = this.ref
+		await goto(resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/deploys', { p, s, a }))
 	}
 }

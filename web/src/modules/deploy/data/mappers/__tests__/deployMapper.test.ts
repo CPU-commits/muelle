@@ -24,6 +24,7 @@ describe('deployFromDto', () => {
 			created_at: '2026-10-10T14:19:49Z',
 			started_at: '2026-10-10T14:19:49.500Z',
 			finished_at: '2026-10-10T14:20:41Z',
+			superseded_by: 144,
 		})
 
 		expect(deployFromDto(dto)).toEqual({
@@ -39,16 +40,18 @@ describe('deployFromDto', () => {
 			createdAt: new Date('2026-10-10T14:19:49Z'),
 			startedAt: new Date('2026-10-10T14:19:49.500Z'),
 			finishedAt: new Date('2026-10-10T14:20:41Z'),
+			supersededBy: 144,
 		})
 	})
 
-	it('los campos opcionales que faltan son null', () => {
+	it('los campos opcionales que faltan son null, y un actor_name vacío también', () => {
 		const dto = deployDtoSchema.parse({
 			id: 145,
 			status: 'queued',
 			images: {},
 			trigger: 'panel',
 			actor_type: 'user',
+			actor_name: '',
 			created_at: '2026-10-10T14:32:07Z',
 		})
 		expect(deployFromDto(dto)).toMatchObject({
@@ -56,7 +59,22 @@ describe('deployFromDto', () => {
 			error: null,
 			startedAt: null,
 			finishedAt: null,
+			supersededBy: null,
 		})
+	})
+
+	it('el schema pide actor_name (el backend guarda una copia, nunca null)', () => {
+		expect(
+			deployDtoSchema.safeParse({
+				id: 1,
+				status: 'queued',
+				images: {},
+				trigger: 'panel',
+				actor_type: 'user',
+				actor_name: null,
+				created_at: '2026-10-10T14:32:07Z',
+			}).success,
+		).toBe(false)
 	})
 
 	it('el schema rechaza un estado que no es del spec', () => {
@@ -67,6 +85,7 @@ describe('deployFromDto', () => {
 				images: {},
 				trigger: 'panel',
 				actor_type: 'user',
+				actor_name: 'felipe',
 				created_at: '2026-10-10T14:32:07Z',
 			}).success,
 		).toBe(false)
@@ -74,15 +93,13 @@ describe('deployFromDto', () => {
 })
 
 describe('appStatusFromDto', () => {
-	it('traduce servicios y tareas', () => {
+	it('traduce servicios y tareas, con CPU y memoria por tarea (null si no se midió)', () => {
 		const dto = appStatusDtoSchema.parse({
 			services: [
 				{
 					name: 'api',
 					replicas_desired: 2,
 					replicas_running: 1,
-					cpu_percent: 3.4,
-					memory_bytes: 1024,
 					memory_limit_bytes: 2048,
 					tasks: [
 						{
@@ -94,6 +111,8 @@ describe('appStatusFromDto', () => {
 							node: 'manager-1',
 							since: '2026-10-10T14:20:05Z',
 							error: '',
+							cpu_percent: 3.4,
+							memory_bytes: 1024,
 						},
 						{ id: 'c7f4e0b', state: 'failed', desired_state: 'shutdown' },
 					],
@@ -107,8 +126,6 @@ describe('appStatusFromDto', () => {
 					name: 'api',
 					desiredReplicas: 2,
 					runningReplicas: 1,
-					cpuPercent: 3.4,
-					memoryBytes: 1024,
 					memoryLimitBytes: 2048,
 					tasks: [
 						{
@@ -120,6 +137,8 @@ describe('appStatusFromDto', () => {
 							node: 'manager-1',
 							since: new Date('2026-10-10T14:20:05Z'),
 							error: null,
+							cpuPercent: 3.4,
+							memoryBytes: 1024,
 						},
 						{
 							id: 'c7f4e0b',
@@ -130,6 +149,8 @@ describe('appStatusFromDto', () => {
 							node: null,
 							since: null,
 							error: null,
+							cpuPercent: null,
+							memoryBytes: null,
 						},
 					],
 				},

@@ -1,5 +1,7 @@
 // El estado real de una app en Swarm (`GET …/apps/{a}/status`, spec §10): por servicio,
-// las réplicas deseadas y corriendo, las tareas con su estado y error, y CPU% y RAM.
+// las réplicas deseadas y corriendo, las tareas con su estado y error, y CPU% y RAM de
+// cada tarea. El backend solo mide las tareas del nodo donde corre muelle: las demás
+// llegan sin medida y el panel suma lo que hay.
 
 export type TaskHealth = 'healthy' | 'unhealthy' | 'starting'
 
@@ -17,16 +19,16 @@ export interface ServiceTask {
 	/** Desde cuándo está en `state`. */
 	readonly since: Date | null
 	readonly error: string | null
+	/** CPU de la tarea, en % de un núcleo. Null si no se midió (otro nodo, o detenida). */
+	readonly cpuPercent: number | null
+	/** RAM de la tarea, en bytes. Null si no se midió. */
+	readonly memoryBytes: number | null
 }
 
 export interface ServiceStatus {
 	readonly name: string
 	readonly desiredReplicas: number
 	readonly runningReplicas: number
-	/** CPU de todas las tareas sumada, en % de un núcleo. Null si Docker no la dio. */
-	readonly cpuPercent: number | null
-	/** RAM de todas las tareas sumada, en bytes. */
-	readonly memoryBytes: number | null
 	/** El límite de RAM de CADA tarea (`resources.memory_mb`), en bytes. */
 	readonly memoryLimitBytes: number | null
 	readonly tasks: readonly ServiceTask[]
@@ -132,4 +134,28 @@ export function allTasks(status: AppStatus): { service: string; task: ServiceTas
 		if (current !== 0) return current
 		return (b.task.since?.getTime() ?? 0) - (a.task.since?.getTime() ?? 0)
 	})
+}
+
+export interface ServiceUsage {
+	/** CPU de las tareas medidas, sumada (% de un núcleo). Null si no se midió ninguna. */
+	readonly cpuPercent: number | null
+	/** RAM promedio por tarea medida, en bytes. Null si no se midió ninguna. */
+	readonly memoryPerTaskBytes: number | null
+	/** Cuántas tareas vigentes se midieron, y cuántas hay. */
+	readonly sampled: number
+	readonly current: number
+}
+
+/** CPU y RAM del servicio, juntando lo que se midió de sus tareas vigentes. */
+export function serviceUsage(service: ServiceStatus): ServiceUsage {
+	const current = service.tasks.filter(isCurrentTask)
+	const cpu = current.flatMap((task) => (task.cpuPercent === null ? [] : [task.cpuPercent]))
+	const memory = current.flatMap((task) => (task.memoryBytes === null ? [] : [task.memoryBytes]))
+	const sum = (values: number[]) => values.reduce((total, value) => total + value, 0)
+	return {
+		cpuPercent: cpu.length > 0 ? sum(cpu) : null,
+		memoryPerTaskBytes: memory.length > 0 ? sum(memory) / memory.length : null,
+		sampled: Math.max(cpu.length, memory.length),
+		current: current.length,
+	}
 }

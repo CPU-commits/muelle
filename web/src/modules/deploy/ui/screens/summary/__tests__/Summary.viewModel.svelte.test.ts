@@ -145,16 +145,26 @@ describe('SummaryViewModel', () => {
 		expect(vm.pendingChangesHref).toContain('/variables')
 	})
 
-	it('al encolar un deploy va a Deploys con ese deploy abierto', async () => {
+	it('al encolar un deploy va a Deploys, que abre el más reciente (ese)', async () => {
 		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
 		vm.openDeploy()
 		expect(vm.deployOpen).toBe(true)
 
-		await vm.onQueued(asDeployId(145))
+		await vm.onQueued()
 
 		expect(vm.deployOpen).toBe(false)
-		expect(mocks.goto).toHaveBeenCalledWith(
-			'/projects/auditfy/stages/staging/apps/api/deploys?deploy=145',
+		expect(mocks.goto).toHaveBeenCalledWith('/projects/auditfy/stages/staging/apps/api/deploys')
+		// El link al último deploy sí lleva el id.
+		expect(vm.deployHref(asDeployId(143))).toBe(
+			'/projects/auditfy/stages/staging/apps/api/deploys?deploy=143',
 		)
+	})
+
+	it('el healthcheck del catálogo llega por props', async () => {
+		const { vm } = await mountViewModel(
+			() =>
+				new SummaryViewModel(() => ({ ...PROPS, healthcheck: 'GET /health · cada 10 s' })),
+		)
+		expect(vm.healthcheck).toBe('GET /health · cada 10 s')
 	})
 })

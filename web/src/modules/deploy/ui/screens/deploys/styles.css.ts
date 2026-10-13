@@ -158,6 +158,10 @@ export const line = style({
 	display: 'flex',
 	gap: theme.space[16],
 	padding: `0 ${theme.space[20]}`,
+	// Miles de líneas: las que están fuera de la vista no se pintan. `auto` recuerda el
+	// alto que tuvo cada una, así la vista no salta al volver a pintarlas.
+	contentVisibility: 'auto',
+	containIntrinsicSize: 'auto 20px',
 })
 
 export const time = style({

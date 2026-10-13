@@ -38,7 +38,6 @@
 	"deploy_cpu_unit": "%",
 	"deploy_memory": "Memoria",
 	"deploy_memory_unit_each": "MB c/u",
-	"deploy_memory_limit": "límite {limit}",
 	"deploy_last_deploy": "Último deploy",
 	"deploy_last_deploy_meta": "{when} · {actor}",
 	"deploy_image": "Imagen",
@@ -120,5 +119,13 @@
 	"deploy_row_status_service": "{health} · {service} {running}/{desired}",
 	"deploy_row_last": "#{id} · {when}",
 	"deploy_row_failed": "falló",
-	"deploy_row_no_deploys": "Sin deploys"
+	"deploy_row_no_deploys": "Sin deploys",
+	"deploy_announce_succeeded": "El deploy #{id} terminó bien.",
+	"deploy_announce_failed": "El deploy #{id} falló.",
+	"deploy_linked_missing": "El deploy #{id} ya no existe: se muestra el más reciente.",
+	"deploy_not_found": "Ese deploy ya no existe.",
+	"deploy_superseded_by": "Reemplazado por #{id}",
+	"deploy_memory_with_limit": "MB c/u · límite {limit}",
+	"deploy_usage_sampled": "{sampled} de {total} réplicas medidas (solo las del nodo de muelle)",
+	"deploy_healthcheck": "Healthcheck"
 }
