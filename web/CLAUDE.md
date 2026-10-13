@@ -379,6 +379,7 @@ un `href` lo esperan **ya resuelto** con `resolve()`.
 | `Avatar`     | `name` · `size` `sm` 28·`md` 32                                                                                                                                                                                                                                                                                                        |
 | `Logo`       | `size` (22)                                                                                                                                                                                                                                                                                                                            |
 | `Spinner`    | `size` `sm`·`md`·`lg` · `label` · `decorative` (sin `role="status"`: cuando otro elemento ya anuncia la carga)                                                                                                                                                                                                                         |
+| `ShadowHost` | `mount(container, root)` (devuelve la limpieza; estable, del viewModel) · `class` y atributos de `<div>` (el borde y el tamaño van en el host). Un shadow root para librerías que inyectan `<style>` (CodeMirror): ver [CSP](#csp)                                                                                                     |
 
 **Moléculas**
 
@@ -603,6 +604,36 @@ El panel corre bajo una CSP estricta: nada en línea ni `eval`, todo del mismo o
     - crear un schema de Zod antes de `@/shared/data/zodSetup` (Zod sin JIT: con JIT prueba
       un `new Function` que la CSP reporta). Es el primer import de `hooks.client.ts`: que
       siga primero.
+- **Librerías que inyectan estilos** (CodeMirror 6 con su `style-mod`, y cualquiera que
+  haga `document.createElement('style')`): en el documento la CSP bloquea ese `<style>` y
+  el editor queda sin estilos. Adentro de un shadow root, CodeMirror usa
+  `adoptedStyleSheets` (hojas construidas por JS), que la CSP no frena. Se monta con
+  `ShadowHost` de `@/shared/ui`:
+
+    ```svelte
+    <!-- XScreen.svelte -->
+    <ShadowHost class={styles.editor} mount={vm.mountEditor} />
+    ```
+
+    ```ts
+    // X.viewModel.svelte.ts: estable (arrow function del viewModel)
+    mountEditor: ShadowMount = (container, root) => {
+    	const view = new EditorView({ parent: container, root, doc: this.yaml, extensions: [...] })
+    	return () => view.destroy()
+    }
+    ```
+
+    - `root` es obligatorio: sin él, CodeMirror vuelve a poner el `<style>` en el documento;
+    - el nombre accesible va en el editor, no en el host:
+      `EditorView.contentAttributes.of({ 'aria-label': m.catalog_compose_label() })`;
+    - adentro no llegan las clases de vanilla-extract, pero sí las variables del tema:
+      `EditorView.theme({ '&': { color: theme.colors.text.primary } })` funciona, porque
+      `theme.*` son `var(--…)` declaradas en `:root`. Ese tema va en un `editorTheme.ts`
+      junto a la pantalla: es la excepción a "`theme` solo en `styles.css.ts`";
+    - el borde, el alto y el radio van en `class` del host;
+    - `ShadowHost.svelte.test.ts` lo prueba bajo `style-src 'self'` (y muestra que sin
+      shadow root falla). Si otra librería no usa `adoptedStyleSheets`, no sirve: avisar.
+
 - Una pantalla nueva con algo raro (CodeMirror, un gráfico) se suma al recorrido de
   `e2e/csp.e2e.ts`.
 - `pnpm dev` aplica la misma política como header, con `'unsafe-inline'` en los estilos

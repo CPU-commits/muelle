@@ -18,6 +18,10 @@ export { default as Logo } from './components/atoms/logo/Logo.svelte'
 export { default as Mono } from './components/atoms/mono/Mono.svelte'
 export type { MonoSize, MonoTone } from './components/atoms/mono/styles.css'
 export { default as Select } from './components/atoms/select/Select.svelte'
+export {
+	default as ShadowHost,
+	type ShadowMount,
+} from './components/atoms/shadowHost/ShadowHost.svelte'
 export { default as Spinner } from './components/atoms/spinner/Spinner.svelte'
 export type { SpinnerSize } from './components/atoms/spinner/styles.css'
 export { default as StatusDot } from './components/atoms/statusDot/StatusDot.svelte'
