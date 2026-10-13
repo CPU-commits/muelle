@@ -133,7 +133,7 @@ func TestRegistriesSchema(t *testing.T) {
 	}
 }
 
-const insertDomain = `INSERT INTO domains (app_id, hostname, target_service, target_port, proxied, tls_mode, status, error_code, created_at, updated_at)
+const insertDomain = `INSERT INTO domains (app_id, hostname, target_service, target_port, proxied, tls_mode, status, last_error_code, created_at, updated_at)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`
 
 func TestDomainsSchema(t *testing.T) {
@@ -141,7 +141,7 @@ func TestDomainsSchema(t *testing.T) {
 	app := seedApp(t, d)
 
 	mustExec(t, d, insertDomain, app, "api.auditfy.cl", "api", 3000, 1, "cloudflare", "pending", nil)
-	mustExec(t, d, insertDomain, app, "www.auditfy.cl", "api", 3000, 0, "http", "error", "dns_record_exists")
+	mustExec(t, d, insertDomain, app, "www.auditfy.cl", "api", 3000, 0, "http", "error", "record_exists")
 	err := mustFail(t, d, "hostname repetido", insertDomain, app, "api.auditfy.cl", "api", 3000, 0, "http", "pending", nil)
 	if !IsUnique(err) {
 		t.Errorf("hostname repetido: IsUnique=false (%v)", err)
@@ -152,11 +152,11 @@ func TestDomainsSchema(t *testing.T) {
 	mustFail(t, d, "tls_mode desconocido", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "acme", "pending", nil)
 	mustFail(t, d, "status desconocido", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "ok", nil)
 	mustFail(t, d, "proxied no booleano", insertDomain, app, "a.auditfy.cl", "api", 80, 2, "http", "pending", nil)
-	mustFail(t, d, "error_code desconocido", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "error", "boom")
-	// status error va siempre con su error_code, y al revés.
-	mustFail(t, d, "error sin error_code", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "error", nil)
-	mustFail(t, d, "error_code sin status error", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "active", "dns_error")
-	for _, code := range []string{"dns_record_exists", "dns_error", "cert_invalid", "cert_expiring"} {
+	mustFail(t, d, "last_error_code desconocido", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "error", "boom")
+	// status error va siempre con su last_error_code (los del panel), y al revés.
+	mustFail(t, d, "error sin last_error_code", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "error", nil)
+	mustFail(t, d, "last_error_code sin status error", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "active", "cloudflare")
+	for _, code := range []string{"record_exists", "cloudflare", "certificate"} {
 		mustExec(t, d, insertDomain, app, code+".auditfy.cl", "api", 80, 0, "http", "error", code)
 	}
 

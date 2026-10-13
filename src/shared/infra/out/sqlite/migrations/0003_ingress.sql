@@ -21,13 +21,17 @@ CREATE TABLE domains (
   cf_record_id      TEXT,
   cf_record_id_aaaa TEXT,
   status            TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'error')),
-  error_code        TEXT    CHECK (error_code IN ('dns_record_exists', 'dns_error', 'cert_invalid', 'cert_expiring')),
+  -- Por qué está en error, con los códigos que usa el panel para elegir la
+  -- acción: record_exists → Adoptar; cloudflare (la API respondió con error)
+  -- y certificate (inválido o vence en menos de 14 días, §8) → Reintentar.
+  -- last_error trae el mensaje.
+  last_error_code   TEXT    CHECK (last_error_code IN ('record_exists', 'cloudflare', 'certificate')),
   last_error        TEXT,
   cert_issuer       TEXT,
   cert_expires_at   INTEGER,
   created_at        INTEGER NOT NULL,
   updated_at        INTEGER NOT NULL,
-  -- Un dominio en error siempre dice por qué (el panel ofrece Adoptar solo con dns_record_exists).
-  CHECK ((status = 'error') = (error_code IS NOT NULL))
+  -- Un dominio en error siempre dice por qué (el panel ofrece Adoptar solo con record_exists).
+  CHECK ((status = 'error') = (last_error_code IS NOT NULL))
 );
 CREATE INDEX domains_app ON domains(app_id);
