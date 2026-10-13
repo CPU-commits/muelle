@@ -135,7 +135,7 @@
 					<YamlEditor
 						value={vm.draft}
 						label={m.catalog_compose_editor_label()}
-						describedBy={`${ids}-hint`}
+						description={m.catalog_compose_editor_hint()}
 						errorLines={vm.errorLines}
 						focusRequest={vm.focusRequest}
 						onChange={vm.setDraft}
@@ -148,6 +148,7 @@
 							mono
 							rows={20}
 							aria-label={m.catalog_compose_editor_label()}
+							aria-describedby={`${ids}-hint`}
 							spellcheck={false}
 							value={vm.draft}
 							oninput={(event) => vm.setDraft(event.currentTarget.value)}

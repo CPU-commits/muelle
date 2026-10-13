@@ -9,12 +9,17 @@
 	// El editor de YAML de App·Compose (CodeMirror 6). Es controlado: `value` entra,
 	// `onChange` sale con cada cambio; si `value` cambia desde afuera (descartar, otra
 	// app), el documento se reemplaza.
+	//
+	// Va adentro de un shadow root: con `style-src 'self'` la CSP bloquea el `<style>` que
+	// CodeMirror mete en el documento; en un shadow root usa hojas construidas
+	// (adoptedStyleSheets), que sí se permiten. El tema cruza la frontera como variables CSS
+	// (ver styles.css.ts y editorExtensions.ts).
 	type Props = {
 		value: string
 		/** El nombre accesible del área de edición. */
 		label: string
-		/** El id del texto de ayuda (cómo salir del editor con el teclado). */
-		describedBy?: string
+		/** El texto de ayuda (cómo salir del editor con el teclado). */
+		description?: string
 		/** Las líneas (desde 1) que se marcan con error. */
 		errorLines?: readonly number[]
 		/** Llevar el cursor a una línea: cada pedido trae un `nonce` nuevo. */
@@ -25,7 +30,7 @@
 	let {
 		value,
 		label,
-		describedBy,
+		description,
 		errorLines = [],
 		focusRequest = null,
 		onChange,
@@ -36,15 +41,17 @@
 	// Se crea una sola vez: lo que se lee acá va sin seguimiento, o cada tecla
 	// recrearía el editor.
 	const mount: Attachment<HTMLDivElement> = (element) => {
+		const shadow = element.shadowRoot ?? element.attachShadow({ mode: 'open' })
 		const created = untrack(
 			() =>
 				new EditorView({
-					parent: element,
+					parent: shadow,
+					root: shadow,
 					state: EditorState.create({
 						doc: value,
 						extensions: editorExtensions({
 							label,
-							...(describedBy ? { describedBy } : {}),
+							...(description ? { description } : {}),
 							onChange: (next) => onChange(next),
 						}),
 					}),

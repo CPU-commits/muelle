@@ -26,27 +26,62 @@ import {
 	lineNumbers,
 } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
-import {
-	errorLine,
-	tokenComment,
-	tokenKey,
-	tokenPunctuation,
-	tokenSpecial,
-	tokenString,
-	tokenValue,
-} from './styles.css'
+import { editorTokens as t } from './styles.css'
 
-// Los colores van por clase (los tokens del tema), no con estilos en línea.
+// El editor está en un shadow root: su tema va en `EditorView.theme` y el resaltado en un
+// `HighlightStyle` con colores, los dos con las variables CSS del tema (que cruzan la
+// frontera del shadow root). CodeMirror los monta como hojas construidas, que la CSP
+// (`style-src 'self'`) permite.
+
+const ERROR_LINE = 'cm-muelle-error-line'
+
+const darkTheme = EditorView.theme(
+	{
+		'&': {
+			backgroundColor: t.background,
+			color: t.text,
+			fontSize: t.fontSize,
+		},
+		'&.cm-focused': { outline: 'none' },
+		'.cm-scroller': {
+			fontFamily: t.fontFamily,
+			lineHeight: '1.75',
+			minHeight: '320px',
+			maxHeight: '70vh',
+			overflow: 'auto',
+		},
+		'.cm-content': { padding: t.contentPadding, caretColor: t.text },
+		'.cm-line': { paddingInline: t.linePadding },
+		'.cm-gutters': { backgroundColor: t.background, border: 'none', color: t.gutter },
+		'.cm-lineNumbers .cm-gutterElement': {
+			minWidth: '32px',
+			padding: t.gutterPadding,
+			textAlign: 'right',
+		},
+		'.cm-activeLine': { backgroundColor: t.activeLine },
+		'.cm-activeLineGutter': { backgroundColor: 'transparent', color: t.activeGutter },
+		'.cm-cursor, .cm-dropCursor': { borderLeftColor: t.text },
+		'&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
+			{ backgroundColor: t.selection },
+		'.cm-matchingBracket, &.cm-focused .cm-matchingBracket': {
+			backgroundColor: t.matchingBracket,
+			outline: `1px solid ${t.matchingBracketOutline}`,
+		},
+		[`.${ERROR_LINE}`]: { backgroundColor: t.errorLine },
+	},
+	{ dark: true },
+)
+
 const yamlHighlight = HighlightStyle.define([
-	{ tag: tags.propertyName, class: tokenKey },
-	{ tag: [tags.content, tags.attributeValue], class: tokenValue },
-	{ tag: [tags.string, tags.special(tags.string)], class: tokenString },
-	{ tag: tags.lineComment, class: tokenComment },
+	{ tag: tags.propertyName, color: t.key },
+	{ tag: [tags.content, tags.attributeValue], color: t.value },
+	{ tag: [tags.string, tags.special(tags.string)], color: t.string },
+	{ tag: tags.lineComment, color: t.comment, fontStyle: 'italic' },
 	{
 		tag: [tags.separator, tags.punctuation, tags.squareBracket, tags.brace, tags.meta],
-		class: tokenPunctuation,
+		color: t.punctuation,
 	},
-	{ tag: [tags.labelName, tags.typeName, tags.keyword], class: tokenSpecial },
+	{ tag: [tags.labelName, tags.typeName, tags.keyword], color: t.special },
 ])
 
 /** Marca las líneas con errores de sintaxis (1 = la primera). */
@@ -63,7 +98,7 @@ const errorLines = StateField.define<DecorationSet>({
 			for (const line of [...effect.value].sort((a, b) => a - b)) {
 				if (line < 1 || line > doc.lines) continue
 				const { from } = doc.line(line)
-				builder.add(from, from, Decoration.line({ class: errorLine }))
+				builder.add(from, from, Decoration.line({ class: ERROR_LINE }))
 			}
 			next = builder.finish()
 		}
@@ -74,7 +109,11 @@ const errorLines = StateField.define<DecorationSet>({
 
 export interface EditorOptions {
 	label: string
-	describedBy?: string
+	/**
+	 * El texto de ayuda (cómo salir del editor con el teclado). Va como `aria-description`:
+	 * un `aria-describedby` no cruza el shadow root.
+	 */
+	description?: string
 	onChange: (value: string) => void
 }
 
@@ -95,10 +134,10 @@ export function editorExtensions(options: EditorOptions): Extension[] {
 		yaml(),
 		syntaxHighlighting(yamlHighlight),
 		errorLines,
-		EditorView.darkTheme.of(true),
+		darkTheme,
 		EditorView.contentAttributes.of({
 			'aria-label': options.label,
-			...(options.describedBy ? { 'aria-describedby': options.describedBy } : {}),
+			...(options.description ? { 'aria-description': options.description } : {}),
 			spellcheck: 'false',
 			autocapitalize: 'off',
 			autocorrect: 'off',
