@@ -108,8 +108,8 @@
 
 <ConfirmDialog
 	open={vm.confirmingLockout}
-	title={m.admin_security_lockout_title()}
-	body={m.admin_security_lockout_body({ ip: vm.clientIp ?? '' })}
+	title={vm.lockoutTitle}
+	body={vm.lockoutBody}
 	confirmLabel={m.admin_security_lockout_confirm()}
 	cancelLabel={m.common_cancel()}
 	loading={vm.isSaving}

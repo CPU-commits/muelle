@@ -142,6 +142,53 @@ describe('SecuritySettingsViewModel', () => {
 		expect(vm.confirmingLockout).toBe(false)
 	})
 
+	it('sin saber la IP de la sesión, una lista nueva o distinta también pide confirmación', async () => {
+		const vm = await mountViewModel({
+			...PHASE_3,
+			panelAccess: { allowedCidrs: [], clientIp: null },
+		})
+
+		vm.setCidrs('10.0.0.0/8')
+		expect(vm.clientIpHint).toBeNull()
+		await vm.save()
+
+		expect(vm.confirmingLockout).toBe(true)
+		expect(vm.lockoutTitle).toBe(m.admin_security_lockout_unknown_title())
+		expect(vm.lockoutBody).toBe(m.admin_security_lockout_unknown_body())
+		expect(mocks.updateSecurity).not.toHaveBeenCalled()
+
+		await vm.confirmLockout()
+		expect(mocks.updateSecurity).toHaveBeenCalledWith({ allowedCidrs: '10.0.0.0/8' })
+
+		// Cambiar una lista que ya tenía rangos, también.
+		vm.setCidrs('203.0.113.0/24')
+		await vm.save()
+		expect(vm.confirmingLockout).toBe(true)
+	})
+
+	it('vaciar la lista abre el panel a todos: no pide confirmación', async () => {
+		const vm = await mountViewModel({
+			...PHASE_3,
+			panelAccess: { allowedCidrs: ['10.0.0.0/8'], clientIp: null },
+		})
+
+		vm.setCidrs('')
+		await vm.save()
+
+		expect(vm.confirmingLockout).toBe(false)
+		expect(mocks.updateSecurity).toHaveBeenCalledWith({ allowedCidrs: '' })
+	})
+
+	it('con la IP conocida y afuera, el aviso dice cuál es', async () => {
+		const vm = await mountViewModel(PHASE_3)
+
+		vm.setCidrs('10.0.0.0/8')
+		await vm.save()
+
+		expect(vm.lockoutTitle).toBe(m.admin_security_lockout_title())
+		expect(vm.lockoutBody).toBe(m.admin_security_lockout_body({ ip: '198.51.100.17' }))
+	})
+
 	it('un 422 del backend en las IPs va al campo', async () => {
 		const vm = await mountViewModel(PHASE_3)
 		mocks.updateSecurity.mockRejectedValueOnce(

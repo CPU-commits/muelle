@@ -74,6 +74,29 @@ export class SecuritySettingsViewModel {
 			: m.admin_security_client_ip_out({ ip })
 	}
 
+	/**
+	 * Por qué guardar la lista nueva podría dejar afuera a esta sesión: `out` si se sabe su
+	 * IP y no está incluida, `unknown` si el backend no la informó. Vaciar la lista abre el
+	 * panel a todos, así que eso nunca es un riesgo.
+	 */
+	get lockoutRisk(): 'out' | 'unknown' | null {
+		if (!this.areCidrsDirty || this.cidrs.trim() === '') return null
+		if (this.clientIp === null) return 'unknown'
+		return this.clientIpAllowed ? null : 'out'
+	}
+
+	get lockoutTitle(): string {
+		return this.lockoutRisk === 'unknown'
+			? m.admin_security_lockout_unknown_title()
+			: m.admin_security_lockout_title()
+	}
+
+	get lockoutBody(): string {
+		return this.lockoutRisk === 'unknown'
+			? m.admin_security_lockout_unknown_body()
+			: m.admin_security_lockout_body({ ip: this.clientIp ?? '' })
+	}
+
 	setRequire2fa = (value: boolean): void => {
 		this.require2fa = value
 		this.totpRequiredFirst = false
@@ -93,7 +116,7 @@ export class SecuritySettingsViewModel {
 				this.#fail(error)
 				return
 			}
-			if (this.clientIpAllowed === false) {
+			if (this.lockoutRisk !== null) {
 				this.confirmingLockout = true
 				return
 			}

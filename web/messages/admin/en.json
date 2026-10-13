@@ -70,6 +70,8 @@
 	"admin_security_saved": "Security saved",
 	"admin_security_lockout_title": "Your IP would be left out",
 	"admin_security_lockout_body": "With this list, {ip} could no longer open the panel, and getting back in would mean changing it from the server.",
+	"admin_security_lockout_unknown_title": "We don't know your current IP",
+	"admin_security_lockout_unknown_body": "With this list you could lose access to the panel, and getting back in would mean changing it from the server.",
 	"admin_security_lockout_confirm": "Save anyway",
 	"admin_error_cidr": "Line {line}: “{value}” is neither an IP nor a CIDR range.",
 
