@@ -21,6 +21,7 @@
 	import {
 		clockTime,
 		durationText,
+		sentence,
 		statusLabel,
 		triggerText,
 	} from '../../components/labels/deployLabels'
@@ -151,7 +152,7 @@
 					{#if vm.selectedStatus === 'failed' && vm.selected.error}
 						<div class={failure} role="alert">
 							<span class={failureDot}><StatusDot status="bad" /></span>
-							<p class={failureText}>{vm.selected.error}</p>
+							<p class={failureText}>{sentence(vm.selected.error)}</p>
 						</div>
 					{/if}
 					{#if vm.polling && vm.isActive}

@@ -158,6 +158,11 @@ export function taskStateText(state: string, health: string | null): string {
 	return health ? `${capitalized} · ${health}` : capitalized
 }
 
+/** Un mensaje del backend (en minúscula, estilo Go) para mostrar como oración. */
+export function sentence(text: string): string {
+	return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 export function taskTone(state: string, health: string | null): StatusTone {
 	if (state === 'failed' || state === 'rejected' || health === 'unhealthy') return 'bad'
 	if (state === 'running' && (health === null || health === 'healthy')) return 'ok'
