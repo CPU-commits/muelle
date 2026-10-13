@@ -3,7 +3,11 @@ import { srOnly } from '@/shared/ui/themes/utilities.css'
 // Copia al portapapeles. La API async solo existe en un contexto seguro (HTTPS o
 // localhost) y puede estar denegada; si falla, se prueba el camino viejo (un textarea
 // fuera de vista + execCommand), que funciona en HTTP dentro de un clic.
-export async function writeToClipboard(value: string): Promise<boolean> {
+//
+// `near` es el botón que copia: si está adentro de un <dialog> modal, el textarea va
+// adentro del <dialog>. Con un modal abierto el resto de la página está inerte, y un
+// textarea en el <body> no se puede seleccionar: execCommand no copiaría nada.
+export async function writeToClipboard(value: string, near?: Element | null): Promise<boolean> {
 	try {
 		if (navigator.clipboard?.writeText) {
 			await navigator.clipboard.writeText(value)
@@ -17,7 +21,8 @@ export async function writeToClipboard(value: string): Promise<boolean> {
 	area.readOnly = true
 	area.className = srOnly
 	const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
-	document.body.append(area)
+	const container = near?.closest('dialog[open]') ?? document.body
+	container.append(area)
 	try {
 		area.select()
 		return document.execCommand('copy')

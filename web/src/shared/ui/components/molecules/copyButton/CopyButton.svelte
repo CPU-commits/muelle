@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Attachment } from 'svelte/attachments'
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import { toast } from '@/shared/ui/stores'
 	import { srOnly } from '@/shared/ui/themes/utilities.css'
@@ -32,6 +33,14 @@
 
 	const FEEDBACK_MS = 1600
 	let result = $state<'idle' | 'copied' | 'failed'>('idle')
+	// Para saber si el botón está adentro de un modal (ver `writeToClipboard`).
+	let liveRegion: HTMLSpanElement | undefined
+	const rememberLiveRegion: Attachment<HTMLSpanElement> = (element) => {
+		liveRegion = element
+		return () => {
+			liveRegion = undefined
+		}
+	}
 	let timer: ReturnType<typeof setTimeout> | undefined
 
 	function show(next: 'copied' | 'failed'): void {
@@ -44,7 +53,7 @@
 	}
 
 	async function copy(): Promise<void> {
-		if (await writeToClipboard(value)) {
+		if (await writeToClipboard(value, liveRegion)) {
 			show('copied')
 			return
 		}
@@ -72,4 +81,6 @@
 	<Icon name={result === 'copied' ? 'check' : result === 'failed' ? 'alert' : 'copy'} size={14} />
 	{#if !iconOnly}{text}{/if}
 </Button>
-<span class={srOnly} aria-live="polite">{result === 'copied' ? m.common_copied() : ''}</span>
+<span {@attach rememberLiveRegion} class={srOnly} aria-live="polite"
+	>{result === 'copied' ? m.common_copied() : ''}</span
+>

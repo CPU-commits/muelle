@@ -50,8 +50,15 @@
 				<div class={secret}>
 					<span class={secretLabel}>{m.auth_2fa_secret()}</span>
 					<div class={secretRow}>
-						<Mono size={13}>{vm.secretGroups}</Mono>
-						<CopyButton value={vm.setup.secret} iconOnly variant="ghost" size="xs" />
+						<!-- `target`: si no se puede copiar, queda seleccionado para Ctrl+C. -->
+						<span id="totp-secret"><Mono size={13}>{vm.secretGroups}</Mono></span>
+						<CopyButton
+							value={vm.setup.secret}
+							target="totp-secret"
+							iconOnly
+							variant="ghost"
+							size="xs"
+						/>
 					</div>
 				</div>
 			</div>

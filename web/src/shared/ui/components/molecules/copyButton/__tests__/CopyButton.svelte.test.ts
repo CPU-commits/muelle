@@ -3,6 +3,7 @@ import { render } from 'vitest-browser-svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
 import CopyButtonHarness from './CopyButtonHarness.svelte'
+import CopyInModalHarness from './CopyInModalHarness.svelte'
 
 const TOKEN = 'mk_Vq3tY8pL2xWc9RmZ0aKfN7sB4hJdU6gE1oTiQ5yXlCw'
 
@@ -52,5 +53,30 @@ describe('CopyButton', () => {
 		await expect
 			.element(screen.getByRole('button', { name: m.common_copied() }))
 			.toBeInTheDocument()
+	})
+
+	// Con un Modal abierto, todo lo de afuera del <dialog> está inerte: un textarea en el
+	// <body> no se puede enfocar ni seleccionar, y execCommand no copia nada.
+	it('adentro de un Modal, el plan B copia desde adentro del <dialog>', async () => {
+		vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('NotAllowedError'))
+		let copied: string | null = null
+		vi.spyOn(document, 'execCommand').mockImplementation(() => {
+			const active = document.activeElement
+			const dialog = document.querySelector('dialog[open]')
+			if (!(active instanceof HTMLTextAreaElement) || !dialog?.contains(active)) return false
+			copied = active.value.slice(active.selectionStart, active.selectionEnd)
+			return true
+		})
+		const screen = await render(CopyInModalHarness, { value: TOKEN })
+
+		await screen.getByRole('button', { name: m.common_copy() }).click()
+
+		expect(copied).toBe(TOKEN)
+		await expect
+			.element(screen.getByRole('button', { name: m.common_copied() }))
+			.toBeInTheDocument()
+		// El textarea de apoyo no queda y el foco vuelve al botón.
+		expect(document.querySelectorAll('dialog textarea')).toHaveLength(0)
+		await expect.element(screen.getByRole('button', { name: m.common_copied() })).toHaveFocus()
 	})
 })
