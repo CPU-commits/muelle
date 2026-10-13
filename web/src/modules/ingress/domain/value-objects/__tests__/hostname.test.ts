@@ -18,22 +18,22 @@ describe('hostname', () => {
 	})
 
 	it.each([
-		['', 'vacío'],
-		['localhost', 'le falta el dominio'],
-		['https://api.tudominio.cl', 'sin https://'],
-		['api.tudominio.cl/v1', 'sin https://'],
-		['-api.tudominio.cl', 'guiones'],
-		['api_v1.tudominio.cl', 'guiones'],
-		['api.tudominio.123', 'primer nivel'],
-		['*.tudominio.cl', 'guiones'],
-	])('rechaza %j', (raw, fragment) => {
-		expect(hostnameProblem(raw)).toContain(fragment)
+		['', 'empty'],
+		['localhost', 'no_domain'],
+		['https://api.tudominio.cl', 'not_bare'],
+		['api.tudominio.cl/v1', 'not_bare'],
+		['-api.tudominio.cl', 'bad_label'],
+		['api_v1.tudominio.cl', 'bad_label'],
+		['api.tudominio.123', 'bad_tld'],
+		['*.tudominio.cl', 'bad_label'],
+	])('rechaza %j (%s)', (raw, problem) => {
+		expect(hostnameProblem(raw)).toBe(problem)
 		expect(() => parseHostname(raw)).toThrow(ValidationError)
 	})
 
 	it('demasiado largo', () => {
 		const long = `${'a'.repeat(60)}.`.repeat(5) + 'cl'
-		expect(hostnameProblem(long)).toBe('es demasiado largo')
+		expect(hostnameProblem(long)).toBe('too_long')
 	})
 
 	it('el error lleva el campo', () => {

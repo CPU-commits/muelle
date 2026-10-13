@@ -37,7 +37,7 @@ export { makeRetryDomain } from './use-cases/retryDomain'
 export type { SetProxied, SetProxiedInput } from './use-cases/setProxied'
 export { makeSetProxied } from './use-cases/setProxied'
 export type { AppRef } from './value-objects/appRef'
-export type { DomainTarget } from './value-objects/domainTarget'
+export type { DomainTarget, TargetProblem } from './value-objects/domainTarget'
 export { formatTarget, parseTarget, sameTarget, targetProblem } from './value-objects/domainTarget'
 export type {
 	DnsRecordType,
@@ -51,7 +51,7 @@ export {
 	DOMAIN_STATUSES,
 	TLS_MODES,
 } from './value-objects/domainStatus'
-export type { Hostname } from './value-objects/hostname'
+export type { Hostname, HostnameProblem } from './value-objects/hostname'
 export {
 	asHostname,
 	HOSTNAME_MAX_LENGTH,

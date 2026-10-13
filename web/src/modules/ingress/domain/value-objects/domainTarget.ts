@@ -16,21 +16,28 @@ export function formatTarget(target: DomainTarget): string {
 	return `${target.service}:${target.port}`
 }
 
-export function targetProblem(raw: string): string | null {
+/** Por qué un destino no sirve; la UI lo traduce. */
+export type TargetProblem = 'format' | 'service' | 'port'
+
+const PROBLEM_TEXT: Record<TargetProblem, string> = {
+	format: 'escribe servicio:puerto (ej. api:3000)',
+	service: 'no es un nombre de servicio válido',
+	port: 'el puerto va de 1 a 65535',
+}
+
+export function targetProblem(raw: string): TargetProblem | null {
 	const match = TARGET.exec(raw)
-	if (!match) return 'escribe servicio:puerto (ej. api:3000)'
+	if (!match) return 'format'
 	const [, service = '', port = ''] = match
-	if (!SERVICE.test(service)) return `"${service}" no es un nombre de servicio válido`
+	if (!SERVICE.test(service)) return 'service'
 	const value = Number(port)
-	if (!Number.isInteger(value) || value < 1 || value > 65535) {
-		return 'el puerto va de 1 a 65535'
-	}
+	if (!Number.isInteger(value) || value < 1 || value > 65535) return 'port'
 	return null
 }
 
 export function parseTarget(raw: string, field = 'target'): DomainTarget {
 	const problem = targetProblem(raw)
-	if (problem) throw new ValidationError(problem, field)
+	if (problem) throw new ValidationError(PROBLEM_TEXT[problem], field)
 	const [, service = '', port = ''] = TARGET.exec(raw) ?? []
 	return { service, port: Number(port) }
 }

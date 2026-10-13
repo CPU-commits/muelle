@@ -9,14 +9,14 @@ describe('destino servicio:puerto', () => {
 	})
 
 	it.each([
-		['api', 'servicio:puerto'],
-		['api:', 'servicio:puerto'],
-		['API:3000', 'no es un nombre de servicio'],
-		['un-servicio-muy-largo:80', 'no es un nombre de servicio'],
-		['api:0', 'de 1 a 65535'],
-		['api:70000', 'de 1 a 65535'],
-	])('rechaza %j', (raw, fragment) => {
-		expect(targetProblem(raw)).toContain(fragment)
+		['api', 'format'],
+		['api:', 'format'],
+		['API:3000', 'service'],
+		['un-servicio-muy-largo:80', 'service'],
+		['api:0', 'port'],
+		['api:70000', 'port'],
+	])('rechaza %j (%s)', (raw, problem) => {
+		expect(targetProblem(raw)).toBe(problem)
 		expect(() => parseTarget(raw, 'target')).toThrow(ValidationError)
 	})
 
