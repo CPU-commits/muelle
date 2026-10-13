@@ -10,6 +10,7 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/service"
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/vo"
+	srepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
 
@@ -196,8 +197,32 @@ type DeleteApp struct{ d Deps }
 
 func NewDeleteApp(d Deps) *DeleteApp { return &DeleteApp{d} }
 
-// Execute solo borra el registro (y sus variables en cascada). La Fase 2 agrega `docker stack rm`.
+// Execute borra la app: con Runtime, primero su stack (docker stack rm, que
+// hace deploy); después la fila, con sus variables y deploys en cascada. Una
+// app con dominios devuelve ErrNotEmpty sin tocar nada: primero se borran sus
+// dominios, que limpian sus registros de Cloudflare (§9). Si Docker no
+// responde, la app queda y se puede reintentar.
 func (uc *DeleteApp) Execute(ctx context.Context, project, stage, slug string) error {
+	if uc.d.Runtime != nil || uc.d.Domains != nil {
+		a, err := uc.d.Apps.Get(ctx, project, stage, slug)
+		if err != nil {
+			return err
+		}
+		if uc.d.Domains != nil {
+			n, err := uc.d.Domains.CountByApp(ctx, a.ID)
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				return srepo.ErrNotEmpty
+			}
+		}
+		if uc.d.Runtime != nil {
+			if err := uc.d.Runtime.RemoveApp(ctx, project, stage, slug); err != nil {
+				return err
+			}
+		}
+	}
 	err := uc.d.Tx.InTx(ctx, func(ctx context.Context) error {
 		a, err := uc.d.Apps.Get(ctx, project, stage, slug)
 		if err != nil {

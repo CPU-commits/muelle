@@ -7,8 +7,10 @@ import (
 
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
 	"github.com/CPU-commits/muelle/src/internal/catalog/app/usecases"
+	"github.com/CPU-commits/muelle/src/internal/catalog/domain/service"
 	cathttp "github.com/CPU-commits/muelle/src/internal/catalog/infra/in/http"
 	catsqlite "github.com/CPU-commits/muelle/src/internal/catalog/infra/out/repository/sqlite"
+	outservice "github.com/CPU-commits/muelle/src/internal/catalog/infra/out/service"
 	"github.com/CPU-commits/muelle/src/package/audit"
 	"github.com/CPU-commits/muelle/src/package/clock"
 	sqlitedb "github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
@@ -19,6 +21,14 @@ type Deps struct {
 	Clock clock.Clock
 	Audit audit.Recorder
 	Log   *slog.Logger
+
+	// Networks crea la red de un stage al crearlo y la borra al borrarlo
+	// (§3.2); la implementa ingress.Module. Opcional: con nil, catalog no toca
+	// Docker (el comportamiento de la Fase 1, y sus tests).
+	Networks service.StageNetworks
+	// Runtime ejecuta docker stack rm al borrar una app; lo implementa
+	// deploy.Module. Opcional, como Networks.
+	Runtime service.AppRuntime
 }
 
 type Module struct {
@@ -33,6 +43,9 @@ func New(d Deps) *Module {
 		Apps:     catsqlite.NewAppRepository(d.DB),
 		Clock:    d.Clock,
 		Audit:    d.Audit,
+		Networks: d.Networks,
+		Runtime:  d.Runtime,
+		Domains:  outservice.NewDomainCounter(d.DB),
 	}
 	return &Module{uc: cathttp.UseCases{
 		CreateProject: usecases.NewCreateProject(ud),
