@@ -19,6 +19,7 @@ const FIELDS = {
 const LIST_ERRORS: DomainErrorMap = { phase: 3, fields: FIELDS }
 
 // Al crear, un 409 es el hostname tomado (es único en todo muelle).
+// TODO(Fase 3): sacar el `conflict` genérico cuando el backend mande `hostname_taken`.
 const CREATE_ERRORS: DomainErrorMap = {
 	phase: 3,
 	fields: FIELDS,

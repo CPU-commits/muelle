@@ -40,14 +40,12 @@ export class AppDeployState {
 	constructor(ref: () => AppRef, enabled: () => boolean = () => true) {
 		this.#ref = ref
 		this.#enabled = enabled
-		this.#status = createQuery(() => ({
-			...appStatusQuery(this.#ref(), { enabled: this.#enabled() }),
-			retry: false,
-		}))
-		this.#deploys = createQuery(() => ({
-			...deploysQuery(this.#ref(), { enabled: this.#enabled() }),
-			retry: false,
-		}))
+		this.#status = createQuery(() =>
+			appStatusQuery(this.#ref(), { enabled: this.#enabled(), noRetry: true }),
+		)
+		this.#deploys = createQuery(() =>
+			deploysQuery(this.#ref(), { enabled: this.#enabled(), noRetry: true }),
+		)
 	}
 
 	/** Cargando de verdad (apagada no carga: muestra "—"). */

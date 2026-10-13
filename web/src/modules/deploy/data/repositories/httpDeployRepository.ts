@@ -49,6 +49,7 @@ const ONE_DEPLOY_ERRORS: DomainErrorMap = {
 
 // Un 409 en el rollback es "no hay un succeeded anterior" (spec §5.2 regla 6). Se acepta
 // el código propio que se supone en el README y el `conflict` genérico del Kit.
+// TODO(Fase 2): sacar el `conflict` cuando el backend mande `no_previous_deploy`.
 const ROLLBACK_ERRORS: DomainErrorMap = {
 	phase: 2,
 	codes: {

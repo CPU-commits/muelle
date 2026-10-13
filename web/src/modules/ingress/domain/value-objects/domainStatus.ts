@@ -13,7 +13,8 @@ export const TLS_MODES = ['cloudflare', 'http'] as const
 export type TlsMode = (typeof TLS_MODES)[number]
 
 /**
- * El motivo de un `error`, para elegir la acción (supuesto del README):
+ * El motivo de un `error`, para elegir la acción (`last_error_code`, migración 0003: con
+ * `status: error` nunca falta):
  * - `record_exists`: el registro ya existe y no lo creó muelle → Adoptar (§9);
  * - `cloudflare`: la API de Cloudflare respondió con error → Reintentar (§9);
  * - `certificate`: certificado inválido o por vencer en menos de 14 días (§8) → Reintentar.

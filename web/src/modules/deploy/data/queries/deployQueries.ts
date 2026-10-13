@@ -31,12 +31,18 @@ export interface QueryToggles {
 	readonly refreshEvery?: number | false
 	/** `false` para no pedir nada (una fila de Proyectos fuera de la vista, un id vacío). */
 	readonly enabled?: boolean
+	/**
+	 * Sin reintentos: un dato secundario (las columnas de una fila de Proyectos) que, si
+	 * falla, dice "—" enseguida en vez de esperar dos reintentos.
+	 */
+	readonly noRetry?: boolean
 }
 
-function toggles({ refreshEvery, enabled }: QueryToggles) {
+function toggles({ refreshEvery, enabled, noRetry }: QueryToggles) {
 	return {
 		...(refreshEvery !== undefined ? { refetchInterval: refreshEvery } : {}),
 		...(enabled !== undefined ? { enabled } : {}),
+		...(noRetry ? { retry: false } : {}),
 		// TanStack no refresca con la pestaña oculta (refetchIntervalInBackground: false).
 		refetchIntervalInBackground: false,
 	}
