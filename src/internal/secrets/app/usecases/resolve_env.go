@@ -27,8 +27,8 @@ func NewResolveEnv(tx repository.Transactor, owners service.OwnerResolver, repo 
 // Execute toma el stage de la propia app, así que nunca mezcla las variables
 // de otro stage. Lee las dos listas en una transacción, para que un cambio
 // entre una y otra no deje una mezcla que nunca existió.
-func (u *ResolveEnv) Execute(ctx context.Context, in dto.ResolveEnv) (map[string]string, error) {
-	var out map[string]string
+func (u *ResolveEnv) Execute(ctx context.Context, in dto.ResolveEnv) (dto.ResolvedEnv, error) {
+	var out dto.ResolvedEnv
 	// InTx (BEGIN IMMEDIATE) aunque solo lee: es para leer una foto consistente.
 	err := u.tx.InTx(ctx, func(ctx context.Context) error {
 		app := entity.AppOwner(in.AppID)
@@ -44,11 +44,14 @@ func (u *ResolveEnv) Execute(ctx context.Context, in dto.ResolveEnv) (map[string
 		if err != nil {
 			return err
 		}
-		out = service.Merge(stageVars, appVars)
+		out = dto.ResolvedEnv{
+			Vars:         service.Merge(stageVars, appVars),
+			SecretValues: service.SecretValues(stageVars, appVars),
+		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return dto.ResolvedEnv{}, err
 	}
 	return out, nil
 }

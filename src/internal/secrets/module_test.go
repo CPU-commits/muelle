@@ -31,6 +31,7 @@ type testEnv struct {
 	db     *sqlite.DB
 	client *httptestutil.Client
 	clock  *clock.Manual
+	module *Module
 }
 
 var session = httptestutil.WithSession("s")
@@ -59,7 +60,7 @@ func newTestEnv(t *testing.T) *testEnv {
 			"otro":    {Token: &entity.TokenScope{ID: 9, Name: "ci-otro", ProjectSlug: "otro"}},
 		},
 	}
-	return &testEnv{db: db, client: httptestutil.New(t, auth, m.RegisterRoutes), clock: clk}
+	return &testEnv{db: db, client: httptestutil.New(t, auth, m.RegisterRoutes), clock: clk, module: m}
 }
 
 type auditEvent struct {
@@ -486,5 +487,22 @@ func TestEnvAPITokenScopes(t *testing.T) {
 		if ev.actorType != "token" {
 			t.Fatalf("evento sin el token como actor: %+v", ev)
 		}
+	}
+}
+
+// ResolveEnv es lo que el deploy (Fase 2) le pide a secrets: las variables de
+// la app con las de su stage debajo, y los valores secretos para enmascarar.
+func TestModuleResolveEnv(t *testing.T) {
+	e := newTestEnv(t)
+	c := e.client
+	httptestutil.Expect(t, c.Do("PUT", stageEnv, map[string]any{"vars": map[string]string{"NATS": "nats:4222"}, "secret": false}, session), http.StatusNoContent)
+	httptestutil.Expect(t, c.Do("PUT", appEnv, map[string]any{"vars": map[string]string{"JWT_KEY": "k-123"}}, session), http.StatusNoContent)
+	appID := seedtest.AppID(t, e.db, "auditfy", "staging", "api")
+	vars, secrets, err := e.module.ResolveEnv(context.Background(), appID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vars) != 2 || vars["NATS"] != "nats:4222" || vars["JWT_KEY"] != "k-123" || len(secrets) != 1 || secrets[0] != "k-123" {
+		t.Fatalf("vars=%v secrets=%q", vars, secrets)
 	}
 }
