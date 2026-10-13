@@ -4,21 +4,41 @@ import { untrack } from 'svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import { ValidationError } from '@/shared/domain'
-import { updateAppMutation } from '../../../data'
-import { appRefOf, type ServiceApp } from '../../../domain'
-import { catalogErrorMessage, specMessages } from '../../components/catalogMessages'
+import { catalogKeys, updateAppMutation } from '../../../data'
+import { appRefOf, KindMismatch, type ServiceApp } from '../../../domain'
 import {
+	catalogErrorMessage,
+	serverFieldMessage,
+	specMessages,
+} from '../../components/catalogMessages'
+import {
+	type CardId,
+	cardOf,
 	checkSection,
 	type SectionDef,
 	type SectionMessages,
 	sectionChanges,
 	valueAt,
+	visibleFieldOf,
 } from './sections'
 
 export const sectionMessages: SectionMessages = {
 	...specMessages,
 	unclosedQuote: () => m.catalog_error_unclosed_quote(),
 	deployTimeout: () => m.catalog_error_timeout(),
+}
+
+const CARD_TITLES: Record<CardId, () => string> = {
+	image: () => m.catalog_config_image(),
+	run: () => m.catalog_config_run(),
+	health: () => m.catalog_config_health(),
+	volumes: () => m.catalog_config_volumes(),
+	resources: () => m.catalog_config_resources(),
+}
+
+// Un valor de formulario comparable: los campos son texto, salvo la lista de volúmenes.
+function sameValue(a: unknown, b: unknown): boolean {
+	return a === b || JSON.stringify(a) === JSON.stringify(b)
 }
 
 interface ServerError {
@@ -53,8 +73,12 @@ export class SectionSaver<V> {
 	validate = (values: V): { fields: Record<string, string> } | undefined => {
 		const { fields, elsewhere } = checkSection(this.#def, values, this.#app(), sectionMessages)
 		const [problem] = elsewhere
+		const card = problem ? cardOf(problem.field) : null
 		this.formError = problem
-			? m.catalog_config_stored_problem({ field: problem.field, message: problem.message })
+			? m.catalog_config_stored_problem({
+					card: card ? CARD_TITLES[card]() : m.catalog_config_other_card(),
+					message: problem.message,
+				})
 			: null
 		return Object.keys(fields).length > 0 ? { fields: { ...fields } } : undefined
 	}
@@ -65,7 +89,7 @@ export class SectionSaver<V> {
 	 */
 	serverError = (field: string, value: unknown): string | null => {
 		const error = this.#serverErrors[field]
-		return error && error.value === value ? error.message : null
+		return error && sameValue(error.value, value) ? error.message : null
 	}
 
 	/** Devuelve la app guardada, o null si no hubo nada que guardar o falló. */
@@ -85,13 +109,23 @@ export class SectionSaver<V> {
 		} catch (error) {
 			const field =
 				error instanceof ValidationError && error.field
-					? this.#def.fieldOf(error.field)
+					? visibleFieldOf(this.#def, error.field, values)
 					: null
-			if (field !== null && error instanceof ValidationError) {
+			// Cada campo que nombra `fieldOf` tiene dónde mostrarse en su tarjeta (lo prueba
+			// ServiceConfig.svelte.test.ts); el resto (otra tarjeta, `spec`) va arriba.
+			if (field !== null && error instanceof ValidationError && error.field) {
 				this.#serverErrors = {
-					[field]: { message: error.message, value: valueAt(values, field) },
+					[field]: {
+						message: serverFieldMessage(error.field, error.message),
+						value: valueAt(values, field),
+					},
 				}
 				return null
+			}
+			// La app es compose ahora (otra pestaña): se vuelve a cargar y la pantalla cambia
+			// sola al editor de YAML.
+			if (error instanceof KindMismatch) {
+				void this.#client.invalidateQueries({ queryKey: catalogKeys.app(appRefOf(app)) })
 			}
 			this.formError = catalogErrorMessage(error)
 			return null

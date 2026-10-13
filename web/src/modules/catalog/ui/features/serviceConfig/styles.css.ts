@@ -53,6 +53,12 @@ export const fieldError = style({
 	color: theme.colors.status.errorText,
 })
 
+export const typeField = style({
+	display: 'flex',
+	flexDirection: 'column',
+	gap: theme.space[6],
+})
+
 export const imageField = style({
 	display: 'flex',
 	flexDirection: 'column',

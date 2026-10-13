@@ -9,6 +9,7 @@ import {
 	SPEC_LIMITS,
 	type ServiceApp,
 } from '../../../domain'
+import { guardUnsavedChanges } from '../../components/unsavedGuard'
 import { createSectionForm, sectionMessages } from './sectionForm.svelte.ts'
 import {
 	EMPTY_VOLUME,
@@ -48,7 +49,9 @@ export class ServiceConfigViewModel {
 
 	readonly #app: () => ServiceApp
 	readonly #healthValues
+	readonly #editedPort
 	readonly #volumeCount
+	readonly #pristine
 
 	constructor(app: () => ServiceApp) {
 		this.#app = app
@@ -58,7 +61,18 @@ export class ServiceConfigViewModel {
 		this.volumes = createSectionForm(app, volumesSection)
 		this.resources = createSectionForm(app, resourcesSection)
 		this.#healthValues = this.health.form.useSelector((state) => state.values)
+		this.#editedPort = this.run.form.useSelector((state) => state.values.port)
 		this.#volumeCount = this.volumes.form.useSelector((state) => state.values.volumes.length)
+		// Una tarjeta con lo que tenía al cargar (o al guardar) no cuenta como cambio.
+		this.#pristine = [this.image, this.run, this.health, this.volumes, this.resources].map(
+			(section) => section.form.useSelector((state) => state.isDefaultValue),
+		)
+		guardUnsavedChanges(() => this.isDirty)
+	}
+
+	/** Alguna tarjeta tiene cambios sin guardar. */
+	get isDirty(): boolean {
+		return this.#pristine.some((pristine) => !pristine.current)
 	}
 
 	readonly healthOptions = [
@@ -93,10 +107,20 @@ export class ServiceConfigViewModel {
 		return this.#healthValues.current.type
 	}
 
-	/** Lo que va a ejecutar Swarm, con los valores que se están editando. */
+	/**
+	 * Lo que va a ejecutar Swarm, con lo que se está editando: el healthcheck y el puerto de
+	 * Ejecución (si todavía no es un puerto válido, el guardado).
+	 */
 	get healthPreview(): string | null {
 		const { healthcheck } = healthcheckFrom(this.#healthValues.current, sectionMessages)
-		return healthcheckPreview(healthcheck, this.#app().spec.port)
+		const edited = Number(this.#editedPort.current)
+		const port =
+			Number.isInteger(edited) &&
+			edited >= SPEC_LIMITS.port.min &&
+			edited <= SPEC_LIMITS.port.max
+				? edited
+				: this.#app().spec.port
+		return healthcheckPreview(healthcheck, port)
 	}
 
 	get healthRequirement(): string {

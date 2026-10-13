@@ -10,6 +10,7 @@ import {
 	type SectionMessages,
 	sectionChanges,
 	valueAt,
+	visibleFieldOf,
 	volumesSection,
 } from '../sections'
 
@@ -177,6 +178,20 @@ describe('las tarjetas de Configuración', () => {
 		expect(volumesSection.fieldOf('volumes[2].name')).toBe('volumes[2].name')
 		expect(resourcesSection.fieldOf('deployTimeoutSeconds')).toBe('deployTimeoutSeconds')
 		expect(runSection.fieldOf('spec')).toBeNull()
+	})
+
+	it('un campo que no está a la vista no recibe el error: va arriba de la tarjeta', () => {
+		const http = healthSection.values(app)
+		expect(visibleFieldOf(healthSection, 'healthcheck.path', http)).toBe('path')
+		expect(visibleFieldOf(healthSection, 'healthcheck.command', http)).toBeNull()
+		expect(visibleFieldOf(healthSection, 'healthcheck.type', http)).toBe('type')
+		const none = { ...http, type: 'none' as const }
+		expect(visibleFieldOf(healthSection, 'healthcheck.intervalSeconds', none)).toBeNull()
+		const volumes = volumesSection.values(app)
+		expect(visibleFieldOf(volumesSection, 'volumes[0].mount', volumes)).toBe('volumes[0].mount')
+		expect(visibleFieldOf(volumesSection, 'volumes[3].mount', volumes)).toBeNull()
+		expect(visibleFieldOf(volumesSection, 'volumes', volumes)).toBe('volumes')
+		expect(visibleFieldOf(imageSection, 'port', imageSection.values(app))).toBeNull()
 	})
 
 	it('valueAt lee un campo por su nombre', () => {

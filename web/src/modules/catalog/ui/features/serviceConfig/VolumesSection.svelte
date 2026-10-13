@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte'
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import { Banner, Button, Card, firstError, Icon, Input } from '@/shared/ui'
 	import type { ServiceConfigViewModel } from './ServiceConfig.viewModel.svelte.ts'
@@ -20,6 +21,18 @@
 	let { vm, id }: { vm: ServiceConfigViewModel; id: string } = $props()
 
 	const baseId = $props.id()
+
+	// Al quitar una fila, el foco va a la que quedó en su lugar (o a la anterior) o, si no
+	// queda ninguna, a "Agregar": no se pierde en el <body>.
+	async function remove(index: number): Promise<void> {
+		vm.removeVolume(index)
+		await tick()
+		const next =
+			document.getElementById(`${baseId}-${index}-name-input`) ??
+			document.getElementById(`${baseId}-${index - 1}-name-input`) ??
+			document.getElementById(`${baseId}-add`)
+		next?.focus()
+	}
 </script>
 
 <form
@@ -74,6 +87,7 @@
 														)}
 													<div class={volumeInputs}>
 														<Input
+															id={`${baseId}-${index}-name-input`}
 															class={volumeNameColumn}
 															mono
 															name={nameField.name}
@@ -129,8 +143,7 @@
 																		index: position,
 																	},
 																)}
-																onclick={() =>
-																	vm.removeVolume(index)}
+																onclick={() => remove(index)}
 															>
 																<Icon name="x" />
 															</Button>
@@ -160,11 +173,15 @@
 							{/each}
 						</ul>
 					{/if}
-					{#if firstError(list.state.meta.errors)}
-						<p class={fieldError}>{firstError(list.state.meta.errors)}</p>
+					{#if firstError(list.state.meta.errors) ?? vm.volumes.saver.serverError('volumes', list.state.value)}
+						<p class={fieldError}>
+							{firstError(list.state.meta.errors) ??
+								vm.volumes.saver.serverError('volumes', list.state.value)}
+						</p>
 					{/if}
 					<span class={addButton}>
 						<Button
+							id={`${baseId}-add`}
 							variant="secondary"
 							size="sm"
 							disabled={!vm.canAddVolume}

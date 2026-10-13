@@ -178,7 +178,7 @@
 	"catalog_config_saved_body": "Quedan pendientes hasta el próximo deploy.",
 	"catalog_config_no_changes": "No hay cambios para guardar.",
 	"catalog_config_save_error": "No se guardó",
-	"catalog_config_stored_problem": "La configuración guardada tiene un problema en {field}: {message}",
+	"catalog_config_stored_problem": "La configuración guardada tiene un problema en {card}: {message}",
 	"catalog_unit_seconds": "s",
 	"catalog_unit_mb": "MB",
 
@@ -244,5 +244,7 @@
 	"catalog_crumb_app": "App {app}, cambiar",
 	"catalog_crumb_projects": "Proyectos",
 	"catalog_crumb_stages": "Stages de {project}",
-	"catalog_crumb_apps": "Apps de {project}/{stage}"
+	"catalog_crumb_apps": "Apps de {project}/{stage}",
+
+	"catalog_config_other_card": "otra parte de la configuración"
 }

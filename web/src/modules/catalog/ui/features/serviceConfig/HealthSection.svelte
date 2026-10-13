@@ -3,7 +3,7 @@
 	import { Banner, Button, Card, Field, firstError, Input, SegmentedControl } from '@/shared/ui'
 	import { UnitInput } from '../../components/unitInput'
 	import type { ServiceConfigViewModel } from './ServiceConfig.viewModel.svelte.ts'
-	import { form as formClass, grid4, narrow, preview } from './styles.css'
+	import { fieldError, form as formClass, grid4, narrow, preview, typeField } from './styles.css'
 
 	let { vm, id }: { vm: ServiceConfigViewModel; id: string } = $props()
 
@@ -34,13 +34,26 @@
 			<Banner tone="error" title={vm.health.saver.formError} />
 		{/if}
 
-		<SegmentedControl
-			label={m.catalog_config_health()}
-			name={`${id}-type`}
-			options={vm.healthOptions}
-			value={vm.healthType}
-			onChange={vm.setHealthType}
-		/>
+		<!-- El tipo también es un campo: un 422 de `healthcheck` o `healthcheck.type` va acá. -->
+		<vm.health.form.Field name="type">
+			{#snippet children(field)}
+				{@const error =
+					firstError(field.state.meta.errors) ??
+					vm.health.saver.serverError('type', field.state.value)}
+				<div class={typeField}>
+					<SegmentedControl
+						label={m.catalog_config_health()}
+						name={`${id}-type`}
+						options={vm.healthOptions}
+						value={vm.healthType}
+						onChange={vm.setHealthType}
+					/>
+					{#if error}
+						<p class={fieldError}>{error}</p>
+					{/if}
+				</div>
+			{/snippet}
+		</vm.health.form.Field>
 
 		{#if vm.healthType === 'http' || vm.healthType === 'bun-http'}
 			<div class={narrow}>

@@ -178,7 +178,7 @@
 	"catalog_config_saved_body": "They stay pending until the next deploy.",
 	"catalog_config_no_changes": "There are no changes to save.",
 	"catalog_config_save_error": "Not saved",
-	"catalog_config_stored_problem": "The saved configuration has a problem in {field}: {message}",
+	"catalog_config_stored_problem": "The saved configuration has a problem in {card}: {message}",
 	"catalog_unit_seconds": "s",
 	"catalog_unit_mb": "MB",
 
@@ -244,5 +244,7 @@
 	"catalog_crumb_app": "App {app}, change",
 	"catalog_crumb_projects": "Projects",
 	"catalog_crumb_stages": "Stages of {project}",
-	"catalog_crumb_apps": "Apps in {project}/{stage}"
+	"catalog_crumb_apps": "Apps in {project}/{stage}",
+
+	"catalog_config_other_card": "another part of the configuration"
 }

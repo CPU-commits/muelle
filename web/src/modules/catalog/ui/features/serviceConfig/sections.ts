@@ -32,6 +32,11 @@ export interface SectionDef<V> {
 	apply(values: V, app: ServiceApp, messages: SectionMessages): SectionCandidate
 	/** El campo del formulario que corresponde a un campo del dominio, o null si es de otra tarjeta. */
 	fieldOf(domainField: string): string | null
+	/**
+	 * Si el campo del formulario está a la vista con estos valores (el path no se ve con un
+	 * healthcheck de tipo comando). Sin esto, todos los de `fieldOf` lo están.
+	 */
+	visible?(field: string, values: V): boolean
 }
 
 export interface SectionCandidate {
@@ -154,6 +159,12 @@ export const healthSection: SectionDef<HealthValues> = {
 		}
 	},
 	fieldOf: (field) => HEALTH_FIELDS[field] ?? null,
+	visible: (field, values) => {
+		if (field === 'type') return true
+		if (field === 'path') return values.type === 'http' || values.type === 'bun-http'
+		if (field === 'command') return values.type === 'command'
+		return values.type !== 'none'
+	},
 }
 
 /** El healthcheck que describen los valores (también para la vista previa). */
@@ -205,6 +216,10 @@ export const volumesSection: SectionDef<VolumesValues> = {
 		errors: {},
 	}),
 	fieldOf: (field) => (field === 'volumes' || field.startsWith('volumes[') ? field : null),
+	visible: (field, values) => {
+		const row = /^volumes\[(\d+)\]/.exec(field)
+		return row === null || Number(row[1]) < values.volumes.length
+	},
 }
 
 // --- Recursos -----------------------------------------------------------------------------
@@ -246,6 +261,18 @@ export const resourcesSection: SectionDef<ResourcesValues> = {
 	fieldOf: (field) => RESOURCE_FIELDS[field] ?? null,
 }
 
+export type CardId = 'image' | 'run' | 'health' | 'volumes' | 'resources'
+
+/** La tarjeta donde se edita un campo del dominio (`port` → Ejecución), o null (`spec`). */
+export function cardOf(field: string): CardId | null {
+	if (imageSection.fieldOf(field) !== null) return 'image'
+	if (runSection.fieldOf(field) !== null) return 'run'
+	if (healthSection.fieldOf(field) !== null) return 'health'
+	if (volumesSection.fieldOf(field) !== null) return 'volumes'
+	if (resourcesSection.fieldOf(field) !== null) return 'resources'
+	return null
+}
+
 // --- Validar y comparar -------------------------------------------------------------------
 
 /** Los errores de una tarjeta, con el spec completo validado por las reglas del dominio. */
@@ -284,6 +311,20 @@ export function sectionChanges<V>(
 			: { deployTimeoutSeconds: candidate.deployTimeoutSeconds }),
 	}
 	return Object.keys(changes).length > 0 ? changes : null
+}
+
+/**
+ * Dónde mostrar un error del backend: el campo del formulario si está a la vista, o null
+ * (va arriba de la tarjeta, en su `formError`).
+ */
+export function visibleFieldOf<V>(
+	def: SectionDef<V>,
+	domainField: string,
+	values: V,
+): string | null {
+	const field = def.fieldOf(domainField)
+	if (field === null) return null
+	return def.visible === undefined || def.visible(field, values) ? field : null
 }
 
 /** El valor de un campo del formulario por su nombre (`volumes[1].mount`). */
