@@ -50,6 +50,9 @@
 				checked={vm.editSecret}
 				onchange={(event) => vm.setEditSecret(event.currentTarget.checked)}
 			/>
+			{#if vm.editAlert}
+				<Banner tone="error" title={vm.editAlert} />
+			{/if}
 			{#if vm.editMakesSecret}
 				<p class={editNote}>{m.secrets_edit_to_secret_note()}</p>
 			{:else if vm.editConfirmingReveal}

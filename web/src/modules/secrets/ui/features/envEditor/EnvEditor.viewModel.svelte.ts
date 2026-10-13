@@ -85,7 +85,10 @@ export class EnvEditorViewModel {
 	editing = $state.raw<EnvVar | null>(null)
 	editValue = $state('')
 	editSecret = $state(true)
+	/** Un error del valor (validación): va bajo el campo. */
 	editError = $state<string | null>(null)
+	/** Cualquier otro error (el backend caído, la app borrada): va en el aviso del modal. */
+	editAlert = $state<string | null>(null)
 	/** El segundo paso de guardar una secreta sin la marca: su valor queda a la vista. */
 	editConfirmingReveal = $state(false)
 
@@ -266,6 +269,7 @@ export class EnvEditorViewModel {
 		this.editValue = envVar.secret ? '' : envVar.value
 		this.editSecret = envVar.secret
 		this.editError = null
+		this.editAlert = null
 		this.editConfirmingReveal = false
 	}
 
@@ -336,9 +340,11 @@ export class EnvEditorViewModel {
 		const outcome = await this.#save(
 			'edit',
 			{ set: [[envVar.key, this.editValue]], secret: this.editSecret },
-			// En el modal, cualquier error: un 422, un límite o el backend caído.
-			(message) => {
-				this.editError = message
+			// En el modal, cualquier error: los de validación bajo el campo, el resto en el aviso.
+			(message, error) => {
+				const forField = error instanceof ValidationError
+				this.editError = forField ? message : null
+				this.editAlert = forField ? null : message
 				return true
 			},
 		)
@@ -359,6 +365,7 @@ export class EnvEditorViewModel {
 		this.editing = null
 		this.editValue = ''
 		this.editError = null
+		this.editAlert = null
 		this.editConfirmingReveal = false
 	}
 
@@ -454,8 +461,17 @@ export class EnvEditorViewModel {
 
 	// --- Fila --------------------------------------------------------------------------
 
-	/** Las opciones (⋯) de una fila. Una secreta no se puede editar ni leer: se reemplaza. */
-	menuFor = (envVar: EnvVar): MenuEntry[] => {
+	/**
+	 * Las opciones (⋯) de una fila. Una secreta no se puede editar ni leer: se reemplaza.
+	 * Se arman con la fila de ahora y cada acción la vuelve a buscar al elegirse: un item
+	 * armado antes de que la variable pasara a secreta no abre su valor viejo.
+	 */
+	menuFor = (row: EnvVar): MenuEntry[] => {
+		const envVar = findEnvVar(this.vars, row.key) ?? row
+		const current = (open: (envVar: EnvVar) => void) => () => {
+			const now = findEnvVar(this.vars, envVar.key)
+			if (now) open(now)
+		}
 		const disabled = this.isSaving
 		const remove: MenuEntry = {
 			kind: 'action',
@@ -464,7 +480,7 @@ export class EnvEditorViewModel {
 			icon: 'trash',
 			tone: 'danger',
 			disabled,
-			onSelect: () => this.askDelete(envVar),
+			onSelect: current(this.askDelete),
 		}
 		if (envVar.secret) {
 			return [
@@ -474,7 +490,7 @@ export class EnvEditorViewModel {
 					label: m.secrets_action_replace(),
 					icon: 'refresh',
 					disabled,
-					onSelect: () => this.openEdit(envVar),
+					onSelect: current(this.openEdit),
 				},
 				{ kind: 'separator', id: 'separator' },
 				remove,
@@ -486,7 +502,7 @@ export class EnvEditorViewModel {
 				id: 'edit',
 				label: m.secrets_action_edit(),
 				disabled,
-				onSelect: () => this.openEdit(envVar),
+				onSelect: current(this.openEdit),
 			},
 			{
 				kind: 'action',
@@ -494,7 +510,7 @@ export class EnvEditorViewModel {
 				label: m.secrets_action_make_secret(),
 				icon: 'lock',
 				disabled,
-				onSelect: () => this.askSecure(envVar),
+				onSelect: current(this.askSecure),
 			},
 			{ kind: 'separator', id: 'separator' },
 			remove,

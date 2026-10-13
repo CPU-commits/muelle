@@ -13,6 +13,7 @@ import {
 	MAX_ENV_VARS,
 } from '../../../../domain'
 import { InMemoryEnvRepository } from '../../../../domain/repositories/__fakes__/inMemoryEnvRepository'
+import importViewModelSource from '../EnvImport.viewModel.svelte.ts?raw'
 import ImportHarness from './ImportHarness.svelte'
 
 const mocks = vi.hoisted(() => ({
@@ -45,6 +46,34 @@ async function mount(): Promise<{ editor: EnvEditorViewModel; importer: EnvImpor
 }
 
 const lastPatch = () => mocks.patchEnv.mock.calls.at(-1)?.[0]
+
+/**
+ * Los textos que se alcanzan desde un objeto: sus propiedades, los getters y los campos
+ * `$state` de su clase (Svelte los compila como accessors del prototipo), Maps y arrays.
+ */
+function reachableStrings(root: unknown, seen = new Set<unknown>(), depth = 0): string[] {
+	if (typeof root === 'string') return [root]
+	if (root === null || typeof root !== 'object' || seen.has(root) || depth > 8) return []
+	seen.add(root)
+	const next = (value: unknown) => reachableStrings(value, seen, depth + 1)
+	if (root instanceof Map)
+		return [...root].flatMap(([key, value]) => [...next(key), ...next(value)])
+	if (Array.isArray(root)) return root.flatMap(next)
+	const out = Object.values(root).flatMap(next)
+	for (let proto = Object.getPrototypeOf(root); proto && proto !== Object.prototype; ) {
+		for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(proto))) {
+			if (descriptor.get) out.push(...next((root as Record<string, unknown>)[name]))
+		}
+		proto = Object.getPrototypeOf(proto)
+	}
+	return out
+}
+
+function leaked(vms: { editor: EnvEditorViewModel; importer: EnvImportViewModel }, secret: string) {
+	return [...reachableStrings(vms.importer), ...reachableStrings(vms.editor)].filter((text) =>
+		text.includes(secret),
+	)
+}
 
 describe('EnvImportViewModel', () => {
 	beforeEach(() => {
@@ -284,6 +313,29 @@ describe('EnvImportViewModel', () => {
 		expect(importer.text).toBe('PORT=3000')
 	})
 
+	it('mientras importa, el botón sigue habilitado (no pierde el foco) pero no manda dos veces', async () => {
+		let release: () => void = () => {}
+		const patchEnv = makePatchEnv({ env: fake })
+		mocks.patchEnv.mockImplementationOnce(
+			(input) =>
+				new Promise<void>((resolve) => {
+					release = () => void patchEnv(input).then(resolve)
+				}),
+		)
+		const { importer } = await mount()
+		importer.setSecret(false)
+		importer.setText('NEW=x')
+
+		const first = importer.submit()
+		await vi.waitFor(() => expect(importer.isSubmitting).toBe(true))
+
+		expect(importer.canSubmit).toBe(true)
+		await expect(importer.submit()).resolves.toBe(false)
+		release()
+		await expect(first).resolves.toBe(true)
+		expect(mocks.patchEnv).toHaveBeenCalledTimes(1)
+	})
+
 	it('cancelar cierra y olvida el texto, el modo y la marca', async () => {
 		const { importer } = await mount()
 		importer.setText('A=1')
@@ -296,6 +348,49 @@ describe('EnvImportViewModel', () => {
 		expect(importer.text).toBe('')
 		expect(importer.mode).toBe('merge')
 		expect(importer.secret).toBe(true)
+	})
+
+	describe('después de cerrar no queda ningún valor importado', () => {
+		const SECRET = 's3cr3t-importado'
+
+		it('al importar directo', async () => {
+			const vms = await mount()
+			vms.importer.setText(`NEW_SECRET="${SECRET}"`)
+			expect(leaked(vms, SECRET).length).toBeGreaterThan(0)
+
+			await expect(vms.importer.submit()).resolves.toBe(true)
+
+			expect(vms.importer.open).toBe(false)
+			expect(leaked(vms, SECRET)).toEqual([])
+		})
+
+		it('al importar después de confirmar', async () => {
+			const vms = await mount()
+			vms.importer.setText(`PORT=${SECRET}`)
+			await vms.importer.submit()
+			expect(vms.importer.isConfirming).toBe(true)
+
+			await expect(vms.importer.confirmImport()).resolves.toBe(true)
+
+			expect(leaked(vms, SECRET)).toEqual([])
+		})
+
+		it('al cancelar', async () => {
+			const vms = await mount()
+			vms.importer.setText(`JWT_SECRET=${SECRET}\nB=2`)
+			void vms.importer.plan
+
+			vms.importer.toggle()
+
+			expect(leaked(vms, SECRET)).toEqual([])
+		})
+
+		// Un `$derived` que ya nadie lee guarda su último valor (el texto y el plan con los
+		// secretos) hasta que alguien lo vuelva a leer, y leerlo lo recalcula: desde JS no se
+		// ve, solo en un heap snapshot. Por eso el viewModel no tiene ninguno.
+		it('el viewModel no cachea el parse ni el plan en un $derived', () => {
+			expect(importViewModelSource).not.toMatch(/\$derived(\.by)?\(/)
+		})
 	})
 
 	it('al cerrar cuenta un cierre más, para devolver el foco al botón', async () => {

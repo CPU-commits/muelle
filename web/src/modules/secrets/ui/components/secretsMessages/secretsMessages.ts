@@ -73,7 +73,6 @@ export function secretsErrorMessage(error: unknown, kind: EnvOwnerKind): string 
 	return describeError(error)
 }
 
-/** "Línea 3: COMPOSE_X: el prefijo COMPOSE_ está reservado." */
 /** "Línea 4: parece la variable B, pero quedó dentro del valor de PEM…" */
 export function dotenvSwallowedMessage(swallowed: DotenvSwallowed): string {
 	return m.secrets_import_swallowed({
@@ -83,6 +82,7 @@ export function dotenvSwallowedMessage(swallowed: DotenvSwallowed): string {
 	})
 }
 
+/** "Línea 3: COMPOSE_X: el prefijo COMPOSE_ está reservado." */
 export function dotenvIssueMessage(issue: DotenvIssue): string {
 	const key = issue.key ?? ''
 	const message = (() => {

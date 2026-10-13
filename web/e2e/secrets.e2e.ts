@@ -109,3 +109,20 @@ test('reemplazar una secreta sin la marca pide un segundo paso', async ({ page }
 	await dialog.getByRole('button', { name: 'Guardar sin marcar como secreta' }).click()
 	await expect(row(page, 'JWT_SECRET')).toContainText('visible')
 })
+
+test('importar con confirmación devuelve el foco a "Importar .env"', async ({ page }) => {
+	await login(page)
+	await page.goto(VARIABLES)
+
+	// "Marcar como secretas" está prendido: volver secreta a PORT pide confirmar.
+	await page.getByRole('button', { name: 'Importar .env' }).click()
+	await page.getByRole('textbox', { name: 'Contenido del .env' }).fill('PORT=3000')
+	await page.getByRole('button', { name: 'Importar', exact: true }).click()
+	const dialog = page.getByRole('dialog')
+	await expect(dialog.getByRole('heading', { name: 'Marcar como secretas' })).toBeVisible()
+	await dialog.getByRole('button', { name: 'Importar' }).click()
+
+	await expect(page.getByText('Variables importadas')).toBeVisible()
+	await expect(row(page, 'PORT')).toContainText('valor secreto')
+	await expect(page.getByRole('button', { name: 'Importar .env' })).toBeFocused()
+})

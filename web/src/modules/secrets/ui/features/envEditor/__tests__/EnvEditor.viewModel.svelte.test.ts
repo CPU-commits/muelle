@@ -374,6 +374,27 @@ describe('EnvEditorViewModel', () => {
 			expect(vm.deleteBody).toBe(m.secrets_delete_body_stage())
 		})
 
+		it('las opciones usan la fila de ahora: un item viejo no abre la variable vieja', async () => {
+			const vm = await mount()
+			const before = vm.menuFor(byKey(vm, 'LOG_LEVEL'))
+			vm.askSecure(byKey(vm, 'LOG_LEVEL'))
+			await vm.confirmSecure()
+			expect(byKey(vm, 'LOG_LEVEL').secret).toBe(true)
+
+			const edit = before.find((entry) => entry.id === 'edit')
+			if (edit?.kind !== 'action') throw new Error('falta Editar')
+			edit.onSelect()
+
+			// Abre la variable de ahora (secreta): para reemplazar, sin el valor de antes.
+			expect(vm.editing).toMatchObject({ key: 'LOG_LEVEL', secret: true })
+			expect(vm.editValue).toBe('')
+			expect(vm.menuFor(byKey(vm, 'LOG_LEVEL')).map((entry) => entry.id)).toEqual([
+				'replace',
+				'separator',
+				'delete',
+			])
+		})
+
 		it('las opciones de una secreta no ofrecen editar ni leer', async () => {
 			const vm = await mount()
 			const ids = (key: string) => vm.menuFor(byKey(vm, key)).map((entry) => entry.id)
@@ -403,7 +424,7 @@ describe('EnvEditorViewModel', () => {
 			expect(toasts.items.filter((item) => item.tone === 'error')).toEqual([])
 		})
 
-		it('editar: también un backend caído queda en el modal', async () => {
+		it('editar: un backend caído queda en el aviso del modal, no en el campo', async () => {
 			mocks.patchEnv.mockRejectedValueOnce(new UnavailableError('caído'))
 			const vm = await mount()
 			vm.openEdit(byKey(vm, 'PORT'))
@@ -411,8 +432,15 @@ describe('EnvEditorViewModel', () => {
 
 			await vm.submitEdit()
 
-			expect(vm.editError).toBe(m.common_unavailable())
+			expect(vm.editAlert).toBe(m.common_unavailable())
+			expect(vm.editError).toBeNull()
 			expect(vm.editing?.key).toBe('PORT')
+
+			// Un error de validación sí va al campo, y se lleva el aviso anterior.
+			mocks.patchEnv.mockRejectedValueOnce(new InvalidEnvValue('too_large', 'PORT', 'set'))
+			await vm.submitEdit()
+			expect(vm.editError).toBe(m.secrets_error_value_too_large())
+			expect(vm.editAlert).toBeNull()
 		})
 	})
 

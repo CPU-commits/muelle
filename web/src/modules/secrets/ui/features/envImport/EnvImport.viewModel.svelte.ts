@@ -21,8 +21,13 @@ import type { EnvEditorViewModel } from '../envEditor'
 // "Importar .env": el texto pegado se parsea mientras se escribe, se compara con las
 // variables del dueño (el plan: nuevas, cambian, secretas que se reescriben, sin cambios
 // y, si reemplaza, las que se borran) y se aplica en un solo PATCH. Borrar variables o
-// cambiar la marca de secreta de una que ya existía se confirma antes. El texto puede
-// tener secretos: se borra al cerrar el panel y después de importar.
+// cambiar la marca de secreta de una que ya existía se confirma antes.
+//
+// El texto puede tener secretos: al cerrar el panel (y después de importar) se borra el
+// texto, su parse y el plan confirmado. Nada de eso va en un `$derived`: uno que ya nadie
+// lee se queda con su último valor en memoria hasta que lo vuelvan a leer.
+const NOTHING_PARSED: ParsedDotenv = parseDotenv('')
+
 export class EnvImportViewModel {
 	open = $state(false)
 	text = $state('')
@@ -38,18 +43,24 @@ export class EnvImportViewModel {
 	/** Cuántas veces se cerró el panel: la pantalla devuelve el foco al botón que lo abre. */
 	closedCount = $state(0)
 
-	readonly #editor: EnvEditorViewModel
+	/** El parse de `text`: se recalcula en `setText` y se vacía al cerrar. */
+	parsed = $state.raw<ParsedDotenv>(NOTHING_PARSED)
 
-	readonly parsed: ParsedDotenv = $derived.by(() => parseDotenv(this.text))
-	readonly plan: ImportPlan = $derived.by(() =>
-		planImport(this.#editor.vars, this.parsed.entries, {
-			mode: this.mode,
-			secret: this.secret,
-		}),
-	)
+	readonly #editor: EnvEditorViewModel
 
 	constructor(editor: EnvEditorViewModel) {
 		this.#editor = editor
+	}
+
+	/**
+	 * Lo que pasaría con las variables del dueño. Un getter, sin caché: se calcula cada vez
+	 * que se lee (es lineal en las variables) y no queda guardado al cerrar.
+	 */
+	get plan(): ImportPlan {
+		return planImport(this.#editor.vars, this.parsed.entries, {
+			mode: this.mode,
+			secret: this.secret,
+		})
 	}
 
 	get modeOptions(): ChoiceOption<ImportMode>[] {
@@ -102,13 +113,12 @@ export class EnvImportViewModel {
 		return this.#editor.pendingAction === 'import'
 	}
 
+	/**
+	 * Si hay algo válido que importar. No mira si se está guardando: el botón queda
+	 * habilitado (con `loading`) para no perder el foco, y `submit` no manda dos veces.
+	 */
 	get canSubmit(): boolean {
-		return (
-			this.showPlan &&
-			this.plan.patch !== null &&
-			this.limitError === null &&
-			!this.#editor.isSaving
-		)
+		return this.showPlan && this.plan.patch !== null && this.limitError === null
 	}
 
 	get isConfirming(): boolean {
@@ -168,6 +178,7 @@ export class EnvImportViewModel {
 		if (this.isSubmitting) return
 		this.open = false
 		this.text = ''
+		this.parsed = NOTHING_PARSED
 		this.mode = 'merge'
 		this.secret = true
 		this.serverError = null
@@ -177,6 +188,7 @@ export class EnvImportViewModel {
 
 	setText = (value: string): void => {
 		this.text = value
+		this.parsed = parseDotenv(value)
 		this.serverError = null
 	}
 
@@ -196,7 +208,7 @@ export class EnvImportViewModel {
 	 * que se podía leer.
 	 */
 	submit = async (): Promise<boolean> => {
-		if (!this.canSubmit) return false
+		if (!this.canSubmit || this.#editor.isSaving) return false
 		const plan = this.plan
 		if (plan.removed.length > 0 || plan.changed.some((change) => change.reason !== 'value')) {
 			this.confirming = plan
