@@ -69,9 +69,13 @@
 		open = !open
 	}
 
+	// El foco vuelve al botón ANTES de `onSelect`: el item desaparece con el menú, y un
+	// diálogo que abra `onSelect` (un ConfirmDialog de "Eliminar") recuerda quién tenía el
+	// foco para devolvérselo al cerrarse. Con el item, terminaría en <body>.
 	function select(entry: MenuEntry): void {
+		if (entry.kind !== 'action') return
 		close(true)
-		if (entry.kind === 'action') entry.onSelect()
+		entry.onSelect()
 	}
 
 	function onTriggerKeydown(event: KeyboardEvent): void {

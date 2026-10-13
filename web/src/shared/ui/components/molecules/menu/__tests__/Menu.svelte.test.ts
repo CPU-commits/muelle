@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-svelte'
+import MenuConfirmHarness from './MenuConfirmHarness.svelte'
 import MenuHarness from './MenuHarness.svelte'
 
 function itemRects(): DOMRect[] {
@@ -98,5 +99,37 @@ describe('Menu', () => {
 		document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
 
 		await expect.element(screen.getByRole('menu')).not.toBeInTheDocument()
+	})
+})
+
+// El item que abrió un diálogo desaparece con el menú: si el diálogo le devolviera el
+// foco a él, terminaría en <body>. Antes de `onSelect` el foco ya está en el botón.
+describe('Menu con un item que abre un ConfirmDialog', () => {
+	it('con el mouse: Escape cierra el diálogo y el foco vuelve al botón del menú', async () => {
+		const screen = await render(MenuConfirmHarness)
+		const trigger = screen.getByRole('button', { name: 'Opciones de auditfy' })
+
+		await trigger.click()
+		await screen.getByRole('menuitem', { name: 'Eliminar' }).click()
+		await expect.element(screen.getByRole('dialog', { name: 'Eliminar auditfy' })).toBeVisible()
+		await userEvent.keyboard('{Escape}')
+
+		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument()
+		await expect.element(trigger).toHaveFocus()
+	})
+
+	it('con el teclado: Enter en el item, Cancelar, y el foco vuelve al botón del menú', async () => {
+		const screen = await render(MenuConfirmHarness)
+		const trigger = screen.getByRole('button', { name: 'Opciones de auditfy' })
+
+		trigger.element().focus()
+		await userEvent.keyboard('{ArrowDown}')
+		await expect.element(screen.getByRole('menuitem', { name: 'Renombrar' })).toHaveFocus()
+		await userEvent.keyboard('{ArrowDown}{Enter}')
+		await expect.element(screen.getByRole('dialog', { name: 'Eliminar auditfy' })).toBeVisible()
+		await screen.getByRole('button', { name: 'Cancelar' }).click()
+
+		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument()
+		await expect.element(trigger).toHaveFocus()
 	})
 })
