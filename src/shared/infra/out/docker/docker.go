@@ -32,8 +32,9 @@ var (
 	ErrConflict = errors.New("docker: ya existe o está en uso")
 	// ErrDenied: el registry rechazó las credenciales o no da acceso a la imagen.
 	ErrDenied = errors.New("docker: el registry no da acceso a la imagen")
-	// ErrUnavailable: el daemon no responde (§13: los endpoints que usan
-	// Docker responden 503).
+	// ErrUnavailable: el daemon no responde, o responde 503 porque el nodo no
+	// está en un Swarm o no es manager (§13: los endpoints que usan Docker
+	// responden 503).
 	ErrUnavailable = entity.ErrDockerUnavailable
 	// ErrCommand: el CLI de docker (stack deploy/rm) terminó con error; su
 	// salida va en el valor que devuelve el método.
@@ -161,7 +162,7 @@ const (
 // TaskFilter elige tareas. Los campos vacíos no filtran.
 type TaskFilter struct {
 	Service      string            // nombre o id del servicio
-	Labels       map[string]string // etiquetas del servicio (todas)
+	Labels       map[string]string // etiquetas del servicio (todas), no las de la tarea
 	DesiredState string            // "running", "shutdown" o "accepted"
 }
 
@@ -212,8 +213,9 @@ type LogLine struct {
 }
 
 // LogStream entrega las líneas de un log en orden. Next devuelve io.EOF al
-// terminar; con Follow, termina al cancelar el ctx o con Close. Hay que
-// llamar a Close siempre.
+// terminar; con Follow, termina al cancelar el ctx o con Close, con un error
+// que no es io.EOF. Close se puede llamar desde otra goroutine mientras Next
+// espera, y hay que llamarlo siempre.
 type LogStream interface {
 	Next() (LogLine, error)
 	Close() error

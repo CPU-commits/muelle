@@ -222,3 +222,65 @@ func TestListServicesFiltersByLabel(t *testing.T) {
 		t.Fatalf("servicio: %+v (update %+v)", s, s.Update)
 	}
 }
+
+// Docker filtra las tareas por las etiquetas de la tarea, no las del servicio:
+// ListTasks con Labels busca primero los servicios con esas etiquetas.
+func TestListTasksFiltersByServiceLabels(t *testing.T) {
+	c, f := newFakeAPIClient(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /services": func(w http.ResponseWriter, r *http.Request) {
+			apiJSON(w, []map[string]any{
+				{"ID": "s1", "Spec": map[string]any{"Name": "auditfy_staging_api_api", "Labels": map[string]string{"muelle.app": "api"}}},
+				{"ID": "s2", "Spec": map[string]any{"Name": "auditfy_staging_api_worker", "Labels": map[string]string{"muelle.app": "api"}}},
+			})
+		},
+		"GET /tasks": func(w http.ResponseWriter, r *http.Request) {
+			apiJSON(w, []map[string]any{
+				{"ID": "t1", "ServiceID": "s1", "Slot": 1, "DesiredState": "running", "CreatedAt": "2026-10-12T10:00:00Z",
+					"Status": map[string]any{"State": "running", "ContainerStatus": map[string]any{"ContainerID": "c1"}}},
+				{"ID": "t2", "ServiceID": "s2", "Slot": 1, "DesiredState": "running", "CreatedAt": "2026-10-12T11:00:00Z",
+					"Status": map[string]any{"State": "failed", "Err": "task: non-zero exit (1)"}},
+				// Una tarea de otro servicio que el daemon no debió devolver no pasa.
+				{"ID": "t3", "ServiceID": "otro", "DesiredState": "running", "Status": map[string]any{"State": "running"}},
+			})
+		},
+	})
+	got, err := c.ListTasks(context.Background(), TaskFilter{Labels: map[string]string{"muelle.app": "api"}, DesiredState: TaskRunning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, _ := url.ParseQuery(f.last(t).URL.RawQuery)
+	var filters map[string]map[string]bool
+	if err := json.Unmarshal([]byte(q.Get("filters")), &filters); err != nil {
+		t.Fatalf("filters=%q: %v", q.Get("filters"), err)
+	}
+	if !filters["service"]["s1"] || !filters["service"]["s2"] || !filters["desired-state"]["running"] || len(filters["label"]) != 0 {
+		t.Fatalf("filtros de /tasks: %v", filters)
+	}
+	if len(got) != 2 || got[0].ID != "t2" || got[0].Err != "task: non-zero exit (1)" || got[1].ContainerID != "c1" {
+		t.Fatalf("tareas (de la más nueva a la más vieja): %+v", got)
+	}
+
+	// Sin servicios con esas etiquetas no hay tareas, y no se lista todo.
+	c2, f2 := newFakeAPIClient(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /services": func(w http.ResponseWriter, r *http.Request) { apiJSON(w, []any{}) },
+	})
+	got, err = c2.ListTasks(context.Background(), TaskFilter{Labels: map[string]string{"muelle.app": "nada"}})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("sin servicios: %+v %v", got, err)
+	}
+	if r := f2.last(t); !strings.HasSuffix(r.URL.Path, "/services") {
+		t.Fatalf("no debió pedir /tasks: %s", r.URL.Path)
+	}
+}
+
+// Un nodo que no es manager (o sin Swarm) responde 503: para muelle es lo
+// mismo que Docker caído (§13).
+func TestSwarmNotActiveIsUnavailable(t *testing.T) {
+	c, _ := newFakeAPIClient(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /services": func(w http.ResponseWriter, r *http.Request) {
+			apiError(w, http.StatusServiceUnavailable, "This node is not a swarm manager. Use \"docker swarm init\" or \"docker swarm join\" to connect this node to swarm and try again.")
+		},
+	})
+	_, err := c.ListServices(context.Background(), nil)
+	check(t, "sin swarm", err, ErrUnavailable)
+}

@@ -70,7 +70,9 @@ func wrap(op string, err error) error {
 	switch {
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 		return fmt.Errorf("docker: %s: %w", op, err)
-	case client.IsErrConnectionFailed(err):
+	// 503 del daemon: el nodo no está en un Swarm o no es manager. Para muelle
+	// es lo mismo que Docker caído.
+	case client.IsErrConnectionFailed(err) || cerrdefs.IsUnavailable(err):
 		kind = ErrUnavailable
 	case cerrdefs.IsNotFound(err):
 		kind = ErrNotFound
@@ -232,9 +234,28 @@ func toTask(t swarm.Task) Task {
 	return out
 }
 
-// ListTasks devuelve las tareas, de la más nueva a la más vieja.
+// ListTasks devuelve las tareas, de la más nueva a la más vieja. El filtro
+// "label" de Docker mira las etiquetas de la tarea, no las del servicio, así
+// que con f.Labels se buscan primero los servicios que las tienen.
 func (c *Client) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	filters := client.Filters{}
+	var services map[string]bool // nil: sin filtro por etiquetas
+	if len(f.Labels) > 0 {
+		list, err := c.ListServices(ctx, f.Labels)
+		if err != nil {
+			return nil, err
+		}
+		if len(list) == 0 {
+			return []Task{}, nil
+		}
+		services = map[string]bool{}
+		for _, s := range list {
+			services[s.ID] = true
+			if f.Service == "" { // con f.Service, los dos filtros "service" se sumarían
+				filters.Add("service", s.ID)
+			}
+		}
+	}
 	if f.Service != "" {
 		filters.Add("service", f.Service)
 	}
@@ -247,6 +268,9 @@ func (c *Client) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	}
 	out := make([]Task, 0, len(res.Items))
 	for _, t := range res.Items {
+		if services != nil && !services[t.ServiceID] {
+			continue
+		}
 		out = append(out, toTask(t))
 	}
 	slices.SortFunc(out, func(a, b Task) int { return b.CreatedAt.Compare(a.CreatedAt) })
