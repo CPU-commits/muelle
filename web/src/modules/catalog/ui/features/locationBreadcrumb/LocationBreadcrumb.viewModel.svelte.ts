@@ -122,7 +122,7 @@ export class LocationBreadcrumbViewModel {
 
 	#stageEntries(node: ProjectNode, where: Location): MenuEntry[] {
 		const tab = tabOf(page.url.pathname)
-		return node.stages.map((stageNode) => {
+		const stages = node.stages.map((stageNode) => {
 			const slug = stageNode.stage.slug
 			let href = stageVariablesHref(where.project, slug)
 			if (where.app !== null) {
@@ -132,6 +132,18 @@ export class LocationBreadcrumbViewModel {
 			}
 			return link(`s-${slug}`, slug, href, slug === where.stage)
 		})
+		if (where.app === null) return stages
+		// Desde una app, el stage también lleva a sus variables (como el link de antes).
+		return [
+			{
+				kind: 'link',
+				id: 'stage-variables',
+				label: m.catalog_crumb_stage_variables({ stage: where.stage }),
+				href: stageVariablesHref(where.project, where.stage),
+			},
+			{ kind: 'separator', id: 'sep' },
+			...stages,
+		]
 	}
 
 	#appEntries(stageNode: StageNode, where: Location, app: string): MenuEntry[] {

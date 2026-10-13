@@ -117,6 +117,11 @@ describe('LocationBreadcrumbViewModel', () => {
 		])
 		expect(links(stage.items)).toEqual([
 			{
+				label: m.catalog_crumb_stage_variables({ stage: 'staging' }),
+				href: '/projects/auditfy/stages/staging/variables',
+				current: false,
+			},
+			{
 				label: 'staging',
 				href: '/projects/auditfy/stages/staging/apps/redis/configuracion',
 				current: true,
@@ -147,7 +152,7 @@ describe('LocationBreadcrumbViewModel', () => {
 			'/projects/auditfy/stages/staging/apps/api',
 		)
 
-		expect(links(menu(vm.items, 1).items)[1]).toEqual({
+		expect(links(menu(vm.items, 1).items)[2]).toEqual({
 			label: 'production',
 			href: '/projects/auditfy/stages/production/apps/redis',
 			current: false,

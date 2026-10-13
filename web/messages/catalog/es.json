@@ -246,5 +246,7 @@
 	"catalog_crumb_stages": "Stages de {project}",
 	"catalog_crumb_apps": "Apps de {project}/{stage}",
 
-	"catalog_config_other_card": "otra parte de la configuración"
+	"catalog_config_other_card": "otra parte de la configuración",
+
+	"catalog_crumb_stage_variables": "Variables de {stage}"
 }
