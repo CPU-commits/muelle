@@ -30,6 +30,12 @@ comandos:
   genkey   imprime una clave maestra nueva en base64
   help     muestra esta ayuda (también -h y --help)`
 
+// version es la versión de muelle. La imagen la fija al compilar (Fase 5):
+// go build -ldflags "-X main.version=v0.1.0". Con una versión publicada,
+// muelle-caddy usa la imagen del mismo tag (naming.CaddyImageFor); "dev" no
+// tiene imagen por defecto.
+var version = "dev"
+
 const (
 	// memoryLimit es el límite blando de memoria de serve si GOMEMLIMIT no
 	// está definido. Argon2id usa 19 MiB por hash, hasta 2 a la vez: cerca
@@ -97,6 +103,7 @@ func serve(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	s.Version = version
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -129,17 +136,23 @@ func serve(log *slog.Logger) error {
 			"url", s.PanelOrigin+"/setup?token="+token)
 	}
 
-	// Las tareas periódicas usan la base: antes de cerrarla (el defer de
-	// arriba) se detienen y se espera a que terminen.
-	cronCtx, stopCron := context.WithCancel(ctx)
-	cronDone := make(chan struct{})
+	// Las tareas periódicas y los workers de los módulos (deploy, ingress)
+	// usan la base: antes de cerrarla (el defer de arriba) se detienen y se
+	// espera a que terminen.
+	bgCtx, stopBackground := context.WithCancel(ctx)
+	cronDone, runDone := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(cronDone)
-		cron.Run(cronCtx, c.Jobs, log)
+		cron.Run(bgCtx, c.Jobs, log)
+	}()
+	go func() {
+		defer close(runDone)
+		c.Run(bgCtx)
 	}()
 	defer func() {
-		stopCron()
+		stopBackground()
 		<-cronDone
+		<-runDone
 	}()
 
 	errc := make(chan error, 1)

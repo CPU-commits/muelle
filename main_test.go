@@ -110,6 +110,8 @@ func serveEnv(t *testing.T, listen, key string) string {
 	t.Setenv("MUELLE_PANEL_ORIGIN", "http://127.0.0.1:8080")
 	t.Setenv("MUELLE_SECURE_COOKIES", "false")
 	t.Setenv("GOMEMLIMIT", "")
+	// Nunca el Docker real de la máquina: un socket que no existe.
+	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "sin-docker.sock"))
 
 	// serve cambia el logger por defecto y el límite de memoria del proceso.
 	prevLog := slog.Default()
