@@ -3,7 +3,7 @@
 	"ingress_subtitle": "Se aplican al instante, sin deploy: muelle crea el registro en Cloudflare y la ruta en Caddy.",
 	"ingress_loading": "Cargando los dominios…",
 	"ingress_error_title": "No se pudieron leer los dominios",
-	"ingress_coming": "Los dominios",
+	"ingress_coming": "La gestión de dominios",
 	"ingress_empty_title": "Esta app todavía no tiene dominios",
 	"ingress_empty_body": "Agrega uno arriba: muelle crea el registro en Cloudflare y la ruta en Caddy.",
 	"ingress_footnote": "Si el servicio todavía no existe, la ruta se crea igual y responde 502 hasta el primer deploy.",

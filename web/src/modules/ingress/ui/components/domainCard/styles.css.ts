@@ -107,8 +107,11 @@ export const footer = style({
 	backgroundColor: theme.colors.background.sunken,
 })
 
+// Sin `wrap`: en una columna que envuelve, cada línea toma el ancho de su ítem más ancho
+// (la tabla de 520 px) y el pie se sale de la tarjeta en un teléfono.
 export const footerStack = style({
 	flexDirection: 'column',
+	flexWrap: 'nowrap',
 	alignItems: 'stretch',
 	paddingBottom: theme.space[20],
 })
@@ -129,7 +132,10 @@ export const errorText = style({
 	color: theme.colors.status.errorText,
 })
 
+// `relative`: los `srOnly` (absolutos) de la tabla y del botón de copiar quedan dentro de
+// la caja con scroll; si no, se escapan y la página entera scrollea en un teléfono.
 export const recordsBox = style({
+	position: 'relative',
 	overflowX: 'auto',
 	border: `1px solid ${theme.colors.borders.subtle}`,
 	borderRadius: theme.radius.md,

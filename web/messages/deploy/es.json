@@ -93,7 +93,7 @@
 	"deploy_logs_subtitle": "En vivo desde Docker. muelle no guarda nada.",
 	"deploy_logs_loading": "Cargando los servicios…",
 	"deploy_logs_error_title": "No se pudieron leer los servicios de la app",
-	"deploy_logs_coming": "Los logs en vivo",
+	"deploy_logs_coming": "El visor de logs en vivo",
 	"deploy_logs_no_services_title": "Esta app no tiene servicios en Swarm",
 	"deploy_logs_no_services_body": "Despliégala para ver sus logs.",
 	"deploy_logs_filter": "Filtrar logs",

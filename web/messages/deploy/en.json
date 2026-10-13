@@ -93,7 +93,7 @@
 	"deploy_logs_subtitle": "Live from Docker. muelle stores nothing.",
 	"deploy_logs_loading": "Loading the services…",
 	"deploy_logs_error_title": "Couldn't read the app's services",
-	"deploy_logs_coming": "Live logs",
+	"deploy_logs_coming": "The live log viewer",
 	"deploy_logs_no_services_title": "This app has no services in Swarm",
 	"deploy_logs_no_services_body": "Deploy it to see its logs.",
 	"deploy_logs_filter": "Filter logs",

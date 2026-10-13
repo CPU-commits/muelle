@@ -43,9 +43,12 @@ export const lines = style({
 	padding: `${theme.space[8]} 0`,
 })
 
+// En un teléfono, el mensaje baja a su propia línea cuando no le quedan ~28 caracteres
+// al lado de la hora, la tarea y el nivel.
 export const line = style({
 	display: 'flex',
-	gap: theme.space[16],
+	flexWrap: 'wrap',
+	columnGap: theme.space[16],
 	padding: `0 ${theme.space[16]}`,
 	selectors: {
 		'&:hover': { backgroundColor: theme.colors.background.hover },
@@ -82,7 +85,7 @@ export const levels = styleVariants({
 })
 
 export const message = style({
-	flex: '1 1 auto',
+	flex: '1 1 28ch',
 	minWidth: 0,
 	color: theme.colors.text.primary,
 	whiteSpace: 'pre-wrap',
