@@ -80,4 +80,32 @@ describe('Modal', () => {
 		element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 		await expect.poll(() => text('closes')).toBe('1')
 	})
+
+	// Con el mouse de verdad (Playwright): se aprieta en un campo del panel, algo cambia el
+	// layout (un error de validación que desaparece) y se suelta sobre el fondo. El
+	// navegador manda el click al ancestro común, el <dialog>: no tiene que cerrar.
+	it('apretar adentro del panel y soltar sobre el fondo no lo cierra ni pierde lo escrito', async () => {
+		const screen = await render(ModalHarness)
+		await screen.getByRole('button', { name: 'abrir' }).click()
+		const input = screen.getByRole('textbox', { name: 'adentro' })
+		await input.fill('mi-app')
+
+		// `state` está arriba a la izquierda, debajo del fondo del modal.
+		await userEvent.dragAndDrop(input, screen.getByTestId('state'), { force: true })
+		await tick()
+
+		expect(text('closes')).toBe('0')
+		expect(dialog()?.open).toBe(true)
+		await expect.element(input).toHaveValue('mi-app')
+	})
+
+	it('apretar y soltar sobre el fondo, con el mouse de verdad, lo cierra', async () => {
+		const screen = await render(ModalHarness)
+		await screen.getByRole('button', { name: 'abrir' }).click()
+
+		await userEvent.click(screen.getByTestId('state'), { force: true })
+
+		await expect.poll(() => text('closes')).toBe('1')
+		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument()
+	})
 })

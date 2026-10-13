@@ -67,8 +67,10 @@
 	}
 
 	// El fondo es el propio <dialog>: el contenido lo llena, así que un clic cuyo target es
-	// el <dialog> cayó afuera del panel. Cuenta solo si también se apretó ahí: arrastrar una
-	// selección de texto y soltar sobre el fondo no cierra.
+	// el <dialog> cayó afuera del panel. Cuenta solo si también se APRETÓ ahí: apretar en el
+	// panel y soltar sobre el fondo (una selección de texto, o un error de validación que
+	// desaparece y mueve el layout) le manda el click al <dialog>, el ancestro común, y no
+	// tiene que cerrar ni perder el formulario.
 	function onPointerDown(event: PointerEvent & { currentTarget: HTMLDialogElement }): void {
 		pressedOnBackdrop = event.target === event.currentTarget
 	}
