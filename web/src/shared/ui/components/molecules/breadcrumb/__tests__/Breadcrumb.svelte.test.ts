@@ -45,4 +45,28 @@ describe('Breadcrumb', () => {
 
 		expect(onSelect).toHaveBeenCalledOnce()
 	})
+
+	it('un selector que es la página actual (el último) lleva aria-current; los otros no', async () => {
+		const screen = await render(Breadcrumb, {
+			label: 'Ubicación',
+			homeHref: '/',
+			homeLabel: 'muelle, inicio',
+			items: [
+				{
+					kind: 'menu',
+					label: 'auditfy',
+					ariaLabel: 'Proyecto auditfy, cambiar',
+					items: [],
+				},
+				{ kind: 'menu', label: 'api', ariaLabel: 'App api, cambiar', items: [] },
+			],
+		})
+
+		await expect
+			.element(screen.getByRole('button', { name: 'App api, cambiar' }))
+			.toHaveAttribute('aria-current', 'page')
+		await expect
+			.element(screen.getByRole('button', { name: 'Proyecto auditfy, cambiar' }))
+			.not.toHaveAttribute('aria-current')
+	})
 })

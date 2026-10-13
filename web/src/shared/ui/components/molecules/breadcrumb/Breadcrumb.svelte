@@ -55,6 +55,7 @@
 						items={crumb.items}
 						triggerClass={selectorClass}
 						align="start"
+						current={isLast ? 'page' : undefined}
 					>
 						{#snippet trigger()}
 							{@render content(crumb)}

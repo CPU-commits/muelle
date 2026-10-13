@@ -36,6 +36,8 @@
 		triggerClass?: string
 		/** De qué lado del botón se alinea el panel. */
 		align?: 'start' | 'end'
+		/** El `aria-current` del botón: el selector del breadcrumb que es la página actual. */
+		current?: 'page' | 'location' | undefined
 		/** Algo arriba de los items que no es un item (el usuario de la sesión). */
 		header?: Snippet
 	}
@@ -47,6 +49,7 @@
 		trigger,
 		triggerClass,
 		align = 'end',
+		current,
 		header,
 	}: Props = $props()
 
@@ -174,6 +177,7 @@
 		type="button"
 		class={triggerClass ?? (variant === 'ghost' ? triggerGhost : triggerBare)}
 		aria-label={label}
+		aria-current={current}
 		aria-haspopup="menu"
 		aria-expanded={open}
 		aria-controls={open ? menuId : undefined}
