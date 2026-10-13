@@ -148,6 +148,12 @@ export class UsersSectionViewModel {
 		this.invite = null
 	}
 
+	/**
+	 * Escape o un clic en el fondo NO cierran el modal de la invitación: la URL no se vuelve
+	 * a mostrar, así que solo se cierra con "Listo".
+	 */
+	keepInviteOpen = (): void => {}
+
 	askDelete = (username: string): void => {
 		this.pending = { kind: 'delete', username }
 	}

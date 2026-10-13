@@ -90,7 +90,7 @@
 	open={vm.invite !== null}
 	title={m.identity_invite_title()}
 	description={m.identity_invite_body()}
-	onClose={vm.closeInvite}
+	onClose={vm.keepInviteOpen}
 >
 	{#if vm.invite}
 		<div class={inviteBody}>
