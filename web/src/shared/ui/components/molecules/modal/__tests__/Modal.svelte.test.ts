@@ -109,3 +109,87 @@ describe('Modal', () => {
 		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument()
 	})
 })
+
+// Chrome deja cancelar un pedido de cierre (Escape → `cancel` con preventDefault) una sola
+// vez sin activación del usuario: Escape no cuenta como activación, así que a partir del
+// segundo cierra el <dialog> por su cuenta. Un modal de un solo uso (la URL de una
+// invitación, un token nuevo) no se puede ir con su contenido.
+describe('Modal dismissible={false}', () => {
+	const focusInside = () => dialog()?.contains(document.activeElement) ?? false
+
+	it('seis Escape seguidos lo dejan abierto, con el foco adentro y el contenido intacto', async () => {
+		const screen = await render(ModalHarness, { dismissible: false })
+		await screen.getByRole('button', { name: 'abrir' }).click()
+		const input = screen.getByRole('textbox', { name: 'adentro' })
+		await input.fill('https://muelle.example/invite/abc')
+
+		for (let i = 0; i < 6; i++) await userEvent.keyboard('{Escape}')
+		await tick()
+
+		await expect.poll(() => dialog()?.open).toBe(true)
+		await expect.poll(focusInside).toBe(true)
+		await expect.element(input).toHaveValue('https://muelle.example/invite/abc')
+		expect(text('closes')).toBe('0')
+		expect(text('state')).toBe('abierto')
+	})
+
+	it('un clic en el fondo no lo cierra', async () => {
+		const screen = await render(ModalHarness, { dismissible: false })
+		await screen.getByRole('button', { name: 'abrir' }).click()
+
+		await userEvent.click(screen.getByTestId('state'), { force: true })
+		await tick()
+
+		expect(dialog()?.open).toBe(true)
+		expect(text('closes')).toBe('0')
+	})
+
+	it('si el navegador lo cierra igual, se vuelve a abrir con el foco donde estaba', async () => {
+		const screen = await render(ModalHarness, { dismissible: false })
+		await screen.getByRole('button', { name: 'abrir' }).click()
+		const input = screen.getByRole('textbox', { name: 'adentro' })
+		await input.click()
+
+		dialog()?.close()
+
+		await expect.poll(() => dialog()?.open).toBe(true)
+		await expect.element(input).toHaveFocus()
+		expect(text('closes')).toBe('0')
+	})
+
+	it('el dueño lo cierra con su botón', async () => {
+		const screen = await render(ModalHarness, { dismissible: false })
+		const opener = screen.getByRole('button', { name: 'abrir' })
+		await opener.click()
+
+		await screen.getByRole('button', { name: 'cerrar' }).click()
+
+		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument()
+		await expect.element(opener).toHaveFocus()
+	})
+})
+
+describe('Modal dismissible (por defecto)', () => {
+	it('el primer Escape lo cierra y llama a onClose una sola vez', async () => {
+		const screen = await render(ModalHarness)
+		await screen.getByRole('button', { name: 'abrir' }).click()
+
+		await userEvent.keyboard('{Escape}')
+		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument()
+		await tick()
+		await new Promise((done) => setTimeout(done, 20))
+
+		expect(text('closes')).toBe('1')
+		expect(text('state')).toBe('cerrado')
+	})
+
+	it('si el navegador lo cierra por su cuenta, avisa a onClose y el estado acompaña', async () => {
+		const screen = await render(ModalHarness)
+		await screen.getByRole('button', { name: 'abrir' }).click()
+
+		dialog()?.close()
+
+		await expect.poll(() => text('state')).toBe('cerrado')
+		expect(text('closes')).toBe('1')
+	})
+})

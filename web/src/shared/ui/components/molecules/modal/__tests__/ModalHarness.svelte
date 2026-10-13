@@ -4,7 +4,9 @@
 
 	// Una página con un h1 en <main>, un botón que abre el modal y, adentro, uno que lo
 	// cierra y otro que además borra el botón que lo abrió (una fila eliminada).
-	let { blocked = false }: { blocked?: boolean } = $props()
+	// `dismissible={false}`: como el modal que muestra una sola vez la URL de una invitación.
+	let { blocked = false, dismissible = true }: { blocked?: boolean; dismissible?: boolean } =
+		$props()
 
 	let open = $state(false)
 	let showOpener = $state(true)
@@ -25,7 +27,13 @@
 	<span data-testid="closes">{closes}</span>
 </main>
 
-<Modal {open} title="Eliminar FOO" description="No se puede deshacer." onClose={close}>
+<Modal
+	{open}
+	{dismissible}
+	title="Eliminar FOO"
+	description="No se puede deshacer."
+	onClose={close}
+>
 	<input aria-label="adentro" />
 	{#snippet footer()}
 		<button type="button" onclick={() => (open = false)}>cerrar</button>
