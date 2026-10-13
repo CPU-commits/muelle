@@ -9,9 +9,15 @@ CREATE TABLE deploys (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   app_id        INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
   status        TEXT    NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'superseded')),
-  -- JSON servicio → imagen. Mientras el deploy está queued son las refs que
-  -- se van a desplegar; desde que se resuelven (§7 paso 2), ref@sha256:….
+  -- JSON servicio → imagen. Mientras el deploy está queued son los overrides
+  -- del cuerpo del POST ({} si no hubo); desde que se resuelven (§7 paso 2),
+  -- todos los servicios con ref@sha256:….
   images        TEXT    NOT NULL DEFAULT '{}',
+  -- JSON servicio → ref de la configuración de la app (apps.spec o el
+  -- compose) cuando este deploy la leyó, sin overrides. Un deploy sin
+  -- override usa la imagen del deploy actual, salvo en los servicios cuya ref
+  -- de la configuración cambió desde entonces (ver el contrato de las fases 2 y 3).
+  config_images TEXT    NOT NULL DEFAULT '{}',
   trigger       TEXT    NOT NULL CHECK (trigger IN ('panel', 'api', 'rollback')),
   actor_type    TEXT    NOT NULL CHECK (actor_type IN ('user', 'token')),
   actor_id      INTEGER,
