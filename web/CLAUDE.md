@@ -276,6 +276,18 @@ cambiar `shared/`, `package.json` o una ruta ajena, se detiene y lo reporta.
   sin entrar a las tripas de `catalog`. En el layout cambia los items del breadcrumb por
   selectores (`{ kind: 'menu', … }`, ver `Breadcrumb`).
 - La página de variables del stage pone su breadcrumb con `<ShellHeader>` igual.
+- **Los snippets de `<ShellHeader>` pueden ver `params` vacíos.** Se pintan en el header
+  del AppShell, fuera de su ruta. Al navegar afuera, SvelteKit cambia los `params` y
+  desmonta la ruta en el mismo cambio, y el snippet llega a evaluarse una vez con los params
+  de la ruta nueva (a `/` no hay `p`, `s` ni `a`; a las variables del stage no hay `a`):
+    - lo que tire esa evaluación (un `params.p.charAt(0)`, un `resolve()` sin `a`) lo ataja
+      el AppShell con un `<svelte:boundary>`, sin aviso: en el mismo cambio la ruta suelta
+      el slot. Un error con la ruta todavía montada sí va a la consola y deja el logo;
+    - lo que NO se puede atajar son los efectos: un componente del snippet que hace una
+      query con los params tiene que llevar `enabled: Boolean(p && s)` (o recibir los datos
+      ya cargados), o sale un pedido a `/projects/undefined`;
+    - `e2e/shell.e2e.ts` recorre app → Proyectos, app → variables del stage y los tabs: si
+      tu ruta tiene un `<ShellHeader>`, sumala ahí.
 
 ### i18n: prefijo por módulo
 
@@ -374,11 +386,11 @@ un `href` lo esperan **ya resuelto** con `resolve()`.
 
 **Organismos**
 
-| Componente    | Props                                                                                                                                   |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `AppShell`    | El marco con sesión. No se usa directo: lo monta `SessionShell` (barrel de `auth`) en `(app)/+layout.svelte`                            |
-| `ShellHeader` | `breadcrumb` · `nav` (snippets). No dibuja nada donde está: mientras está montado, reemplaza el logo y/o la nav del header del AppShell |
-| `AuthLayout`  | `appName` · `host` · `width` `sm` 360·`md` 440 · `children`. Las pantallas de acceso                                                    |
+| Componente    | Props                                                                                                                                                                                                                      |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AppShell`    | El marco con sesión. No se usa directo: lo monta `SessionShell` (barrel de `auth`) en `(app)/+layout.svelte`                                                                                                               |
+| `ShellHeader` | `breadcrumb` · `nav` (snippets). No dibuja nada donde está: mientras está montado, reemplaza el logo y/o la nav del header del AppShell. Sus snippets pueden ver `params` vacíos al salir de la ruta (ver [Rutas](#rutas)) |
+| `AuthLayout`  | `appName` · `host` · `width` `sm` 360·`md` 440 · `children`. Las pantallas de acceso                                                                                                                                       |
 
 Clases y helpers: `srOnly`, `textLink` (link dentro de un texto), `truncate`, `firstError`,
 `formatDate`, `formatDateTime`, `formatNumber`, `formatRelative` y `describeError(error)`

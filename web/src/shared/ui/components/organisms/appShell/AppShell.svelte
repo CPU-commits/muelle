@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte'
+	import { type Snippet, tick } from 'svelte'
 	import Avatar from '../../atoms/avatar/Avatar.svelte'
 	import Logo from '../../atoms/logo/Logo.svelte'
 	import Menu from '../../molecules/menu/Menu.svelte'
@@ -53,9 +53,31 @@
 
 	const slots = new ShellSlots()
 	setShellSlots(slots)
+
+	// Los snippets de <ShellHeader> se pintan acá, fuera de la ruta que los puso. Al salir
+	// de esa ruta, SvelteKit cambia los `params` y desmonta la ruta en el MISMO cambio, y
+	// el header (que va antes que `main` en el árbol) llega a re-pintarse una vez con los
+	// params de la ruta nueva: `params.p` undefined, un `resolve()` sin `a`. El
+	// <svelte:boundary> ataja ese error; en el mismo cambio la ruta suelta el slot y vuelve
+	// lo de antes, sin que se llegue a ver. Si después el snippet sigue puesto, no era la
+	// navegación: es un bug del snippet, y va a la consola.
+	function reportSlotError(snippet: Snippet): (error: unknown) => void {
+		return (error) => {
+			void tick().then(() => {
+				if (slots.holds(snippet)) console.error(error)
+			})
+		}
+	}
 </script>
 
 <!-- eslint-disable svelte/no-navigation-without-resolve -- los href llegan ya resueltos (resolve()) desde quien usa el componente -->
+{#snippet brandLink()}
+	<a href={homeHref} class={brand}>
+		<Logo />
+		<span class={brandName}>{appName}</span>
+	</a>
+{/snippet}
+
 <div class={shell}>
 	<a href="#contenido" class={skipLink}>{skipLabel}</a>
 
@@ -64,12 +86,17 @@
 			<div class={topRow}>
 				<div class={leading}>
 					{#if slots.breadcrumb}
-						{@render slots.breadcrumb()}
+						{@const crumb = slots.breadcrumb}
+						{#key crumb}
+							<svelte:boundary onerror={reportSlotError(crumb)}>
+								{@render crumb()}
+								{#snippet failed()}
+									{@render brandLink()}
+								{/snippet}
+							</svelte:boundary>
+						{/key}
 					{:else}
-						<a href={homeHref} class={brand}>
-							<Logo />
-							<span class={brandName}>{appName}</span>
-						</a>
+						{@render brandLink()}
 					{/if}
 				</div>
 
@@ -91,7 +118,15 @@
 			</div>
 
 			{#if slots.nav}
-				{@render slots.nav()}
+				{@const routeNav = slots.nav}
+				{#key routeNav}
+					<svelte:boundary onerror={reportSlotError(routeNav)}>
+						{@render routeNav()}
+						{#snippet failed()}
+							{@render nav()}
+						{/snippet}
+					</svelte:boundary>
+				{/key}
 			{:else}
 				{@render nav()}
 			{/if}
