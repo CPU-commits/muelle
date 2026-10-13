@@ -47,11 +47,9 @@ test('el detalle de una app cambia el header por el breadcrumb y sus tabs', asyn
 	await page.goto('/projects/auditfy/stages/staging/apps/api/logs')
 
 	const location = page.getByRole('navigation', { name: 'Ubicación' })
-	await expect(location.getByRole('link', { name: 'auditfy' })).toBeVisible()
-	await expect(location.getByRole('link', { name: 'api' })).toHaveAttribute(
-		'aria-current',
-		'page',
-	)
+	// Proyecto, stage y app son los selectores del diseño (F1-catalog).
+	await expect(location.getByRole('button', { name: 'Proyecto auditfy, cambiar' })).toBeVisible()
+	await expect(location.getByRole('button', { name: 'App api, cambiar' })).toBeVisible()
 	const tabs = page.getByRole('navigation', { name: 'Secciones de la app' })
 	await expect(tabs.getByRole('link', { name: 'Logs' })).toHaveAttribute('aria-current', 'page')
 
