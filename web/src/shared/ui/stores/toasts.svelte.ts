@@ -64,8 +64,13 @@ class ToastStore {
 
 export const toasts = new ToastStore()
 
+// Un contador y no `crypto.randomUUID`: ese solo existe en un contexto seguro, y el panel
+// por HTTP en una IP de la red local no lo es. El id solo tiene que ser único en la pestaña.
+let lastId = 0
+
 function show(tone: ToastTone, title: string, description?: string): void {
-	const id = crypto.randomUUID()
+	lastId += 1
+	const id = `toast-${lastId}`
 	toasts.push(
 		{ id, tone, title, description: description ?? null },
 		tone === 'error' ? null : TOAST_TTL_MS,
