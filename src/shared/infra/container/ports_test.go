@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
+	deployout "github.com/CPU-commits/muelle/src/internal/deploy/infra/out/service"
 	ingressout "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/domain/naming"
@@ -134,6 +136,62 @@ func TestContractProxySettings(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ingress lee:\n%+v\nesperaba\n%+v", got, want)
+	}
+}
+
+// deploy lee las apps que guarda catalog y marca el deploy; catalog lo ve en
+// last_deployed_at y pending_changes (§5.2 regla 4).
+func TestContractDeployReadsCatalogApps(t *testing.T) {
+	e := api{t: t, c: newTestContainer(t)}
+	s := e.setup()
+	const P = "/api/v1/projects/p"
+	e.create(s, "/api/v1/projects", map[string]string{"slug": "p", "name": "P"})
+	e.create(s, P+"/stages", map[string]string{"slug": "tmp"})
+	e.create(s, P+"/stages/tmp/apps", map[string]any{
+		"slug": "api", "kind": "service", "deploy_timeout_s": 120,
+		"spec": map[string]any{"image": "x:1", "port": 80},
+	})
+	ctx := context.Background()
+	apps := deployout.NewCatalogApps(e.c.DB)
+	a, err := apps.Get(ctx, "p", "tmp", "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := map[string]any{}
+	if err := json.Unmarshal(a.Spec, &spec); err != nil || spec["image"] != "x:1" {
+		t.Fatalf("spec: %s %v", a.Spec, err)
+	}
+	if a.Kind != "service" || a.DeployTimeoutS != 120 || a.StorageNodeID != "" || a.LastDeployedAt != nil {
+		t.Fatalf("app: %+v", a)
+	}
+
+	pending := func() bool {
+		t.Helper()
+		w := e.do("GET", P+"/stages/tmp/apps/api", nil, s)
+		httptestutil.Expect(t, w, http.StatusOK)
+		return httptestutil.Decode[map[string]any](t, w)["pending_changes"] == true
+	}
+	// Una app que nunca se desplegó no tiene contra qué comparar.
+	if pending() {
+		t.Fatal("una app sin deploys no tiene cambios pendientes")
+	}
+	// El deploy leyó la configuración tal como quedó al crear la app.
+	if err := apps.MarkDeployed(ctx, a.ID, a.ConfigChangedAt); err != nil {
+		t.Fatal(err)
+	}
+	w := e.do("GET", P+"/stages/tmp/apps/api", nil, s)
+	if got := httptestutil.Decode[map[string]any](t, w)["last_deployed_at"]; got == nil {
+		t.Fatal("catalog no ve last_deployed_at")
+	}
+	if pending() {
+		t.Fatal("después del deploy no debería tener cambios pendientes")
+	}
+	time.Sleep(2 * time.Millisecond) // las fechas se guardan en milisegundos
+	httptestutil.Expect(t, e.do("PATCH", P+"/stages/tmp/apps/api", map[string]any{
+		"spec": map[string]any{"image": "x:2", "port": 80},
+	}, s), http.StatusOK)
+	if !pending() {
+		t.Fatal("cambiar el spec después del deploy deja cambios pendientes")
 	}
 }
 

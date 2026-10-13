@@ -12,7 +12,9 @@
 //	deploy  → ingress  la red antes del deploy y las rutas después (Ingress)
 //	admin   → ingress  verificar el token de Cloudflare y aplicar los ajustes (ProxyHook)
 //
-// Lo que un módulo lee de las tablas de otro va por sus adaptadores SQL.
+// Lo que un módulo lee de las tablas de otro va por sus adaptadores SQL:
+// deploy lee apps (y escribe solo storage_node_id y last_deployed_at) y
+// domains; ingress lee settings; catalog cuenta domains; admin mira users.
 package container
 
 import (

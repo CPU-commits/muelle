@@ -5,8 +5,11 @@
 // es el único lugar que conoce todas sus piezas.
 //
 // Esqueleto de la etapa de contratos: RemoveApp ya funciona (lo usa catalog al
-// borrar una app); las rutas todavía no existen (404 no_route). El contrato
-// está en docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md.
+// borrar una app), igual que los adaptadores SQL que leen las apps de catalog
+// y los destinos de los dominios de ingress (infra/out/service: NewCatalogApps
+// y NewDomainTargets, para los puertos Apps y DomainTargets); las rutas
+// todavía no existen (404 no_route). El contrato está en
+// docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md.
 package deploy
 
 import (
