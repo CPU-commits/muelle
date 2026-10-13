@@ -101,17 +101,22 @@ func TestFakeBusyHostPort(t *testing.T) {
 		Ports: []docker.PortBinding{{HostPort: 443, ContainerPort: 443}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.StartContainer(ctx, "c"); err == nil {
-		t.Fatal("arrancar con un puerto ocupado debió fallar")
+	if err := f.StartContainer(ctx, "c"); !errors.Is(err, docker.ErrPortInUse) {
+		t.Fatalf("arrancar con un puerto ocupado: %v, esperaba ErrPortInUse", err)
 	}
 	if c, _ := f.InspectContainer(ctx, "c"); c.Running {
 		t.Fatal("no debe quedar corriendo")
 	}
-	// Un contenedor corriendo no se borra sin force.
+	// Como Docker 29: volver a arrancar ese contenedor lo deja corriendo sin
+	// los puertos publicados. Hay que borrarlo y crearlo de nuevo.
 	f.FreeHostPort(443)
 	if err := f.StartContainer(ctx, "c"); err != nil {
 		t.Fatal(err)
 	}
+	if c, _ := f.InspectContainer(ctx, "c"); !c.Running || len(c.Ports) != 0 {
+		t.Fatalf("rearrancado después de un puerto ocupado: %+v (sin puertos, como Docker)", c)
+	}
+	// Un contenedor corriendo no se borra sin force.
 	if err := f.RemoveContainer(ctx, "c", false); !errors.Is(err, docker.ErrConflict) {
 		t.Fatalf("borrar corriendo sin force: %v", err)
 	}

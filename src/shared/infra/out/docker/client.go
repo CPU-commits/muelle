@@ -528,9 +528,18 @@ func (c *Client) InspectContainer(ctx context.Context, nameOrID string) (Contain
 	return out, nil
 }
 
+// StartContainer reconoce un puerto del host ocupado por el texto: el daemon
+// responde 500 "… port is already allocated" (otro contenedor lo publica) o
+// "… address already in use" (un proceso del host lo escucha).
 func (c *Client) StartContainer(ctx context.Context, nameOrID string) error {
 	_, err := c.api.ContainerStart(ctx, nameOrID, client.ContainerStartOptions{})
-	return wrap("arrancando el contenedor "+nameOrID, err)
+	op := "arrancando el contenedor " + nameOrID
+	if err != nil {
+		if msg := err.Error(); strings.Contains(msg, "port is already allocated") || strings.Contains(msg, "address already in use") {
+			return fmt.Errorf("docker: %s: %w: %w", op, ErrPortInUse, err)
+		}
+	}
+	return wrap(op, err)
 }
 
 func (c *Client) StopContainer(ctx context.Context, nameOrID string, timeout time.Duration) error {

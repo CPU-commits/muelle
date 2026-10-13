@@ -4,7 +4,7 @@
 // que exigen la imagen y fallan con un puerto del host ocupado, stacks cuyo
 // efecto decide el test (OnDeployStack), digests de registry, tareas, logs y
 // stats. Devuelve los mismos errores que el cliente real (docker.ErrNotFound,
-// ErrConflict, ErrDenied, ErrUnavailable, ErrCommand) y registra las llamadas.
+// ErrConflict, ErrDenied, ErrUnavailable, ErrCommand, ErrPortInUse) y registra las llamadas.
 //
 // Es seguro usarlo desde varias goroutines.
 package dockertest
@@ -64,6 +64,7 @@ type Fake struct {
 	stats       map[string]docker.Stats
 	taskLogs    map[string]*logBuffer
 	busyPorts   map[int]bool
+	portFailed  map[string]bool // contenedores cuyo arranque falló por un puerto ocupado
 	unavailable bool
 	failNext    map[string]error
 	nextID      int
@@ -93,6 +94,7 @@ func New() *Fake {
 		stats:      map[string]docker.Stats{},
 		taskLogs:   map[string]*logBuffer{},
 		busyPorts:  map[int]bool{},
+		portFailed: map[string]bool{},
 		failNext:   map[string]error{},
 		info: docker.Info{
 			ServerVersion: "29.6.1", Hostname: "manager-1", NCPU: 4, MemTotal: 8 << 30,
@@ -711,6 +713,11 @@ func (f *Fake) StartContainer(ctx context.Context, nameOrID string) error {
 	if c.Running {
 		return nil
 	}
+	// Como Docker 29: un contenedor cuyo arranque falló por un puerto
+	// ocupado, si se vuelve a arrancar, corre sin publicar sus puertos.
+	if f.portFailed[c.ID] {
+		c.Ports = nil
+	}
 	for _, p := range c.Ports {
 		busy := f.busyPorts[p.HostPort]
 		for _, other := range f.containers {
@@ -720,7 +727,8 @@ func (f *Fake) StartContainer(ctx context.Context, nameOrID string) error {
 		}
 		if busy {
 			c.Status = "created"
-			return fmt.Errorf("dockertest: arrancando %s: Bind for 0.0.0.0:%d failed: port is already allocated", c.Name, p.HostPort)
+			f.portFailed[c.ID] = true
+			return fmt.Errorf("dockertest: arrancando %s: Bind for 0.0.0.0:%d failed: %w", c.Name, p.HostPort, docker.ErrPortInUse)
 		}
 	}
 	c.Running, c.Status, c.StartedAt = true, "running", f.Now()

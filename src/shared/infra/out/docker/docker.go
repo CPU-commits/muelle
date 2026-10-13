@@ -10,7 +10,7 @@
 // tests de los casos de uso usan el fake de dockertest.
 //
 // Errores: todo método devuelve un error que envuelve ErrNotFound,
-// ErrConflict, ErrDenied o ErrUnavailable cuando corresponde, para
+// ErrConflict, ErrDenied, ErrUnavailable o ErrPortInUse cuando corresponde, para
 // compararlo con errors.Is. ErrUnavailable es entity.ErrDockerUnavailable,
 // que cmd/http responde como 503 docker_unavailable.
 package docker
@@ -39,6 +39,10 @@ var (
 	// ErrCommand: el CLI de docker (stack deploy/rm) terminó con error; su
 	// salida va en el valor que devuelve el método.
 	ErrCommand = errors.New("docker: el comando falló")
+	// ErrPortInUse: un puerto del host que publica el contenedor ya está
+	// tomado, por otro contenedor o por un proceso del host (StartContainer).
+	// Lo usan ingress al recrear muelle-caddy e install al probar los puertos (§3.3 paso 2).
+	ErrPortInUse = errors.New("docker: el puerto del host ya está en uso")
 )
 
 // Engine es todo lo que muelle usa de Docker. Cada módulo pide solo las
@@ -346,6 +350,10 @@ type Containers interface {
 	// está tomado, ErrNotFound si la imagen no está en el nodo (PullImage antes).
 	CreateContainer(ctx context.Context, spec ContainerSpec) (id string, err error)
 	InspectContainer(ctx context.Context, nameOrID string) (Container, error)
+	// StartContainer: ErrPortInUse si un puerto del host está tomado (el
+	// contenedor queda creado y detenido). Ojo: Docker 29 arranca sin los
+	// puertos un contenedor así si se lo vuelve a arrancar; hay que borrarlo
+	// y crearlo de nuevo (el fake de dockertest hace lo mismo).
 	StartContainer(ctx context.Context, nameOrID string) error
 	// StopContainer espera hasta timeout antes de matarlo.
 	StopContainer(ctx context.Context, nameOrID string, timeout time.Duration) error

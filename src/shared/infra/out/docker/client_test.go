@@ -335,3 +335,31 @@ func TestInspectImage(t *testing.T) {
 	_, err = c.InspectImage(context.Background(), "ghcr.io/cpu-commits/muelle-caddy:v2")
 	check(t, "imagen que no está en el nodo", err, ErrNotFound)
 }
+
+// Un puerto del host ocupado al arrancar un contenedor (muelle-caddy, o la
+// prueba de puertos de install) es ErrPortInUse: el daemon responde 500 y
+// solo el texto lo distingue, sea otro contenedor o un proceso del host.
+func TestStartContainerPortInUse(t *testing.T) {
+	for _, msg := range []string{
+		"driver failed programming external connectivity on endpoint muelle-caddy (abc): Bind for 0.0.0.0:80 failed: port is already allocated",
+		"failed to set up container networking: driver failed programming external connectivity on endpoint muelle-caddy (abc): failed to bind host port for 0.0.0.0:443:172.17.0.2:443/tcp: address already in use",
+	} {
+		c, _ := newFakeAPIClient(t, map[string]func(http.ResponseWriter, *http.Request){
+			"POST /containers/muelle-caddy/start": func(w http.ResponseWriter, r *http.Request) {
+				apiError(w, http.StatusInternalServerError, msg)
+			},
+		})
+		err := c.StartContainer(context.Background(), "muelle-caddy")
+		if !errors.Is(err, ErrPortInUse) {
+			t.Fatalf("%q: %v, esperaba ErrPortInUse", msg, err)
+		}
+	}
+	c, _ := newFakeAPIClient(t, map[string]func(http.ResponseWriter, *http.Request){
+		"POST /containers/muelle-caddy/start": func(w http.ResponseWriter, r *http.Request) {
+			apiError(w, http.StatusInternalServerError, "otro error")
+		},
+	})
+	if err := c.StartContainer(context.Background(), "muelle-caddy"); err == nil || errors.Is(err, ErrPortInUse) {
+		t.Fatalf("otro error: %v", err)
+	}
+}

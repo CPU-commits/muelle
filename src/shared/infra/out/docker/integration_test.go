@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"net"
 	"net/netip"
 	"slices"
 	"strings"
@@ -350,5 +351,57 @@ func TestIntegrationContainerHotConnect(t *testing.T) {
 	}
 	if _, err := c.InspectContainer(ctx, ctrName); !errors.Is(err, docker.ErrNotFound) {
 		t.Fatalf("contenedor borrado: %v", err)
+	}
+}
+
+// Un puerto del host ocupado hace fallar el arranque con ErrPortInUse, sea
+// un proceso del host que lo escucha o un contenedor que ya lo publica (la
+// prueba de puertos de install y la recreación de muelle-caddy, §3.3 y §16).
+// Ojo: Docker 29 arranca sin los puertos un contenedor cuyo arranque falló
+// así, si se lo vuelve a arrancar; por eso cada intento usa uno nuevo.
+func TestIntegrationPortInUse(t *testing.T) {
+	c := realClient(t)
+	requireLocalImage(t, c, containerImg)
+	ctx := context.Background()
+	base := strings.ReplaceAll(uniqueName(t), "_", "-")
+	names := []string{base + "-a", base + "-b", base + "-c"}
+	labels := map[string]string{testLabel: prefix}
+	t.Cleanup(func() {
+		for _, n := range names {
+			if err := c.RemoveContainer(context.Background(), n, true); err != nil && !errors.Is(err, docker.ErrNotFound) {
+				t.Errorf("limpieza: contenedor %s: %v", n, err)
+			}
+		}
+	})
+
+	// Un puerto libre del host, que un proceso escucha.
+	ln, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	t.Cleanup(func() { ln.Close() })
+	start := func(name string) error {
+		t.Helper()
+		if _, err := c.CreateContainer(ctx, docker.ContainerSpec{Name: name, Image: containerImg, Cmd: []string{"sleep", "600"},
+			Labels: labels, Ports: []docker.PortBinding{{HostIP: "0.0.0.0", HostPort: port, ContainerPort: 8080}}}); err != nil {
+			t.Fatal(err)
+		}
+		return c.StartContainer(ctx, name)
+	}
+	if err := start(names[0]); !errors.Is(err, docker.ErrPortInUse) {
+		t.Fatalf("puerto que escucha un proceso del host: %v, esperaba ErrPortInUse", err)
+	}
+
+	// Lo libera el proceso y lo toma un contenedor; otro choca con él.
+	ln.Close()
+	if err := start(names[1]); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.InspectContainer(ctx, names[1]); err != nil || len(got.Ports) != 1 || got.Ports[0].HostPort != port {
+		t.Fatalf("el contenedor que tomó el puerto: %+v %v", got, err)
+	}
+	if err := start(names[2]); !errors.Is(err, docker.ErrPortInUse) {
+		t.Fatalf("puerto que publica otro contenedor: %v, esperaba ErrPortInUse", err)
 	}
 }
