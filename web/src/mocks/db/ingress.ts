@@ -15,6 +15,8 @@ import { loadPersisted, savePersisted } from './persist'
 
 export const MOCK_ZONE = 'tudominio.cl'
 export const MOCK_PUBLIC_IP = '203.0.113.24'
+/** La IPv6 pública del nodo: con ella, el dominio lleva también un AAAA. */
+export const MOCK_PUBLIC_IPV6 = '2001:db8::24'
 
 const STORAGE_KEY = 'ingress'
 const DAY = 24 * 60 * 60 * 1000

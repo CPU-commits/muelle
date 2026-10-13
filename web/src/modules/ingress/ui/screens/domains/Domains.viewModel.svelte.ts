@@ -20,6 +20,7 @@ import {
 	type AppDomain,
 	type AppRef,
 	DomainNotFound,
+	failingDomains,
 	formatTarget,
 	HostnameTaken,
 	hostnameProblem,
@@ -50,6 +51,8 @@ export interface DomainsProps {
 export class DomainsViewModel {
 	hostname = $state('')
 	target = $state('')
+	/** Proxied al crear: apagado por defecto, como en el spec (solo cuenta en una zona de Cloudflare). */
+	proxied = $state(false)
 	hostnameError = $state<string | null>(null)
 	targetError = $state<string | null>(null)
 	formError = $state<string | null>(null)
@@ -61,6 +64,8 @@ export class DomainsViewModel {
 
 	/** El dominio a punto de borrarse (el ConfirmDialog), o null. */
 	removing = $state.raw<AppDomain | null>(null)
+	/** Por qué no se pudo borrar: se muestra dentro del diálogo, que queda abierto. */
+	removeError = $state<string | null>(null)
 
 	readonly #props: () => DomainsProps
 	readonly #client = useQueryClient()
@@ -131,6 +136,19 @@ export class DomainsViewModel {
 		return this.#remove.isPending
 	}
 
+	/**
+	 * Para el lector de pantalla, en una sola región (no una por tarjeta): qué dominios
+	 * tienen error. Cambia solo si cambia ese conjunto, no con cada refresco.
+	 */
+	get failingAnnouncement(): string {
+		const failing = failingDomains(this.list)
+		if (failing.length === 0) return ''
+		return m.ingress_failing_announce({
+			count: failing.length,
+			hostnames: failing.map((domain) => domain.hostname).join(', '),
+		})
+	}
+
 	/** Hay una acción en curso sobre este dominio (para deshabilitar sus botones). */
 	isBusy = (domain: AppDomain): boolean => {
 		const busy = (mutation: {
@@ -150,6 +168,10 @@ export class DomainsViewModel {
 		this.hostname = value
 		this.hostnameError = null
 		this.formError = null
+	}
+
+	setProxied = (value: boolean): void => {
+		this.proxied = value
 	}
 
 	setTarget = (value: string): void => {
@@ -177,7 +199,7 @@ export class DomainsViewModel {
 				app: this.ref,
 				hostname: this.hostname,
 				target,
-				proxied: true,
+				proxied: this.proxied,
 			})
 			toast.success(
 				m.ingress_toast_added({ hostname: domain.hostname }),
@@ -260,23 +282,31 @@ export class DomainsViewModel {
 
 	askRemove = (domain: AppDomain): void => {
 		this.removing = domain
+		this.removeError = null
 	}
 
 	cancelRemove = (): void => {
 		if (this.#remove.isPending) return
 		this.removing = null
+		this.removeError = null
 	}
 
 	confirmRemove = async (): Promise<void> => {
 		const domain = this.removing
 		if (!domain || this.#remove.isPending) return
+		this.removeError = null
 		try {
 			await this.#remove.mutateAsync({ app: this.ref, hostname: domain.hostname })
 			toast.success(m.ingress_toast_removed({ hostname: domain.hostname }))
-		} catch (error) {
-			this.#toastError(error)
-		} finally {
 			this.removing = null
+		} catch (error) {
+			if (error instanceof DomainNotFound) {
+				// Otra persona ya lo borró: lo que se quería. Se cierra y la lista se pide de nuevo.
+				this.removing = null
+				void this.domains.refetch()
+				return
+			}
+			this.removeError = ingressErrorMessage(error)
 		}
 	}
 

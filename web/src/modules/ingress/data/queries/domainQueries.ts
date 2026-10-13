@@ -6,6 +6,7 @@ import {
 	type AppRef,
 	type ChangeTargetInput,
 	type DomainRef,
+	hasProvisioning,
 	replaceDomain,
 	type SetProxiedInput,
 	sortDomains,
@@ -16,7 +17,7 @@ export const ingressKeys = {
 	domains: (app: AppRef): QueryKey => ['ingress', app.project, app.stage, app.app, 'domains'],
 }
 
-/** Mientras un dominio esté en `pending`, la lista se refresca sola cada tanto. */
+/** Mientras muelle esté resolviendo un dominio (registro, certificado), la lista se refresca sola. */
 export const PENDING_REFRESH_MS = 5_000
 
 export function domainsQuery(app: AppRef) {
@@ -24,14 +25,11 @@ export function domainsQuery(app: AppRef) {
 		queryKey: ingressKeys.domains(app),
 		queryFn: ({ signal }) => ingressUseCases.listDomains(app, signal),
 		staleTime: 10_000,
-		// Con la pestaña oculta TanStack no refresca (refetchIntervalInBackground: false).
+		// Un `pending` que espera un registro manual no cambia solo: no se refresca por él.
+		// Con la pestaña oculta tampoco (refetchIntervalInBackground: false).
 		refetchInterval: (query) =>
-			(query.state.data ?? []).some((domain) => domain.status === 'pending')
-				? PENDING_REFRESH_MS
-				: false,
-		// Ver deploy/data/queries: el resultado "tracked" se pierde cambios de `error` si
-		// un viewModel solo leyó `data`.
-		notifyOnChangeProps: 'all',
+			hasProvisioning(query.state.data ?? []) ? PENDING_REFRESH_MS : false,
+		refetchIntervalInBackground: false,
 	})
 }
 

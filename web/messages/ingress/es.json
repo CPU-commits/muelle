@@ -71,5 +71,15 @@
 	"ingress_hostname_bad_label": "Solo letras, números y guiones, sin empezar ni terminar con guion.",
 	"ingress_target_format": "Escribe servicio:puerto (ej. api:3000).",
 	"ingress_target_service": "El servicio no es un nombre válido.",
-	"ingress_target_port": "El puerto va de 1 a 65535."
+	"ingress_target_port": "El puerto va de 1 a 65535.",
+	"ingress_failing_announce": [
+		{
+			"declarations": ["input count", "input hostnames", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "Un dominio tiene un error: {hostnames}.",
+				"countPlural=*": "{count} dominios tienen errores: {hostnames}."
+			}
+		}
+	]
 }

@@ -12,6 +12,8 @@
 		LoadingState,
 		Modal,
 		PageHeader,
+		srOnly,
+		Switch,
 	} from '@/shared/ui'
 	import { DomainCard } from '../../components/domainCard'
 	import { type DomainsProps, DomainsViewModel } from './Domains.viewModel.svelte.ts'
@@ -24,6 +26,7 @@
 		hostnameField,
 		list,
 		page,
+		proxiedField,
 		targetField,
 	} from './styles.css'
 
@@ -34,6 +37,9 @@
 </script>
 
 <div class={page}>
+	<!-- Una sola región para los dominios con error (no una por tarjeta). Está desde el
+	     principio, así se anuncia cuando llega la lista o cambia cuáles fallan. -->
+	<p class={srOnly} role="alert">{vm.failingAnnouncement}</p>
 	<PageHeader title={m.nav_app_domains()} subtitle={m.ingress_subtitle()} />
 
 	{#if vm.pendingPhase !== null}
@@ -105,6 +111,14 @@
 						<p id={`${id}-target-error`} class={fieldError}>{vm.targetError}</p>
 					{/if}
 				</div>
+				<label class={proxiedField}>
+					<Switch
+						checked={vm.proxied}
+						disabled={vm.isAdding}
+						onchange={(event) => vm.setProxied(event.currentTarget.checked)}
+					/>
+					<span>{m.ingress_proxied()}</span>
+				</label>
 				<Button type="submit" loading={vm.isAdding}>{m.ingress_add()}</Button>
 			</div>
 		</form>
@@ -185,6 +199,7 @@
 	confirmLabel={m.common_delete()}
 	cancelLabel={m.common_cancel()}
 	loading={vm.isRemoving}
+	error={vm.removeError}
 	onConfirm={() => void vm.confirmRemove()}
 	onCancel={vm.cancelRemove}
 />

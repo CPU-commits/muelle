@@ -179,7 +179,7 @@
 			<Button size="sm" loading={busy} onclick={onAdopt}>{m.ingress_adopt()}</Button>
 		</div>
 	{:else if current === 'error'}
-		<div class={footer} role="alert">
+		<div class={footer}>
 			<p class={[footerText, errorText]}>{domain.lastError ?? m.ingress_error_fallback()}</p>
 			<Button variant="secondary" size="sm" loading={busy} onclick={onRetry}>
 				<Icon name="refresh" size={14} />
@@ -206,14 +206,17 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each records as record (`${record.type}-${record.content}`)}
+						{#each records as record, index (`${record.type}-${record.content}`)}
 							<tr>
 								<td><Mono>{record.type}</Mono></td>
 								<td><Mono>{record.name}</Mono></td>
-								<td><Mono>{record.content}</Mono></td>
+								<td id={`${titleId}-record-${index}`}
+									><Mono>{record.content}</Mono></td
+								>
 								<td class={copyCell}>
 									<CopyButton
 										value={record.content}
+										target={`${titleId}-record-${index}`}
 										label={m.ingress_record_copy()}
 										iconOnly
 										variant="ghost"

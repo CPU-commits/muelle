@@ -9,6 +9,8 @@ import {
 	certificateExpiresSoon,
 	dnsMode,
 	domainState,
+	failingDomains,
+	hasProvisioning,
 	isReachable,
 	manualRecords,
 	publicAddress,
@@ -47,14 +49,30 @@ describe('domainState (estado y acción, spec §8 y §9)', () => {
 		expect(domainState(recordExists('webhooks.tudominio.cl'))).toBe('record_exists')
 	})
 
-	it('sin código, se reconoce por el mensaje del spec', () => {
+	it('solo el código dice "ya existe": el texto del mensaje no cuenta', () => {
 		const domain = makeDomain('webhooks.tudominio.cl', {
 			recordId: null,
 			status: 'error',
-			errorKind: null,
+			errorKind: 'cloudflare',
 			lastError: 'el registro ya existe',
 		})
-		expect(domainState(domain)).toBe('record_exists')
+		expect(domainState(domain)).toBe('error')
+	})
+
+	it('hasProvisioning: solo lo que muelle está resolviendo (no lo que espera un registro manual)', () => {
+		const provisioning = makeDomain('nuevo.tudominio.cl', { status: 'pending' })
+		expect(hasProvisioning([makeDomain('api.tudominio.cl'), provisioning])).toBe(true)
+		expect(
+			hasProvisioning([makeDomain('api.tudominio.cl'), manualPending('api.otro.com')]),
+		).toBe(false)
+	})
+
+	it('failingDomains junta los que tienen error, por hostname', () => {
+		const broken = makeDomain('b.tudominio.cl', { status: 'error', errorKind: 'cloudflare' })
+		const existing = recordExists('a.tudominio.cl')
+		expect(
+			failingDomains([makeDomain('c.tudominio.cl'), broken, existing]).map((d) => d.hostname),
+		).toEqual(['a.tudominio.cl', 'b.tudominio.cl'])
 	})
 
 	it('cualquier otro error se reintenta', () => {

@@ -1,6 +1,6 @@
 import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent } from '../api'
-import { appKey, ingressDb, type MockDomain, MOCK_PUBLIC_IP } from '../db/ingress'
+import { appKey, ingressDb, type MockDomain, MOCK_PUBLIC_IP, MOCK_PUBLIC_IPV6 } from '../db/ingress'
 import { requireSession } from '../session'
 
 // Dominios (Fase 3) del backend simulado, con el contrato de
@@ -37,7 +37,11 @@ function domainDto(domain: MockDomain) {
 		last_error_code: domain.lastErrorCode,
 		cert_issuer: domain.certIssuer,
 		cert_expires_at: iso(domain.certExpiresAt),
-		records: [{ type: 'A', name: domain.hostname, content: MOCK_PUBLIC_IP }],
+		// El A y, con IPv6, el AAAA: los dos los maneja muelle (o hay que crearlos a mano).
+		records: [
+			{ type: 'A', name: domain.hostname, content: MOCK_PUBLIC_IP },
+			{ type: 'AAAA', name: domain.hostname, content: MOCK_PUBLIC_IPV6 },
+		],
 		created_at: iso(domain.createdAt),
 	}
 }

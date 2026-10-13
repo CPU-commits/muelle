@@ -51,3 +51,15 @@ export const editForm = style({
 	flexDirection: 'column',
 	gap: theme.space[16],
 })
+
+/** El switch de Proxied del formulario, con su texto al lado (el nombre del control). */
+export const proxiedField = style({
+	display: 'inline-flex',
+	alignItems: 'center',
+	gap: theme.space[8],
+	minHeight: theme.control.md,
+	color: theme.colors.text.secondary,
+	fontSize: theme.typography.fontSize[13],
+	whiteSpace: 'nowrap',
+	cursor: 'pointer',
+})

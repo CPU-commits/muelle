@@ -44,8 +44,10 @@ describe('dominios de una app', () => {
 		const [active, manual] = domains
 		expect(active?.certificate?.issuer).toBe("Let's Encrypt")
 		expect(dnsMode(manual!)).toBe('manual')
+		// El A y el AAAA (el nodo tiene IPv6): los dos se crean a mano.
 		expect(manual?.records).toEqual([
 			{ type: 'A', name: 'api.staging.otro-dominio.com', content: '203.0.113.24' },
+			{ type: 'AAAA', name: 'api.staging.otro-dominio.com', content: '2001:db8::24' },
 		])
 	})
 

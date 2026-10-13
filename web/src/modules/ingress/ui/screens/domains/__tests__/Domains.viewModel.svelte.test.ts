@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
 import { UnavailableError, ValidationError } from '@/shared/domain'
-import { HostnameTaken, type AppDomain } from '../../../../domain'
+import { DomainNotFound, HostnameTaken, type AppDomain } from '../../../../domain'
 import {
 	APP,
 	makeDomain,
@@ -10,6 +10,7 @@ import {
 	recordExists,
 } from '../../../../domain/repositories/__fakes__/domainFixtures'
 import { mountViewModel } from '../../../__tests__/mountViewModel'
+import { domainsQuery, PENDING_REFRESH_MS } from '../../../../data'
 import { DomainsViewModel } from '../Domains.viewModel.svelte.ts'
 
 const mocks = vi.hoisted(() => ({
@@ -67,7 +68,7 @@ describe('DomainsViewModel', () => {
 		expect(mocks.addDomain).not.toHaveBeenCalled()
 	})
 
-	it('agrega con el destino sugerido, avisa y limpia el hostname', async () => {
+	it('agrega con el destino sugerido y Proxied apagado (el default del spec), avisa y limpia el hostname', async () => {
 		const created = makeDomain('nuevo.tudominio.cl', { status: 'pending' })
 		mocks.addDomain.mockResolvedValue(created)
 		const vm = await mounted()
@@ -81,13 +82,25 @@ describe('DomainsViewModel', () => {
 			app: APP,
 			hostname: 'nuevo.tudominio.cl',
 			target: 'api:3000',
-			proxied: true,
+			proxied: false,
 		})
 		expect(vm.hostname).toBe('')
 		expect(toastTitles()).toContain(m.ingress_toast_added({ hostname: 'nuevo.tudominio.cl' }))
 		await vi.waitFor(() =>
 			expect(vm.list.some((domain) => domain.hostname === 'nuevo.tudominio.cl')).toBe(true),
 		)
+	})
+
+	it('Proxied se puede prender en el formulario antes de agregar', async () => {
+		mocks.addDomain.mockResolvedValue(makeDomain('nuevo.tudominio.cl', { status: 'pending' }))
+		const vm = await mounted()
+		expect(vm.proxied).toBe(false)
+
+		vm.setHostname('nuevo.tudominio.cl')
+		vm.setProxied(true)
+		await vm.add()
+
+		expect(mocks.addDomain).toHaveBeenCalledWith(expect.objectContaining({ proxied: true }))
 	})
 
 	it('un hostname tomado o un 422 van al campo que corresponde', async () => {
@@ -177,6 +190,67 @@ describe('DomainsViewModel', () => {
 		expect(mocks.removeDomain).toHaveBeenCalledWith({ app: APP, hostname: MANUAL.hostname })
 		expect(vm.removing).toBeNull()
 		expect(vm.list.some((domain) => domain.hostname === MANUAL.hostname)).toBe(false)
+	})
+
+	it('si borrar falla, el error se ve en el diálogo, que queda abierto', async () => {
+		mocks.removeDomain.mockRejectedValueOnce(new UnavailableError('caído'))
+		const vm = await mounted()
+
+		const toastsBefore = toastTitles().length
+		vm.askRemove(MANUAL)
+		await vm.confirmRemove()
+
+		expect(vm.removing?.hostname).toBe(MANUAL.hostname)
+		expect(vm.removeError).not.toBeNull()
+		// Sin toast: el error ya está en el diálogo.
+		expect(toastTitles()).toHaveLength(toastsBefore)
+
+		vm.cancelRemove()
+		expect(vm.removing).toBeNull()
+		expect(vm.removeError).toBeNull()
+	})
+
+	it('si otra persona ya lo borró, se cierra y se pide la lista de nuevo', async () => {
+		mocks.removeDomain.mockRejectedValueOnce(new DomainNotFound())
+		const vm = await mounted()
+		mocks.listDomains.mockResolvedValue([ACTIVE, EXISTING])
+
+		vm.askRemove(MANUAL)
+		await vm.confirmRemove()
+
+		expect(vm.removing).toBeNull()
+		expect(vm.removeError).toBeNull()
+		await vi.waitFor(() =>
+			expect(vm.list.some((domain) => domain.hostname === MANUAL.hostname)).toBe(false),
+		)
+	})
+
+	it('los dominios con error se anuncian en una sola región, sin repetir en cada refresco', async () => {
+		const broken = makeDomain('roto.tudominio.cl', { status: 'error', errorKind: 'cloudflare' })
+		mocks.listDomains.mockResolvedValue([ACTIVE, EXISTING, broken])
+		const vm = await mounted()
+
+		const announcement = vm.failingAnnouncement
+		expect(announcement).toBe(
+			m.ingress_failing_announce({
+				count: 2,
+				hostnames: 'roto.tudominio.cl, webhooks-staging.tudominio.cl',
+			}),
+		)
+		await vm.domains.refetch()
+		expect(vm.failingAnnouncement).toBe(announcement)
+	})
+
+	it('se refresca sola mientras muelle provisiona, no por un registro manual', () => {
+		const interval = domainsQuery(APP).refetchInterval
+		if (typeof interval !== 'function') throw new Error('sin refetchInterval')
+		const withData = (data: readonly AppDomain[]) =>
+			interval({ state: { data } } as Parameters<typeof interval>[0])
+
+		expect(withData([ACTIVE, MANUAL])).toBe(false)
+		expect(withData([ACTIVE, makeDomain('nuevo.tudominio.cl', { status: 'pending' })])).toBe(
+			PENDING_REFRESH_MS,
+		)
 	})
 
 	it('sin dominios queda vacío, con el formulario', async () => {

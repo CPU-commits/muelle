@@ -13,6 +13,8 @@ export {
 	certificateExpiresSoon,
 	dnsMode,
 	domainState,
+	failingDomains,
+	hasProvisioning,
 	isReachable,
 	manualRecords,
 	publicAddress,

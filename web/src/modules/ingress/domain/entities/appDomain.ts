@@ -79,19 +79,35 @@ export type DomainState =
 	/** Cloudflare o el certificado fallaron: "Reintentar". */
 	| 'error'
 
-// Sin `last_error_code`, se reconoce el caso del spec por su mensaje (§9: "el registro ya
-// existe").
-const RECORD_EXISTS_MESSAGE = /registro ya existe|record already exists/i
-
 export function domainState(domain: AppDomain): DomainState {
 	if (domain.status === 'active') return 'active'
 	if (domain.status === 'pending') {
 		return dnsMode(domain) === 'manual' ? 'waiting_dns' : 'provisioning'
 	}
-	const recordExists =
-		domain.errorKind === 'record_exists' ||
-		(domain.errorKind === null && RECORD_EXISTS_MESSAGE.test(domain.lastError ?? ''))
-	return recordExists && domain.recordId === null ? 'record_exists' : 'error'
+	// Con `status: error` el backend siempre manda `last_error_code` (un CHECK de la tabla):
+	// el caso se reconoce por el código, nunca por el texto del mensaje.
+	return domain.errorKind === 'record_exists' && domain.recordId === null
+		? 'record_exists'
+		: 'error'
+}
+
+/**
+ * Hay algo que se resuelve solo en el backend (muelle creando el registro o emitiendo el
+ * certificado): la lista se refresca hasta que termine. Uno que espera un registro manual
+ * no: ese se resuelve con "Verificar".
+ */
+export function hasProvisioning(domains: readonly AppDomain[]): boolean {
+	return domains.some((domain) => domainState(domain) === 'provisioning')
+}
+
+/** Los que están en `error` (con o sin "Adoptar"), por hostname. */
+export function failingDomains(domains: readonly AppDomain[]): AppDomain[] {
+	return sortDomains(
+		domains.filter((domain) => {
+			const state = domainState(domain)
+			return state === 'error' || state === 'record_exists'
+		}),
+	)
 }
 
 /** El switch de Proxied solo tiene sentido si muelle maneja el registro (§9). */

@@ -16,7 +16,10 @@ const DTO = {
 	last_error_code: null,
 	cert_issuer: "Let's Encrypt",
 	cert_expires_at: '2027-01-08T00:00:00Z',
-	records: [{ type: 'A', name: 'api-staging.tudominio.cl', content: '203.0.113.24' }],
+	records: [
+		{ type: 'A', name: 'api-staging.tudominio.cl', content: '203.0.113.24' },
+		{ type: 'AAAA', name: 'api-staging.tudominio.cl', content: '2001:db8::24' },
+	],
 	created_at: '2026-10-01T12:00:00Z',
 }
 
@@ -33,7 +36,10 @@ describe('domainFromDto', () => {
 			lastError: null,
 			errorKind: null,
 			certificate: { issuer: "Let's Encrypt", expiresAt: new Date('2027-01-08T00:00:00Z') },
-			records: [{ type: 'A', name: 'api-staging.tudominio.cl', content: '203.0.113.24' }],
+			records: [
+				{ type: 'A', name: 'api-staging.tudominio.cl', content: '203.0.113.24' },
+				{ type: 'AAAA', name: 'api-staging.tudominio.cl', content: '2001:db8::24' },
+			],
 			createdAt: new Date('2026-10-01T12:00:00Z'),
 		})
 	})
