@@ -231,6 +231,7 @@ pnpm dev:mock     # sin backend: MSW contesta en el navegador
 pnpm dev          # con un `muelle serve` local (ver web/README.md)
 pnpm verify       # antes de decir que terminaste
 pnpm test:e2e     # playwright contra build-e2e/ (con y sin MSW, bajo la CSP); no toca ./build
+                  # en paralelo: E2E_MOCK_PORT=4183 E2E_PROD_PORT=4184 pnpm test:e2e
 pnpm build        # el ./build que embebe el binario (sin MSW ni mockServiceWorker.js)
 ```
 
@@ -564,8 +565,15 @@ http.post(api('/projects'), async ({ request }) => {
   401 de `/auth/me` en `/login` es esperado, no un error de la app.
 - `pnpm test:e2e` construye en `build-e2e/` (ignorado): `mock` con MSW y `prod` igual al de
   `pnpm build`, y los sirve con `scripts/serve-build.mjs` (como Go: archivo o `200.html`, y
-  la CSP como header). `./build` no se toca. Con un servidor viejo en el puerto 4173,
-  Playwright lo reusa: cerralo antes.
+  la CSP como header). `./build` no se toca.
+- **Puertos de los e2e:** `mock` en `E2E_MOCK_PORT` (4173, el `baseURL`) y `prod` en
+  `E2E_PROD_PORT` (4174). Salen de `e2e/ports.ts`: un test que necesite una URL la importa
+  de ahí (`PROD_URL`, `MOCK_URL`) o usa rutas relativas al `baseURL`, nunca un puerto
+  escrito a mano. Para correr varios a la vez (un worktree por agente), cada uno con los
+  suyos: `E2E_MOCK_PORT=4183 E2E_PROD_PORT=4184 pnpm test:e2e`. Si un puerto está ocupado,
+  Playwright corta con "already used" en vez de reusar lo que escucha ahí (que puede ser el
+  build de otro worktree): elegí otro par. `E2E_REUSE_SERVER=1` reusa un servidor propio
+  que ya dejaste corriendo.
 - `static/mockServiceWorker.js` solo queda en un build con `VITE_USE_MOCKS=1`: el adapter
   (`svelte.config.js`) lo borra de cualquier otro.
 

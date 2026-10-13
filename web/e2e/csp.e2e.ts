@@ -1,11 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
+import { PROD_URL } from './ports'
 
 // El panel bajo la CSP que manda el servidor (el `csp-header.txt` del build, ver
 // svelte.config.js y scripts/serve-build.mjs). Cualquier violación (un script en línea
 // sin hash, un `style="…"` en el HTML, el `new Function` de Zod, un `data:`) rompe el test.
-
-// El build sin MSW, el mismo de `pnpm build` (playwright.config.ts).
-const PROD_URL = 'http://127.0.0.1:4174'
 
 const USERNAME = 'felipe'
 const PASSWORD = 'una-contraseña-larga'
