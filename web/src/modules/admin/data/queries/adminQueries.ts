@@ -39,6 +39,20 @@ export function auditQuery() {
 	})
 }
 
+/**
+ * Cada escritura del panel deja un evento de auditoría: después de cualquier mutación que
+ * salió bien (también las de otros módulos, como borrar un usuario o crear un token, que no
+ * conocen estas keys) la auditoría se vuelve a pedir. Devuelve la función que deja de
+ * escuchar.
+ */
+export function refreshAuditOnWrites(client: QueryClient): () => void {
+	return client.getMutationCache().subscribe((event) => {
+		if (event.type === 'updated' && event.action.type === 'success') {
+			void client.invalidateQueries({ queryKey: adminKeys.audit() })
+		}
+	})
+}
+
 export function registriesQuery() {
 	return queryOptions({
 		queryKey: adminKeys.registries(),

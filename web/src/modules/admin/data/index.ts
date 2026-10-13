@@ -2,6 +2,7 @@ export {
 	addRegistryMutation,
 	adminKeys,
 	auditQuery,
+	refreshAuditOnWrites,
 	registriesQuery,
 	removeRegistryMutation,
 	replaceCloudflareTokenMutation,

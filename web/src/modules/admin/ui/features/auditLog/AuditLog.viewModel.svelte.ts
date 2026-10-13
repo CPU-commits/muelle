@@ -1,9 +1,9 @@
-import { createInfiniteQuery, createQuery } from '@tanstack/svelte-query'
+import { createInfiniteQuery, createQuery, useQueryClient } from '@tanstack/svelte-query'
 import { tokensQuery } from '@/modules/identity'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { formatDateTime } from '@/shared/ui'
 import { UnavailableError } from '@/shared/domain'
-import { auditQuery } from '../../../data'
+import { auditQuery, refreshAuditOnWrites } from '../../../data'
 import type { AuditActor, AuditEvent } from '../../../domain'
 
 /** Quién, como se muestra: "token" + su nombre en mono, o un texto. */
@@ -64,8 +64,14 @@ function toRow(event: AuditEvent, tokenNames: Readonly<Record<number, string>>):
 // de a una página con "Cargar más" (`before`). Nunca muestra los `details`. El nombre de un
 // token sale de la lista de tokens de identity mientras el token exista.
 export class AuditLogViewModel {
+	readonly #client = useQueryClient()
 	readonly #audit = createInfiniteQuery(() => auditQuery())
 	readonly #tokens = createQuery(() => tokensQuery())
+
+	constructor() {
+		// Mientras la sección está montada, lo que se hace en el panel aparece arriba.
+		$effect(() => refreshAuditOnWrites(this.#client))
+	}
 
 	readonly #tokenNames = $derived(
 		Object.fromEntries((this.#tokens.data ?? []).map((token) => [token.id, token.name])),

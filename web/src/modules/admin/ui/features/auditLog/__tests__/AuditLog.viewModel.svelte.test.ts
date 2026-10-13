@@ -60,8 +60,10 @@ const FIRST: AuditPage = {
 
 const LAST: AuditPage = { events: [event(1, { kind: 'system' })], nextBefore: null }
 
+let client: QueryClient
+
 async function mountViewModel(): Promise<AuditLogViewModel> {
-	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+	client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 	let vm: AuditLogViewModel | undefined
 	await render(AuditLogHarness, { client, onReady: (instance) => (vm = instance) })
 	if (!vm) throw new Error('el harness no expuso el viewModel')
@@ -104,6 +106,33 @@ describe('AuditLogViewModel', () => {
 		expect(mocks.listAudit).toHaveBeenLastCalledWith({ before: 2 }, expect.anything())
 		expect(vm.rows.at(-1)?.actor).toEqual({ kind: 'text', text: m.admin_audit_actor_system() })
 		expect(vm.hasMore).toBe(false)
+	})
+
+	it('una escritura de otro módulo (borrar un usuario, crear un token) refresca la auditoría', async () => {
+		await mountViewModel()
+		expect(mocks.listAudit).toHaveBeenCalledTimes(1)
+
+		// Una mutación cualquiera del cache, como las de identity: no conoce las keys de admin.
+		await client
+			.getMutationCache()
+			.build(client, { mutationFn: () => Promise.resolve('ok') })
+			.execute(undefined)
+
+		await vi.waitUntil(() => mocks.listAudit.mock.calls.length > 1)
+		expect(mocks.listAudit).toHaveBeenLastCalledWith({ before: null }, expect.anything())
+	})
+
+	it('una escritura que falla no refresca nada', async () => {
+		await mountViewModel()
+
+		await client
+			.getMutationCache()
+			.build(client, { mutationFn: () => Promise.reject(new Error('boom')) })
+			.execute(undefined)
+			.catch(() => undefined)
+
+		await new Promise((resolve) => setTimeout(resolve, 50))
+		expect(mocks.listAudit).toHaveBeenCalledTimes(1)
 	})
 
 	it('sin eventos, el estado vacío; un error al cargar, el mensaje', async () => {
