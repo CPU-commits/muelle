@@ -66,6 +66,13 @@ export class ProxySettingsViewModel {
 		return this.#proxy()
 	}
 
+	/** "4 zonas visibles · cifrado", o solo "cifrado" si el backend no sabe cuántas ve. */
+	get cloudflareMeta(): string {
+		const zones = this.proxy.cloudflare.zones
+		if (zones === null) return m.admin_cf_encrypted()
+		return zones === 1 ? m.admin_cf_zones_one() : m.admin_cf_zones({ count: zones })
+	}
+
 	get isIpDirty(): boolean {
 		return (
 			this.ipv4.trim() !== this.proxy.publicIpv4 ||

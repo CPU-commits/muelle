@@ -58,7 +58,7 @@
 	"identity_tokens_empty_title": "Todavía no hay tokens",
 	"identity_tokens_empty_body": "Crea uno para que GitHub Actions despliegue sin usar tu sesión.",
 	"identity_tokens_load_error": "No se pudieron cargar los tokens.",
-	"identity_tokens_created_title": "Token creado: {name}",
+	"identity_tokens_created_title": "Token creado:",
 	"identity_tokens_created_body": "Cópialo ahora. Guárdalo en GitHub como el secreto",
 	"identity_tokens_secret_label": "Token",
 	"identity_tokens_snippet_label": "Ejemplo de uso en GitHub Actions",

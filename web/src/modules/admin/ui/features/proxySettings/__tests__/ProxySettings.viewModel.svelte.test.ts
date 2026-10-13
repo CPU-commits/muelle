@@ -61,12 +61,12 @@ async function cacheHolds(secret: string): Promise<boolean> {
 	return JSON.stringify([mutations, queries]).includes(secret)
 }
 
-async function mountViewModel(): Promise<ProxySettingsViewModel> {
+async function mountViewModel(proxy: ProxySettings = PROXY): Promise<ProxySettingsViewModel> {
 	client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
 	let vm: ProxySettingsViewModel | undefined
 	await render(ProxySettingsHarness, {
 		client,
-		proxy: () => PROXY,
+		proxy: () => proxy,
 		onReady: (instance) => (vm = instance),
 	})
 	if (!vm) throw new Error('el harness no expuso el viewModel')
@@ -82,6 +82,17 @@ describe('ProxySettingsViewModel', () => {
 		mocks.replaceCloudflareToken.mockResolvedValue(
 			saved({ cloudflare: { tokenSet: true, zones: 2 } }),
 		)
+	})
+
+	it('dice cuántas zonas ve el token, en singular o plural, o solo "cifrado"', async () => {
+		const zones = async (count: number | null) =>
+			(await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: count } }))
+				.cloudflareMeta
+
+		expect(await zones(4)).toBe(m.admin_cf_zones({ count: 4 }))
+		expect(await zones(1)).toBe(m.admin_cf_zones_one())
+		expect(await zones(null)).toBe(m.admin_cf_encrypted())
+		expect(m.admin_cf_zones({ count: 4 })).toMatch(/^4 zonas visibles/)
 	})
 
 	it('cada tarjeta se activa cuando algo suyo cambió', async () => {

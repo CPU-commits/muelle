@@ -39,9 +39,7 @@
 			{#if vm.proxy.cloudflare.tokenSet}
 				<span class={statusLabel}><StatusDot status="ok" />{m.admin_cf_set()}</span>
 				<span class={statusMeta}>
-					{vm.proxy.cloudflare.zones === null
-						? m.admin_cf_encrypted()
-						: m.admin_cf_zones({ count: vm.proxy.cloudflare.zones })}
+					{vm.cloudflareMeta}
 				</span>
 			{:else}
 				<span class={statusLabel}><StatusDot status="idle" />{m.admin_cf_unset()}</span>
@@ -188,8 +186,10 @@
 				{/snippet}
 			</Field>
 		</form>
-		<p class={warning}><StatusDot status="warn" size={6} />{m.admin_ports_warning()}</p>
 		{#snippet footer()}
+			<span class={warning}
+				><StatusDot status="warn" size={6} />{m.admin_ports_warning()}</span
+			>
 			<Button
 				type="submit"
 				form={portsForm}

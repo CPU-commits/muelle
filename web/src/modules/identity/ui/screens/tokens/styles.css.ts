@@ -33,6 +33,13 @@ export const subtitle = style({
 	color: theme.colors.text.secondary,
 })
 
+export const createdTitle = style({
+	fontSize: theme.typography.fontSize[16],
+	fontWeight: theme.typography.fontWeight.semibold,
+	letterSpacing: theme.typography.letterSpacing.snug,
+	overflowWrap: 'anywhere',
+})
+
 export const createdText = style({
 	color: theme.colors.text.secondary,
 })
@@ -97,13 +104,22 @@ export const nameCell = style({
 	gap: theme.space[2],
 })
 
+// "nuevo" queda al lado del nombre aunque sea largo: el nombre corta, el badge no salta.
 export const nameLine = style({
 	display: 'flex',
-	flexWrap: 'wrap',
 	alignItems: 'center',
 	gap: theme.space[8],
+	minWidth: 0,
 	fontWeight: theme.typography.fontWeight.medium,
+})
+
+export const tokenName = style({
+	minWidth: 0,
 	overflowWrap: 'anywhere',
+})
+
+export const newBadge = style({
+	flexShrink: 0,
 })
 
 export const creator = style({

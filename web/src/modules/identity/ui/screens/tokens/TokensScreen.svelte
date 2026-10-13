@@ -21,6 +21,7 @@
 		copyInput,
 		copyRow,
 		createdText,
+		createdTitle,
 		creator,
 		expiredText,
 		group,
@@ -32,11 +33,13 @@
 		metaCell,
 		nameCell,
 		nameLine,
+		newBadge,
 		scopeCell,
 		screen,
 		snippet,
 		subtitle,
 		title,
+		tokenName,
 	} from './styles.css'
 	import { type TokenRow, TokensViewModel } from './Tokens.viewModel.svelte.ts'
 
@@ -55,9 +58,11 @@
 	<ListRow height="lg" muted={expired}>
 		<span class={nameCell}>
 			<span class={nameLine}>
-				<Mono>{row.token.name}</Mono>
+				<span class={tokenName}><Mono>{row.token.name}</Mono></span>
 				{#if row.isNew}
-					<Badge tone="strong" shape="pill">{m.identity_tokens_new()}</Badge>
+					<span class={newBadge}>
+						<Badge tone="strong" shape="pill">{m.identity_tokens_new()}</Badge>
+					</span>
 				{/if}
 			</span>
 			{#if row.creator}
@@ -93,12 +98,12 @@
 	</div>
 
 	{#if vm.created}
-		<Card
-			tone="highlight"
-			headingLevel={3}
-			title={m.identity_tokens_created_title({ name: vm.created.token.name })}
-			note={m.identity_tokens_once()}
-		>
+		<Card tone="highlight" note={m.identity_tokens_once()}>
+			<!-- El título va acá y no en `title` de Card: el nombre del token va en mono. -->
+			<h3 class={createdTitle}>
+				{m.identity_tokens_created_title()}
+				<Mono size={14} tone="primary">{vm.created.token.name}</Mono>
+			</h3>
 			<p class={createdText}>
 				{m.identity_tokens_created_body()}
 				<Mono size={13} tone="primary">MUELLE_TOKEN</Mono>.

@@ -95,7 +95,13 @@ export class TokensViewModel {
 			isNew: token.id === newId,
 		})
 		const { active, expired } = partitionTokens(this.#tokens.data ?? [], now)
-		return { active: active.map(toRow), expired: expired.map(toRow) }
+		// El recién creado va arriba, junto a la tarjeta con su valor; el resto, como llega.
+		const rows = active.map(toRow)
+		const fresh = rows.filter((row) => row.isNew)
+		return {
+			active: [...fresh, ...rows.filter((row) => !row.isNew)],
+			expired: expired.map(toRow),
+		}
 	})
 
 	get activeRows(): readonly TokenRow[] {
