@@ -1,6 +1,7 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import type { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import type { AuditLogViewModel } from '..'
 import type { AuditEvent, AuditEventId, AuditPage } from '../../../../domain'
@@ -50,20 +51,20 @@ function event(id: number, actor: AuditEvent['actor']): AuditEvent {
 }
 
 const FIRST: AuditPage = {
-	events: [
+	items: [
 		event(4, { kind: 'user', id: 1 }),
 		event(3, { kind: 'token', id: 7 }),
 		event(2, { kind: 'token', id: 99 }),
 	],
-	nextBefore: 2 as AuditEventId,
+	nextCursor: '2',
 }
 
-const LAST: AuditPage = { events: [event(1, { kind: 'system' })], nextBefore: null }
+const LAST: AuditPage = { items: [event(1, { kind: 'system' })], nextCursor: null }
 
 let client: QueryClient
 
 async function mountViewModel(): Promise<AuditLogViewModel> {
-	client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+	client = createQueryClient({ retry: false })
 	let vm: AuditLogViewModel | undefined
 	await render(AuditLogHarness, { client, onReady: (instance) => (vm = instance) })
 	if (!vm) throw new Error('el harness no expuso el viewModel')
@@ -74,7 +75,7 @@ async function mountViewModel(): Promise<AuditLogViewModel> {
 describe('AuditLogViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		mocks.listAudit.mockImplementation((input: { before: AuditEventId | null }) =>
+		mocks.listAudit.mockImplementation((input: { before: string | null }) =>
 			Promise.resolve(input.before === null ? FIRST : LAST),
 		)
 		mocks.listTokens.mockResolvedValue([{ id: 7, name: 'github-actions' }])
@@ -103,7 +104,7 @@ describe('AuditLogViewModel', () => {
 		vm.loadMore()
 		await vi.waitUntil(() => vm.rows.length === 4)
 
-		expect(mocks.listAudit).toHaveBeenLastCalledWith({ before: 2 }, expect.anything())
+		expect(mocks.listAudit).toHaveBeenLastCalledWith({ before: '2' }, expect.anything())
 		expect(vm.rows.at(-1)?.actor).toEqual({ kind: 'text', text: m.admin_audit_actor_system() })
 		expect(vm.hasMore).toBe(false)
 	})
@@ -136,7 +137,7 @@ describe('AuditLogViewModel', () => {
 	})
 
 	it('sin eventos, el estado vacío; un error al cargar, el mensaje', async () => {
-		mocks.listAudit.mockResolvedValueOnce({ events: [], nextBefore: null })
+		mocks.listAudit.mockResolvedValueOnce({ items: [], nextCursor: null })
 		const empty = await mountViewModel()
 		expect(empty.isEmpty).toBe(true)
 

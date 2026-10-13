@@ -1,13 +1,19 @@
 import { http, HttpResponse } from 'msw'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { api, apiError, invalid } from '@/mocks/api'
+import { api, apiError, invalid, noRoute } from '@/mocks/api'
 import { adminDb, MOCK_AUDIT_SEED_COUNT } from '@/mocks/db/admin'
 import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { identityDb } from '@/mocks/db/identity'
 import { server } from '@/mocks/server'
 import { pendingPhase, UnavailableError, ValidationError } from '@/shared/domain'
 import { adminUseCases } from '../container'
-import { AUDIT_PAGE_SIZE, InvalidCidr, RegistryExists, TotpRequiredFirst } from '../domain'
+import {
+	AUDIT_PAGE_SIZE,
+	InvalidCidr,
+	RegistryExists,
+	RegistryNotFound,
+	TotpRequiredFirst,
+} from '../domain'
 
 // Recorre el módulo entero contra el backend simulado (src/mocks/handlers/admin.ts). Los
 // mocks responden como el backend con las Fases 2 y 3; con `server.use` se simula el de la
@@ -137,22 +143,22 @@ describe('auditoría', () => {
 	it('pagina con before, de la más nueva a la más vieja, sin details', async () => {
 		const first = await adminUseCases.listAudit()
 		const pages = [first]
-		let next = first.nextBefore
+		let next = first.nextCursor
 		while (next !== null) {
 			const page = await adminUseCases.listAudit({ before: next })
 			pages.push(page)
-			next = page.nextBefore
+			next = page.nextCursor
 		}
 
-		expect(first.events).toHaveLength(AUDIT_PAGE_SIZE)
-		expect(first.events[0]?.id).toBe(MOCK_AUDIT_SEED_COUNT)
-		expect(first.nextBefore).toBe(MOCK_AUDIT_SEED_COUNT - AUDIT_PAGE_SIZE + 1)
-		const ids = pages.flatMap((page) => page.events.map((event) => event.id))
+		expect(first.items).toHaveLength(AUDIT_PAGE_SIZE)
+		expect(first.items[0]?.id).toBe(MOCK_AUDIT_SEED_COUNT)
+		expect(first.nextCursor).toBe(String(MOCK_AUDIT_SEED_COUNT - AUDIT_PAGE_SIZE + 1))
+		const ids = pages.flatMap((page) => page.items.map((event) => event.id))
 		// Todos, una sola vez, en orden: el último pedido viene vacío o incompleto.
 		expect(ids).toEqual(
 			Array.from({ length: MOCK_AUDIT_SEED_COUNT }, (_, i) => MOCK_AUDIT_SEED_COUNT - i),
 		)
-		expect(first.events[0]).not.toHaveProperty('details')
+		expect(first.items[0]).not.toHaveProperty('details')
 	})
 
 	it('lo que se hace en el panel aparece arriba', async () => {
@@ -160,7 +166,7 @@ describe('auditoría', () => {
 
 		const page = await adminUseCases.listAudit()
 
-		expect(page.events[0]).toMatchObject({
+		expect(page.items[0]).toMatchObject({
 			action: 'settings.update',
 			target: 'settings',
 			actor: { kind: 'user', id: 1 },
@@ -210,8 +216,17 @@ describe('registries (Fase 2)', () => {
 		expect(pendingPhase(addError)).toBe(2)
 	})
 
-	it('el backend actual responde not_found a una ruta que no existe: también es la Fase 2', async () => {
-		server.use(http.get(api('/registries'), () => apiError(404, 'not_found', 'no existe')))
+	it('un not_found no es la Fase 2: es el registry que ya no está', async () => {
+		const error = await adminUseCases
+			.removeRegistry('quay.io')
+			.catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(RegistryNotFound)
+		expect(pendingPhase(error)).toBeNull()
+	})
+
+	it('una ruta sin handler en los mocks contesta no_route, como el backend', async () => {
+		server.use(http.get(api('/registries'), () => noRoute()))
 
 		const error = await adminUseCases.listRegistries().catch((caught: unknown) => caught)
 

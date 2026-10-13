@@ -1,10 +1,10 @@
-import { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import type { SecuritySettingsViewModel } from '..'
-import { ValidationError } from '@/shared/domain'
+import { UnavailableError, ValidationError } from '@/shared/domain'
 import { type Settings, TotpRequiredFirst } from '../../../../domain'
 import SecuritySettingsHarness from './SecuritySettingsHarness.svelte'
 
@@ -36,7 +36,7 @@ const PHASE_3: Settings = {
 const PHASE_1: Settings = { require2fa: false, proxy: null, panelAccess: null }
 
 async function mountViewModel(initial: Settings): Promise<SecuritySettingsViewModel> {
-	const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+	const client = createQueryClient({ retry: false })
 	let current = initial
 	mocks.updateSecurity.mockImplementation(
 		(input: { require2fa?: boolean; allowedCidrs?: string }) => {
@@ -187,6 +187,20 @@ describe('SecuritySettingsViewModel', () => {
 
 		expect(vm.lockoutTitle).toBe(m.admin_security_lockout_title())
 		expect(vm.lockoutBody).toBe(m.admin_security_lockout_body({ ip: '198.51.100.17' }))
+	})
+
+	it('si guardar falla desde la confirmación, el error queda adentro y sigue abierta', async () => {
+		const vm = await mountViewModel(PHASE_3)
+		vm.setCidrs('10.0.0.0/8')
+		await vm.save()
+		mocks.updateSecurity.mockRejectedValueOnce(new UnavailableError('caído'))
+
+		await vm.confirmLockout()
+
+		expect(vm.confirmingLockout).toBe(true)
+		expect(vm.lockoutError).toBe(m.common_unavailable())
+		vm.cancelLockout()
+		expect(vm.lockoutError).toBeNull()
 	})
 
 	it('un 422 del backend en las IPs va al campo', async () => {

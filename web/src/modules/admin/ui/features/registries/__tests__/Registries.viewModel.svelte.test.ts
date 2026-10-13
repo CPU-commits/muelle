@@ -1,11 +1,12 @@
-import { onlineManager, QueryClient } from '@tanstack/svelte-query'
+import { onlineManager, type QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import { UnavailableError } from '@/shared/domain'
 import type { RegistriesViewModel } from '..'
-import { RegistryExists } from '../../../../domain'
+import { RegistryExists, RegistryNotFound } from '../../../../domain'
 import RegistriesHarness from './RegistriesHarness.svelte'
 import { cacheHolds } from '../../../__tests__/cacheHolds'
 
@@ -35,9 +36,7 @@ vi.mock('@/modules/admin/container', () => ({
 let client: QueryClient
 
 async function mountViewModel(): Promise<RegistriesViewModel> {
-	client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
+	client = createQueryClient({ retry: false })
 	let vm: RegistriesViewModel | undefined
 	await render(RegistriesHarness, { client, onReady: (instance) => (vm = instance) })
 	if (!vm) throw new Error('el harness no expuso el viewModel')
@@ -178,6 +177,22 @@ describe('RegistriesViewModel', () => {
 			username: 'cpu-commits',
 			password: 'nueva',
 		})
+	})
+
+	it('un error al eliminar queda adentro de la confirmación; si ya no estaba, avisa', async () => {
+		const info = vi.spyOn(toast, 'info')
+		const vm = await mountViewModel()
+
+		mocks.removeRegistry.mockRejectedValueOnce(new UnavailableError('caído'))
+		vm.askRemove('ghcr.io')
+		await vm.confirmRemove()
+		expect(vm.removing).toBe('ghcr.io')
+		expect(vm.removeError).toBe(m.common_unavailable())
+
+		mocks.removeRegistry.mockRejectedValueOnce(new RegistryNotFound())
+		await vm.confirmRemove()
+		expect(vm.removing).toBeNull()
+		expect(info).toHaveBeenCalledWith(m.admin_error_registry_not_found())
 	})
 
 	it('eliminar pide confirmación', async () => {

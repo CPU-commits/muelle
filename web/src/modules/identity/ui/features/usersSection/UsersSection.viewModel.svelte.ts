@@ -10,7 +10,13 @@ import {
 	resetUserTotpMutation,
 	usersQuery,
 } from '../../../data'
-import { type Invite, inviteHoursLeft, isCurrentUser, type User } from '../../../domain'
+import {
+	type Invite,
+	inviteHoursLeft,
+	isCurrentUser,
+	type User,
+	UserNotFound,
+} from '../../../domain'
 import { identityErrorMessage } from '../../components/identityMessages'
 
 /** Lo que espera confirmación: borrar a alguien o quitarle el 2FA. */
@@ -33,6 +39,8 @@ export class UsersSectionViewModel {
 	/** La invitación recién creada. Solo vive acá, mientras el modal está abierto. */
 	invite = $state.raw<Invite | null>(null)
 	pending = $state.raw<PendingUserAction | null>(null)
+	/** Por qué falló la confirmación; el diálogo sigue abierto y lo muestra adentro. */
+	confirmError = $state<string | null>(null)
 
 	readonly #client = useQueryClient()
 	readonly #users = createQuery(() => usersQuery())
@@ -148,22 +156,20 @@ export class UsersSectionViewModel {
 		this.invite = null
 	}
 
-	/**
-	 * Escape o un clic en el fondo NO cierran el modal de la invitación: la URL no se vuelve
-	 * a mostrar, así que solo se cierra con "Listo".
-	 */
-	keepInviteOpen = (): void => {}
-
 	askDelete = (username: string): void => {
+		this.confirmError = null
 		this.pending = { kind: 'delete', username }
 	}
 
 	askResetTotp = (username: string): void => {
+		this.confirmError = null
 		this.pending = { kind: 'resetTotp', username }
 	}
 
 	cancel = (): void => {
-		if (!this.isConfirming) this.pending = null
+		if (this.isConfirming) return
+		this.pending = null
+		this.confirmError = null
 	}
 
 	confirm = async (): Promise<void> => {
@@ -183,10 +189,15 @@ export class UsersSectionViewModel {
 					m.identity_users_reset_done_body(),
 				)
 			}
-		} catch (error) {
-			toast.error(identityErrorMessage(error))
-		} finally {
 			this.pending = null
+		} catch (error) {
+			if (error instanceof UserNotFound) {
+				// Lo borró otra persona: no hay nada que confirmar (la lista ya se recarga).
+				this.pending = null
+				toast.info(identityErrorMessage(error))
+				return
+			}
+			this.confirmError = identityErrorMessage(error)
 		}
 	}
 }

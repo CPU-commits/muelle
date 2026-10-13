@@ -1,7 +1,8 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import type { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { authKeys } from '@/modules/auth'
 import UsersSectionView from './UsersSectionView.svelte'
 
@@ -22,9 +23,7 @@ vi.mock('@/modules/identity/container', () => ({
 }))
 
 function client(): QueryClient {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
+	const queryClient = createQueryClient({ retry: false })
 	queryClient.setQueryData(authKeys.me(), {
 		username: 'felipe',
 		totpEnabled: true,
@@ -55,8 +54,21 @@ describe('UsersSection', () => {
 			.element(screen.getByLabelText('Link de invitación'))
 			.toHaveValue('http://panel/invite/abc')
 
-		await userEvent.keyboard('{Escape}')
+		// Chrome deja frenar un solo Escape sin activación del usuario: con varios seguidos,
+		// un modal común se cerraría igual. Este no.
+		for (let press = 0; press < 6; press += 1) await userEvent.keyboard('{Escape}')
 		await expect.element(dialog).toBeVisible()
+		await expect
+			.element(screen.getByLabelText('Link de invitación'))
+			.toHaveValue('http://panel/invite/abc')
+
+		// Y si el navegador cierra el <dialog> por su cuenta (lo que hace Chrome a partir del
+		// segundo Escape sin activación del usuario), vuelve a abrirse con la URL.
+		document.querySelector('dialog')?.close()
+		await expect.poll(() => document.querySelector('dialog')?.open).toBe(true)
+		await expect
+			.element(screen.getByLabelText('Link de invitación'))
+			.toHaveValue('http://panel/invite/abc')
 
 		await screen.getByRole('button', { name: 'Listo' }).click()
 		await expect.element(dialog).not.toBeInTheDocument()

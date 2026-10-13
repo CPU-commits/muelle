@@ -149,6 +149,7 @@
 	confirmLabel={m.admin_registries_delete()}
 	cancelLabel={m.common_cancel()}
 	loading={vm.isRemoving}
+	error={vm.removeError}
 	onConfirm={vm.confirmRemove}
 	onCancel={vm.cancelRemove}
 />

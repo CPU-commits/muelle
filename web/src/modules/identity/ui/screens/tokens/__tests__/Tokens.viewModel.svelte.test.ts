@@ -1,9 +1,10 @@
-import { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import type { TokensViewModel } from '..'
+import { UnavailableError } from '@/shared/domain'
 import { type ApiToken, type TokenId, TokenNotFound } from '../../../../domain'
 import TokensHarness from './TokensHarness.svelte'
 
@@ -57,9 +58,7 @@ const TOKENS: ApiToken[] = [
 ]
 
 async function mountViewModel(): Promise<TokensViewModel> {
-	const client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
+	const client = createQueryClient({ retry: false })
 	let vm: TokensViewModel | undefined
 	await render(TokensHarness, { client, onReady: (instance) => (vm = instance) })
 	if (!vm) throw new Error('el harness no expuso el viewModel')
@@ -149,6 +148,21 @@ describe('TokensViewModel', () => {
 		await vm.confirmRevoke()
 
 		expect(info).toHaveBeenCalledWith(m.identity_tokens_already_revoked())
+	})
+
+	it('un error al revocar queda adentro de la confirmación', async () => {
+		mocks.revokeToken.mockRejectedValue(new UnavailableError('caído'))
+		const vm = await mountViewModel()
+		const target = vm.activeRows[0]?.token
+		if (!target) throw new Error('falta el token')
+
+		vm.askRevoke(target)
+		await vm.confirmRevoke()
+
+		expect(vm.revoking).toEqual(target)
+		expect(vm.revokeError).toBe(m.common_unavailable())
+		vm.cancelRevoke()
+		expect(vm.revokeError).toBeNull()
 	})
 
 	it('sin tokens, el estado vacío', async () => {

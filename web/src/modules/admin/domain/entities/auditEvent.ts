@@ -1,4 +1,4 @@
-import type { Brand } from '@/shared/domain'
+import type { Brand, CursorPage } from '@/shared/domain'
 
 export type AuditEventId = Brand<number, 'AuditEventId'>
 
@@ -26,11 +26,11 @@ export interface AuditEvent {
 	readonly at: Date
 }
 
-/** Una página, de la más nueva a la más vieja. `nextBefore` pide la siguiente. */
-export interface AuditPage {
-	readonly events: readonly AuditEvent[]
-	readonly nextBefore: AuditEventId | null
-}
+/**
+ * Una página, de la más nueva a la más vieja (el `CursorPage` de shared). `nextCursor` es
+ * el id del último evento, como texto: es el `before` de la siguiente.
+ */
+export type AuditPage = CursorPage<AuditEvent>
 
 export const AUDIT_PAGE_SIZE = 25
 
@@ -40,5 +40,10 @@ export const AUDIT_PAGE_SIZE = 25
  */
 export function toAuditPage(events: readonly AuditEvent[], limit: number): AuditPage {
 	const last = events.at(-1)
-	return { events, nextBefore: events.length >= limit && last ? last.id : null }
+	return { items: events, nextCursor: events.length >= limit && last ? String(last.id) : null }
+}
+
+/** El cursor de vuelta a id; `null` si no es uno (un cursor que no salió de `toAuditPage`). */
+export function parseAuditCursor(cursor: string): AuditEventId | null {
+	return /^[1-9]\d*$/.test(cursor) ? (Number(cursor) as AuditEventId) : null
 }

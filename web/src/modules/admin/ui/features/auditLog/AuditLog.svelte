@@ -7,12 +7,13 @@
 		ErrorState,
 		Icon,
 		LoadingState,
+		LoadMore,
 		Mono,
 		Table,
 	} from '@/shared/ui'
 	import { SectionHeading } from '../../components/sectionHeading'
 	import { AuditLogViewModel } from './AuditLog.viewModel.svelte.ts'
-	import { more, moreError, section, target, when } from './styles.css'
+	import { moreError, section, target, when } from './styles.css'
 
 	// La sección "Auditoría" de Ajustes (`Ajustes.dc.html`). `id` es el ancla de la nav.
 	let { id }: { id?: string } = $props()
@@ -74,20 +75,14 @@
 				{/each}
 			</tbody>
 		</Table>
-		{#if vm.hasMore || vm.moreError}
-			<div class={more}>
-				{#if vm.moreError}
-					<span class={moreError} role="alert">{vm.moreError}</span>
-				{/if}
-				<Button
-					variant="secondary"
-					size="sm"
-					loading={vm.isLoadingMore}
-					onclick={vm.loadMore}
-				>
-					{vm.moreError ? m.common_retry() : m.admin_audit_more()}
-				</Button>
-			</div>
+		{#if vm.moreError}
+			<p class={moreError} role="alert">{vm.moreError}</p>
 		{/if}
+		<LoadMore
+			hasMore={vm.hasMore}
+			loading={vm.isLoadingMore}
+			onLoadMore={vm.loadMore}
+			label={vm.moreError ? m.common_retry() : m.admin_audit_more()}
+		/>
 	{/if}
 </section>

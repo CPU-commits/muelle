@@ -9,7 +9,12 @@ import {
 	removeRegistryMutation,
 	updateRegistryMutation,
 } from '../../../data'
-import { parseRegistryCredentials, parseRegistryHost, type Registry } from '../../../domain'
+import {
+	parseRegistryCredentials,
+	parseRegistryHost,
+	type Registry,
+	RegistryNotFound,
+} from '../../../domain'
 import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
 
 /** El modal abierto: agregar uno nuevo o cambiar las credenciales de uno que ya está. */
@@ -33,6 +38,8 @@ export class RegistriesViewModel {
 	password = $state('')
 	errors = $state<FieldErrors>({})
 	removing = $state<string | null>(null)
+	/** Por qué falló eliminar; el diálogo sigue abierto y lo muestra adentro. */
+	removeError = $state<string | null>(null)
 
 	readonly #client = useQueryClient()
 	readonly #registries = createQuery(() => registriesQuery())
@@ -169,11 +176,14 @@ export class RegistriesViewModel {
 	}
 
 	askRemove = (host: string): void => {
+		this.removeError = null
 		this.removing = host
 	}
 
 	cancelRemove = (): void => {
-		if (!this.isRemoving) this.removing = null
+		if (this.isRemoving) return
+		this.removing = null
+		this.removeError = null
 	}
 
 	confirmRemove = async (): Promise<void> => {
@@ -183,10 +193,14 @@ export class RegistriesViewModel {
 			await this.#remove.mutateAsync(host)
 			toast.success(m.admin_registry_deleted())
 		} catch (error) {
-			toast.error(m.admin_save_error(), adminErrorMessage(error))
-		} finally {
-			this.removing = null
+			if (!(error instanceof RegistryNotFound)) {
+				this.removeError = adminErrorMessage(error)
+				return
+			}
+			// Ya lo había borrado otra persona: la lista se recarga sola.
+			toast.info(adminErrorMessage(error))
 		}
+		this.removing = null
 	}
 
 	#reset(host: string, username: string): void {

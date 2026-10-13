@@ -28,14 +28,11 @@ const SETTINGS_ERRORS: DomainErrorMap = {
 	},
 }
 
-// Fase 2: que la ruta no exista es `UnavailableError` con la fase. Hoy eso es cualquier 404
-// o 405; cuando el backend mande `no_route`, un `not_found` va a ser el registry que ya no
-// está (`notFound`).
+// Fase 2: que la ruta no exista (404 `no_route` o 405 `method_not_allowed`) es
+// `UnavailableError` con la fase; un 404 `not_found` es el registry que ya no está.
 const REGISTRY_ERRORS: DomainErrorMap = {
 	phase: REGISTRIES_PHASE,
 	codes: { conflict: (error) => new RegistryExists(cause(error)) },
-	// No en `codes`, que gana siempre: el backend actual responde `not_found` también a una
-	// ruta que no existe, y eso tiene que seguir saliendo como "llega con la Fase 2".
 	notFound: (error) => new RegistryNotFound(cause(error)),
 	fields: { host: 'host', username: 'username', password: 'password' },
 }

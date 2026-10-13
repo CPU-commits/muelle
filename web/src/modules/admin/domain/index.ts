@@ -1,5 +1,5 @@
 export type { AuditActor, AuditEvent, AuditEventId, AuditPage } from './entities/auditEvent'
-export { AUDIT_PAGE_SIZE, toAuditPage } from './entities/auditEvent'
+export { AUDIT_PAGE_SIZE, parseAuditCursor, toAuditPage } from './entities/auditEvent'
 export type { NewRegistry, Registry, RegistryCredentials } from './entities/registry'
 export { REGISTRIES_PHASE } from './entities/registry'
 export type {

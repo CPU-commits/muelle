@@ -1,11 +1,12 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import type { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { authKeys } from '@/modules/auth'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import type { UsersSectionViewModel } from '..'
-import { CannotDeleteSelf, type User } from '../../../../domain'
+import { CannotDeleteSelf, type User, UserNotFound } from '../../../../domain'
 import UsersSectionHarness from './UsersSectionHarness.svelte'
 import { cacheHolds } from '../../../__tests__/cacheHolds'
 
@@ -41,9 +42,7 @@ const USERS: User[] = [
 let client: QueryClient
 
 async function mountViewModel(): Promise<UsersSectionViewModel> {
-	client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
+	client = createQueryClient({ retry: false })
 	// El guard de `(app)` ya dejó al usuario de la sesión en el cache.
 	client.setQueryData(authKeys.me(), {
 		username: 'felipe',
@@ -103,16 +102,32 @@ describe('UsersSectionViewModel', () => {
 		expect(success).toHaveBeenCalledWith(m.identity_users_deleted({ username: 'soporte' }))
 	})
 
-	it('cannot_delete_self se muestra con un mensaje claro', async () => {
-		const error = vi.spyOn(toast, 'error')
+	it('cannot_delete_self se muestra adentro de la confirmación, que queda abierta', async () => {
 		mocks.deleteUser.mockRejectedValue(new CannotDeleteSelf())
 		const vm = await mountViewModel()
 
 		vm.askDelete('felipe')
 		await vm.confirm()
 
-		expect(error).toHaveBeenCalledWith(m.identity_error_cannot_delete_self())
+		expect(vm.confirmError).toBe(m.identity_error_cannot_delete_self())
+		expect(vm.pending).toEqual({ kind: 'delete', username: 'felipe' })
+
+		vm.cancel()
 		expect(vm.pending).toBeNull()
+		expect(vm.confirmError).toBeNull()
+	})
+
+	it('si el usuario ya no existe, cierra la confirmación con un aviso', async () => {
+		const info = vi.spyOn(toast, 'info')
+		mocks.deleteUser.mockRejectedValue(new UserNotFound())
+		const vm = await mountViewModel()
+
+		vm.askDelete('soporte')
+		await vm.confirm()
+
+		expect(vm.pending).toBeNull()
+		expect(vm.confirmError).toBeNull()
+		expect(info).toHaveBeenCalledWith(m.identity_error_user_not_found())
 	})
 
 	it('quitar el 2FA avisa que se cerraron sus sesiones', async () => {

@@ -18,15 +18,8 @@ export const target = style({
 	overflowWrap: 'anywhere',
 })
 
-export const more = style({
-	display: 'flex',
-	flexWrap: 'wrap',
-	alignItems: 'center',
-	justifyContent: 'center',
-	gap: theme.space[12],
-})
-
 export const moreError = style({
+	textAlign: 'center',
 	fontSize: theme.typography.fontSize[13],
 	color: theme.colors.status.errorText,
 })

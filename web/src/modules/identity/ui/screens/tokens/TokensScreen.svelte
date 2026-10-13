@@ -46,6 +46,7 @@
 	const vm = new TokensViewModel()
 	const activeId = $props.id()
 	const expiredId = `${activeId}-expired`
+	const secretId = `${activeId}-secret`
 
 	// El token recién creado queda seleccionado, listo para copiar a mano si hace falta.
 	const selectOnMount: Attachment<HTMLInputElement> = (input) => {
@@ -110,6 +111,7 @@
 			</p>
 			<div class={copyRow}>
 				<Input
+					id={secretId}
 					class={copyInput}
 					mono
 					readonly
@@ -118,7 +120,7 @@
 					onfocus={(event) => event.currentTarget.select()}
 					{@attach selectOnMount}
 				/>
-				<CopyButton value={vm.created.secret} />
+				<CopyButton value={vm.created.secret} target={secretId} />
 			</div>
 			<pre class={snippet} aria-label={m.identity_tokens_snippet_label()}>{vm.snippet}</pre>
 			{#snippet footer()}
@@ -185,6 +187,7 @@
 	confirmLabel={m.identity_tokens_revoke()}
 	cancelLabel={m.common_cancel()}
 	loading={vm.isRevoking}
+	error={vm.revokeError}
 	onConfirm={vm.confirmRevoke}
 	onCancel={vm.cancelRevoke}
 />

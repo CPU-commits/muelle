@@ -1,6 +1,6 @@
-import { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { UnavailableError } from '@/shared/domain'
 import type { SettingsViewModel } from '..'
@@ -28,7 +28,7 @@ vi.mock('@/modules/admin/container', () => ({
 const PHASE_1: Settings = { require2fa: true, proxy: null, panelAccess: null }
 
 async function mountViewModel(): Promise<SettingsViewModel> {
-	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+	const client = createQueryClient({ retry: false })
 	let vm: SettingsViewModel | undefined
 	await render(SettingsHarness, { client, onReady: (instance) => (vm = instance) })
 	if (!vm) throw new Error('el harness no expuso el viewModel')

@@ -2,7 +2,7 @@ import { createInfiniteQuery, createQuery, useQueryClient } from '@tanstack/svel
 import { tokensQuery } from '@/modules/identity'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { formatDateTime } from '@/shared/ui'
-import { UnavailableError } from '@/shared/domain'
+import { flattenCursorPages, UnavailableError } from '@/shared/domain'
 import { auditQuery, refreshAuditOnWrites } from '../../../data'
 import type { AuditActor, AuditEvent } from '../../../domain'
 
@@ -78,8 +78,8 @@ export class AuditLogViewModel {
 	)
 
 	readonly rows = $derived(
-		(this.#audit.data?.pages ?? []).flatMap((page) =>
-			page.events.map((event) => toRow(event, this.#tokenNames)),
+		flattenCursorPages(this.#audit.data?.pages ?? []).map((event) =>
+			toRow(event, this.#tokenNames),
 		),
 	)
 

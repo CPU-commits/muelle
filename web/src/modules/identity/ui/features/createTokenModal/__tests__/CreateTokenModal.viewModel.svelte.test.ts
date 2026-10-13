@@ -1,6 +1,7 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import type { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { ValidationError } from '@/shared/domain'
 import type { CreateTokenModalViewModel } from '..'
@@ -50,9 +51,7 @@ const CREATED: CreatedApiToken = {
 let client: QueryClient
 
 async function mountViewModel(): Promise<CreateTokenModalViewModel> {
-	client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
+	client = createQueryClient({ retry: false })
 	let vm: CreateTokenModalViewModel | undefined
 	await render(CreateTokenModalHarness, {
 		client,

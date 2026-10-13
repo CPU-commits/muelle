@@ -24,6 +24,8 @@ export class SecuritySettingsViewModel {
 	totpRequiredFirst = $state(false)
 	/** La lista nueva dejaría afuera la IP de esta sesión: se pide confirmación. */
 	confirmingLockout = $state(false)
+	/** Por qué no se pudo guardar desde la confirmación; se muestra adentro. */
+	lockoutError = $state<string | null>(null)
 
 	readonly #settings: () => Settings
 	readonly #client = useQueryClient()
@@ -117,23 +119,44 @@ export class SecuritySettingsViewModel {
 				return
 			}
 			if (this.lockoutRisk !== null) {
+				this.lockoutError = null
 				this.confirmingLockout = true
 				return
 			}
 		}
-		await this.#submit()
+		const error = await this.#submit()
+		if (error !== null) this.#fail(error)
 	}
 
 	confirmLockout = async (): Promise<void> => {
-		await this.#submit()
-		this.confirmingLockout = false
+		if (this.#update.isPending) return
+		this.lockoutError = null
+		const error = await this.#submit()
+		if (error === null) {
+			this.confirmingLockout = false
+			return
+		}
+		// Lo que tiene su lugar en la tarjeta (el 2FA propio, una línea mal) va ahí; el resto,
+		// adentro de la confirmación, que queda abierta.
+		const inCard =
+			error instanceof TotpRequiredFirst ||
+			adminFieldError(error)?.field === 'panelAllowedCidrs'
+		if (inCard) {
+			this.confirmingLockout = false
+			this.#fail(error)
+			return
+		}
+		this.lockoutError = adminErrorMessage(error)
 	}
 
 	cancelLockout = (): void => {
-		if (!this.#update.isPending) this.confirmingLockout = false
+		if (this.#update.isPending) return
+		this.confirmingLockout = false
+		this.lockoutError = null
 	}
 
-	async #submit(): Promise<void> {
+	/** Guarda lo que cambió; devuelve el error si falló (o null). */
+	async #submit(): Promise<unknown> {
 		const input: UpdateSecurityInput = {
 			...(this.is2faDirty ? { require2fa: this.require2fa } : {}),
 			...(this.areCidrsDirty ? { allowedCidrs: this.cidrs } : {}),
@@ -141,8 +164,9 @@ export class SecuritySettingsViewModel {
 		try {
 			this.#load(await this.#update.mutateAsync(input))
 			toast.success(m.admin_security_saved())
+			return null
 		} catch (error) {
-			this.#fail(error)
+			return error
 		}
 	}
 

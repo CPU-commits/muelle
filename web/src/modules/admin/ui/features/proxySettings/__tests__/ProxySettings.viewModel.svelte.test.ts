@@ -1,6 +1,7 @@
-import { onlineManager, QueryClient } from '@tanstack/svelte-query'
+import { onlineManager, type QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { UnavailableError, ValidationError } from '@/shared/domain'
 import type { ProxySettingsViewModel } from '..'
@@ -48,7 +49,7 @@ function saved(proxy: Partial<ProxySettings>): Settings {
 let client: QueryClient
 
 async function mountViewModel(proxy: ProxySettings = PROXY): Promise<ProxySettingsViewModel> {
-	client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+	client = createQueryClient({ retry: false })
 	let vm: ProxySettingsViewModel | undefined
 	await render(ProxySettingsHarness, {
 		client,
@@ -134,6 +135,24 @@ describe('ProxySettingsViewModel', () => {
 		await vm.savePorts()
 		expect(mocks.updateProxyPorts).toHaveBeenCalledWith({ http: '8080', https: '8443' })
 		expect(vm.confirmingPorts).toBe(false)
+	})
+
+	it('si cambiar los puertos falla, el error queda en la confirmación; uno de campo, en la tarjeta', async () => {
+		const vm = await mountViewModel()
+		vm.setField('httpPort', '8080')
+		vm.askSavePorts()
+
+		mocks.updateProxyPorts.mockRejectedValueOnce(new UnavailableError('caído'))
+		await vm.savePorts()
+		expect(vm.confirmingPorts).toBe(true)
+		expect(vm.portsError).toBe(m.common_unavailable())
+
+		mocks.updateProxyPorts.mockRejectedValueOnce(
+			new ValidationError('el puerto está ocupado', 'httpPort'),
+		)
+		await vm.savePorts()
+		expect(vm.confirmingPorts).toBe(false)
+		expect(vm.errors).toEqual({ httpPort: 'el puerto está ocupado' })
 	})
 
 	it('el token de Cloudflare se escribe en un modal y no queda en memoria', async () => {

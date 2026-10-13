@@ -45,6 +45,8 @@ export class ProxySettingsViewModel {
 	cloudflareToken = $state('')
 	cloudflareOpen = $state(false)
 	confirmingPorts = $state(false)
+	/** Por qué no se pudieron cambiar los puertos; se muestra adentro de la confirmación. */
+	portsError = $state<string | null>(null)
 	errors = $state<FieldErrors>({})
 
 	readonly #proxy: () => ProxySettings
@@ -139,21 +141,37 @@ export class ProxySettingsViewModel {
 			this.#fail(error)
 			return
 		}
+		this.portsError = null
 		this.confirmingPorts = true
 	}
 
 	cancelPorts = (): void => {
-		if (!this.#ports.isPending) this.confirmingPorts = false
+		if (this.#ports.isPending) return
+		this.confirmingPorts = false
+		this.portsError = null
 	}
 
 	savePorts = async (): Promise<void> => {
 		if (this.#ports.isPending) return
-		await this.#save(
-			() => this.#ports.mutateAsync({ http: this.httpPort, https: this.httpsPort }),
-			m.admin_ports_saved(),
-			(proxy) => this.#loadPorts(proxy),
-		)
-		this.confirmingPorts = false
+		this.portsError = null
+		try {
+			const settings = await this.#ports.mutateAsync({
+				http: this.httpPort,
+				https: this.httpsPort,
+			})
+			if (settings.proxy) this.#loadPorts(settings.proxy)
+			toast.success(m.admin_ports_saved())
+			this.confirmingPorts = false
+		} catch (error) {
+			const fieldError = adminFieldError(error)
+			if (fieldError && isProxyField(fieldError.field)) {
+				// Un puerto que el backend rechaza va a su campo, en la tarjeta.
+				this.errors = { ...this.errors, [fieldError.field]: fieldError.message }
+				this.confirmingPorts = false
+				return
+			}
+			this.portsError = adminErrorMessage(error)
+		}
 	}
 
 	openCloudflare = (): void => {

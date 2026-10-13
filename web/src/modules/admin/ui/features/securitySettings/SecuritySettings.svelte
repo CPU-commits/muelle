@@ -113,6 +113,7 @@
 	confirmLabel={m.admin_security_lockout_confirm()}
 	cancelLabel={m.common_cancel()}
 	loading={vm.isSaving}
+	error={vm.lockoutError}
 	onConfirm={vm.confirmLockout}
 	onCancel={vm.cancelLockout}
 />

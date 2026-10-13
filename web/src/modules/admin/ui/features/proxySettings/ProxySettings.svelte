@@ -254,6 +254,7 @@
 	confirmLabel={m.admin_ports_confirm()}
 	cancelLabel={m.common_cancel()}
 	loading={vm.isSavingPorts}
+	error={vm.portsError}
 	onConfirm={vm.savePorts}
 	onCancel={vm.cancelPorts}
 />

@@ -6,7 +6,6 @@ import {
 } from '@tanstack/svelte-query'
 import { adminUseCases } from '../../container'
 import type {
-	AuditEventId,
 	RegistryInput,
 	Settings,
 	UpdateProxyPortsInput,
@@ -33,8 +32,8 @@ export function auditQuery() {
 	return infiniteQueryOptions({
 		queryKey: adminKeys.audit(),
 		queryFn: ({ pageParam, signal }) => adminUseCases.listAudit({ before: pageParam }, signal),
-		initialPageParam: null as AuditEventId | null,
-		getNextPageParam: (lastPage) => lastPage.nextBefore,
+		initialPageParam: null as string | null,
+		getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
 		staleTime: 0,
 	})
 }

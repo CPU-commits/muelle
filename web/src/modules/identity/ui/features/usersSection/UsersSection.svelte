@@ -90,7 +90,8 @@
 	open={vm.invite !== null}
 	title={m.identity_invite_title()}
 	description={m.identity_invite_body()}
-	onClose={vm.keepInviteOpen}
+	dismissible={false}
+	onClose={vm.closeInvite}
 >
 	{#if vm.invite}
 		<div class={inviteBody}>
@@ -105,7 +106,7 @@
 							value={vm.invite?.url ?? ''}
 							onfocus={(event) => event.currentTarget.select()}
 						/>
-						<CopyButton value={vm.invite?.url ?? ''} />
+						<CopyButton value={vm.invite?.url ?? ''} target={a11y.id} />
 					</div>
 				{/snippet}
 			</Field>
@@ -124,6 +125,7 @@
 	confirmLabel={vm.confirmLabel}
 	cancelLabel={m.common_cancel()}
 	loading={vm.isConfirming}
+	error={vm.confirmError}
 	onConfirm={vm.confirm}
 	onCancel={vm.cancel}
 />

@@ -1,5 +1,6 @@
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { UnavailableError, ValidationError } from '@/shared/domain'
+import { describeError } from '@/shared/ui'
+import { ValidationError } from '@/shared/domain'
 import {
 	InvalidAcmeEmail,
 	InvalidCidr,
@@ -17,8 +18,8 @@ export function adminErrorMessage(error: unknown): string {
 	if (error instanceof TotpRequiredFirst) return m.admin_security_totp_first()
 	if (error instanceof RegistryExists) return m.admin_error_registry_exists()
 	if (error instanceof RegistryNotFound) return m.admin_error_registry_not_found()
-	if (error instanceof UnavailableError) return m.common_unavailable()
-	return m.common_error_generic()
+	// Lo común (sin red, fase pendiente, MUELLE_PANEL_ORIGIN mal, demasiados intentos…).
+	return describeError(error)
 }
 
 export interface FieldError {

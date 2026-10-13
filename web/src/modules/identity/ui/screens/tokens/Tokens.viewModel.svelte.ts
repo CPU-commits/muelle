@@ -63,6 +63,8 @@ export class TokensViewModel {
 	/** El último token creado, con su valor en claro. Solo vive acá hasta "Listo". */
 	created = $state.raw<CreatedApiToken | null>(null)
 	revoking = $state.raw<ApiToken | null>(null)
+	/** Por qué falló revocar; el diálogo sigue abierto y lo muestra adentro. */
+	revokeError = $state<string | null>(null)
 
 	readonly #client = useQueryClient()
 	readonly #tokens = createQuery(() => tokensQuery())
@@ -151,11 +153,14 @@ export class TokensViewModel {
 	}
 
 	askRevoke = (token: ApiToken): void => {
+		this.revokeError = null
 		this.revoking = token
 	}
 
 	cancelRevoke = (): void => {
-		if (!this.#revoke.isPending) this.revoking = null
+		if (this.#revoke.isPending) return
+		this.revoking = null
+		this.revokeError = null
 	}
 
 	confirmRevoke = async (): Promise<void> => {
@@ -165,11 +170,14 @@ export class TokensViewModel {
 			await this.#revoke.mutateAsync(token.id)
 			toast.success(m.identity_tokens_revoked())
 		} catch (error) {
-			if (error instanceof TokenNotFound) toast.info(m.identity_tokens_already_revoked())
-			else toast.error(m.identity_tokens_revoke_error(), identityErrorMessage(error))
-		} finally {
-			if (this.created?.token.id === token.id) this.created = null
-			this.revoking = null
+			if (!(error instanceof TokenNotFound)) {
+				this.revokeError = identityErrorMessage(error)
+				return
+			}
+			toast.info(m.identity_tokens_already_revoked())
 		}
+		// Revocado (o ya lo estaba): se va de la lista y, si era el nuevo, su tarjeta también.
+		if (this.created?.token.id === token.id) this.created = null
+		this.revoking = null
 	}
 }

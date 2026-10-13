@@ -1,6 +1,7 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import type { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { authKeys } from '@/modules/auth'
 import { UnavailableError } from '@/shared/domain'
 import type { Settings } from '../../../../domain'
@@ -62,7 +63,7 @@ const PHASE_3: Settings = {
 }
 
 function client(): QueryClient {
-	const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+	const queryClient = createQueryClient({ retry: false })
 	queryClient.setQueryData(authKeys.me(), {
 		username: 'felipe',
 		totpEnabled: true,
@@ -74,7 +75,7 @@ function client(): QueryClient {
 describe('SettingsScreen', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		mocks.listAudit.mockResolvedValue({ events: [], nextBefore: null })
+		mocks.listAudit.mockResolvedValue({ items: [], nextCursor: null })
 		mocks.listUsers.mockResolvedValue([
 			{ username: 'felipe', totpEnabled: true, createdAt: new Date('2026-10-09T12:00:00Z') },
 		])

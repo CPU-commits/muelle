@@ -1,5 +1,6 @@
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { UnavailableError, ValidationError } from '@/shared/domain'
+import { describeError } from '@/shared/ui'
+import { ValidationError } from '@/shared/domain'
 import {
 	CannotDeleteSelf,
 	InvalidTokenExpiry,
@@ -18,8 +19,8 @@ export function identityErrorMessage(error: unknown): string {
 	if (error instanceof UserNotFound) return m.identity_error_user_not_found()
 	if (error instanceof TokenNotFound) return m.identity_tokens_already_revoked()
 	if (error instanceof TokenScopeNotFound) return m.identity_error_scope_not_found()
-	if (error instanceof UnavailableError) return m.common_unavailable()
-	return m.common_error_generic()
+	// Lo común (sin red, fase pendiente, MUELLE_PANEL_ORIGIN mal, demasiados intentos…).
+	return describeError(error)
 }
 
 /** Los campos del formulario de un token. */
