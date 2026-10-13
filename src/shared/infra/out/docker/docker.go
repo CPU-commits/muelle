@@ -134,6 +134,10 @@ type Service struct {
 	DesiredTasks uint64
 	// HasHealthcheck dice si sus contenedores tienen un healthcheck activo.
 	HasHealthcheck bool
+	// MemoryLimitBytes y NanoCPUs son los límites de cada tarea
+	// (deploy.resources.limits); 0 si no tiene.
+	MemoryLimitBytes int64
+	NanoCPUs         int64
 	// Update es nil si el servicio nunca se actualizó (recién creado).
 	Update    *UpdateStatus
 	Version   uint64 // índice de la versión del spec; sube con cada cambio

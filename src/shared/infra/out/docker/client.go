@@ -161,6 +161,9 @@ func toService(s swarm.Service) Service {
 			out.HasHealthcheck = true
 		}
 	}
+	if r := s.Spec.TaskTemplate.Resources; r != nil && r.Limits != nil {
+		out.MemoryLimitBytes, out.NanoCPUs = r.Limits.MemoryBytes, r.Limits.NanoCPUs
+	}
 	if r := s.Spec.Mode.Replicated; r != nil && r.Replicas != nil {
 		n := *r.Replicas
 		out.Replicas = &n

@@ -212,10 +212,13 @@ func TestListServicesFiltersByLabel(t *testing.T) {
 					"Name":   "auditfy_staging_api_api",
 					"Labels": map[string]string{"muelle.app": "api"},
 					"Mode":   map[string]any{"Replicated": map[string]any{"Replicas": 2}},
-					"TaskTemplate": map[string]any{"ContainerSpec": map[string]any{
-						"Image":       "ghcr.io/x/api@sha256:abc",
-						"Healthcheck": map[string]any{"Test": []string{"CMD", "wget", "-q"}},
-					}},
+					"TaskTemplate": map[string]any{
+						"ContainerSpec": map[string]any{
+							"Image":       "ghcr.io/x/api@sha256:abc",
+							"Healthcheck": map[string]any{"Test": []string{"CMD", "wget", "-q"}},
+						},
+						"Resources": map[string]any{"Limits": map[string]any{"MemoryBytes": 512 << 20, "NanoCPUs": 1500000000}},
+					},
 				},
 				"ServiceStatus": map[string]any{"RunningTasks": 1, "DesiredTasks": 2},
 				"UpdateStatus":  map[string]any{"State": "rollback_completed", "Message": "rollback completed"},
@@ -239,7 +242,8 @@ func TestListServicesFiltersByLabel(t *testing.T) {
 	}
 	s := got[0]
 	if s.Name != "auditfy_staging_api_api" || s.Replicas == nil || *s.Replicas != 2 || s.RunningTasks != 1 || s.DesiredTasks != 2 ||
-		!s.HasHealthcheck || s.Image != "ghcr.io/x/api@sha256:abc" || s.Update == nil || s.Update.State != UpdateRollbackCompleted {
+		!s.HasHealthcheck || s.Image != "ghcr.io/x/api@sha256:abc" || s.Update == nil || s.Update.State != UpdateRollbackCompleted ||
+		s.MemoryLimitBytes != 512<<20 || s.NanoCPUs != 1500000000 {
 		t.Fatalf("servicio: %+v (update %+v)", s, s.Update)
 	}
 }
