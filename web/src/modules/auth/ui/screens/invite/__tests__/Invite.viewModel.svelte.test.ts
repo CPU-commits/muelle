@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
 	acceptInvite: vi.fn(),
 	goto: vi.fn(),
 	replaceState: vi.fn(),
+	// Como SvelteKit: el callback corre cuando terminó la navegación, después de montar.
+	afterNavigate: vi.fn((callback: () => void) => queueMicrotask(callback)),
 }))
 
 vi.mock('@/modules/auth/container', () => ({
@@ -25,7 +27,11 @@ vi.mock('@/modules/auth/container', () => ({
 	},
 }))
 
-vi.mock('$app/navigation', () => ({ goto: mocks.goto, replaceState: mocks.replaceState }))
+vi.mock('$app/navigation', () => ({
+	afterNavigate: mocks.afterNavigate,
+	goto: mocks.goto,
+	replaceState: mocks.replaceState,
+}))
 
 const values = { username: 'soporte', password: 'clave-de-soporte', passwordRepeat: '' }
 

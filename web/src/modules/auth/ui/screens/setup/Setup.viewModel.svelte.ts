@@ -1,7 +1,6 @@
-import { goto, replaceState } from '$app/navigation'
+import { afterNavigate, goto, replaceState } from '$app/navigation'
 import { resolve } from '$app/paths'
 import { createMutation, useQueryClient } from '@tanstack/svelte-query'
-import { onMount } from 'svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { setupMutation } from '../../../data'
 import { AlreadySetUp, InvalidInvite, MissingInviteToken } from '../../../domain'
@@ -29,7 +28,16 @@ export class SetupViewModel {
 	// de pantalla ni en el Referer. Si se recarga, /setup sin token pide el link de nuevo.
 	constructor(token: () => string | null) {
 		this.#token = token()
-		if (this.hasToken) onMount(() => replaceState(resolve('/setup'), {}))
+		if (!this.hasToken) return
+		// Con el router andando: abierto directo (el link llega por mail o lo imprime
+		// `muelle serve`), en el `onMount` SvelteKit todavía no arrancó y replaceState
+		// rompe. afterNavigate corre después de la primera navegación; una sola vez.
+		let dropped = false
+		afterNavigate(() => {
+			if (dropped) return
+			dropped = true
+			replaceState(resolve('/setup'), {})
+		})
 	}
 
 	get hasToken(): boolean {
