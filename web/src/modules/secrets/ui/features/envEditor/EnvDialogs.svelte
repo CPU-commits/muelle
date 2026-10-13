@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
-	import { Button, Checkbox, ConfirmDialog, Field, Modal, Textarea } from '@/shared/ui'
+	import { Banner, Button, Checkbox, ConfirmDialog, Field, Modal, Textarea } from '@/shared/ui'
 	import type { EnvEditorViewModel } from './EnvEditor.viewModel.svelte.ts'
 	import { editForm, editNote } from './styles.css'
 
@@ -52,6 +52,8 @@
 			/>
 			{#if vm.editMakesSecret}
 				<p class={editNote}>{m.secrets_edit_to_secret_note()}</p>
+			{:else if vm.editConfirmingReveal}
+				<Banner tone="warn" title={m.secrets_edit_to_plain_note()} />
 			{:else if vm.editRevealsSecret}
 				<p class={editNote}>{m.secrets_edit_to_plain_note()}</p>
 			{/if}
@@ -67,14 +69,16 @@
 		>
 			{m.common_cancel()}
 		</Button>
+		<!-- Dejar a la vista una secreta tiene un segundo paso: el botón lo dice. -->
 		<Button
 			type="submit"
 			form={`${id}-edit`}
 			size="sm"
+			variant={vm.editConfirmingReveal ? 'danger' : 'primary'}
 			loading={vm.pendingAction === 'edit'}
 			disabled={!vm.editHasChanges || (vm.isSaving && vm.pendingAction !== 'edit')}
 		>
-			{m.common_save()}
+			{vm.editConfirmingReveal ? m.secrets_edit_reveal_confirm() : m.common_save()}
 		</Button>
 	{/snippet}
 </Modal>

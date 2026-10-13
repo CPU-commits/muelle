@@ -2,6 +2,7 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { ForbiddenError, UnavailableError, ValidationError } from '@/shared/domain'
 import {
 	type DotenvIssue,
+	type DotenvSwallowed,
 	type EnvKeyProblem,
 	type EnvLimit,
 	EnvLimitExceeded,
@@ -64,13 +65,22 @@ export function secretsErrorMessage(error: unknown, kind: EnvOwnerKind): string 
 	if (error instanceof EnvOwnerNotFound) return notFoundMessage(kind)
 	if (error instanceof ForbiddenError) return m.secrets_error_out_of_scope()
 	if (error instanceof UnavailableError) return m.common_unavailable()
-	// Un 422 con una regla que el panel no conoce: el motivo que manda el backend. Las
-	// subclases (EmptyEnvPatch…) tienen su `name` y un mensaje para logs, no para la UI.
-	if (error instanceof ValidationError && error.name === 'ValidationError') return error.message
+	// Un 422 con una regla que el panel no conoce (EnvRejected) o cualquier otra validación:
+	// un texto propio y traducido. El motivo del backend va en español: queda para logs.
+	if (error instanceof ValidationError) return m.secrets_error_rejected()
 	return m.common_error_generic()
 }
 
 /** "Línea 3: COMPOSE_X: el prefijo COMPOSE_ está reservado." */
+/** "Línea 4: parece la variable B, pero quedó dentro del valor de PEM…" */
+export function dotenvSwallowedMessage(swallowed: DotenvSwallowed): string {
+	return m.secrets_import_swallowed({
+		line: swallowed.line,
+		looksLike: swallowed.looksLike,
+		key: swallowed.key,
+	})
+}
+
 export function dotenvIssueMessage(issue: DotenvIssue): string {
 	const key = issue.key ?? ''
 	const message = (() => {

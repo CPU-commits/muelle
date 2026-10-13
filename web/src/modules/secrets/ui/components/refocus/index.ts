@@ -1,1 +1,1 @@
-export { refocusOnClose } from './refocus'
+export { focusOnRequest, refocusOnClose } from './refocus'

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { getLocale, overwriteGetLocale } from '@/shared/ui/i18n/paraglide/runtime'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { ForbiddenError, UnavailableError, ValidationError } from '@/shared/domain'
 import {
@@ -6,6 +7,7 @@ import {
 	EnvLimitExceeded,
 	EnvOutOfScope,
 	EnvOwnerNotFound,
+	EnvRejected,
 	InvalidEnvKey,
 	MAX_ENV_VARS,
 } from '../../../../domain'
@@ -32,12 +34,35 @@ describe('secretsErrorMessage', () => {
 		expect(secretsErrorMessage(new UnavailableError('x'), 'app')).toBe(m.common_unavailable())
 	})
 
-	it('un 422 del backend muestra su motivo; un error de programación, el genérico', () => {
+	it('un 422 nunca muestra el texto del backend: el motivo desconocido tiene un texto propio', () => {
+		const rejected = new EnvRejected('set', 'una regla nueva del backend')
+		expect(secretsErrorMessage(rejected, 'app')).toBe(m.secrets_error_rejected())
 		expect(secretsErrorMessage(new ValidationError('máximo 500 claves', 'unset'), 'app')).toBe(
-			'máximo 500 claves',
+			m.secrets_error_rejected(),
 		)
-		expect(secretsErrorMessage(new EmptyEnvPatch(), 'app')).toBe(m.common_error_generic())
+		expect(secretsErrorMessage(new EmptyEnvPatch(), 'app')).toBe(m.secrets_error_rejected())
 		expect(secretsErrorMessage(new Error('?'), 'app')).toBe(m.common_error_generic())
+	})
+
+	describe('en inglés', () => {
+		const original = getLocale
+		beforeEach(() => overwriteGetLocale(() => 'en'))
+		afterEach(() => overwriteGetLocale(original))
+
+		it('los 422 salen traducidos, sin el texto en español del backend', () => {
+			const rejected = secretsErrorMessage(
+				new EnvRejected('set', 'una regla nueva del backend'),
+				'app',
+			)
+			expect(rejected).toBe("muelle didn't accept the change. Check the keys and values.")
+			expect(rejected).not.toContain('regla')
+			expect(secretsErrorMessage(new EnvLimitExceeded('size', 'set'), 'stage')).toBe(
+				'The variables add up to more than 1 MiB (keys and values).',
+			)
+			expect(secretsErrorMessage(new EnvLimitExceeded('count', 'vars'), 'app')).toBe(
+				'At most 500 variables.',
+			)
+		})
 	})
 })
 

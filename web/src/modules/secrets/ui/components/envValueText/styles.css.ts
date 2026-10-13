@@ -34,8 +34,10 @@ export const masked = style({
 	minWidth: 0,
 })
 
+// Los puntos no son el valor: que no se puedan seleccionar ni copiar.
 export const mask = style({
 	whiteSpace: 'nowrap',
+	userSelect: 'none',
 })
 
 // El candado, más apagado que el texto (como en el diseño).

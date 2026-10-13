@@ -36,6 +36,17 @@ export const keyField = style({
 
 export const valueField = style([keyField, { flex: '2 1 280px' }])
 
+// El textarea del valor arranca del alto de un input (36) y crece con el contenido
+// (`autoGrow`) hasta que conviene desplazarse.
+export const valueInput = style({
+	minHeight: theme.control.md,
+	maxHeight: '240px',
+	paddingBlock: '8px',
+	lineHeight: '18px',
+	resize: 'none',
+	overflowY: 'auto',
+})
+
 export const fieldError = style({
 	fontSize: theme.typography.fontSize[13],
 	color: theme.colors.status.errorText,

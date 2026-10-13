@@ -47,6 +47,15 @@ export const options = style({
 	gap: `${theme.space[8]} ${theme.space[24]}`,
 })
 
+// El contenedor de los problemas y avisos (una región viva: siempre en el árbol de
+// accesibilidad, nunca `display: none`). Vacío, se come el espacio del `gap` del cuerpo.
+export const live = style({
+	display: 'flex',
+	flexDirection: 'column',
+	gap: theme.space[10],
+	selectors: { '&:empty': { marginBottom: `calc(-1 * ${theme.space[14]})` } },
+})
+
 export const issues = style({
 	display: 'flex',
 	flexDirection: 'column',

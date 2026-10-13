@@ -3,17 +3,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
-import { UnavailableError, ValidationError } from '@/shared/domain'
+import { UnavailableError } from '@/shared/domain'
 import type { EnvEditorViewModel } from '..'
 import {
 	appOwner,
-	type EnvKey,
+	EnvLimitExceeded,
 	EnvOwnerNotFound,
 	type EnvOwner,
+	EnvRejected,
 	type EnvVar,
 	InvalidEnvValue,
+	makeGetEnv,
+	makePatchEnv,
 	stageOwner,
 } from '../../../../domain'
+import {
+	FAKE_EPOCH,
+	InMemoryEnvRepository,
+} from '../../../../domain/repositories/__fakes__/inMemoryEnvRepository'
 import EditorHarness from './EditorHarness.svelte'
 
 const mocks = vi.hoisted(() => ({
@@ -21,28 +28,31 @@ const mocks = vi.hoisted(() => ({
 	patchEnv: vi.fn(),
 }))
 
-// Se mockea el CONTAINER, no la red: el test verifica lo que hace el viewModel con lo
-// que le devuelven los casos de uso.
+// Se mockea el CONTAINER, no la red: los casos de uso de verdad, sobre el fake en memoria
+// del puerto (que, como el backend, no reescribe lo que no cambia).
 vi.mock('@/modules/secrets/container', () => ({
 	secretsUseCases: { getEnv: mocks.getEnv, replaceEnv: vi.fn(), patchEnv: mocks.patchEnv },
 }))
 
-const at = new Date('2026-10-01T12:00:00Z')
-const plain = (key: string, value: string): EnvVar => ({
-	key: key as EnvKey,
-	secret: false,
-	value,
-	updatedAt: at,
-})
-const secret = (key: string): EnvVar => ({
-	key: key as EnvKey,
-	secret: true,
-	value: null,
-	updatedAt: at,
-})
-
 const api = appOwner('auditfy', 'staging', 'api')
-const APP_VARS = [plain('LOG_LEVEL', 'info'), plain('PORT', '3000'), secret('JWT_SECRET')]
+const API_LABEL = 'app:auditfy/staging/api'
+const LATER = new Date('2026-10-05T12:00:00.000Z')
+
+let fake: InMemoryEnvRepository
+
+function seedFake(): InMemoryEnvRepository {
+	return new InMemoryEnvRepository({
+		owners: {
+			[API_LABEL]: [
+				{ key: 'JWT_SECRET', value: 'jwt-viejo', secret: true },
+				{ key: 'LOG_LEVEL', value: 'info', secret: false },
+				{ key: 'PORT', value: '3000', secret: false },
+			],
+			'stage:auditfy/staging': [{ key: 'LOG_LEVEL', value: 'debug', secret: false }],
+		},
+		now: () => LATER,
+	})
+}
 
 async function mount(
 	owner: EnvOwner = api,
@@ -70,12 +80,19 @@ function lastPatch() {
 	return mocks.patchEnv.mock.calls.at(-1)?.[0]
 }
 
+function byKey(vm: EnvEditorViewModel, key: string): EnvVar {
+	const envVar = vm.vars.find((candidate) => candidate.key === key)
+	if (!envVar) throw new Error(`no está ${key}`)
+	return envVar
+}
+
 describe('EnvEditorViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		toasts.items = []
-		mocks.getEnv.mockResolvedValue(APP_VARS)
-		mocks.patchEnv.mockResolvedValue(undefined)
+		fake = seedFake()
+		mocks.getEnv.mockImplementation(makeGetEnv({ env: fake }))
+		mocks.patchEnv.mockImplementation(makePatchEnv({ env: fake }))
 	})
 
 	it('carga las variables y las filtra con el buscador', async () => {
@@ -135,6 +152,7 @@ describe('EnvEditorViewModel', () => {
 
 		it('manda un PATCH secreto por defecto, limpia el formulario y avisa', async () => {
 			const vm = await mount()
+			const before = vm.vars
 			vm.setNewKey('  API_KEY ')
 			vm.setNewValue('k-1')
 
@@ -142,18 +160,30 @@ describe('EnvEditorViewModel', () => {
 
 			expect(lastPatch()).toEqual({
 				owner: api,
-				current: APP_VARS,
+				current: before,
 				set: [['API_KEY', 'k-1']],
 				secret: true,
 			})
 			expect(vm.newKey).toBe('')
 			expect(vm.newValue).toBe('')
 			expect(vm.savedChanges).toBe(1)
+			expect(byKey(vm, 'API_KEY')).toMatchObject({ secret: true, value: null })
 			expect(toasts.items.at(-1)).toMatchObject({
 				tone: 'success',
 				title: m.secrets_add_success(),
 				description: m.secrets_saved_key_app({ key: 'API_KEY' }),
 			})
+		})
+
+		it('un valor de varias líneas viaja tal cual, con sus saltos de línea', async () => {
+			const pem = '-----BEGIN KEY-----\nMIIBIjAN\nQUJD==\n-----END KEY-----\n'
+			const vm = await mount()
+			vm.setNewKey('TLS_KEY')
+			vm.setNewValue(pem)
+
+			await vm.submitAdd()
+
+			expect(lastPatch()).toMatchObject({ set: [['TLS_KEY', pem]] })
 		})
 
 		it('sin marcar como secreta manda secret: false, y la siguiente vuelve a ser secreta', async () => {
@@ -168,19 +198,21 @@ describe('EnvEditorViewModel', () => {
 			expect(vm.newSecret).toBe(true)
 		})
 
-		it('un 422 del backend queda junto al formulario, con su motivo', async () => {
-			mocks.patchEnv.mockRejectedValueOnce(
-				new ValidationError('las variables suman más de 1 MiB (claves y valores)', 'set'),
-			)
+		it('un 422 queda junto al formulario, con un texto propio', async () => {
+			mocks.patchEnv.mockRejectedValueOnce(new EnvLimitExceeded('size', 'set'))
 			const vm = await mount()
 			vm.setNewKey('BIG')
 			vm.setNewValue('x')
 
 			await expect(vm.submitAdd()).resolves.toBe(false)
 
-			expect(vm.newFormError).toBe('las variables suman más de 1 MiB (claves y valores)')
+			expect(vm.newFormError).toBe(m.secrets_error_limit_size())
 			expect(vm.newKey).toBe('BIG')
 			expect(vm.savedChanges).toBe(0)
+
+			mocks.patchEnv.mockRejectedValueOnce(new EnvRejected('set', 'una regla nueva'))
+			await vm.submitAdd()
+			expect(vm.newFormError).toBe(m.secrets_error_rejected())
 
 			mocks.patchEnv.mockRejectedValueOnce(new InvalidEnvValue('too_large', 'BIG', 'set'))
 			await vm.submitAdd()
@@ -205,9 +237,8 @@ describe('EnvEditorViewModel', () => {
 	describe('editar y reemplazar', () => {
 		it('una no secreta se edita con su valor; sin cambios no manda nada', async () => {
 			const vm = await mount()
-			const port = APP_VARS[1] as EnvVar
 
-			vm.openEdit(port)
+			vm.openEdit(byKey(vm, 'PORT'))
 			expect(vm.editValue).toBe('3000')
 			expect(vm.editSecret).toBe(false)
 			expect(vm.editHasChanges).toBe(false)
@@ -215,16 +246,17 @@ describe('EnvEditorViewModel', () => {
 			expect(mocks.patchEnv).not.toHaveBeenCalled()
 			expect(vm.editing).toBeNull()
 
-			vm.openEdit(port)
+			vm.openEdit(byKey(vm, 'PORT'))
 			vm.setEditValue('8080')
 			await vm.submitEdit()
 			expect(lastPatch()).toMatchObject({ set: [['PORT', '8080']], secret: false })
 			expect(vm.editing).toBeNull()
+			expect(byKey(vm, 'PORT')).toMatchObject({ value: '8080' })
 		})
 
 		it('pasarla a secreta avisa que después no se va a poder leer', async () => {
 			const vm = await mount()
-			vm.openEdit(APP_VARS[1] as EnvVar)
+			vm.openEdit(byKey(vm, 'PORT'))
 
 			vm.setEditSecret(true)
 
@@ -234,33 +266,62 @@ describe('EnvEditorViewModel', () => {
 			expect(lastPatch()).toMatchObject({ set: [['PORT', '3000']], secret: true })
 		})
 
-		it('una secreta no se lee: se reemplaza con un valor nuevo obligatorio', async () => {
+		it('una secreta no se lee: se reemplaza, también con un valor vacío', async () => {
 			const vm = await mount()
-			vm.openEdit(APP_VARS[2] as EnvVar)
+			vm.openEdit(byKey(vm, 'JWT_SECRET'))
 
 			expect(vm.editTitle).toBe(m.secrets_replace_title({ key: 'JWT_SECRET' }))
 			expect(vm.editValue).toBe('')
+			await vm.submitEdit()
+
+			expect(lastPatch()).toMatchObject({ set: [['JWT_SECRET', '']], secret: true })
+			expect(vm.editing).toBeNull()
+		})
+
+		it('dejarla a la vista pide un segundo paso, que se cancela al cambiar algo', async () => {
+			const vm = await mount()
+			vm.openEdit(byKey(vm, 'JWT_SECRET'))
+			vm.setEditValue('visible')
 			vm.setEditSecret(false)
 			expect(vm.editRevealsSecret).toBe(true)
-			vm.setEditSecret(true)
-			await vm.submitEdit()
-			expect(vm.editError).toBe(m.secrets_error_new_value_required())
+
+			await expect(vm.submitEdit()).resolves.toBe(false)
+			expect(vm.editConfirmingReveal).toBe(true)
 			expect(mocks.patchEnv).not.toHaveBeenCalled()
 
-			vm.setEditValue('nuevo')
+			vm.setEditValue('otro')
+			expect(vm.editConfirmingReveal).toBe(false)
+
 			await vm.submitEdit()
-			expect(lastPatch()).toMatchObject({ set: [['JWT_SECRET', 'nuevo']], secret: true })
+			await expect(vm.submitEdit()).resolves.toBe(true)
+			expect(lastPatch()).toMatchObject({ set: [['JWT_SECRET', 'otro']], secret: false })
+		})
+
+		it('reescribir una secreta con el mismo valor no cuenta como cambio', async () => {
+			const vm = await mount()
+			vm.openEdit(byKey(vm, 'JWT_SECRET'))
+			vm.setEditValue('jwt-viejo')
+
+			await expect(vm.submitEdit()).resolves.toBe(true)
+
+			expect(mocks.patchEnv).toHaveBeenCalledTimes(1)
+			expect(vm.savedChanges).toBe(0)
+			expect(toasts.items.at(-1)).toMatchObject({
+				tone: 'info',
+				title: m.secrets_nothing_changed(),
+				description: m.secrets_nothing_changed_key({ key: 'JWT_SECRET' }),
+			})
 		})
 
 		it('un 422 al editar queda en el modal, que sigue abierto', async () => {
-			mocks.patchEnv.mockRejectedValueOnce(new ValidationError('motivo del backend', 'set'))
+			mocks.patchEnv.mockRejectedValueOnce(new EnvRejected('set', 'motivo del backend'))
 			const vm = await mount()
-			vm.openEdit(APP_VARS[1] as EnvVar)
+			vm.openEdit(byKey(vm, 'PORT'))
 			vm.setEditValue('9000')
 
 			await vm.submitEdit()
 
-			expect(vm.editError).toBe('motivo del backend')
+			expect(vm.editError).toBe(m.secrets_error_rejected())
 			expect(vm.editing?.key).toBe('PORT')
 		})
 	})
@@ -268,22 +329,24 @@ describe('EnvEditorViewModel', () => {
 	describe('marcar como secreta y borrar', () => {
 		it('marcar como secreta reescribe el mismo valor con secret: true', async () => {
 			const vm = await mount()
-			vm.askSecure(APP_VARS[0] as EnvVar)
+			vm.askSecure(byKey(vm, 'LOG_LEVEL'))
 
 			await vm.confirmSecure()
 
 			expect(lastPatch()).toMatchObject({ set: [['LOG_LEVEL', 'info']], secret: true })
 			expect(vm.confirmingSecret).toBeNull()
+			expect(byKey(vm, 'LOG_LEVEL')).toMatchObject({ secret: true, value: null })
 		})
 
 		it('marcar como secreta usa el valor de la lista al confirmar, no el del diálogo', async () => {
 			const vm = await mount()
-			vm.askSecure(APP_VARS[0] as EnvVar)
+			vm.askSecure(byKey(vm, 'LOG_LEVEL'))
 
 			// Mientras el diálogo estaba abierto, otra pestaña cambió el valor.
-			mocks.getEnv.mockResolvedValue([plain('LOG_LEVEL', 'warn'), ...APP_VARS.slice(1)])
+			const stored = fake.owners.get(API_LABEL)?.find((envVar) => envVar.key === 'LOG_LEVEL')
+			if (stored) stored.value = 'warn'
 			vm.retry()
-			await vi.waitFor(() => expect(vm.vars[0]).toMatchObject({ value: 'warn' }))
+			await vi.waitFor(() => expect(byKey(vm, 'LOG_LEVEL')).toMatchObject({ value: 'warn' }))
 			await vm.confirmSecure()
 
 			expect(lastPatch()).toMatchObject({ set: [['LOG_LEVEL', 'warn']], secret: true })
@@ -291,45 +354,84 @@ describe('EnvEditorViewModel', () => {
 
 		it('una secreta no se puede "marcar como secreta"', async () => {
 			const vm = await mount()
-			vm.askSecure(APP_VARS[2] as EnvVar)
+			vm.askSecure(byKey(vm, 'JWT_SECRET'))
 			expect(vm.confirmingSecret).toBeNull()
 		})
 
 		it('borrar manda unset; si pisaba al stage, el texto lo dice', async () => {
 			const vm = await mount(api, new Set(['LOG_LEVEL']))
 
-			vm.askDelete(APP_VARS[0] as EnvVar)
+			vm.askDelete(byKey(vm, 'LOG_LEVEL'))
 			expect(vm.deleteBody).toBe(m.secrets_delete_body_override())
-			vm.askDelete(APP_VARS[1] as EnvVar)
+			vm.askDelete(byKey(vm, 'PORT'))
 			expect(vm.deleteBody).toBe(m.secrets_delete_body_app())
 
 			await vm.confirmDelete()
 			expect(lastPatch()).toMatchObject({ unset: ['PORT'] })
 			expect(lastPatch()).not.toHaveProperty('set')
 			expect(vm.confirmingDelete).toBeNull()
+			expect(vm.vars.map((envVar) => envVar.key)).not.toContain('PORT')
 		})
 
 		it('en el stage, el texto de borrar habla de sus apps', async () => {
 			const vm = await mount(stageOwner('auditfy', 'staging'))
-			vm.askDelete(APP_VARS[0] as EnvVar)
+			vm.askDelete(byKey(vm, 'LOG_LEVEL'))
 			expect(vm.deleteBody).toBe(m.secrets_delete_body_stage())
 		})
 
 		it('las opciones de una secreta no ofrecen editar ni leer', async () => {
 			const vm = await mount()
-			const ids = (envVar: EnvVar) => vm.menuFor(envVar).map((entry) => entry.id)
+			const ids = (key: string) => vm.menuFor(byKey(vm, key)).map((entry) => entry.id)
 
-			expect(ids(APP_VARS[2] as EnvVar)).toEqual(['replace', 'separator', 'delete'])
-			expect(ids(APP_VARS[1] as EnvVar)).toEqual(['edit', 'secure', 'separator', 'delete'])
+			expect(ids('JWT_SECRET')).toEqual(['replace', 'separator', 'delete'])
+			expect(ids('PORT')).toEqual(['edit', 'secure', 'separator', 'delete'])
+		})
+	})
+
+	describe('el foco al cerrar un diálogo de fila', () => {
+		it('vuelve a los ⋯ de la fila al cancelar o guardar', async () => {
+			const vm = await mount()
+			expect(vm.focusSeqFor('PORT')).toBe(0)
+
+			vm.openEdit(byKey(vm, 'PORT'))
+			vm.closeEdit()
+			const afterCancel = vm.focusSeqFor('PORT')
+			expect(afterCancel).toBeGreaterThan(0)
+			expect(vm.focusSeqFor('LOG_LEVEL')).toBe(0)
+
+			vm.openEdit(byKey(vm, 'PORT'))
+			vm.setEditValue('8080')
+			await vm.submitEdit()
+			expect(vm.focusSeqFor('PORT')).toBeGreaterThan(afterCancel)
+
+			vm.askSecure(byKey(vm, 'LOG_LEVEL'))
+			vm.cancelSecure()
+			expect(vm.focusSeqFor('LOG_LEVEL')).toBeGreaterThan(0)
+
+			vm.askDelete(byKey(vm, 'PORT'))
+			vm.cancelDelete()
+			expect(vm.focusSeqFor('PORT')).toBeGreaterThan(0)
+			expect(vm.headingFocusSeq).toBe(0)
+		})
+
+		it('si la fila se borró, va al título de la lista', async () => {
+			const vm = await mount()
+			vm.askDelete(byKey(vm, 'PORT'))
+
+			await vm.confirmDelete()
+
+			expect(vm.headingFocusSeq).toBeGreaterThan(0)
+			expect(vm.focusSeqFor('PORT')).toBe(0)
 		})
 	})
 
 	it('un PATCH a la vez: mientras guarda, otra acción no sale', async () => {
 		let release: () => void = () => {}
+		const patchEnv = makePatchEnv({ env: fake })
 		mocks.patchEnv.mockImplementationOnce(
-			() =>
+			(input) =>
 				new Promise<void>((resolve) => {
-					release = resolve
+					release = () => void patchEnv(input).then(resolve)
 				}),
 		)
 		const vm = await mount()
@@ -337,7 +439,7 @@ describe('EnvEditorViewModel', () => {
 		const first = vm.submitAdd()
 
 		await vi.waitFor(() => expect(vm.isAdding).toBe(true))
-		vm.askDelete(APP_VARS[1] as EnvVar)
+		vm.askDelete(byKey(vm, 'PORT'))
 		await expect(vm.confirmDelete()).resolves.toBe(false)
 		vm.setNewKey('NEXT')
 		release()
@@ -345,5 +447,14 @@ describe('EnvEditorViewModel', () => {
 		expect(mocks.patchEnv).toHaveBeenCalledTimes(1)
 		// Lo que se escribió mientras se guardaba no se borra.
 		expect(vm.newKey).toBe('NEXT')
+	})
+
+	it('las fechas del fake son las del backend: lo que no cambió conserva la suya', async () => {
+		const vm = await mount()
+		vm.setNewKey('NEW')
+		await vm.submitAdd()
+
+		expect(byKey(vm, 'PORT').updatedAt).toEqual(FAKE_EPOCH)
+		expect(byKey(vm, 'NEW').updatedAt).toEqual(LATER)
 	})
 })

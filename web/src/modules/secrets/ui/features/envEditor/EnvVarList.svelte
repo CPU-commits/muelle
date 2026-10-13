@@ -12,6 +12,7 @@
 		SearchInput,
 	} from '@/shared/ui'
 	import { EnvValueText } from '../../components/envValueText'
+	import { focusOnRequest } from '../../components/refocus'
 	import type { EnvEditorViewModel } from './EnvEditor.viewModel.svelte.ts'
 	import {
 		keyCell,
@@ -28,7 +29,8 @@
 	} from './styles.css'
 
 	// Las variables propias del dueño, editables. En la app, las que también tiene el stage
-	// llevan "pisa al stage": la de la app gana.
+	// llevan "pisa al stage": la de la app gana. Al cerrar un diálogo de una fila, el foco
+	// vuelve a sus ⋯ (o al título, si se borró).
 	type Props = { vm: EnvEditorViewModel; title: string; emptyTitle: string; emptyBody: string }
 
 	let { vm, title, emptyTitle, emptyBody }: Props = $props()
@@ -39,7 +41,14 @@
 <section class={listSection} aria-labelledby={`${id}-title`}>
 	<div class={listHeader}>
 		<div class={listHeading}>
-			<h2 id={`${id}-title`} class={listTitle}>{title}</h2>
+			<h2
+				id={`${id}-title`}
+				class={listTitle}
+				tabindex="-1"
+				{@attach focusOnRequest(() => vm.headingFocusSeq)}
+			>
+				{title}
+			</h2>
 			<span class={listMeta}>{formatNumber(vm.count)}</span>
 		</div>
 		{#if vm.count > 0}
@@ -75,7 +84,10 @@
 					>
 						{formatRelative(envVar.updatedAt)}
 					</time>
-					<span class={rowActions}>
+					<span
+						class={rowActions}
+						{@attach focusOnRequest(() => vm.focusSeqFor(envVar.key), 'button')}
+					>
 						<Menu
 							label={m.secrets_row_options({ key: envVar.key })}
 							items={vm.menuFor(envVar)}

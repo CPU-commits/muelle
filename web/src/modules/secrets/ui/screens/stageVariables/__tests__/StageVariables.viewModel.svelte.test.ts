@@ -4,7 +4,8 @@ import { render } from 'vitest-browser-svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
 import type { StageVariablesViewModel } from '..'
-import { type EnvKey, type EnvVar, stageOwner } from '../../../../domain'
+import { makeGetEnv, makePatchEnv, stageOwner } from '../../../../domain'
+import { InMemoryEnvRepository } from '../../../../domain/repositories/__fakes__/inMemoryEnvRepository'
 import StageVariablesHarness from './StageVariablesHarness.svelte'
 
 const mocks = vi.hoisted(() => ({
@@ -15,15 +16,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/modules/secrets/container', () => ({
 	secretsUseCases: { getEnv: mocks.getEnv, replaceEnv: vi.fn(), patchEnv: mocks.patchEnv },
 }))
-
-const STAGE_VARS: EnvVar[] = [
-	{
-		key: 'TZ' as EnvKey,
-		secret: false,
-		value: 'UTC',
-		updatedAt: new Date('2026-10-01T12:00:00Z'),
-	},
-]
 
 async function mount(): Promise<StageVariablesViewModel> {
 	const client = new QueryClient({
@@ -47,8 +39,11 @@ describe('StageVariablesViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		toasts.items = []
-		mocks.getEnv.mockResolvedValue(STAGE_VARS)
-		mocks.patchEnv.mockResolvedValue(undefined)
+		const fake = new InMemoryEnvRepository({
+			owners: { 'stage:auditfy/staging': [{ key: 'TZ', value: 'UTC', secret: false }] },
+		})
+		mocks.getEnv.mockImplementation(makeGetEnv({ env: fake }))
+		mocks.patchEnv.mockImplementation(makePatchEnv({ env: fake }))
 	})
 
 	it('el dueño es el stage, y un cambio deja pendientes a sus apps', async () => {

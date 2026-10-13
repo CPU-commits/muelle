@@ -2,6 +2,7 @@ export {
 	changeReasonLabel,
 	deletedKeyNote,
 	dotenvIssueMessage,
+	dotenvSwallowedMessage,
 	importedNote,
 	keyProblemMessage,
 	limitMessage,

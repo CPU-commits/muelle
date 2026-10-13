@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
-	import { Banner, Button, Checkbox, Input } from '@/shared/ui'
+	import { Banner, Button, Checkbox, Input, Textarea } from '@/shared/ui'
+	import { autoGrow } from '../../components/autoGrow'
 	import type { EnvEditorViewModel } from './EnvEditor.viewModel.svelte.ts'
 	import {
 		addCard,
@@ -12,12 +13,21 @@
 		secretToggle,
 		submitSlot,
 		valueField,
+		valueInput,
 	} from './styles.css'
 
-	// "Agregar variable": clave, valor y si es secreta (por defecto sí, como el backend).
+	// "Agregar variable": clave, valor y si es secreta (por defecto sí, como el backend). El
+	// valor es un textarea de una línea que crece: un valor pegado de varias líneas (una
+	// clave PEM) conserva sus saltos. Enter agrega; Mayús + Enter es una línea nueva.
 	let { vm }: { vm: EnvEditorViewModel } = $props()
 
 	const id = $props.id()
+
+	// Los ids que describen cada control: su error y el error del formulario.
+	const describedBy = (fieldErrorShown: boolean, fieldId: string): string | undefined =>
+		[fieldErrorShown ? fieldId : null, vm.hasNewFormError ? `${id}-form-error` : null]
+			.filter(Boolean)
+			.join(' ') || undefined
 </script>
 
 <section class={addCard} aria-labelledby={`${id}-title`}>
@@ -35,8 +45,8 @@
 				mono
 				name="key"
 				aria-label={m.secrets_add_key()}
-				aria-invalid={vm.newKeyError !== null}
-				aria-describedby={vm.newKeyError ? `${id}-key-error` : undefined}
+				aria-invalid={vm.newKeyError !== null || vm.hasNewFormError}
+				aria-describedby={describedBy(vm.newKeyError !== null, `${id}-key-error`)}
 				placeholder={m.secrets_add_key_placeholder()}
 				autocomplete="off"
 				autocapitalize="characters"
@@ -50,17 +60,25 @@
 			{/if}
 		</div>
 		<div class={valueField}>
-			<Input
+			<Textarea
+				class={valueInput}
 				mono
+				rows={1}
 				name="value"
 				aria-label={m.secrets_add_value()}
-				aria-invalid={vm.newValueError !== null}
-				aria-describedby={vm.newValueError ? `${id}-value-error` : undefined}
+				aria-invalid={vm.newValueError !== null || vm.hasNewFormError}
+				aria-describedby={describedBy(vm.newValueError !== null, `${id}-value-error`)}
 				placeholder={m.secrets_add_value_placeholder()}
 				autocomplete="off"
 				spellcheck={false}
 				value={vm.newValue}
 				oninput={(event) => vm.setNewValue(event.currentTarget.value)}
+				onkeydown={(event) => {
+					if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+					event.preventDefault()
+					event.currentTarget.form?.requestSubmit()
+				}}
+				{@attach autoGrow(() => vm.newValue)}
 			/>
 			{#if vm.newValueError}
 				<p id={`${id}-value-error`} class={fieldError} role="alert">
@@ -85,7 +103,9 @@
 		</div>
 	</form>
 	{#if vm.newFormError}
-		<Banner tone="error" title={vm.newFormError} />
+		<div id={`${id}-form-error`}>
+			<Banner tone="error" title={vm.newFormError} />
+		</div>
 	{/if}
 	<p class={note}>{m.secrets_add_note()}</p>
 </section>

@@ -3,10 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
-import { ValidationError } from '@/shared/domain'
 import type { EnvImportViewModel } from '..'
 import type { EnvEditorViewModel } from '../../envEditor'
-import { appOwner, type EnvKey, type EnvVar, MAX_ENV_VARS } from '../../../../domain'
+import {
+	appOwner,
+	EnvLimitExceeded,
+	makeGetEnv,
+	makePatchEnv,
+	MAX_ENV_VARS,
+} from '../../../../domain'
+import { InMemoryEnvRepository } from '../../../../domain/repositories/__fakes__/inMemoryEnvRepository'
 import ImportHarness from './ImportHarness.svelte'
 
 const mocks = vi.hoisted(() => ({
@@ -14,26 +20,14 @@ const mocks = vi.hoisted(() => ({
 	patchEnv: vi.fn(),
 }))
 
+// El container con los casos de uso de verdad sobre el fake en memoria del puerto.
 vi.mock('@/modules/secrets/container', () => ({
 	secretsUseCases: { getEnv: mocks.getEnv, replaceEnv: vi.fn(), patchEnv: mocks.patchEnv },
 }))
 
-const at = new Date('2026-10-01T12:00:00Z')
-const plain = (key: string, value: string): EnvVar => ({
-	key: key as EnvKey,
-	secret: false,
-	value,
-	updatedAt: at,
-})
-const secret = (key: string): EnvVar => ({
-	key: key as EnvKey,
-	secret: true,
-	value: null,
-	updatedAt: at,
-})
-
 const api = appOwner('auditfy', 'staging', 'api')
-const APP_VARS = [plain('LOG_LEVEL', 'info'), plain('PORT', '3000'), secret('JWT_SECRET')]
+const API_LABEL = 'app:auditfy/staging/api'
+let fake: InMemoryEnvRepository
 
 async function mount(): Promise<{ editor: EnvEditorViewModel; importer: EnvImportViewModel }> {
 	const client = new QueryClient({
@@ -54,12 +48,24 @@ async function mount(): Promise<{ editor: EnvEditorViewModel; importer: EnvImpor
 	return ready
 }
 
+const lastPatch = () => mocks.patchEnv.mock.calls.at(-1)?.[0]
+
 describe('EnvImportViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		toasts.items = []
-		mocks.getEnv.mockResolvedValue(APP_VARS)
-		mocks.patchEnv.mockResolvedValue(undefined)
+		fake = new InMemoryEnvRepository({
+			owners: {
+				[API_LABEL]: [
+					{ key: 'JWT_SECRET', value: 'jwt-viejo', secret: true },
+					{ key: 'LOG_LEVEL', value: 'info', secret: false },
+					{ key: 'PORT', value: '3000', secret: false },
+				],
+			},
+			now: () => new Date('2026-10-05T12:00:00.000Z'),
+		})
+		mocks.getEnv.mockImplementation(makeGetEnv({ env: fake }))
+		mocks.patchEnv.mockImplementation(makePatchEnv({ env: fake }))
 	})
 
 	it('los problemas de cada línea bloquean la importación', async () => {
@@ -78,6 +84,16 @@ describe('EnvImportViewModel', () => {
 		expect(importer.canSubmit).toBe(false)
 		await expect(importer.submit()).resolves.toBe(false)
 		expect(mocks.patchEnv).not.toHaveBeenCalled()
+	})
+
+	it('avisa las líneas con forma de variable que quedaron dentro de un valor', async () => {
+		const { importer } = await mount()
+
+		importer.setText('PEM="-----BEGIN-----\nNEXT=1\n')
+
+		expect(importer.swallowedMessages).toEqual([
+			m.secrets_import_swallowed({ line: 2, looksLike: 'NEXT', key: 'PEM' }),
+		])
 	})
 
 	it('combinar: el plan separa nuevas, cambios, secretas que se reescriben y sin cambios', async () => {
@@ -104,20 +120,22 @@ describe('EnvImportViewModel', () => {
 
 	it('importa en un solo PATCH, avisa y borra el texto (puede tener secretos)', async () => {
 		const { importer, editor } = await mount()
+		const before = editor.vars
+		importer.setSecret(false)
 		importer.setText('LOG_LEVEL=debug\nNEW="a b"')
 
 		await expect(importer.submit()).resolves.toBe(true)
 
 		expect(mocks.patchEnv).toHaveBeenCalledTimes(1)
-		expect(mocks.patchEnv.mock.calls[0]?.[0]).toEqual({
+		expect(lastPatch()).toEqual({
 			owner: api,
-			current: APP_VARS,
+			current: before,
 			set: new Map([
 				['LOG_LEVEL', 'debug'],
 				['NEW', 'a b'],
 			]),
 			unset: [],
-			secret: true,
+			secret: false,
 		})
 		expect(importer.open).toBe(false)
 		expect(importer.text).toBe('')
@@ -126,6 +144,19 @@ describe('EnvImportViewModel', () => {
 			title: m.secrets_import_success(),
 			description: m.secrets_imported_app(),
 		})
+	})
+
+	it('volver secreta una que se podía leer se confirma, como en el menú de la fila', async () => {
+		const { importer } = await mount()
+		importer.setText('PORT=3000')
+
+		await expect(importer.submit()).resolves.toBe(false)
+
+		expect(importer.confirmTitle).toBe(m.secrets_import_conceal_title())
+		expect(importer.confirmBody).toBe(m.secrets_import_conceal_body({ count: 1, keys: 'PORT' }))
+		expect(mocks.patchEnv).not.toHaveBeenCalled()
+		await expect(importer.confirmImport()).resolves.toBe(true)
+		expect(lastPatch()).toMatchObject({ set: new Map([['PORT', '3000']]), secret: true })
 	})
 
 	it('reemplazar todas pide confirmar antes de borrar las que no están', async () => {
@@ -144,7 +175,7 @@ describe('EnvImportViewModel', () => {
 		expect(mocks.patchEnv).not.toHaveBeenCalled()
 
 		await expect(importer.confirmImport()).resolves.toBe(true)
-		expect(mocks.patchEnv.mock.calls[0]?.[0]).toMatchObject({
+		expect(lastPatch()).toMatchObject({
 			unset: ['JWT_SECRET', 'LOG_LEVEL'],
 			set: new Map(),
 		})
@@ -176,23 +207,34 @@ describe('EnvImportViewModel', () => {
 		await importer.submit()
 
 		// Otra pestaña agregó una variable: el plan recalculado también la borraría.
-		mocks.getEnv.mockResolvedValue([...APP_VARS, plain('OTHER', 'x')])
+		fake.owners.get(API_LABEL)?.push({
+			key: 'OTHER',
+			value: 'x',
+			secret: false,
+			updatedAt: new Date(),
+		})
 		editor.retry()
 		await vi.waitFor(() => expect(editor.count).toBe(4))
 		expect(importer.plan.removed).toContain('OTHER')
 
 		await importer.confirmImport()
 
-		expect(mocks.patchEnv.mock.calls[0]?.[0]).toMatchObject({
-			unset: ['JWT_SECRET', 'LOG_LEVEL'],
-		})
+		expect(lastPatch()).toMatchObject({ unset: ['JWT_SECRET', 'LOG_LEVEL'] })
 	})
 
-	it('al cerrar cuenta un cierre más, para devolver el foco al botón', async () => {
-		const { importer } = await mount()
-		expect(importer.closedCount).toBe(0)
-		importer.close()
-		expect(importer.closedCount).toBe(1)
+	it('si el backend no cambió nada (la misma secreta otra vez), lo dice', async () => {
+		const { importer, editor } = await mount()
+		importer.setText('JWT_SECRET=jwt-viejo')
+
+		await expect(importer.submit()).resolves.toBe(true)
+
+		expect(mocks.patchEnv).toHaveBeenCalledTimes(1)
+		expect(editor.savedChanges).toBe(0)
+		expect(toasts.items.at(-1)).toMatchObject({
+			tone: 'info',
+			title: m.secrets_nothing_changed(),
+			description: m.secrets_nothing_changed_import(),
+		})
 	})
 
 	it('sin nada que cambiar no hay nada que importar', async () => {
@@ -216,15 +258,13 @@ describe('EnvImportViewModel', () => {
 	})
 
 	it('un 422 queda en el panel, con el texto intacto para corregirlo', async () => {
-		mocks.patchEnv.mockRejectedValueOnce(
-			new ValidationError('las variables suman más de 1 MiB (claves y valores)', 'set'),
-		)
+		mocks.patchEnv.mockRejectedValueOnce(new EnvLimitExceeded('size', 'set'))
 		const { importer } = await mount()
 		importer.setText('NEW=x')
 
 		await expect(importer.submit()).resolves.toBe(false)
 
-		expect(importer.serverError).toBe('las variables suman más de 1 MiB (claves y valores)')
+		expect(importer.serverError).toBe(m.secrets_error_limit_size())
 		expect(importer.open).toBe(true)
 		expect(importer.text).toBe('NEW=x')
 
@@ -244,5 +284,12 @@ describe('EnvImportViewModel', () => {
 		expect(importer.text).toBe('')
 		expect(importer.mode).toBe('merge')
 		expect(importer.secret).toBe(true)
+	})
+
+	it('al cerrar cuenta un cierre más, para devolver el foco al botón', async () => {
+		const { importer } = await mount()
+		expect(importer.closedCount).toBe(0)
+		importer.close()
+		expect(importer.closedCount).toBe(1)
 	})
 })

@@ -13,3 +13,24 @@ export function refocusOnClose(closedCount: () => number): Attachment<HTMLElemen
 		element.querySelector<HTMLElement>('button')?.focus()
 	}
 }
+
+/**
+ * Mueve el foco cuando el viewModel lo pide: cada vez que `seq()` cambia a un valor
+ * distinto de 0. Con `button`, al primer botón del elemento (los ⋯ de una fila); si no, al
+ * elemento (un título con `tabindex="-1"`). Espera un cuadro: el diálogo que se cierra en
+ * el mismo cambio podría mover el foco después.
+ */
+export function focusOnRequest(
+	seq: () => number,
+	target: 'self' | 'button' = 'self',
+): Attachment<HTMLElement> {
+	return (element) => {
+		if (seq() === 0) return
+		const frame = requestAnimationFrame(() => {
+			const focusable =
+				target === 'button' ? element.querySelector<HTMLElement>('button') : element
+			focusable?.focus()
+		})
+		return () => cancelAnimationFrame(frame)
+	}
+}

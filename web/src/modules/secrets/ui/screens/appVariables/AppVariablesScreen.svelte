@@ -48,7 +48,7 @@
 		<EmptyState
 			icon="alert"
 			title={m.secrets_not_found_app()}
-			body={m.secrets_not_found_body()}
+			body={m.secrets_not_found_app_body()}
 		>
 			{#snippet action()}
 				<LinkButton href={vm.homeHref} variant="secondary" size="sm">

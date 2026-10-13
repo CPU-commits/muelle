@@ -19,6 +19,7 @@
 		issuesTitle,
 		key,
 		keyRemoved,
+		live,
 		muted,
 		notes,
 		options,
@@ -89,26 +90,32 @@
 				/>
 			</div>
 
-			{#if vm.issueMessages.length > 0}
-				<div class={issues}>
-					<p class={issuesTitle}>
-						{m.secrets_import_issues({ count: vm.issueMessages.length })}
-					</p>
-					<ul class={issueList}>
-						{#each vm.issueMessages as message, index (index)}
+			<!-- Siempre en el DOM: un lector de pantalla anuncia los problemas cuando aparecen. -->
+			<div class={live} aria-live="polite">
+				{#if vm.issueMessages.length > 0}
+					<div class={issues}>
+						<p class={issuesTitle}>
+							{m.secrets_import_issues({ count: vm.issueMessages.length })}
+						</p>
+						<ul class={issueList}>
+							{#each vm.issueMessages as message, index (index)}
+								<li>{message}</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+
+				{#if vm.swallowedMessages.length > 0 || vm.duplicateMessages.length > 0}
+					<ul class={notes}>
+						{#each vm.swallowedMessages as message, index (index)}
+							<li>{message}</li>
+						{/each}
+						{#each vm.duplicateMessages as message, index (index)}
 							<li>{message}</li>
 						{/each}
 					</ul>
-				</div>
-			{/if}
-
-			{#if vm.duplicateMessages.length > 0}
-				<ul class={notes}>
-					{#each vm.duplicateMessages as message, index (index)}
-						<li>{message}</li>
-					{/each}
-				</ul>
-			{/if}
+				{/if}
+			</div>
 
 			{#if vm.showPlan}
 				<section class={preview} aria-labelledby={`${uid}-preview`}>
@@ -178,7 +185,7 @@
 		</div>
 
 		<div class={footer}>
-			<span class={summary} aria-live="polite">
+			<span class={summary}>
 				{vm.hasText
 					? m.secrets_import_detected({ count: vm.entryCount })
 					: m.secrets_import_empty()}

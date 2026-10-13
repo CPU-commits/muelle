@@ -9,14 +9,19 @@ import {
 	patchLimitProblem,
 	planImport,
 } from '../../../domain'
-import { dotenvIssueMessage, importedNote, limitMessage } from '../../components/secretsMessages'
+import {
+	dotenvIssueMessage,
+	dotenvSwallowedMessage,
+	importedNote,
+	limitMessage,
+} from '../../components/secretsMessages'
 import type { EnvEditorViewModel } from '../envEditor'
 
 // "Importar .env": el texto pegado se parsea mientras se escribe, se compara con las
 // variables del dueño (el plan: nuevas, cambian, secretas que se reescriben, sin cambios
 // y, si reemplaza, las que se borran) y se aplica en un solo PATCH. Borrar variables o
-// dejar a la vista el valor de una secreta se confirma antes. El texto puede tener
-// secretos: se borra al cerrar el panel y después de importar.
+// cambiar la marca de secreta de una que ya existía se confirma antes. El texto puede
+// tener secretos: se borra al cerrar el panel y después de importar.
 export class EnvImportViewModel {
 	open = $state(false)
 	text = $state('')
@@ -65,6 +70,11 @@ export class EnvImportViewModel {
 		return this.parsed.issues.map(dotenvIssueMessage)
 	}
 
+	/** Líneas que quedaron dentro de un valor de varias líneas y parecen otra variable. */
+	get swallowedMessages(): string[] {
+		return this.parsed.swallowed.map(dotenvSwallowedMessage)
+	}
+
 	get duplicateMessages(): string[] {
 		return this.parsed.duplicates.map((duplicate) =>
 			m.secrets_import_duplicate({
@@ -104,18 +114,20 @@ export class EnvImportViewModel {
 		return this.confirming !== null
 	}
 
+	/** Lo más grave manda en el título: borrar, después mostrar, después ocultar. */
 	get confirmTitle(): string {
 		const plan = this.confirming
 		if (!plan) return ''
-		return plan.removed.length > 0
-			? m.secrets_import_replace_title()
-			: m.secrets_import_unmask_title()
+		if (plan.removed.length > 0) return m.secrets_import_replace_title()
+		if (keysBecoming(plan, 'to_plain').length > 0) return m.secrets_import_unmask_title()
+		return m.secrets_import_conceal_title()
 	}
 
 	get confirmBody(): string {
 		const plan = this.confirming
 		if (!plan) return ''
-		const revealed = revealedKeys(plan)
+		const revealed = keysBecoming(plan, 'to_plain')
+		const concealed = keysBecoming(plan, 'to_secret')
 		return [
 			plan.removed.length > 0
 				? m.secrets_import_replace_body({
@@ -127,6 +139,12 @@ export class EnvImportViewModel {
 				? m.secrets_import_unmask_body({
 						count: revealed.length,
 						keys: revealed.join(', '),
+					})
+				: '',
+			concealed.length > 0
+				? m.secrets_import_conceal_body({
+						count: concealed.length,
+						keys: concealed.join(', '),
 					})
 				: '',
 		]
@@ -171,11 +189,15 @@ export class EnvImportViewModel {
 		this.serverError = null
 	}
 
-	/** "Importar": si va a borrar variables o a mostrar secretas, primero lo confirma. */
+	/**
+	 * "Importar": lo que no se puede deshacer desde el panel se confirma antes, como en el
+	 * menú de una fila: borrar variables, dejar a la vista una secreta o volver secreta una
+	 * que se podía leer.
+	 */
 	submit = async (): Promise<boolean> => {
 		if (!this.canSubmit) return false
 		const plan = this.plan
-		if (plan.removed.length > 0 || revealedKeys(plan).length > 0) {
+		if (plan.removed.length > 0 || plan.changed.some((change) => change.reason !== 'value')) {
 			this.confirming = plan
 			return false
 		}
@@ -198,18 +220,23 @@ export class EnvImportViewModel {
 		const patch = plan.patch
 		if (!patch) return false
 		this.serverError = null
-		const applied = await this.#editor.applyImport(patch, (message) => {
+		const outcome = await this.#editor.applyImport(patch, (message) => {
 			this.serverError = message
 			return true
 		})
-		if (!applied) return false
-		toast.success(m.secrets_import_success(), importedNote(this.#editor.kind))
+		if (outcome === 'failed') return false
+		if (outcome === 'changed') {
+			toast.success(m.secrets_import_success(), importedNote(this.#editor.kind))
+		} else {
+			// Solo secretas reescritas con el mismo valor: el backend no cambió nada.
+			toast.info(m.secrets_nothing_changed(), m.secrets_nothing_changed_import())
+		}
 		this.close()
 		return true
 	}
 }
 
-/** Las secretas que el import deja de marcar: su valor se va a poder leer. */
-function revealedKeys(plan: ImportPlan): string[] {
-	return plan.changed.filter((change) => change.reason === 'to_plain').map((change) => change.key)
+/** Las claves que el import pasa a secretas (`to_secret`) o deja a la vista (`to_plain`). */
+function keysBecoming(plan: ImportPlan, reason: 'to_secret' | 'to_plain'): string[] {
+	return plan.changed.filter((change) => change.reason === reason).map((change) => change.key)
 }
