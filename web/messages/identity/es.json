@@ -54,7 +54,6 @@
 	"identity_tokens_revoke_body": "Lo que use este token va a recibir 401 desde ahora. No se puede deshacer.",
 	"identity_tokens_revoked": "Token revocado",
 	"identity_tokens_already_revoked": "Ese token ya estaba revocado.",
-	"identity_tokens_revoke_error": "No se pudo revocar el token.",
 	"identity_tokens_empty_title": "Todavía no hay tokens",
 	"identity_tokens_empty_body": "Crea uno para que GitHub Actions despliegue sin usar tu sesión.",
 	"identity_tokens_load_error": "No se pudieron cargar los tokens.",

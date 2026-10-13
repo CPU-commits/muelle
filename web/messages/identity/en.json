@@ -54,7 +54,6 @@
 	"identity_tokens_revoke_body": "Anything using this token gets a 401 from now on. This can't be undone.",
 	"identity_tokens_revoked": "Token revoked",
 	"identity_tokens_already_revoked": "That token was already revoked.",
-	"identity_tokens_revoke_error": "The token couldn't be revoked.",
 	"identity_tokens_empty_title": "No tokens yet",
 	"identity_tokens_empty_body": "Create one so GitHub Actions can deploy without your session.",
 	"identity_tokens_load_error": "The tokens couldn't be loaded.",
