@@ -9,7 +9,7 @@ import {
 	removeRegistryMutation,
 	updateRegistryMutation,
 } from '../../../data'
-import type { Registry } from '../../../domain'
+import { parseRegistryCredentials, parseRegistryHost, type Registry } from '../../../domain'
 import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
 
 /** El modal abierto: agregar uno nuevo o cambiar las credenciales de uno que ya está. */
@@ -130,8 +130,17 @@ export class RegistriesViewModel {
 		if (!dialog || this.isSaving) return
 		this.errors = {}
 		const input = { host: this.host, username: this.username, password: this.password }
-		// La contraseña no se queda en ningún lado: ni en el campo ni en el cache de
-		// mutaciones. Si algo falla, se escribe de nuevo.
+		// Lo que se ve sin mandar nada (host mal escrito, usuario vacío) no borra la
+		// contraseña: todavía no salió.
+		try {
+			if (dialog.mode === 'add') parseRegistryHost(input.host)
+			parseRegistryCredentials(input)
+		} catch (error) {
+			this.#fail(error)
+			return
+		}
+		// Ya sale: la contraseña no se queda en ningún lado, ni en el campo ni en el cache
+		// de mutaciones. Si el backend la rechaza, se escribe de nuevo.
 		this.password = ''
 		try {
 			if (dialog.mode === 'add') {
@@ -143,16 +152,20 @@ export class RegistriesViewModel {
 			}
 			this.dialog = null
 		} catch (error) {
-			const fieldError = adminFieldError(error)
-			if (fieldError && REGISTRY_FIELDS.includes(fieldError.field)) {
-				this.errors = { [fieldError.field]: fieldError.message }
-				return
-			}
-			toast.error(m.admin_save_error(), adminErrorMessage(error))
+			this.#fail(error)
 		} finally {
 			this.#add.reset()
 			this.#update.reset()
 		}
+	}
+
+	#fail(error: unknown): void {
+		const fieldError = adminFieldError(error)
+		if (fieldError && REGISTRY_FIELDS.includes(fieldError.field)) {
+			this.errors = { [fieldError.field]: fieldError.message }
+			return
+		}
+		toast.error(m.admin_save_error(), adminErrorMessage(error))
 	}
 
 	askRemove = (host: string): void => {

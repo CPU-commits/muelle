@@ -7,6 +7,7 @@ import { toast } from '@/shared/ui/stores'
 import type { UsersSectionViewModel } from '..'
 import { CannotDeleteSelf, type User } from '../../../../domain'
 import UsersSectionHarness from './UsersSectionHarness.svelte'
+import { cacheHolds } from '../../../__tests__/cacheHolds'
 
 const mocks = vi.hoisted(() => ({
 	listUsers: vi.fn(),
@@ -38,21 +39,6 @@ const USERS: User[] = [
 ]
 
 let client: QueryClient
-
-/** Si `secret` quedó en algún lado del cache de TanStack (queries o mutaciones). */
-async function cacheHolds(secret: string): Promise<boolean> {
-	// Una mutación con `gcTime: 0` se borra en el tick siguiente a quedarse sin observers.
-	await new Promise((resolve) => setTimeout(resolve, 20))
-	const mutations = client
-		.getMutationCache()
-		.getAll()
-		.map((mutation) => mutation.state)
-	const queries = client
-		.getQueryCache()
-		.getAll()
-		.map((query) => query.state.data)
-	return JSON.stringify([mutations, queries]).includes(secret)
-}
 
 async function mountViewModel(): Promise<UsersSectionViewModel> {
 	client = new QueryClient({
@@ -163,7 +149,7 @@ describe('UsersSectionViewModel', () => {
 
 		expect(vm.invite?.url).toBe('http://panel/invite/abc')
 		expect(vm.inviteExpiry).toContain('24')
-		expect(await cacheHolds('invite/abc')).toBe(false)
+		expect(await cacheHolds(client, 'invite/abc')).toBe(false)
 		vm.closeInvite()
 		expect(vm.invite).toBeNull()
 	})

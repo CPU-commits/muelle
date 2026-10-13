@@ -1,11 +1,12 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import { onlineManager, QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { ValidationError } from '@/shared/domain'
+import { UnavailableError, ValidationError } from '@/shared/domain'
 import type { ProxySettingsViewModel } from '..'
 import { InvalidIpAddress, type ProxySettings, type Settings } from '../../../../domain'
 import ProxySettingsHarness from './ProxySettingsHarness.svelte'
+import { cacheHolds } from '../../../__tests__/cacheHolds'
 
 const mocks = vi.hoisted(() => ({
 	updatePublicIp: vi.fn(),
@@ -45,21 +46,6 @@ function saved(proxy: Partial<ProxySettings>): Settings {
 }
 
 let client: QueryClient
-
-/** Si `secret` quedó en algún lado del cache de TanStack (queries o mutaciones). */
-async function cacheHolds(secret: string): Promise<boolean> {
-	// Una mutación con `gcTime: 0` se borra en el tick siguiente a quedarse sin observers.
-	await new Promise((resolve) => setTimeout(resolve, 20))
-	const mutations = client
-		.getMutationCache()
-		.getAll()
-		.map((mutation) => mutation.state)
-	const queries = client
-		.getQueryCache()
-		.getAll()
-		.map((query) => query.state.data)
-	return JSON.stringify([mutations, queries]).includes(secret)
-}
 
 async function mountViewModel(proxy: ProxySettings = PROXY): Promise<ProxySettingsViewModel> {
 	client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
@@ -160,7 +146,24 @@ describe('ProxySettingsViewModel', () => {
 		expect(mocks.replaceCloudflareToken).toHaveBeenCalledWith('cf-secreto')
 		expect(vm.cloudflareOpen).toBe(false)
 		expect(vm.cloudflareToken).toBe('')
-		expect(await cacheHolds('cf-secreto')).toBe(false)
+		expect(await cacheHolds(client, 'cf-secreto')).toBe(false)
+	})
+
+	it('sin red, guardar el token falla enseguida en vez de quedar pausado con el token', async () => {
+		mocks.replaceCloudflareToken.mockRejectedValueOnce(new UnavailableError('sin red'))
+		const vm = await mountViewModel()
+		onlineManager.setOnline(false)
+		try {
+			vm.openCloudflare()
+			vm.setField('cloudflareToken', 'cf-sin-red')
+			// Pausada, esta promesa no terminaría hasta que vuelva la red.
+			await vm.saveCloudflare()
+
+			expect(mocks.replaceCloudflareToken).toHaveBeenCalledWith('cf-sin-red')
+			expect(await cacheHolds(client, 'cf-sin-red')).toBe(false)
+		} finally {
+			onlineManager.setOnline(true)
+		}
 	})
 
 	it('si guardar el token falla, tampoco queda en el cache ni en el campo', async () => {
@@ -176,6 +179,6 @@ describe('ProxySettingsViewModel', () => {
 		expect(vm.errors).toEqual({ cloudflareToken: 'el token no ve ninguna zona' })
 		expect(vm.cloudflareOpen).toBe(true)
 		expect(vm.cloudflareToken).toBe('')
-		expect(await cacheHolds('cf-malo')).toBe(false)
+		expect(await cacheHolds(client, 'cf-malo')).toBe(false)
 	})
 })

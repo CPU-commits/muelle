@@ -60,14 +60,13 @@ export function registriesQuery() {
 	})
 }
 
-// Cada cambio de ajustes devuelve los ajustes resultantes: van directo al cache. Y deja
-// un evento en la auditoría.
+// Cada cambio de ajustes devuelve los ajustes resultantes: van directo al cache. El evento
+// que deja en la auditoría lo trae `refreshAuditOnWrites`.
 function settingsMutation<TInput>(client: QueryClient, run: (input: TInput) => Promise<Settings>) {
 	return {
 		mutationFn: run,
-		onSuccess: async (settings: Settings) => {
+		onSuccess: (settings: Settings) => {
 			client.setQueryData(adminKeys.settings(), settings)
-			await client.invalidateQueries({ queryKey: adminKeys.audit() })
 		},
 	}
 }
@@ -95,8 +94,10 @@ export function updateProxyPortsMutation(client: QueryClient) {
 }
 
 // El token de Cloudflare y la contraseña de un registry van en las variables de la
-// mutación: `gcTime: 0` las saca del cache de mutaciones apenas el viewModel hace `reset()`.
-const SECRET = { gcTime: 0 } as const
+// mutación: `gcTime: 0` las saca del cache de mutaciones apenas el viewModel hace `reset()`,
+// y `networkMode: 'always'` hace que sin red fallen enseguida en vez de quedar pausadas
+// (con el secreto adentro) hasta que vuelva la conexión.
+const SECRET = { gcTime: 0, networkMode: 'always' } as const
 
 export function replaceCloudflareTokenMutation(client: QueryClient) {
 	return {
@@ -111,12 +112,8 @@ function registryMutation<TInput, TResult>(
 ) {
 	return {
 		mutationFn: run,
-		onSettled: async () => {
-			await Promise.all([
-				client.invalidateQueries({ queryKey: adminKeys.registries() }),
-				client.invalidateQueries({ queryKey: adminKeys.audit() }),
-			])
-		},
+		// Aunque falle (otro lo borró, ya existía), la lista se vuelve a pedir.
+		onSettled: () => client.invalidateQueries({ queryKey: adminKeys.registries() }),
 	}
 }
 

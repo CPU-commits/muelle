@@ -1,12 +1,13 @@
-import { QueryClient } from '@tanstack/svelte-query'
+import { onlineManager, QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import { UnavailableError } from '@/shared/domain'
 import type { RegistriesViewModel } from '..'
-import { InvalidRegistryHost, RegistryExists } from '../../../../domain'
+import { RegistryExists } from '../../../../domain'
 import RegistriesHarness from './RegistriesHarness.svelte'
+import { cacheHolds } from '../../../__tests__/cacheHolds'
 
 const mocks = vi.hoisted(() => ({
 	listRegistries: vi.fn(),
@@ -32,21 +33,6 @@ vi.mock('@/modules/admin/container', () => ({
 }))
 
 let client: QueryClient
-
-/** Si `secret` quedó en algún lado del cache de TanStack (queries o mutaciones). */
-async function cacheHolds(secret: string): Promise<boolean> {
-	// Una mutación con `gcTime: 0` se borra en el tick siguiente a quedarse sin observers.
-	await new Promise((resolve) => setTimeout(resolve, 20))
-	const mutations = client
-		.getMutationCache()
-		.getAll()
-		.map((mutation) => mutation.state)
-	const queries = client
-		.getQueryCache()
-		.getAll()
-		.map((query) => query.state.data)
-	return JSON.stringify([mutations, queries]).includes(secret)
-}
 
 async function mountViewModel(): Promise<RegistriesViewModel> {
 	client = new QueryClient({
@@ -103,7 +89,7 @@ describe('RegistriesViewModel', () => {
 		expect(vm.dialog).toBeNull()
 		expect(vm.password).toBe('')
 		expect(success).toHaveBeenCalledWith(m.admin_registry_added())
-		expect(await cacheHolds('secreto')).toBe(false)
+		expect(await cacheHolds(client, 'secreto')).toBe(false)
 	})
 
 	it('la contraseña no queda en el cache ni en el campo, aunque guardar falle', async () => {
@@ -118,21 +104,61 @@ describe('RegistriesViewModel', () => {
 
 		expect(vm.dialog).toEqual({ mode: 'edit', host: 'ghcr.io' })
 		expect(vm.password).toBe('')
-		expect(await cacheHolds('clave-nueva')).toBe(false)
+		expect(await cacheHolds(client, 'clave-nueva')).toBe(false)
 	})
 
-	it('un host inválido o repetido va al campo host', async () => {
+	it('un error que se ve sin mandar nada no borra la contraseña escrita', async () => {
 		const vm = await mountViewModel()
 		vm.openAdd()
+		vm.setField('host', 'ghcr.io/org')
+		vm.setField('username', 'bot')
+		vm.setField('password', 'clave-escrita')
 
-		mocks.addRegistry.mockRejectedValueOnce(new InvalidRegistryHost())
 		await vm.submit()
+
 		expect(vm.errors).toEqual({ host: m.admin_error_registry_host() })
+		expect(mocks.addRegistry).not.toHaveBeenCalled()
+		expect(vm.password).toBe('clave-escrita')
+
+		vm.setField('host', 'quay.io')
+		vm.setField('username', ' ')
+		await vm.submit()
+		expect(vm.errors).toEqual({ username: m.common_required() })
+		expect(vm.password).toBe('clave-escrita')
+	})
+
+	it('un host repetido (lo dice el backend) va al campo host', async () => {
+		const vm = await mountViewModel()
+		vm.openAdd()
+		vm.setField('host', 'ghcr.io')
+		vm.setField('username', 'bot')
+		vm.setField('password', 'x')
 
 		mocks.addRegistry.mockRejectedValueOnce(new RegistryExists())
 		await vm.submit()
+
 		expect(vm.errors).toEqual({ host: m.admin_error_registry_exists() })
 		expect(vm.dialog).toEqual({ mode: 'add' })
+		// Ya salió: la contraseña no se guarda en ningún lado.
+		expect(vm.password).toBe('')
+	})
+
+	it('sin red, guardar falla enseguida en vez de quedar pausado con la contraseña', async () => {
+		mocks.addRegistry.mockRejectedValueOnce(new UnavailableError('sin red'))
+		const vm = await mountViewModel()
+		onlineManager.setOnline(false)
+		try {
+			vm.openAdd()
+			vm.setField('host', 'quay.io')
+			vm.setField('username', 'bot')
+			vm.setField('password', 'clave-sin-red')
+			await vm.submit()
+
+			expect(mocks.addRegistry).toHaveBeenCalled()
+			expect(await cacheHolds(client, 'clave-sin-red')).toBe(false)
+		} finally {
+			onlineManager.setOnline(true)
+		}
 	})
 
 	it('cambiar credenciales no cambia el host y pide la contraseña de nuevo', async () => {
