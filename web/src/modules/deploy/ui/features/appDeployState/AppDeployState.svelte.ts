@@ -25,21 +25,34 @@ import { healthLabel, healthTone } from '../../components/labels/deployLabels'
 //
 // Si el backend no tiene la Fase 2 (o falla), todo dice "—" y no hay error: la lista de
 // proyectos funciona igual. No se refresca solo.
+//
+// `enabled` (opcional) frena los pedidos mientras dé false: una fila que todavía no se ve,
+// o un snippet de `<ShellHeader>` que puede evaluarse con los params vacíos
+// (`new AppDeployState(() => ref, () => Boolean(p && s && a))`). Apagado, todo dice "—".
 export class AppDeployState {
 	readonly #ref: () => AppRef
+	readonly #enabled: () => boolean
 	readonly #status: CreateQueryResult<AppStatus, Error>
 	// El historial entero (el mismo cache que `lastDeployQuery`): de ahí salen el último
 	// deploy y el actual (el succeeded más reciente, que es el que corre).
 	readonly #deploys: CreateQueryResult<readonly Deploy[], Error>
 
-	constructor(ref: () => AppRef) {
+	constructor(ref: () => AppRef, enabled: () => boolean = () => true) {
 		this.#ref = ref
-		this.#status = createQuery(() => ({ ...appStatusQuery(this.#ref()), retry: false }))
-		this.#deploys = createQuery(() => ({ ...deploysQuery(this.#ref()), retry: false }))
+		this.#enabled = enabled
+		this.#status = createQuery(() => ({
+			...appStatusQuery(this.#ref(), { enabled: this.#enabled() }),
+			retry: false,
+		}))
+		this.#deploys = createQuery(() => ({
+			...deploysQuery(this.#ref(), { enabled: this.#enabled() }),
+			retry: false,
+		}))
 	}
 
+	/** Cargando de verdad (apagada no carga: muestra "—"). */
 	get isLoading(): boolean {
-		return this.#status.isPending || this.#deploys.isPending
+		return this.#enabled() && (this.#status.isPending || this.#deploys.isPending)
 	}
 
 	/** El estado no está disponible (Fase 2 pendiente, Docker caído, error): se muestra "—". */

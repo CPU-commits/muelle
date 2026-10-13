@@ -45,7 +45,20 @@
 	"deploy_copy_digest": "Copy digest",
 	"deploy_node": "Node",
 	"deploy_tasks_title": "Tasks",
-	"deploy_tasks_meta": "{running} running · {history} past",
+	"deploy_tasks_meta": [
+		{
+			"declarations": [
+				"input running",
+				"input history",
+				"local historyPlural = history: plural"
+			],
+			"selectors": ["historyPlural"],
+			"match": {
+				"historyPlural=one": "{running} running · 1 past",
+				"historyPlural=*": "{running} running · {history} past"
+			}
+		}
+	],
 	"deploy_tasks_caption": "The app's Swarm tasks",
 	"deploy_task": "Task",
 	"deploy_task_state": "State",
@@ -131,7 +144,16 @@
 	"deploy_not_found": "That deploy no longer exists.",
 	"deploy_superseded_by": "Superseded by #{id}",
 	"deploy_memory_with_limit": "MB each · limit {limit}",
-	"deploy_usage_sampled": "{sampled} of {total} replicas measured (only those on muelle’s node)",
+	"deploy_usage_sampled": [
+		{
+			"declarations": ["input sampled", "input total", "local totalPlural = total: plural"],
+			"selectors": ["totalPlural"],
+			"match": {
+				"totalPlural=one": "{sampled} of 1 replica measured (only those on muelle’s node)",
+				"totalPlural=*": "{sampled} of {total} replicas measured (only those on muelle’s node)"
+			}
+		}
+	],
 	"deploy_healthcheck": "Healthcheck",
 	"deploy_logs_pause": "Pause",
 	"deploy_logs_resume": "Resume",

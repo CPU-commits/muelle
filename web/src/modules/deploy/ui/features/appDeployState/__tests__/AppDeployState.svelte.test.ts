@@ -115,4 +115,27 @@ describe('AppDeployState (las columnas de Proyectos para F2)', () => {
 		expect(vm.tone).toBe('idle')
 		expect(vm.image).toBeNull()
 	})
+
+	it('con enabled en false no pide nada y dice "—"; al prenderse carga', async () => {
+		let enabled = $state(false)
+		const { vm } = await mountViewModel(
+			() =>
+				new AppDeployState(
+					() => APP,
+					() => enabled,
+				),
+		)
+
+		await new Promise((resolve) => setTimeout(resolve, 50))
+		expect(mocks.getAppStatus).not.toHaveBeenCalled()
+		expect(mocks.listDeploys).not.toHaveBeenCalled()
+		expect(vm.isLoading).toBe(false)
+		expect(vm.statusText).toBe(m.deploy_none())
+		expect(vm.lastDeployText).toBe(m.deploy_none())
+
+		enabled = true
+		await vi.waitFor(() => expect(vm.isLoading).toBe(false))
+		await vi.waitFor(() => expect(vm.tone).toBe('ok'))
+		expect(mocks.getAppStatus).toHaveBeenCalledTimes(1)
+	})
 })

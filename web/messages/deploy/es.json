@@ -28,7 +28,7 @@
 	"deploy_summary_error_title": "No se pudo leer el estado de la app",
 	"deploy_summary_coming": "El estado de la app",
 	"deploy_summary_not_deployed_title": "Esta app todavía no tiene un deploy",
-	"deploy_summary_not_deployed_body": "Cuando la despliegues, acá vas a ver sus réplicas, CPU, memoria y tareas.",
+	"deploy_summary_not_deployed_body": "Cuando la despliegues, aquí verás sus réplicas, CPU, memoria y tareas.",
 	"deploy_service_title": "Servicio {name}",
 	"deploy_live": "En vivo · cada 5 s",
 	"deploy_live_paused": "En pausa mientras la pestaña está oculta",
@@ -45,7 +45,20 @@
 	"deploy_copy_digest": "Copiar digest",
 	"deploy_node": "Nodo",
 	"deploy_tasks_title": "Tareas",
-	"deploy_tasks_meta": "{running} corriendo · {history} históricas",
+	"deploy_tasks_meta": [
+		{
+			"declarations": [
+				"input running",
+				"input history",
+				"local historyPlural = history: plural"
+			],
+			"selectors": ["historyPlural"],
+			"match": {
+				"historyPlural=one": "{running} corriendo · 1 histórica",
+				"historyPlural=*": "{running} corriendo · {history} históricas"
+			}
+		}
+	],
 	"deploy_tasks_caption": "Tareas de Swarm de la app",
 	"deploy_task": "Tarea",
 	"deploy_task_state": "Estado",
@@ -79,7 +92,7 @@
 	"deploy_deploys_error_title": "No se pudo leer el historial de deploys",
 	"deploy_deploys_coming": "El historial de deploys",
 	"deploy_deploys_empty_title": "Todavía no hay deploys",
-	"deploy_deploys_empty_body": "El primero aparece acá apenas lo encoles.",
+	"deploy_deploys_empty_body": "El primero aparece aquí apenas lo encoles.",
 	"deploy_history": "Historial",
 	"deploy_log": "Log del deploy #{id}",
 	"deploy_log_loading": "Cargando el log…",
@@ -131,7 +144,16 @@
 	"deploy_not_found": "Ese deploy ya no existe.",
 	"deploy_superseded_by": "Reemplazado por #{id}",
 	"deploy_memory_with_limit": "MB c/u · límite {limit}",
-	"deploy_usage_sampled": "{sampled} de {total} réplicas medidas (solo las del nodo de muelle)",
+	"deploy_usage_sampled": [
+		{
+			"declarations": ["input sampled", "input total", "local totalPlural = total: plural"],
+			"selectors": ["totalPlural"],
+			"match": {
+				"totalPlural=one": "{sampled} de 1 réplica medida (solo las del nodo de muelle)",
+				"totalPlural=*": "{sampled} de {total} réplicas medidas (solo las del nodo de muelle)"
+			}
+		}
+	],
 	"deploy_healthcheck": "Healthcheck",
 	"deploy_logs_pause": "Pausar",
 	"deploy_logs_resume": "Reanudar",

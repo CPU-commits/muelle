@@ -280,6 +280,13 @@ describe('LogsViewModel', () => {
 		expect(vm.announcement).toBe(first)
 	})
 
+	it('la cuenta de líneas en pausa va en singular o plural', () => {
+		expect(m.deploy_logs_new_lines({ count: 1 })).toBe('1 línea nueva en pausa')
+		expect(m.deploy_logs_new_lines({ count: 3 })).toBe('3 líneas nuevas en pausa')
+		expect(m.deploy_tasks_meta({ running: 2, history: 1 })).toBe('2 corriendo · 1 histórica')
+		expect(m.deploy_usage_sampled({ sampled: 1, total: 2 })).toMatch(/^1 de 2 réplicas medidas/)
+	})
+
 	it('desmontar la pantalla corta el stream', async () => {
 		const { vm, unmount } = await mountViewModel(() => new LogsViewModel(() => PROPS, FAST))
 		await vi.waitFor(() => expect(vm.connection).toBe('live'))
