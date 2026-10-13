@@ -24,6 +24,7 @@ export { default as StatusDot } from './components/atoms/statusDot/StatusDot.sve
 export type { StatusDotSize, StatusTone } from './components/atoms/statusDot/styles.css'
 export { default as Switch } from './components/atoms/switch/Switch.svelte'
 export { default as Textarea } from './components/atoms/textarea/Textarea.svelte'
+export { default as TextLink } from './components/atoms/textLink/TextLink.svelte'
 
 // Moléculas
 export { default as Banner } from './components/molecules/banner/Banner.svelte'
@@ -79,3 +80,4 @@ export { srOnly, textLink, truncate } from './themes/utilities.css'
 export { describeError } from './utils/errorMessage'
 export { firstError } from './utils/forms'
 export { formatDate, formatDateTime, formatNumber, formatRelative } from './utils/format'
+export { type QueryValue, withQuery } from './utils/url'

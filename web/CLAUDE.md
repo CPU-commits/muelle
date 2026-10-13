@@ -56,9 +56,31 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
   la pantalla las pasa como callback (`onclick={vm.save}`) y un método perdería el `this`.
 - **Props reactivas hacia un viewModel**: como getter (`new XViewModel(() => id)`), nunca
   el valor suelto, o el viewModel queda congelado con el valor inicial.
+- **Una query (o mutation) cuyas opciones leen esos getters se crea en el `constructor`**,
+  no en el inicializador del campo. Los inicializadores corren ANTES del cuerpo del
+  constructor, y `createQuery` evalúa las opciones en el acto: `this.#app` todavía es
+  `undefined`. Las que no leen props (`createQuery(() => meQuery())`) pueden ir en el campo.
+
+    ```ts
+    readonly #app: () => AppRef
+    readonly #deploys: CreateQueryResult<Deploy[], Error>
+
+    constructor(app: () => AppRef) {
+    	this.#app = app
+    	this.#deploys = createQuery(() => deploysQuery(this.#app()))
+    }
+    ```
+
 - **Entidades en estado**: `$state.raw`. Son inmutables, no hace falta volverlas un proxy.
 - **Navegación**: siempre con `resolve()` de `$app/paths` (`goto(resolve('/x'))`,
   `href={resolve('/x/[id]', { id })}`). eslint lo exige.
+- **Links con query string** (`?deploy=7`): `resolve()` no arma queries y eslint marca
+  `resolve(…) + '?…'` en un `<a href>`. Se usa `withQuery` de `@/shared/ui` como `href` de un
+  componente de `shared/ui` (`TextLink`, `LinkButton`, `ListRow`, los items de `Tabs`, `Menu`
+  o `Breadcrumb`), sin `eslint-disable`:
+  `<TextLink href={withQuery(resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/deploys', params), { deploy: id })}>`.
+  Para leerlo, `page.url.searchParams.get('deploy')` de `$app/state`. Un `goto` con query
+  no tiene salida limpia (eslint mira el argumento): si hace falta, es un link.
 - **Casos de uso**: un archivo por operación, factory `makeXxx(deps)` que devuelve la función.
 - **Cache keys y opciones de query**: todas en `data/queries/`, nunca inline en un viewModel.
 - **Textos**: siempre desde `import { m } from '@/shared/ui/i18n/paraglide/messages'`,
@@ -81,8 +103,10 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
   (`@/mocks/server`), entrando por `container.ts`.
 - ViewModels: `__tests__/X.viewModel.svelte.test.ts` junto a la pantalla, corren en Chromium
   (el `.svelte.test.ts` es lo que los manda al proyecto browser de vitest). Se montan con un
-  harness (en el mismo `__tests__/`) que hace `setQueryClientContext` e instancia el
-  viewModel, mockeando el **container** del módulo, no la red. Ver
+  harness (en el mismo `__tests__/`) que hace
+  `setQueryClientContext(createQueryClient({ retry: false }))` (de `@/shared/data/query`:
+  las mismas opciones que la app) e instancia el viewModel, mockeando el **container** del
+  módulo, no la red. Ver
   `src/modules/auth/ui/screens/login/__tests__/` (también mockea `$app/navigation`: `goto`
   no existe fuera del runtime de SvelteKit).
 - E2E: `e2e/*.e2e.ts` contra el build con MSW servido con la CSP (`pnpm test:e2e`, ver
@@ -344,6 +368,7 @@ un `href` lo esperan **ya resuelto** con `resolve()`.
 | `Input`      | `inputSize` `sm` 32·`md` 36·`lg` 40 · `mono` (Geist Mono 13) · `bind:value` · atributos de `<input>`                                                                                                                                                                                                                                   |
 | `Select`     | `inputSize` · `bind:value` · `children` (`<option>`) · atributos de `<select>`                                                                                                                                                                                                                                                         |
 | `Textarea`   | `mono` · `bind:value` · atributos de `<textarea>`                                                                                                                                                                                                                                                                                      |
+| `TextLink`   | `href` (ya resuelto; con query, `withQuery(resolve(…), {…})`) · atributos de `<a>` · `children`. Un link dentro de un texto, con la clase `textLink`                                                                                                                                                                                   |
 | `Checkbox`   | `label` o `children` · `bind:checked` · atributos de `<input>`                                                                                                                                                                                                                                                                         |
 | `Switch`     | `bind:checked` · atributos de `<input>` (`role="switch"`). Va dentro del `<label>` de la pantalla, o con `aria-label`                                                                                                                                                                                                                  |
 | `Badge`      | `tone` `neutral`·`ok`·`warn`·`error`·`mono` ("compose")·`strong` ("nuevo") · `shape` `tag`·`pill` · `size` `sm` 20·`md` 24 · `dot` (`true` o un `StatusTone`) · `children`                                                                                                                                                             |
@@ -393,7 +418,8 @@ un `href` lo esperan **ya resuelto** con `resolve()`.
 | `AuthLayout`  | `appName` · `host` · `width` `sm` 360·`md` 440 · `children`. Las pantallas de acceso                                                                                                                                       |
 
 Clases y helpers: `srOnly`, `textLink` (link dentro de un texto), `truncate`, `firstError`,
-`formatDate`, `formatDateTime`, `formatNumber`, `formatRelative` y `describeError(error)`
+`formatDate`, `formatDateTime`, `formatNumber`, `formatRelative`, `withQuery(href, query)` (ver
+[Convenciones](#convenciones)) y `describeError(error)`
 (el texto para el usuario de cualquier error de `@/shared/domain`: "revisa
 MUELLE_PANEL_ORIGIN", "Llega con la Fase 2", "No se pudo contactar a muelle", …; los errores
 propios de un módulo los traduce el módulo y caen acá para el resto).
@@ -439,6 +465,9 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
       (`parseOrThrow`).
 - `shouldRetry` (el `retry` de las queries) reintenta dos veces solo lo que puede andar
   la próxima: red, timeout y 5xx. Un 4xx, un `ContractError` o una fase pendiente, no.
+- Las queries avisan cualquier cambio del resultado (`notifyOnChangeProps: 'all'` en
+  `createQueryClient`). Con el modo por defecto de TanStack solo avisan lo que ya se leyó, y
+  un viewModel que mira `data` antes que `error` se quedaba cargando para siempre.
 
 ### Endpoints de las fases 2 y 3: `UnavailableError`
 
