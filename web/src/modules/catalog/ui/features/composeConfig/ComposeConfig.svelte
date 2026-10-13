@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
-	import { Badge, Button, Card, Mono, StatusDot } from '@/shared/ui'
+	import { Badge, Button, Card, Mono, Spinner, StatusDot, Textarea } from '@/shared/ui'
 	import type { AppSummary, ComposeApp } from '../../../domain'
 	import { composeServiceDetails, composeServiceWarning } from '../../components/catalogMessages'
 	import { ConfigHeader } from '../../components/configHeader'
-	import { YamlEditor } from '../../components/yamlEditor'
 	import { DeleteAppCard } from '../deleteApp'
 	import { ComposeConfigViewModel } from './ComposeConfig.viewModel.svelte.ts'
 	import {
@@ -13,6 +12,8 @@
 		barEnd,
 		editor,
 		editorBar,
+		editorFallback,
+		editorLoading,
 		errors,
 		errorsList,
 		errorsTitle,
@@ -28,6 +29,7 @@
 		page,
 		service,
 		serviceDetails,
+		serviceError,
 		serviceHead,
 		serviceList,
 		serviceName,
@@ -59,8 +61,8 @@
 
 	<div class={layout}>
 		<div class={main}>
-			{#if vm.check.kind === 'syntax'}
-				{@const count = vm.check.lines.length}
+			{#if vm.check.kind === 'problems'}
+				{@const count = vm.check.problems.length}
 				<div class={errors} role="alert">
 					<p class={errorsTitle}>
 						<StatusDot status="bad" />
@@ -75,17 +77,24 @@
 						{/if}
 					</p>
 					<ul class={errorsList}>
-						{#each vm.check.lines as line (line)}
+						{#each vm.check.problems as problem, index (index)}
 							<li>
 								<button
 									type="button"
 									class={lineLink}
-									aria-label={m.catalog_compose_go_to_line({ line })}
-									onclick={() => vm.goToLine(line)}
+									aria-label={m.catalog_compose_go_to_line({
+										line: problem.line,
+									})}
+									onclick={() => vm.goToLine(problem.line)}
 								>
-									{m.catalog_compose_line({ line })}
+									{m.catalog_compose_line({ line: problem.line })}
 								</button>
-								· {m.catalog_compose_syntax_error()}
+								·
+								{problem.kind === 'syntax'
+									? m.catalog_compose_syntax_error()
+									: m.catalog_compose_duplicate_service({
+											service: problem.service,
+										})}
 							</li>
 						{/each}
 					</ul>
@@ -118,14 +127,33 @@
 						</span>
 					</div>
 				</div>
-				<YamlEditor
-					value={vm.draft}
-					label={m.catalog_compose_editor_label()}
-					describedBy={`${ids}-hint`}
-					errorLines={vm.errorLines}
-					focusRequest={vm.focusRequest}
-					onChange={vm.setDraft}
-				/>
+				{#await vm.editor}
+					<div class={editorLoading}>
+						<Spinner size="sm" label={m.catalog_compose_editor_loading()} />
+					</div>
+				{:then { default: YamlEditor }}
+					<YamlEditor
+						value={vm.draft}
+						label={m.catalog_compose_editor_label()}
+						describedBy={`${ids}-hint`}
+						errorLines={vm.errorLines}
+						focusRequest={vm.focusRequest}
+						onChange={vm.setDraft}
+					/>
+				{:catch}
+					<!-- Sin el editor (no se pudo bajar el chunk), el YAML se edita igual. -->
+					<div class={editorFallback}>
+						<p>{m.catalog_compose_editor_failed()}</p>
+						<Textarea
+							mono
+							rows={20}
+							aria-label={m.catalog_compose_editor_label()}
+							spellcheck={false}
+							value={vm.draft}
+							oninput={(event) => vm.setDraft(event.currentTarget.value)}
+						/>
+					</div>
+				{/await}
 				<p id={`${ids}-hint`} class={hint}>{m.catalog_compose_editor_hint()}</p>
 			</section>
 		</div>
@@ -136,12 +164,17 @@
 					<p class={servicesEmpty}>{m.catalog_compose_services_empty()}</p>
 				{:else}
 					<ul class={serviceList}>
-						{#each vm.services as item (item.name)}
+						<!-- Por índice: un nombre repetido (un error del YAML) no puede romper la lista. -->
+						{#each vm.services as item, index (index)}
 							{@const warning = composeServiceWarning(item)}
 							<li class={service}>
 								<span class={serviceHead}>
 									<span class={serviceName}>{item.name}</span>
-									{#if warning}
+									{#if item.duplicate}
+										<span class={serviceError}
+											>{m.catalog_compose_duplicate_short()}</span
+										>
+									{:else if warning}
 										<span class={serviceWarning}>{warning}</span>
 									{/if}
 								</span>

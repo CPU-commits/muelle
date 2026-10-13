@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { MOCK_AGENTS_COMPOSE } from '@/mocks/db/catalog'
-import { lineCount, yamlSyntaxErrorLines } from '../yamlSyntax'
+import { lineCount } from '../lines'
+import { yamlSyntaxErrorLines } from '../yamlSyntax'
 
 describe('yamlSyntax', () => {
 	it('un compose bien formado no tiene errores (el del diseño, anclas, bloques literales)', () => {

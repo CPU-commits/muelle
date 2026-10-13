@@ -1,5 +1,6 @@
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { UnavailableError, ValidationError } from '@/shared/domain'
+import { describeError } from '@/shared/ui'
+import { ValidationError } from '@/shared/domain'
 import {
 	type AppKind,
 	type AppSpecMessages,
@@ -110,6 +111,84 @@ export function slugTakenMessage(error: SlugTaken): string {
 	}
 }
 
+// El texto de algo puesto entre comillas en el mensaje del backend (`"uploads" está repetido`).
+function quoted(message: string): string {
+	return /"([^"]*)"/.exec(message)?.[1] ?? ''
+}
+
+const TIMINGS: Readonly<Record<string, () => string>> = {
+	'healthcheck.intervalSeconds': () => specMessages.interval(),
+	'healthcheck.timeoutSeconds': () => specMessages.timeout(),
+	'healthcheck.retries': () => specMessages.retries(),
+	'healthcheck.startPeriodSeconds': () => specMessages.startPeriod(),
+}
+
+/**
+ * El texto traducido de un 422 del backend para un campo (con el nombre del dominio). El
+ * backend solo habla español y nombra el campo ("healthcheck.interval_s: debe estar…"): el
+ * panel muestra su propio texto, sin el nombre del campo. Lo que no reconoce, el motivo
+ * tal cual.
+ */
+export function serverFieldMessage(field: string, backend: string): string {
+	const repeated = /repetid/.test(backend)
+	const timing = TIMINGS[field]
+	if (timing) return timing()
+	if (/^volumes\[\d+\]\.name$/.test(field)) {
+		return repeated
+			? specMessages.volumeNameRepeated(quoted(backend))
+			: specMessages.volumeName()
+	}
+	if (/^volumes\[\d+\]\.mount$/.test(field)) {
+		return repeated
+			? specMessages.volumeMountRepeated(quoted(backend))
+			: specMessages.volumeMount()
+	}
+	switch (field) {
+		case 'image':
+			return /obligatoria/.test(backend)
+				? specMessages.imageRequired()
+				: specMessages.imageInvalid()
+		case 'port':
+			return specMessages.port()
+		case 'replicas':
+			return specMessages.replicas()
+		case 'command':
+			return specMessages.commandTooLong()
+		case 'healthcheck':
+		case 'healthcheck.type':
+			return m.catalog_error_healthcheck_shape()
+		case 'healthcheck.path':
+			return specMessages.healthcheckPath()
+		case 'healthcheck.command':
+			return specMessages.healthcheckCommand()
+		case 'volumes':
+			return specMessages.volumesTooMany()
+		case 'resources':
+		case 'resources.memoryMb':
+			return specMessages.memory()
+		case 'resources.cpus':
+			return specMessages.cpus()
+		case 'deployTimeoutSeconds':
+			return m.catalog_error_timeout()
+		case 'composeYaml':
+			return /256/.test(backend)
+				? m.catalog_error_compose_too_large()
+				: m.catalog_error_compose_empty()
+		case 'spec':
+			return m.catalog_error_spec_shape()
+		case 'slug':
+			return /reservad/.test(backend)
+				? m.catalog_error_slug_reserved({ slug: quoted(backend) })
+				: m.catalog_error_slug_invalid()
+		case 'name':
+			if (/superar/.test(backend)) return m.catalog_error_name_long({ max: PROJECT_NAME_MAX })
+			if (/obligatorio/.test(backend)) return m.common_required()
+			return m.catalog_error_name_invisible()
+		default:
+			return backend
+	}
+}
+
 /** Un error que no va en un campo: arriba del formulario o en un toast. */
 export function catalogErrorMessage(error: unknown): string {
 	if (error instanceof KindMismatch) return m.catalog_error_kind_mismatch()
@@ -118,17 +197,17 @@ export function catalogErrorMessage(error: unknown): string {
 	if (error instanceof AppNotFound) return m.catalog_error_app_not_found()
 	if (error instanceof SlugTaken) return slugTakenMessage(error)
 	if (error instanceof InvalidProjectName) return projectNameMessage(error)
-	if (error instanceof InvalidSlug) return m.catalog_error_slug_format({ max: error.max })
+	if (error instanceof InvalidSlug) return slugMessage(error, error.slug)
 	if (error instanceof InvalidCompose) {
 		return error.problem === 'empty'
 			? m.catalog_error_compose_empty()
 			: m.catalog_error_compose_too_large()
 	}
 	if (error instanceof InvalidDeployTimeout) return m.catalog_error_timeout()
-	// Un 422 del backend que el panel no esperaba: su motivo, que ya viene en español.
+	// Un 422 del backend en un campo que la pantalla no tiene a la vista: su texto, sin el
+	// nombre del campo.
 	if (error instanceof ValidationError) {
-		return error.field ? `${error.field}: ${error.message}` : error.message
+		return error.field ? serverFieldMessage(error.field, error.message) : error.message
 	}
-	if (error instanceof UnavailableError) return m.common_unavailable()
-	return m.common_error_generic()
+	return describeError(error)
 }

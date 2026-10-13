@@ -72,12 +72,15 @@ export type SlugProblem = 'format' | 'reserved'
 export class InvalidSlug extends ValidationError {
 	readonly problem: SlugProblem
 	readonly max: number
+	/** El slug ya normalizado (en minúsculas y sin espacios). */
+	readonly slug: string
 
-	constructor(problem: SlugProblem, max: number) {
+	constructor(problem: SlugProblem, max: number, slug = '') {
 		super(`Slug inválido (${problem})`, 'slug')
 		this.name = 'InvalidSlug'
 		this.problem = problem
 		this.max = max
+		this.slug = slug
 	}
 }
 

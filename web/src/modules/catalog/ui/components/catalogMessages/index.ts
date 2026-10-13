@@ -5,6 +5,7 @@ export {
 	composeServiceWarning,
 	kindLabel,
 	projectNameMessage,
+	serverFieldMessage,
 	slugMessage,
 	slugTakenMessage,
 	specMessages,

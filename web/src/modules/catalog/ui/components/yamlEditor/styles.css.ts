@@ -37,10 +37,11 @@ globalStyle(`${root} .cm-content`, {
 
 globalStyle(`${root} .cm-line`, { paddingInline: `${theme.space[4]} ${theme.space[16]}` })
 
+// Números de línea y puntuación con `faint`: lo más tenue que todavía se lee (≥ 4.5:1).
 globalStyle(`${root} .cm-gutters`, {
 	backgroundColor: theme.colors.background.page,
 	border: 0,
-	color: theme.colors.text.disabled,
+	color: theme.colors.text.faint,
 })
 
 globalStyle(`${root} .cm-lineNumbers .cm-gutterElement`, {
@@ -79,5 +80,5 @@ export const tokenKey = style({ color: theme.colors.text.primary })
 export const tokenValue = style({ color: theme.colors.text.secondary })
 export const tokenString = style({ color: theme.colors.status.ok })
 export const tokenComment = style({ color: theme.colors.text.tertiary, fontStyle: 'italic' })
-export const tokenPunctuation = style({ color: theme.colors.text.disabled })
+export const tokenPunctuation = style({ color: theme.colors.text.faint })
 export const tokenSpecial = style({ color: theme.colors.status.warnText })

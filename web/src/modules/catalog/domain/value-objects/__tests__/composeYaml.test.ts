@@ -50,6 +50,8 @@ describe('composeYaml', () => {
 		expect(summarizeCompose(AGENTS)).toEqual([
 			{
 				name: 'gateway',
+				line: 2,
+				duplicate: false,
 				image: 'ghcr.io/aumi-app/agents-gateway:staging',
 				replicas: null,
 				healthcheck: 'defined',
@@ -57,6 +59,8 @@ describe('composeYaml', () => {
 			},
 			{
 				name: 'runner',
+				line: 9,
+				duplicate: false,
 				image: 'ghcr.io/aumi-app/agents-runner:staging',
 				replicas: 2,
 				healthcheck: 'missing',
@@ -64,6 +68,8 @@ describe('composeYaml', () => {
 			},
 			{
 				name: 'scheduler',
+				line: 19,
+				duplicate: false,
 				image: 'ghcr.io/aumi-app/agents-scheduler:staging',
 				replicas: null,
 				healthcheck: 'disabled',
@@ -87,12 +93,35 @@ describe('composeYaml', () => {
 		expect(summarizeCompose(yaml)).toEqual([
 			{
 				name: 'web',
+				line: 4,
+				duplicate: false,
 				image: 'nginx:1.27',
 				replicas: null,
 				healthcheck: 'missing',
 				volumes: [],
 			},
-			{ name: 'api', image: 'x', replicas: 3, healthcheck: 'missing', volumes: ['data'] },
+			{
+				name: 'api',
+				line: 5,
+				duplicate: false,
+				image: 'x',
+				replicas: 3,
+				healthcheck: 'missing',
+				volumes: ['data'],
+			},
+		])
+	})
+
+	it('un servicio repetido queda marcado desde la segunda vez, con su línea', () => {
+		const yaml =
+			'services:\n  web:\n    image: a\n  web:\n    image: b\n  worker:\n    image: c\n'
+
+		const services = summarizeCompose(yaml)
+
+		expect(services.map(({ name, line, duplicate }) => ({ name, line, duplicate }))).toEqual([
+			{ name: 'web', line: 2, duplicate: false },
+			{ name: 'web', line: 4, duplicate: true },
+			{ name: 'worker', line: 6, duplicate: false },
 		])
 	})
 

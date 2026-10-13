@@ -28,6 +28,13 @@ export type ComposeHealthcheck = 'defined' | 'disabled' | 'missing'
 
 export interface ComposeServiceSummary {
 	readonly name: string
+	/** La línea (desde 1) donde empieza el servicio. */
+	readonly line: number
+	/**
+	 * Otro servicio con el mismo nombre apareció antes: YAML no admite claves repetidas
+	 * (compose-go lo rechaza) y la pantalla no puede usar el nombre como clave.
+	 */
+	readonly duplicate: boolean
 	readonly image: string | null
 	/** `deploy.replicas`; `null` si no lo define (Swarm usa 1). */
 	readonly replicas: number | null
@@ -37,6 +44,8 @@ export interface ComposeServiceSummary {
 }
 
 interface Line {
+	/** Desde 1, como las numera el editor. */
+	readonly number: number
 	readonly indent: number
 	readonly text: string
 }
@@ -59,10 +68,10 @@ function withoutComment(text: string): string {
 }
 
 function toLines(yaml: string): Line[] {
-	return yaml.split(/\r?\n/).flatMap((raw) => {
+	return yaml.split(/\r?\n/).flatMap((raw, index) => {
 		const text = withoutComment(raw.trim())
 		if (text === '' || text === '---') return []
-		return [{ indent: raw.length - raw.trimStart().length, text }]
+		return [{ number: index + 1, indent: raw.length - raw.trimStart().length, text }]
 	})
 }
 
@@ -129,7 +138,7 @@ function summarizeService(
 	name: string,
 	value: string,
 	body: readonly Line[],
-): ComposeServiceSummary {
+): Omit<ComposeServiceSummary, 'line' | 'duplicate'> {
 	let image: string | null = null
 	let replicas: number | null = null
 	let healthcheck: ComposeHealthcheck = 'missing'
@@ -183,11 +192,14 @@ export function summarizeCompose(yaml: string): ComposeServiceSummary[] {
 	const block = blockAfter(lines, start)
 	const serviceIndent = block[0]?.indent
 	const services: ComposeServiceSummary[] = []
+	const seen = new Set<string>()
 	block.forEach((line, index) => {
 		if (line.indent !== serviceIndent) return
 		const pair = keyOf(line)
 		if (!pair) return
-		services.push(summarizeService(pair.key, pair.value, blockAfter(block, index)))
+		const service = summarizeService(pair.key, pair.value, blockAfter(block, index))
+		services.push({ ...service, line: line.number, duplicate: seen.has(pair.key) })
+		seen.add(pair.key)
 	})
 	return services
 }

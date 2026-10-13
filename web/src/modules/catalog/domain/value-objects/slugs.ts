@@ -44,19 +44,19 @@ export function isValidVolumeName(raw: string): boolean {
 
 export function parseProjectSlug(raw: string): ProjectSlug {
 	const problem = projectSlugProblem(raw)
-	if (problem) throw new InvalidSlug(problem, PROJECT_SLUG_MAX)
+	if (problem) throw new InvalidSlug(problem, PROJECT_SLUG_MAX, normalizeSlug(raw))
 	return normalizeSlug(raw) as ProjectSlug
 }
 
 export function parseStageSlug(raw: string): StageSlug {
 	const problem = stageSlugProblem(raw)
-	if (problem) throw new InvalidSlug(problem, STAGE_SLUG_MAX)
+	if (problem) throw new InvalidSlug(problem, STAGE_SLUG_MAX, normalizeSlug(raw))
 	return normalizeSlug(raw) as StageSlug
 }
 
 export function parseAppSlug(raw: string): AppSlug {
 	const problem = appSlugProblem(raw)
-	if (problem) throw new InvalidSlug(problem, APP_SLUG_MAX)
+	if (problem) throw new InvalidSlug(problem, APP_SLUG_MAX, normalizeSlug(raw))
 	return normalizeSlug(raw) as AppSlug
 }
 

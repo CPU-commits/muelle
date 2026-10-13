@@ -119,6 +119,22 @@ export const barEnd = style({
 	color: theme.colors.text.tertiary,
 })
 
+// Mientras baja CodeMirror: el mismo alto que el editor, para que la página no salte.
+export const editorLoading = style({
+	display: 'grid',
+	placeItems: 'center',
+	minHeight: '320px',
+})
+
+export const editorFallback = style({
+	display: 'flex',
+	flexDirection: 'column',
+	gap: theme.space[8],
+	padding: theme.space[12],
+	fontSize: theme.typography.fontSize[13],
+	color: theme.colors.status.warnText,
+})
+
 export const hint = style({
 	margin: 0,
 	padding: `${theme.space[8]} ${theme.space[16]}`,
@@ -164,6 +180,12 @@ export const serviceWarning = style({
 	flex: 'none',
 	fontSize: theme.typography.fontSize[12],
 	color: theme.colors.status.warnText,
+})
+
+export const serviceError = style({
+	flex: 'none',
+	fontSize: theme.typography.fontSize[12],
+	color: theme.colors.status.errorText,
 })
 
 export const serviceDetails = style({
