@@ -134,15 +134,24 @@
 	const showPanel: Attachment<HTMLElement> = (element) => {
 		element.showPopover()
 		const place = () => {
-			if (triggerElement) placeBelow(element, triggerElement, align)
+			if (!triggerElement) return
+			// Reubicar mide el alto natural del panel: se guarda el scroll de adentro.
+			const scrollTop = element.scrollTop
+			placeBelow(element, triggerElement, align)
+			element.scrollTop = scrollTop
+		}
+		// El scroll del propio panel (un menú largo) no lo mueve: solo el de la página.
+		const onScroll = (event: Event) => {
+			if (event.target instanceof Node && element.contains(event.target)) return
+			place()
 		}
 		place()
 		menuItems(element)[0]?.focus()
 		window.addEventListener('resize', place)
-		window.addEventListener('scroll', place, true)
+		window.addEventListener('scroll', onScroll, true)
 		return () => {
 			window.removeEventListener('resize', place)
-			window.removeEventListener('scroll', place, true)
+			window.removeEventListener('scroll', onScroll, true)
 			if (element.matches(':popover-open')) element.hidePopover()
 		}
 	}

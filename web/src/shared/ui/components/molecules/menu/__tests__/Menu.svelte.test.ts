@@ -3,6 +3,7 @@ import { page, userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-svelte'
 import MenuConfirmHarness from './MenuConfirmHarness.svelte'
 import MenuHarness from './MenuHarness.svelte'
+import TallMenuHarness from './TallMenuHarness.svelte'
 
 function itemRects(): DOMRect[] {
 	return [...document.querySelectorAll('[role="menuitem"]')].map((item) =>
@@ -99,6 +100,60 @@ describe('Menu', () => {
 		document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
 
 		await expect.element(screen.getByRole('menu')).not.toBeInTheDocument()
+	})
+})
+
+// Un menú más alto que el espacio libre (20 proyectos en un teléfono): el panel va del
+// lado con más lugar, se achica a ese lugar y scrollea adentro. Todos los items se alcanzan.
+describe('Menu largo a 360×640', () => {
+	async function openTall(top: number) {
+		await page.viewport(360, 640)
+		const onSelect = vi.fn()
+		const screen = await render(TallMenuHarness, { top, onSelect })
+		await screen.getByRole('button', { name: 'Proyectos' }).click()
+		const panel = document.querySelector('[role="menu"]')?.parentElement as HTMLElement
+		return { screen, onSelect, panel }
+	}
+
+	for (const [where, top] of [
+		['en el medio', 300],
+		['arriba', 40],
+		['abajo', 560],
+	] as const) {
+		it(`con el botón ${where}, el panel entra en la pantalla y scrollea`, async () => {
+			const { panel } = await openTall(top)
+			const rect = panel.getBoundingClientRect()
+
+			expect(rect.top).toBeGreaterThanOrEqual(0)
+			expect(rect.bottom).toBeLessThanOrEqual(640)
+			expect(panel.scrollHeight).toBeGreaterThan(panel.clientHeight)
+		})
+	}
+
+	it('con el teclado se llega al último item, y se ve', async () => {
+		const { screen, onSelect, panel } = await openTall(300)
+
+		await userEvent.keyboard('{End}')
+		const last = screen.getByRole('menuitem', { name: 'proyecto-20' })
+		await expect.element(last).toHaveFocus()
+		const itemRect = last.element().getBoundingClientRect()
+		const panelRect = panel.getBoundingClientRect()
+		expect(itemRect.top).toBeGreaterThanOrEqual(panelRect.top)
+		expect(itemRect.bottom).toBeLessThanOrEqual(panelRect.bottom)
+
+		await userEvent.keyboard('{Enter}')
+		expect(onSelect).toHaveBeenCalledWith('proyecto-20')
+	})
+
+	it('con el mouse, scrolleando el panel, se clickea el último', async () => {
+		const { screen, onSelect } = await openTall(300)
+
+		const last = screen.getByRole('menuitem', { name: 'proyecto-20' })
+		last.element().scrollIntoView({ block: 'nearest' })
+		expect(isHittable(last.element())).toBe(true)
+		await last.click()
+
+		expect(onSelect).toHaveBeenCalledWith('proyecto-20')
 	})
 })
 
