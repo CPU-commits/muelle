@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { getLocale, overwriteGetLocale } from '@/shared/ui/i18n/paraglide/runtime'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { ForbiddenError, UnavailableError, ValidationError } from '@/shared/domain'
+import { BadOriginError, ForbiddenError, UnavailableError, ValidationError } from '@/shared/domain'
 import {
 	EmptyEnvPatch,
 	EnvLimitExceeded,
@@ -28,9 +28,9 @@ describe('secretsErrorMessage', () => {
 		expect(secretsErrorMessage(new EnvOutOfScope(), 'stage')).toBe(
 			m.secrets_error_out_of_scope(),
 		)
-		expect(secretsErrorMessage(new ForbiddenError('x'), 'stage')).toBe(
-			m.secrets_error_out_of_scope(),
-		)
+		// Un 403 cualquiera (no `out_of_scope`) es el texto de shared.
+		expect(secretsErrorMessage(new ForbiddenError('x'), 'stage')).toBe(m.common_forbidden())
+		expect(secretsErrorMessage(new BadOriginError(), 'app')).toBe(m.common_bad_origin())
 		expect(secretsErrorMessage(new UnavailableError('x'), 'app')).toBe(m.common_unavailable())
 	})
 

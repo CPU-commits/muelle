@@ -1,8 +1,8 @@
-import { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
+import { UnavailableError } from '@/shared/domain'
 import type { EnvImportViewModel } from '..'
 import type { EnvEditorViewModel } from '../../envEditor'
 import {
@@ -30,12 +30,8 @@ const API_LABEL = 'app:auditfy/staging/api'
 let fake: InMemoryEnvRepository
 
 async function mount(): Promise<{ editor: EnvEditorViewModel; importer: EnvImportViewModel }> {
-	const client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
 	let vms: { editor: EnvEditorViewModel; importer: EnvImportViewModel } | undefined
 	await render(ImportHarness, {
-		client,
 		owner: api,
 		onReady: (instances) => {
 			vms = instances
@@ -270,6 +266,22 @@ describe('EnvImportViewModel', () => {
 
 		importer.setText('NEW=y')
 		expect(importer.serverError).toBeNull()
+	})
+
+	it('un error al confirmar queda adentro del diálogo, que sigue abierto', async () => {
+		const { importer } = await mount()
+		importer.setText('PORT=3000')
+		await importer.submit()
+		mocks.patchEnv.mockRejectedValueOnce(new UnavailableError('caído'))
+
+		await expect(importer.confirmImport()).resolves.toBe(false)
+
+		expect(importer.isConfirming).toBe(true)
+		expect(importer.serverError).toBe(m.common_unavailable())
+		expect(toasts.items.filter((item) => item.tone === 'error')).toEqual([])
+		importer.cancelConfirm()
+		expect(importer.serverError).toBeNull()
+		expect(importer.text).toBe('PORT=3000')
 	})
 
 	it('cancelar cierra y olvida el texto, el modo y la marca', async () => {

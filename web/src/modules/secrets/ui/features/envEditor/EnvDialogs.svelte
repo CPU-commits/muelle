@@ -91,6 +91,7 @@
 	cancelLabel={m.common_cancel()}
 	tone="primary"
 	loading={vm.pendingAction === 'secure'}
+	error={vm.secureError}
 	onConfirm={() => void vm.confirmSecure()}
 	onCancel={vm.cancelSecure}
 />
@@ -102,6 +103,7 @@
 	confirmLabel={m.secrets_delete_confirm()}
 	cancelLabel={m.common_cancel()}
 	loading={vm.pendingAction === 'delete'}
+	error={vm.deleteError}
 	onConfirm={() => void vm.confirmDelete()}
 	onCancel={vm.cancelDelete}
 />

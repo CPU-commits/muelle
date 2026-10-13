@@ -1,6 +1,7 @@
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import type { ChoiceOption } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
+import { ValidationError } from '@/shared/domain'
 import {
 	type ImportMode,
 	type ImportPlan,
@@ -204,23 +205,28 @@ export class EnvImportViewModel {
 		return this.#apply(plan)
 	}
 
+	/** Si falla, el diálogo sigue abierto con el error adentro (`serverError`). */
 	confirmImport = async (): Promise<boolean> => {
 		const plan = this.confirming
 		if (!plan || this.#editor.isSaving) return false
-		const applied = await this.#apply(plan)
-		this.confirming = null
-		return applied
+		return this.#apply(plan)
 	}
 
 	cancelConfirm = (): void => {
-		if (!this.isSubmitting) this.confirming = null
+		if (this.isSubmitting) return
+		this.confirming = null
+		this.serverError = null
 	}
 
 	async #apply(plan: ImportPlan): Promise<boolean> {
 		const patch = plan.patch
 		if (!patch) return false
 		this.serverError = null
-		const outcome = await this.#editor.applyImport(patch, (message) => {
+		// En el diálogo de confirmar, cualquier error queda adentro; en el panel, los de
+		// validación (un límite, un 422) quedan sobre los botones y el resto va a un toast.
+		const inDialog = this.confirming !== null
+		const outcome = await this.#editor.applyImport(patch, (message, error) => {
+			if (!inDialog && !(error instanceof ValidationError)) return false
 			this.serverError = message
 			return true
 		})

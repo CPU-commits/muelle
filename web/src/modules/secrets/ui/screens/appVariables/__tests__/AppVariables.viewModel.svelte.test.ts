@@ -1,4 +1,3 @@
-import { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
@@ -38,12 +37,8 @@ function seedFake(): InMemoryEnvRepository {
 }
 
 async function mount(): Promise<AppVariablesViewModel> {
-	const client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
 	let vm: AppVariablesViewModel | undefined
 	await render(AppVariablesHarness, {
-		client,
 		params: { project: 'auditfy', stage: 'staging', app: 'api' },
 		onReady: (instance) => {
 			vm = instance

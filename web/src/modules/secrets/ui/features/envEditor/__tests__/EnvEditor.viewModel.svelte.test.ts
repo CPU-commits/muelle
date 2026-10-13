@@ -1,4 +1,3 @@
-import { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
@@ -58,12 +57,8 @@ async function mount(
 	owner: EnvOwner = api,
 	overridden?: ReadonlySet<string>,
 ): Promise<EnvEditorViewModel> {
-	const client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
 	let vm: EnvEditorViewModel | undefined
 	await render(EditorHarness, {
-		client,
 		owner,
 		...(overridden ? { overridden } : {}),
 		onReady: (instance) => {
@@ -388,53 +383,63 @@ describe('EnvEditorViewModel', () => {
 		})
 	})
 
-	describe('el foco al cerrar un diálogo de fila', () => {
-		it('vuelve a los ⋯ de la fila al cancelar o guardar', async () => {
+	describe('los errores de los diálogos quedan adentro', () => {
+		it('marcar como secreta y borrar: el diálogo sigue abierto con el error', async () => {
 			const vm = await mount()
-			expect(vm.focusSeqFor('PORT')).toBe(0)
+			mocks.patchEnv.mockRejectedValueOnce(new UnavailableError('caído'))
+			vm.askSecure(byKey(vm, 'LOG_LEVEL'))
 
+			await expect(vm.confirmSecure()).resolves.toBe(false)
+			expect(vm.secureError).toBe(m.common_unavailable())
+			expect(vm.confirmingSecret?.key).toBe('LOG_LEVEL')
+			vm.cancelSecure()
+			expect(vm.secureError).toBeNull()
+
+			mocks.patchEnv.mockRejectedValueOnce(new EnvOwnerNotFound())
+			vm.askDelete(byKey(vm, 'PORT'))
+			await expect(vm.confirmDelete()).resolves.toBe(false)
+			expect(vm.deleteError).toBe(m.secrets_not_found_app())
+			expect(vm.confirmingDelete?.key).toBe('PORT')
+			expect(toasts.items.filter((item) => item.tone === 'error')).toEqual([])
+		})
+
+		it('editar: también un backend caído queda en el modal', async () => {
+			mocks.patchEnv.mockRejectedValueOnce(new UnavailableError('caído'))
+			const vm = await mount()
+			vm.openEdit(byKey(vm, 'PORT'))
+			vm.setEditValue('9000')
+
+			await vm.submitEdit()
+
+			expect(vm.editError).toBe(m.common_unavailable())
+			expect(vm.editing?.key).toBe('PORT')
+		})
+	})
+
+	describe('el foco después de borrar', () => {
+		// Cancelar o guardar no piden nada: el Modal devuelve el foco a los ⋯ que lo abrieron.
+		it('cancelar o guardar no mueven el foco por su cuenta', async () => {
+			const vm = await mount()
 			vm.openEdit(byKey(vm, 'PORT'))
 			vm.closeEdit()
-			const afterCancel = vm.focusSeqFor('PORT')
-			expect(afterCancel).toBeGreaterThan(0)
-			expect(vm.focusSeqFor('LOG_LEVEL')).toBe(0)
-
-			vm.openEdit(byKey(vm, 'PORT'))
-			vm.setEditValue('8080')
-			await vm.submitEdit()
-			expect(vm.focusSeqFor('PORT')).toBeGreaterThan(afterCancel)
-
-			vm.askSecure(byKey(vm, 'LOG_LEVEL'))
-			vm.cancelSecure()
-			expect(vm.focusSeqFor('LOG_LEVEL')).toBeGreaterThan(0)
-
 			vm.askDelete(byKey(vm, 'PORT'))
 			vm.cancelDelete()
-			expect(vm.focusSeqFor('PORT')).toBeGreaterThan(0)
+
 			expect(vm.headingFocusSeq).toBe(0)
 		})
 
-		it('un pedido cumplido se olvida: un re-render de la fila no vuelve a mover el foco', async () => {
-			const vm = await mount()
-			vm.openEdit(byKey(vm, 'PORT'))
-			vm.closeEdit()
-			const seq = vm.focusSeqFor('PORT')
-
-			vm.focusDone(seq - 1)
-			expect(vm.focusSeqFor('PORT')).toBe(seq)
-			vm.focusDone(seq)
-			expect(vm.focusSeqFor('PORT')).toBe(0)
-			expect(vm.focusRequest).toBeNull()
-		})
-
-		it('si la fila se borró, va al título de la lista', async () => {
+		it('si la fila se borró, va al título de la lista, una sola vez', async () => {
 			const vm = await mount()
 			vm.askDelete(byKey(vm, 'PORT'))
 
 			await vm.confirmDelete()
 
-			expect(vm.headingFocusSeq).toBeGreaterThan(0)
-			expect(vm.focusSeqFor('PORT')).toBe(0)
+			const seq = vm.headingFocusSeq
+			expect(seq).toBeGreaterThan(0)
+			vm.focusDone(seq - 1)
+			expect(vm.headingFocusSeq).toBe(seq)
+			vm.focusDone(seq)
+			expect(vm.headingFocusSeq).toBe(0)
 		})
 	})
 

@@ -66,3 +66,42 @@ test('de una app a Proyectos, al stage y entre tabs, sin errores', async ({ page
 
 	expect(errors).toEqual([])
 })
+
+test('las variables: de la app al stage y a Proyectos, sin errores ni pedidos sin params', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	const undefinedRequests: string[] = []
+	page.on('request', (request) => {
+		if (request.url().includes('/undefined')) undefinedRequests.push(request.url())
+	})
+	await login(page)
+
+	// El tab Variables de una app (F1-secrets).
+	await page.goto('/projects/auditfy/stages/staging/apps/api/logs')
+	await tabs(page).getByRole('link', { name: 'Variables' }).click()
+	await expect(page).toHaveURL(/\/apps\/api\/variables$/)
+	await expect(page.getByRole('heading', { name: 'De la app' })).toBeVisible()
+
+	// Variables de la app → variables del stage, por el link de las heredadas.
+	await page.getByRole('link', { name: 'Editar en el stage' }).click()
+	await expect(page).toHaveURL(/\/stages\/staging\/variables$/)
+	await expect(page.getByRole('heading', { name: 'Variables del stage' })).toBeVisible()
+	await expect(tabs(page)).toHaveCount(0)
+	await expect(location(page).getByText('staging')).toBeVisible()
+
+	// Variables del stage → Proyectos, y de vuelta con el historial.
+	await page.getByRole('link', { name: 'muelle, inicio' }).click()
+	await expect(page.getByRole('heading', { name: 'Proyectos' })).toBeVisible()
+	await page.goBack()
+	await expect(page.getByRole('heading', { name: 'Variables del stage' })).toBeVisible()
+	await page.goBack()
+	await expect(page.getByRole('heading', { name: 'De la app' })).toBeVisible()
+	await expect(tabs(page).getByRole('link', { name: 'Variables' })).toHaveAttribute(
+		'aria-current',
+		'page',
+	)
+
+	expect(errors).toEqual([])
+	expect(undefinedRequests).toEqual([])
+})

@@ -29,8 +29,8 @@
 	} from './styles.css'
 
 	// Las variables propias del dueño, editables. En la app, las que también tiene el stage
-	// llevan "pisa al stage": la de la app gana. Al cerrar un diálogo de una fila, el foco
-	// vuelve a sus ⋯ (o al título, si se borró).
+	// llevan "pisa al stage": la de la app gana. Al cerrar un diálogo de una fila, el Modal
+	// devuelve el foco a sus ⋯; si se borró la fila, el foco viene al título de la lista.
 	type Props = { vm: EnvEditorViewModel; title: string; emptyTitle: string; emptyBody: string }
 
 	let { vm, title, emptyTitle, emptyBody }: Props = $props()
@@ -84,14 +84,7 @@
 					>
 						{formatRelative(envVar.updatedAt)}
 					</time>
-					<span
-						class={rowActions}
-						{@attach focusOnRequest(
-							() => vm.focusSeqFor(envVar.key),
-							vm.focusDone,
-							'button',
-						)}
-					>
+					<span class={rowActions}>
 						<Menu
 							label={m.secrets_row_options({ key: envVar.key })}
 							items={vm.menuFor(envVar)}

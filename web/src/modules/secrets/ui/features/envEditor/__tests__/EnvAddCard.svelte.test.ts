@@ -1,4 +1,3 @@
-import { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-svelte'
@@ -27,11 +26,7 @@ const PEM = [
 ].join('\n')
 
 async function mount() {
-	const client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
 	const screen = await render(AddCardHarness, {
-		client,
 		owner: appOwner('auditfy', 'staging', 'api'),
 	})
 	await expect.element(screen.getByRole('button', { name: 'Agregar' })).toBeEnabled()

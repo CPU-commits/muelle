@@ -1,4 +1,3 @@
-import { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
@@ -18,12 +17,8 @@ vi.mock('@/modules/secrets/container', () => ({
 }))
 
 async function mount(): Promise<StageVariablesViewModel> {
-	const client = new QueryClient({
-		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-	})
 	let vm: StageVariablesViewModel | undefined
 	await render(StageVariablesHarness, {
-		client,
 		params: { project: 'auditfy', stage: 'staging' },
 		onReady: (instance) => {
 			vm = instance

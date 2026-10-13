@@ -51,20 +51,19 @@ type PatchRequest = Omit<PatchEnvInput, 'owner' | 'current'>
 const NO_KEYS: ReadonlySet<string> = envKeys([])
 
 /**
- * Qué hacer con un error de validación (un 422 o un límite) de la acción: devuelve
- * `true` si lo mostró junto al formulario. Si no, va a un toast.
+ * Qué hacer con el error de una acción: devuelve `true` si lo mostró junto a su formulario
+ * o adentro de su diálogo. Si no, va a un toast.
  */
-type FieldErrorHandler = (message: string, error: ValidationError) => boolean
+type ErrorHandler = (message: string, error: unknown) => boolean
 
-/**
- * A dónde vuelve el foco cuando se cierra un diálogo de una fila: a sus ⋯ (`key`), o al
- * título de la lista (`key: null`) si la fila ya no está. `seq` crece en cada pedido, así
- * que dos pedidos seguidos a la misma fila también mueven el foco.
- */
-interface FocusRequest {
-	readonly key: string | null
-	readonly seq: number
-}
+/** Los formularios muestran junto a sus campos solo los errores de validación. */
+const onlyValidation =
+	(show: (message: string, error: ValidationError) => void): ErrorHandler =>
+	(message, error) => {
+		if (!(error instanceof ValidationError)) return false
+		show(message, error)
+		return true
+	}
 
 // Las variables de un dueño (stage o app) y todo lo que las cambia: agregar, editar o
 // reemplazar el valor, marcar como secreta y borrar. "Importar .env" (EnvImportViewModel)
@@ -92,9 +91,16 @@ export class EnvEditorViewModel {
 
 	confirmingDelete = $state.raw<EnvVar | null>(null)
 	confirmingSecret = $state.raw<EnvVar | null>(null)
+	/** Por qué falló borrar o marcar como secreta: se muestra adentro del diálogo. */
+	deleteError = $state<string | null>(null)
+	secureError = $state<string | null>(null)
 
-	focusRequest = $state.raw<FocusRequest | null>(null)
-
+	/**
+	 * Cuántas veces se pidió llevar el foco al título de la lista (después de borrar una
+	 * fila). El Modal devuelve el foco a los ⋯ que lo abrieron; si la fila ya no está, al
+	 * h1 de la página: esto lo deja más cerca, en la lista. 0 es "nada pendiente".
+	 */
+	headingFocusSeq = $state(0)
 	#focusSeq = 0
 	readonly #owner: () => EnvOwner
 	readonly #overridden: () => ReadonlySet<string>
@@ -178,23 +184,14 @@ export class EnvEditorViewModel {
 
 	// --- Foco --------------------------------------------------------------------------
 
-	/** El `seq` del pedido de foco si es para la fila `key`; si no, 0. */
-	focusSeqFor = (key: string): number =>
-		this.focusRequest?.key === key ? this.focusRequest.seq : 0
-
-	/** El `seq` del pedido de foco si es para el título de la lista; si no, 0. */
-	get headingFocusSeq(): number {
-		return this.focusRequest && this.focusRequest.key === null ? this.focusRequest.seq : 0
-	}
-
 	/** La vista ya movió el foco: el pedido se olvida (un re-render no lo repite). */
 	focusDone = (seq: number): void => {
-		if (this.focusRequest?.seq === seq) this.focusRequest = null
+		if (this.headingFocusSeq === seq) this.headingFocusSeq = 0
 	}
 
-	#focus(key: string | null): void {
+	#focusHeading(): void {
 		this.#focusSeq += 1
-		this.focusRequest = { key, seq: this.#focusSeq }
+		this.headingFocusSeq = this.#focusSeq
 	}
 
 	// --- Agregar ---------------------------------------------------------------------
@@ -239,11 +236,10 @@ export class EnvEditorViewModel {
 		const outcome = await this.#save(
 			'add',
 			{ set: [[key, sent.value]], secret: this.newSecret },
-			(message, error) => {
+			onlyValidation((message, error) => {
 				if (error instanceof InvalidEnvValue) this.newValueError = message
 				else this.newFormError = message
-				return true
-			},
+			}),
 		)
 		if (outcome === 'failed') return false
 		toast.success(m.secrets_add_success(), savedKeyNote(this.kind, key))
@@ -273,12 +269,10 @@ export class EnvEditorViewModel {
 		this.editConfirmingReveal = false
 	}
 
-	/** Cancelar, Escape o un clic afuera: el foco vuelve a los ⋯ de la fila. */
+	/** Cancelar, Escape o un clic afuera (el Modal devuelve el foco a los ⋯ de la fila). */
 	closeEdit = (): void => {
 		if (this.pendingAction === 'edit') return
-		const key = this.editing?.key
 		this.#resetEdit()
-		if (key) this.#focus(key)
 	}
 
 	setEditValue = (value: string): void => {
@@ -331,7 +325,6 @@ export class EnvEditorViewModel {
 		}
 		if (!this.editHasChanges) {
 			this.#resetEdit()
-			this.#focus(envVar.key)
 			return true
 		}
 		// Dejar a la vista el valor de una secreta tiene un segundo paso, como en el import.
@@ -343,6 +336,7 @@ export class EnvEditorViewModel {
 		const outcome = await this.#save(
 			'edit',
 			{ set: [[envVar.key, this.editValue]], secret: this.editSecret },
+			// En el modal, cualquier error: un 422, un límite o el backend caído.
 			(message) => {
 				this.editError = message
 				return true
@@ -358,7 +352,6 @@ export class EnvEditorViewModel {
 			)
 		}
 		this.#resetEdit()
-		this.#focus(envVar.key)
 		return true
 	}
 
@@ -372,14 +365,15 @@ export class EnvEditorViewModel {
 	// --- Marcar como secreta -------------------------------------------------------------
 
 	askSecure = (envVar: EnvVar): void => {
-		if (!envVar.secret) this.confirmingSecret = envVar
+		if (envVar.secret) return
+		this.confirmingSecret = envVar
+		this.secureError = null
 	}
 
 	cancelSecure = (): void => {
 		if (this.pendingAction === 'secure') return
-		const key = this.confirmingSecret?.key
 		this.confirmingSecret = null
-		if (key) this.#focus(key)
+		this.secureError = null
 	}
 
 	/**
@@ -393,17 +387,20 @@ export class EnvEditorViewModel {
 		const envVar = findEnvVar(this.vars, asked.key)
 		if (!envVar || envVar.secret) {
 			this.confirmingSecret = null
-			this.#focus(envVar ? envVar.key : null)
 			return false
 		}
-		const outcome = await this.#save('secure', {
-			set: [[envVar.key, envVar.value]],
-			secret: true,
-		})
+		this.secureError = null
+		const outcome = await this.#save(
+			'secure',
+			{ set: [[envVar.key, envVar.value]], secret: true },
+			(message) => {
+				this.secureError = message
+				return true
+			},
+		)
 		if (outcome === 'failed') return false
 		toast.success(m.secrets_secure_success({ key: envVar.key }), savedNote(this.kind))
 		this.confirmingSecret = null
-		this.#focus(envVar.key)
 		return true
 	}
 
@@ -411,6 +408,7 @@ export class EnvEditorViewModel {
 
 	askDelete = (envVar: EnvVar): void => {
 		this.confirmingDelete = envVar
+		this.deleteError = null
 	}
 
 	/** Qué pasa al borrarla: en una app que pisaba al stage, vuelve el valor del stage. */
@@ -424,32 +422,35 @@ export class EnvEditorViewModel {
 
 	cancelDelete = (): void => {
 		if (this.pendingAction === 'delete') return
-		const key = this.confirmingDelete?.key
 		this.confirmingDelete = null
-		if (key) this.#focus(key)
+		this.deleteError = null
 	}
 
 	/** La fila desaparece: el foco va al título de la lista. */
 	confirmDelete = async (): Promise<boolean> => {
 		const envVar = this.confirmingDelete
 		if (!envVar) return false
-		const outcome = await this.#save('delete', { unset: [envVar.key], secret: true })
+		this.deleteError = null
+		const outcome = await this.#save(
+			'delete',
+			{ unset: [envVar.key], secret: true },
+			(message) => {
+				this.deleteError = message
+				return true
+			},
+		)
 		if (outcome === 'failed') return false
 		toast.success(m.secrets_delete_success(), deletedKeyNote(this.kind, envVar.key))
 		this.confirmingDelete = null
-		this.#focus(null)
+		this.#focusHeading()
 		return true
 	}
 
 	// --- Importar ----------------------------------------------------------------------
 
-	/** Aplica el plan de "Importar .env". */
-	applyImport = (patch: EnvPatch, onFieldError: FieldErrorHandler): Promise<SaveOutcome> =>
-		this.#save(
-			'import',
-			{ set: patch.set, unset: patch.unset, secret: patch.secret },
-			onFieldError,
-		)
+	/** Aplica el plan de "Importar .env". `onError` decide dónde se muestra un error. */
+	applyImport = (patch: EnvPatch, onError: ErrorHandler): Promise<SaveOutcome> =>
+		this.#save('import', { set: patch.set, unset: patch.unset, secret: patch.secret }, onError)
 
 	// --- Fila --------------------------------------------------------------------------
 
@@ -501,14 +502,14 @@ export class EnvEditorViewModel {
 	}
 
 	// Un PATCH a la vez. Con `current`, el caso de uso revisa los límites del dueño antes
-	// de mandar. Un error de validación va al formulario si la acción lo sabe mostrar; el
-	// resto (o sin formulario), a un toast. La mutación espera el refetch: comparar la
+	// de mandar. Un error va al formulario o al diálogo si la acción lo sabe mostrar
+	// (`onError`); si no, a un toast. La mutación espera el refetch: comparar la
 	// lista de antes con la de después dice si el backend cambió algo (no reescribe lo que
 	// no cambia, ni su fecha). Si el refetch falló, se cuenta como cambio.
 	async #save(
 		action: EnvAction,
 		request: PatchRequest,
-		onFieldError?: FieldErrorHandler,
+		onError?: ErrorHandler,
 	): Promise<SaveOutcome> {
 		if (this.pendingAction !== null) return 'failed'
 		this.pendingAction = action
@@ -520,9 +521,7 @@ export class EnvEditorViewModel {
 			return changed ? 'changed' : 'unchanged'
 		} catch (error) {
 			const message = secretsErrorMessage(error, this.kind)
-			if (!(error instanceof ValidationError && onFieldError?.(message, error))) {
-				toast.error(message)
-			}
+			if (!onError?.(message, error)) toast.error(message)
 			return 'failed'
 		} finally {
 			this.pendingAction = null

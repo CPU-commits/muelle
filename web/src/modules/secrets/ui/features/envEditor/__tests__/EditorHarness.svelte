@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { type QueryClient, setQueryClientContext } from '@tanstack/svelte-query'
+	import { setQueryClientContext } from '@tanstack/svelte-query'
+	import { createQueryClient } from '@/shared/data/query'
 	import { untrack } from 'svelte'
 	import type { EnvOwner } from '../../../../domain'
 	import { EnvEditorViewModel } from '..'
@@ -8,7 +9,6 @@
 	// `useQueryClient`, `createQuery` y `createMutation` pueden leer el contexto. No
 	// renderiza nada: el test habla con el viewModel, no con el markup.
 	const props: {
-		client: QueryClient
 		owner: EnvOwner
 		overridden?: ReadonlySet<string>
 		onReady: (vm: EnvEditorViewModel) => void
@@ -16,7 +16,8 @@
 
 	// `untrack`: las props se leen UNA vez, al montar, y es a propósito.
 	untrack(() => {
-		setQueryClientContext(props.client)
+		// Las mismas opciones que la app, sin reintentos.
+		setQueryClientContext(createQueryClient({ retry: false }))
 		const overridden = props.overridden
 		props.onReady(
 			new EnvEditorViewModel(() => props.owner, overridden ? () => overridden : undefined),

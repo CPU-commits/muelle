@@ -1,11 +1,13 @@
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { ForbiddenError, UnavailableError, ValidationError } from '@/shared/domain'
+import { describeError } from '@/shared/ui'
+import { ValidationError } from '@/shared/domain'
 import {
 	type DotenvIssue,
 	type DotenvSwallowed,
 	type EnvKeyProblem,
 	type EnvLimit,
 	EnvLimitExceeded,
+	EnvOutOfScope,
 	EnvOwnerNotFound,
 	type EnvOwnerKind,
 	type EnvValueProblem,
@@ -63,12 +65,12 @@ export function secretsErrorMessage(error: unknown, kind: EnvOwnerKind): string 
 	if (error instanceof InvalidEnvValue) return valueProblemMessage(error.problem)
 	if (error instanceof EnvLimitExceeded) return limitMessage(error.limit)
 	if (error instanceof EnvOwnerNotFound) return notFoundMessage(kind)
-	if (error instanceof ForbiddenError) return m.secrets_error_out_of_scope()
-	if (error instanceof UnavailableError) return m.common_unavailable()
+	if (error instanceof EnvOutOfScope) return m.secrets_error_out_of_scope()
 	// Un 422 con una regla que el panel no conoce (EnvRejected) o cualquier otra validación:
 	// un texto propio y traducido. El motivo del backend va en español: queda para logs.
 	if (error instanceof ValidationError) return m.secrets_error_rejected()
-	return m.common_error_generic()
+	// Lo que puede llegar de cualquier endpoint: backend caído, origen o sesión ambigua…
+	return describeError(error)
 }
 
 /** "Línea 3: COMPOSE_X: el prefijo COMPOSE_ está reservado." */

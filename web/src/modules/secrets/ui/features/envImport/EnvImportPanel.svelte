@@ -179,7 +179,7 @@
 			{#if vm.limitError}
 				<Banner tone="error" title={vm.limitError} />
 			{/if}
-			{#if vm.serverError}
+			{#if vm.serverError && !vm.isConfirming}
 				<Banner tone="error" title={vm.serverError} />
 			{/if}
 		</div>
@@ -213,6 +213,7 @@
 		confirmLabel={vm.confirmLabel}
 		cancelLabel={m.common_cancel()}
 		loading={vm.isSubmitting}
+		error={vm.isConfirming ? vm.serverError : null}
 		onConfirm={() => void vm.confirmImport()}
 		onCancel={vm.cancelConfirm}
 	/>
