@@ -1,8 +1,7 @@
 import { createQuery } from '@tanstack/svelte-query'
-import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { UnavailableError } from '@/shared/domain'
 import { appQuery } from '../../../data'
 import { type App, AppNotFound, type AppRef, type AppSummary, appSummaryOf } from '../../../domain'
+import { catalogErrorMessage } from '../../components/catalogMessages'
 
 // App·Configuración: carga la app y elige el formulario (servicio) o el editor de YAML
 // (compose). Cada uno guarda por su cuenta.
@@ -42,7 +41,7 @@ export class AppConfigViewModel {
 	get loadError(): string | null {
 		const error = this.#app.error
 		if (!error || this.isNotFound) return null
-		return error instanceof UnavailableError ? m.common_unavailable() : m.common_error_generic()
+		return catalogErrorMessage(error)
 	}
 
 	retry = (): void => {

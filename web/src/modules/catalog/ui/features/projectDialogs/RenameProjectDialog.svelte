@@ -2,7 +2,6 @@
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import { Banner, Button, Field, firstError, Input, Modal } from '@/shared/ui'
 	import type { Project } from '../../../domain'
-	import { validateProjectName } from './dialogForm'
 	import { RenameProjectViewModel } from './RenameProject.viewModel.svelte.ts'
 	import { form as formClass } from './styles.css'
 
@@ -35,12 +34,7 @@
 		{#if vm.errors.form}
 			<Banner tone="error" title={vm.errors.form} />
 		{/if}
-		<vm.form.Field
-			name="name"
-			validators={{
-				onDynamic: ({ value }) => validateProjectName(value),
-			}}
-		>
+		<vm.form.Field name="name">
 			{#snippet children(field)}
 				<Field
 					label={m.catalog_project_name()}

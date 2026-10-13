@@ -67,6 +67,16 @@ export function validateComposeYaml(value: string): string | undefined {
 	return problem === 'too_large' ? m.catalog_error_compose_too_large() : undefined
 }
 
+/** Para el validador del formulario: `{ fields }` con los errores que haya, o nada. */
+export function formErrors(
+	fields: Record<string, string | undefined>,
+): { fields: Record<string, string> } | undefined {
+	const errors = Object.fromEntries(
+		Object.entries(fields).filter((entry): entry is [string, string] => entry[1] !== undefined),
+	)
+	return Object.keys(errors).length > 0 ? { fields: errors } : undefined
+}
+
 export interface DialogErrors {
 	/** Por campo del formulario. */
 	readonly fields: Readonly<Record<string, string>>
@@ -94,11 +104,8 @@ export function dialogErrors(error: unknown, formFields: readonly string[]): Dia
 		return { fields: { slug: slugTakenMessage(error) }, form: null }
 	}
 	if (error instanceof ValidationError && error.field && formFields.includes(error.field)) {
-		const message =
-			error instanceof InvalidSlug || error instanceof InvalidProjectName
-				? catalogErrorMessage(error)
-				: error.message
-		return { fields: { [error.field]: message }, form: null }
+		// Del dominio (InvalidSlug…) o un 422 del backend: el texto traducido, sin el campo.
+		return { fields: { [error.field]: catalogErrorMessage(error) }, form: null }
 	}
 	return { fields: {}, form: catalogErrorMessage(error) }
 }

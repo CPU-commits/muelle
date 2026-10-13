@@ -12,7 +12,17 @@ import {
 	type ProjectSlug,
 	type StageSlug,
 } from '../../../domain'
-import { type DialogErrors, dialogErrors, NO_DIALOG_ERRORS, withoutField } from './dialogForm'
+import {
+	type DialogErrors,
+	dialogErrors,
+	formErrors,
+	NO_DIALOG_ERRORS,
+	validateAppSlug,
+	validateComposeYaml,
+	validateImage,
+	validatePort,
+	withoutField,
+} from './dialogForm'
 
 export interface NewAppValues {
 	slug: string
@@ -52,6 +62,22 @@ export class NewAppViewModel {
 		// Valida al enviar y, después, en cada cambio: un error que desaparece al salir del
 		// campo movería el botón justo cuando se lo clickea.
 		validationLogic: revalidateLogic(),
+		// Solo lo del tipo elegido: la imagen de una compose no importa.
+		validators: {
+			onDynamic: ({ value }: { value: NewAppValues }) =>
+				formErrors(
+					value.kind === 'service'
+						? {
+								slug: validateAppSlug(value.slug),
+								image: validateImage(value.image),
+								port: validatePort(value.port),
+							}
+						: {
+								slug: validateAppSlug(value.slug),
+								composeYaml: validateComposeYaml(value.composeYaml),
+							},
+				),
+		},
 		onSubmit: async ({ value }) => {
 			await this.#submit(value)
 		},

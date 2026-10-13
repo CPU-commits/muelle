@@ -11,7 +11,6 @@
 		Textarea,
 	} from '@/shared/ui'
 	import { APP_SLUG_MAX, type ProjectSlug, type StageSlug } from '../../../domain'
-	import { validateAppSlug, validateComposeYaml, validateImage, validatePort } from './dialogForm'
 	import { NewAppViewModel } from './NewApp.viewModel.svelte.ts'
 	import { form as formClass, kind, kindHint, kindLabel, row, yaml } from './styles.css'
 
@@ -46,12 +45,7 @@
 			<Banner tone="error" title={vm.errors.form} />
 		{/if}
 
-		<vm.form.Field
-			name="slug"
-			validators={{
-				onDynamic: ({ value }) => validateAppSlug(value),
-			}}
-		>
+		<vm.form.Field name="slug">
 			{#snippet children(field)}
 				<Field
 					label={m.catalog_slug()}
@@ -94,15 +88,7 @@
 
 		{#if vm.kind === 'service'}
 			<div class={row}>
-				<vm.form.Field
-					name="image"
-					validators={{
-						onDynamic: ({ value, fieldApi }) =>
-							fieldApi.form.getFieldValue('kind') === 'service'
-								? validateImage(value)
-								: undefined,
-					}}
-				>
+				<vm.form.Field name="image">
 					{#snippet children(field)}
 						<Field
 							label={m.catalog_app_image()}
@@ -131,15 +117,7 @@
 					{/snippet}
 				</vm.form.Field>
 
-				<vm.form.Field
-					name="port"
-					validators={{
-						onDynamic: ({ value, fieldApi }) =>
-							fieldApi.form.getFieldValue('kind') === 'service'
-								? validatePort(value)
-								: undefined,
-					}}
-				>
+				<vm.form.Field name="port">
 					{#snippet children(field)}
 						<Field
 							label={m.catalog_app_port()}
@@ -170,15 +148,7 @@
 				</vm.form.Field>
 			</div>
 		{:else}
-			<vm.form.Field
-				name="composeYaml"
-				validators={{
-					onDynamic: ({ value, fieldApi }) =>
-						fieldApi.form.getFieldValue('kind') === 'compose'
-							? validateComposeYaml(value)
-							: undefined,
-				}}
-			>
+			<vm.form.Field name="composeYaml">
 				{#snippet children(field)}
 					<Field
 						label={m.catalog_app_compose_yaml()}

@@ -4,7 +4,15 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import { createProjectMutation } from '../../../data'
 import { PROJECT_SLUG_MAX, slugFromName } from '../../../domain'
-import { type DialogErrors, dialogErrors, NO_DIALOG_ERRORS, withoutField } from './dialogForm'
+import {
+	type DialogErrors,
+	dialogErrors,
+	formErrors,
+	NO_DIALOG_ERRORS,
+	validateProjectName,
+	validateProjectSlug,
+	withoutField,
+} from './dialogForm'
 
 export interface NewProjectValues {
 	name: string
@@ -26,6 +34,13 @@ export class NewProjectViewModel {
 		// Valida al enviar y, después, en cada cambio: un error que desaparece al salir del
 		// campo movería el botón justo cuando se lo clickea.
 		validationLogic: revalidateLogic(),
+		validators: {
+			onDynamic: ({ value }: { value: NewProjectValues }) =>
+				formErrors({
+					name: validateProjectName(value.name),
+					slug: validateProjectSlug(value.slug),
+				}),
+		},
 		onSubmit: async ({ value }) => {
 			await this.#submit(value)
 		},

@@ -125,7 +125,12 @@ describe('ProjectsViewModel', () => {
 		expect(vm.dialog).toMatchObject({ kind: 'renameProject' })
 		select('delete')
 		expect(vm.dialog).toMatchObject({ kind: 'deleteProject' })
-		expect(vm.confirmation?.body).toBe(m.catalog_delete_project_body_stages())
+		// Tiene stages: el diálogo explica qué hacer antes y no ofrece borrar.
+		expect(vm.confirmation).toEqual({
+			title: m.catalog_project_not_empty_title({ project: 'auditfy' }),
+			body: m.catalog_project_not_empty_body(),
+			blocked: true,
+		})
 	})
 
 	it('borrar un proyecto vacío avisa y cierra', async () => {
@@ -141,27 +146,40 @@ describe('ProjectsViewModel', () => {
 		expect(vm.dialog).toBeNull()
 	})
 
-	it('not_empty dice claramente qué falta', async () => {
-		const error = vi.spyOn(toast, 'error')
+	it('un stage con apps tampoco ofrece borrar', async () => {
+		const vm = await loaded()
+
+		vm.open({ kind: 'deleteStage', project: tree[0]!.project.slug, node: tree[0]!.stages[0]! })
+
+		expect(vm.confirmation).toEqual({
+			title: m.catalog_stage_not_empty_title({ stage: 'staging' }),
+			body: m.catalog_stage_not_empty_body(),
+			blocked: true,
+		})
+		vm.closeDialog()
+		expect(vm.dialog).toBeNull()
+	})
+
+	it('si el backend dice not_empty igual, el motivo queda adentro del diálogo', async () => {
 		mocks.deleteProject.mockRejectedValue(new ProjectNotEmpty())
 		mocks.deleteStage.mockRejectedValue(new StageNotEmpty())
 		const vm = await loaded()
 
-		vm.open({ kind: 'deleteProject', node: tree[0]! })
+		// El árbol lo da por vacío, pero otra pestaña le agregó un stage.
+		vm.open({ kind: 'deleteProject', node: tree[2]! })
+		expect(vm.confirmation?.blocked).toBe(false)
 		await vm.confirmDelete()
-		expect(error).toHaveBeenCalledWith(
-			m.catalog_project_not_empty_title({ project: 'auditfy' }),
-			m.catalog_project_not_empty_body(),
-		)
+		expect(vm.deleteError).toBe(m.catalog_project_not_empty_body())
+		expect(vm.dialog).toMatchObject({ kind: 'deleteProject' })
 
-		vm.open({ kind: 'deleteStage', project: tree[0]!.project.slug, node: tree[0]!.stages[0]! })
-		expect(vm.confirmation?.body).toBe(m.catalog_delete_stage_body_apps())
+		vm.open({
+			kind: 'deleteStage',
+			project: tree[1]!.project.slug,
+			node: { ...tree[1]!.stages[0]!, apps: [] },
+		})
+		expect(vm.deleteError).toBeNull()
 		await vm.confirmDelete()
-		expect(mocks.deleteStage).toHaveBeenCalledWith({ project: 'auditfy', stage: 'staging' })
-		expect(error).toHaveBeenCalledWith(
-			m.catalog_stage_not_empty_title({ stage: 'staging' }),
-			m.catalog_stage_not_empty_body(),
-		)
-		expect(vm.dialog).toBeNull()
+		expect(mocks.deleteStage).toHaveBeenCalledWith({ project: 'aumi-agents', stage: 'staging' })
+		expect(vm.deleteError).toBe(m.catalog_stage_not_empty_body())
 	})
 })

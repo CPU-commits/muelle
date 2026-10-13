@@ -2,7 +2,6 @@
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import { Banner, Button, Field, firstError, Input, Modal } from '@/shared/ui'
 	import { type ProjectSlug, STAGE_SLUG_MAX } from '../../../domain'
-	import { validateStageSlug } from './dialogForm'
 	import { NewStageViewModel } from './NewStage.viewModel.svelte.ts'
 	import { form as formClass } from './styles.css'
 
@@ -35,12 +34,7 @@
 		{#if vm.errors.form}
 			<Banner tone="error" title={vm.errors.form} />
 		{/if}
-		<vm.form.Field
-			name="slug"
-			validators={{
-				onDynamic: ({ value }) => validateStageSlug(value),
-			}}
-		>
+		<vm.form.Field name="slug">
 			{#snippet children(field)}
 				<Field
 					label={m.catalog_slug()}

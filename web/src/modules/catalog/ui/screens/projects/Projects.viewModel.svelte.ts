@@ -3,7 +3,6 @@ import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-qu
 import type { MenuEntry } from '@/shared/ui'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
-import { UnavailableError } from '@/shared/domain'
 import { catalogTreeQuery, deleteProjectMutation, deleteStageMutation } from '../../../data'
 import {
 	type App,
@@ -34,6 +33,8 @@ export type ProjectsDialog =
 export class ProjectsViewModel {
 	search = $state('')
 	dialog = $state.raw<ProjectsDialog | null>(null)
+	/** Por qué no se pudo borrar, adentro del diálogo (el `error` de ConfirmDialog). */
+	deleteError = $state<string | null>(null)
 
 	readonly #client = useQueryClient()
 	readonly #tree = createQuery(() => catalogTreeQuery())
@@ -47,9 +48,7 @@ export class ProjectsViewModel {
 	get loadError(): string | null {
 		const error = this.#tree.error
 		if (!error) return null
-		return error instanceof UnavailableError
-			? m.common_unavailable()
-			: catalogErrorMessage(error)
+		return catalogErrorMessage(error)
 	}
 
 	get #all(): CatalogTree {
@@ -78,30 +77,40 @@ export class ProjectsViewModel {
 		return this.#deleteProject.isPending || this.#deleteStage.isPending
 	}
 
-	/** Los textos del diálogo de borrar, si está abierto. Avisa si todavía no está vacío. */
-	get confirmation(): { title: string; body: string } | null {
+	/**
+	 * El diálogo de borrar, si está abierto. Si el árbol ya dice que no está vacío
+	 * (`blocked`), no hay botón de borrar: solo la explicación y "Cerrar". Si el backend
+	 * dice `not_empty` igual (otra pestaña agregó algo), el motivo queda en `deleteError`.
+	 */
+	get confirmation(): { title: string; body: string; blocked: boolean } | null {
 		const dialog = this.dialog
 		if (dialog?.kind === 'deleteProject') {
 			const project = dialog.node.project.slug
-			return {
-				title: m.catalog_delete_project_title({ project }),
-				body:
-					dialog.node.stages.length > 0
-						? m.catalog_delete_project_body_stages()
-						: m.catalog_delete_project_body(),
-			}
+			return dialog.node.stages.length > 0
+				? {
+						title: m.catalog_project_not_empty_title({ project }),
+						body: m.catalog_project_not_empty_body(),
+						blocked: true,
+					}
+				: {
+						title: m.catalog_delete_project_title({ project }),
+						body: m.catalog_delete_project_body(),
+						blocked: false,
+					}
 		}
 		if (dialog?.kind === 'deleteStage') {
-			return {
-				title: m.catalog_delete_stage_title({
-					project: dialog.project,
-					stage: dialog.node.stage.slug,
-				}),
-				body:
-					dialog.node.apps.length > 0
-						? m.catalog_delete_stage_body_apps()
-						: m.catalog_delete_stage_body(),
-			}
+			const stage = dialog.node.stage.slug
+			return dialog.node.apps.length > 0
+				? {
+						title: m.catalog_stage_not_empty_title({ stage }),
+						body: m.catalog_stage_not_empty_body(),
+						blocked: true,
+					}
+				: {
+						title: m.catalog_delete_stage_title({ project: dialog.project, stage }),
+						body: m.catalog_delete_stage_body(),
+						blocked: false,
+					}
 		}
 		return null
 	}
@@ -178,6 +187,7 @@ export class ProjectsViewModel {
 	}
 
 	open = (dialog: ProjectsDialog): void => {
+		this.deleteError = null
 		this.dialog = dialog
 	}
 
@@ -208,39 +218,31 @@ export class ProjectsViewModel {
 	}
 
 	async #removeProject(project: ProjectSlug): Promise<void> {
+		this.deleteError = null
 		try {
 			await this.#deleteProject.mutateAsync(project)
+			this.dialog = null
 			toast.success(m.catalog_project_deleted({ project }))
 		} catch (error) {
-			if (error instanceof ProjectNotEmpty) {
-				toast.error(
-					m.catalog_project_not_empty_title({ project }),
-					m.catalog_project_not_empty_body(),
-				)
-			} else {
-				toast.error(m.catalog_delete_project_error(), catalogErrorMessage(error))
-			}
-		} finally {
-			this.dialog = null
+			this.deleteError =
+				error instanceof ProjectNotEmpty
+					? m.catalog_project_not_empty_body()
+					: catalogErrorMessage(error)
 		}
 	}
 
 	async #removeStage(project: ProjectSlug, node: StageNode): Promise<void> {
 		const stage = node.stage.slug
+		this.deleteError = null
 		try {
 			await this.#deleteStage.mutateAsync({ project, stage })
+			this.dialog = null
 			toast.success(m.catalog_stage_deleted({ stage }))
 		} catch (error) {
-			if (error instanceof StageNotEmpty) {
-				toast.error(
-					m.catalog_stage_not_empty_title({ stage }),
-					m.catalog_stage_not_empty_body(),
-				)
-			} else {
-				toast.error(m.catalog_delete_stage_error(), catalogErrorMessage(error))
-			}
-		} finally {
-			this.dialog = null
+			this.deleteError =
+				error instanceof StageNotEmpty
+					? m.catalog_stage_not_empty_body()
+					: catalogErrorMessage(error)
 		}
 	}
 }

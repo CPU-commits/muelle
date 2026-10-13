@@ -9,6 +9,7 @@
 		Icon,
 		LoadingState,
 		Menu,
+		Modal,
 		Mono,
 		PageHeader,
 		SearchInput,
@@ -225,13 +226,27 @@
 	<NewAppDialog project={vm.dialog.project} stage={vm.dialog.stage} onClose={vm.closeDialog} />
 {/if}
 
+<!-- Todavía no está vacío: no hay nada que confirmar, solo qué hacer antes. -->
+<Modal
+	open={vm.confirmation?.blocked === true}
+	title={vm.confirmation?.title ?? ''}
+	description={vm.confirmation?.body ?? ''}
+	size="sm"
+	onClose={vm.closeDialog}
+>
+	{#snippet footer()}
+		<Button variant="secondary" size="sm" onclick={vm.closeDialog}>{m.common_close()}</Button>
+	{/snippet}
+</Modal>
+
 <ConfirmDialog
-	open={vm.confirmation !== null}
+	open={vm.confirmation?.blocked === false}
 	title={vm.confirmation?.title ?? ''}
 	body={vm.confirmation?.body ?? ''}
 	confirmLabel={m.common_delete()}
 	cancelLabel={m.common_cancel()}
 	loading={vm.isDeleting}
+	error={vm.deleteError}
 	onConfirm={vm.confirmDelete}
 	onCancel={vm.closeDialog}
 />

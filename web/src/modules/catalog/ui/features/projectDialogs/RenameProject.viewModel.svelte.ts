@@ -5,7 +5,14 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import { renameProjectMutation } from '../../../data'
 import type { Project } from '../../../domain'
-import { type DialogErrors, dialogErrors, NO_DIALOG_ERRORS, withoutField } from './dialogForm'
+import {
+	type DialogErrors,
+	dialogErrors,
+	formErrors,
+	NO_DIALOG_ERRORS,
+	validateProjectName,
+	withoutField,
+} from './dialogForm'
 
 // "Renombrar": solo el nombre visible; el slug no cambia.
 export class RenameProjectViewModel {
@@ -25,6 +32,10 @@ export class RenameProjectViewModel {
 			// Valida al enviar y, después, en cada cambio: un error que desaparece al salir del
 			// campo movería el botón justo cuando se lo clickea.
 			validationLogic: revalidateLogic(),
+			validators: {
+				onDynamic: ({ value }: { value: { name: string } }) =>
+					formErrors({ name: validateProjectName(value.name) }),
+			},
 			onSubmit: async ({ value }) => {
 				await this.#submit(value.name)
 			},
@@ -45,6 +56,11 @@ export class RenameProjectViewModel {
 
 	async #submit(name: string): Promise<void> {
 		this.errors = NO_DIALOG_ERRORS
+		// El mismo nombre: no hay nada que cambiar (ni que auditar).
+		if (name.trim() === this.#project().name) {
+			this.#onDone()
+			return
+		}
 		try {
 			await this.#rename.mutateAsync({ project: this.#project().slug, name })
 			toast.success(m.catalog_project_renamed())

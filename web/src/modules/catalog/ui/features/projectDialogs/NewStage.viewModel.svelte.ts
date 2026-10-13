@@ -4,7 +4,14 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import { createStageMutation } from '../../../data'
 import type { ProjectSlug } from '../../../domain'
-import { type DialogErrors, dialogErrors, NO_DIALOG_ERRORS, withoutField } from './dialogForm'
+import {
+	type DialogErrors,
+	dialogErrors,
+	formErrors,
+	NO_DIALOG_ERRORS,
+	validateStageSlug,
+	withoutField,
+} from './dialogForm'
 
 // "Nuevo stage" de un proyecto: solo el slug (staging, production…).
 export class NewStageViewModel {
@@ -20,6 +27,10 @@ export class NewStageViewModel {
 		// Valida al enviar y, después, en cada cambio: un error que desaparece al salir del
 		// campo movería el botón justo cuando se lo clickea.
 		validationLogic: revalidateLogic(),
+		validators: {
+			onDynamic: ({ value }: { value: { slug: string } }) =>
+				formErrors({ slug: validateStageSlug(value.slug) }),
+		},
 		onSubmit: async ({ value }) => {
 			await this.#submit(value.slug)
 		},

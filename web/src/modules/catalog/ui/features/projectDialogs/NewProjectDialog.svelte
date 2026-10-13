@@ -2,7 +2,6 @@
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import { Banner, Button, Field, firstError, Input, Modal } from '@/shared/ui'
 	import { PROJECT_SLUG_MAX } from '../../../domain'
-	import { validateProjectName, validateProjectSlug } from './dialogForm'
 	import { NewProjectViewModel } from './NewProject.viewModel.svelte.ts'
 	import { form as formClass } from './styles.css'
 
@@ -33,12 +32,7 @@
 			<Banner tone="error" title={vm.errors.form} />
 		{/if}
 
-		<vm.form.Field
-			name="name"
-			validators={{
-				onDynamic: ({ value }) => validateProjectName(value),
-			}}
-		>
+		<vm.form.Field name="name">
 			{#snippet children(field)}
 				<Field
 					label={m.catalog_project_name()}
@@ -62,12 +56,7 @@
 			{/snippet}
 		</vm.form.Field>
 
-		<vm.form.Field
-			name="slug"
-			validators={{
-				onDynamic: ({ value }) => validateProjectSlug(value),
-			}}
-		>
+		<vm.form.Field name="slug">
 			{#snippet children(field)}
 				<Field
 					label={m.catalog_slug()}

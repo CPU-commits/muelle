@@ -75,6 +75,27 @@ describe('NewProjectViewModel', () => {
 			new ValidationError('no puede superar 64', 'name'),
 		)
 		await vm.form.handleSubmit()
-		expect(vm.errors.fields).toEqual({ name: 'no puede superar 64' })
+		expect(vm.errors.fields).toEqual({ name: m.catalog_error_name_long({ max: 64 }) })
+	})
+
+	it('un slug reservado lo dice con su mensaje, del dominio o del backend', async () => {
+		const vm = await mount()
+		vm.form.setFieldValue('name', 'Muelle')
+		vm.form.setFieldValue('slug', 'muelle')
+
+		await vm.form.handleSubmit()
+		expect(mocks.createProject).not.toHaveBeenCalled()
+		expect(vm.form.getFieldMeta('slug')?.errors).toContain(
+			m.catalog_error_slug_reserved({ slug: 'muelle' }),
+		)
+
+		mocks.createProject.mockRejectedValueOnce(
+			new ValidationError('"docker" está reservado', 'slug'),
+		)
+		vm.form.setFieldValue('slug', 'otro')
+		await vm.form.handleSubmit()
+		expect(vm.errors.fields).toEqual({
+			slug: m.catalog_error_slug_reserved({ slug: 'docker' }),
+		})
 	})
 })
