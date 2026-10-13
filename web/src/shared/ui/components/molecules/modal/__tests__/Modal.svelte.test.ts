@@ -1,6 +1,6 @@
 import { tick } from 'svelte'
 import { describe, expect, it } from 'vitest'
-import { userEvent } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-svelte'
 import ModalHarness from './ModalHarness.svelte'
 
@@ -166,6 +166,66 @@ describe('Modal dismissible={false}', () => {
 
 		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument()
 		await expect.element(opener).toHaveFocus()
+	})
+})
+
+describe('Modal dismissible={false}, al reabrirse solo', () => {
+	it('el foco vuelve al último elemento que lo tuvo, aunque no sea el primero', async () => {
+		const screen = await render(ModalHarness, { dismissible: false })
+		await screen.getByRole('button', { name: 'abrir' }).click()
+		await userEvent.keyboard('{Tab}')
+		const cerrar = screen.getByRole('button', { name: 'cerrar' })
+		await expect.element(cerrar).toHaveFocus()
+
+		dialog()?.close()
+
+		await expect.poll(() => dialog()?.open).toBe(true)
+		await expect.element(cerrar).toHaveFocus()
+	})
+
+	it('no repite la animación de entrada', async () => {
+		await render(ModalHarness, { dismissible: false }).then((screen) =>
+			screen.getByRole('button', { name: 'abrir' }).click(),
+		)
+		await new Promise((done) => setTimeout(done, 300))
+
+		dialog()?.close()
+		await expect.poll(() => dialog()?.open).toBe(true)
+
+		expect(dialog()?.getAnimations().length).toBe(0)
+	})
+})
+
+describe('Modal en una pantalla baja (360×640)', () => {
+	it('con contenido largo, el pie queda a la vista y el cuerpo scrollea', async () => {
+		await page.viewport(360, 640)
+		const screen = await render(ModalHarness, { tall: true })
+		await screen.getByRole('button', { name: 'abrir' }).click()
+		await new Promise((done) => setTimeout(done, 250))
+
+		const cerrar = screen.getByRole('button', { name: 'cerrar' })
+		const rect = cerrar.element().getBoundingClientRect()
+		expect(rect.bottom).toBeLessThanOrEqual(640)
+		expect(dialog()?.getBoundingClientRect().bottom).toBeLessThanOrEqual(640)
+		const body = screen.getByText('Línea 1 de un formulario largo.').element().parentElement
+		expect(body && body.scrollHeight > body.clientHeight).toBe(true)
+
+		await cerrar.click()
+		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument()
+	})
+})
+
+describe('Modal que se cierra y se vuelve a abrir enseguida', () => {
+	it('el `close` tardío del <dialog> anterior no cierra el nuevo', async () => {
+		const screen = await render(ModalHarness)
+		await screen.getByRole('button', { name: 'abrir' }).click()
+
+		await screen.getByRole('button', { name: 'reabrir' }).click()
+		await new Promise((done) => setTimeout(done, 50))
+
+		expect(dialog()?.open).toBe(true)
+		expect(text('state')).toBe('abierto')
+		expect(text('closes')).toBe('0')
 	})
 })
 

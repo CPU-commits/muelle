@@ -2,11 +2,20 @@ import { globalStyle, style, styleVariants } from '@vanilla-extract/css'
 import { backdropIn, modalIn } from '@/shared/ui/themes/animations.css'
 import { theme } from '@/shared/ui/themes/theme.css'
 
+// El margen de arriba y el mínimo de abajo: el diálogo nunca pasa del alto de la pantalla.
+const TOP = 'min(120px, 12vh)'
+const BOTTOM = '16px'
+
 // <dialog> nativo con showModal(): el navegador pone el fondo inerte, atrapa el foco,
 // cierra con Escape y devuelve el foco al botón que lo abrió.
+//
+// En una pantalla baja (un teléfono, 360×640) con un formulario largo, el pie (los
+// botones) tiene que seguir a la vista: el diálogo se limita al alto disponible y lo que
+// scrollea es el cuerpo.
 export const dialog = style({
 	width: 'calc(100% - 32px)',
-	marginTop: 'min(120px, 12vh)',
+	maxHeight: [`calc(100vh - ${TOP} - ${BOTTOM})`, `calc(100dvh - ${TOP} - ${BOTTOM})`],
+	marginTop: TOP,
 	marginInline: 'auto',
 	padding: 0,
 	border: `1px solid ${theme.colors.borders.control}`,
@@ -18,6 +27,11 @@ export const dialog = style({
 	animation: `${modalIn} 0.18s ease-out`,
 	selectors: {
 		'&:focus-visible': { outline: 'none' },
+		// Solo abierto: un `display` en el <dialog> cerrado le ganaría al `display: none`
+		// del navegador.
+		'&[open]': { display: 'flex', flexDirection: 'column' },
+		// Reabierto a la fuerza (`dismissible={false}`): no se repite la entrada.
+		'&[data-reopened]': { animation: 'none' },
 	},
 	'@media': {
 		'(prefers-reduced-motion: reduce)': { animation: 'none' },
@@ -40,6 +54,9 @@ export const body = style({
 	flexDirection: 'column',
 	gap: theme.space[20],
 	padding: theme.space[24],
+	flex: '1 1 auto',
+	minHeight: 0,
+	overflowY: 'auto',
 })
 
 export const heading = style({
@@ -67,6 +84,7 @@ export const footer = style({
 	padding: `${theme.space[12]} ${theme.space[24]}`,
 	borderTop: `1px solid ${theme.colors.borders.subtle}`,
 	backgroundColor: theme.colors.background.sunken,
+	flexShrink: 0,
 })
 
 export type ModalSize = keyof typeof sizes

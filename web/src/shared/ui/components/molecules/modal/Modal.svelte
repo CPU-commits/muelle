@@ -76,10 +76,15 @@
 		if (dismissible) onClose()
 	}
 
+	// Se guarda a quién volver ANTES de showModal(): al abrir, el navegador enfoca el primer
+	// control y ese focusin pisaría `lastFocused`. `data-reopened` apaga la animación de
+	// entrada: no es un diálogo nuevo.
 	function reopen(): void {
 		if (!element?.isConnected || element.open) return
+		const target = lastFocused
+		element.dataset['reopened'] = ''
 		element.showModal()
-		if (lastFocused?.isConnected && element.contains(lastFocused)) lastFocused.focus()
+		if (target?.isConnected && element.contains(target)) target.focus()
 	}
 
 	// El navegador puede cerrarlo sin pasar por un `cancel` que se pueda frenar: Chrome
@@ -88,7 +93,10 @@
 	// method="dialog". El <dialog> y el `open` del dueño nunca quedan distintos:
 	// - `dismissible={false}`: se reabre en el acto, sin avisar;
 	// - si no, se le avisa al dueño y, si quiere seguir abierto (está guardando), se reabre.
-	async function onNativeClose(): Promise<void> {
+	async function onNativeClose(event: Event): Promise<void> {
+		// El `close` llega en una tarea aparte: si el dueño cerró y volvió a abrir enseguida,
+		// el de un <dialog> anterior no tiene que tocar al de ahora.
+		if (event.currentTarget !== element) return
 		if (closingFromProp) return
 		if (!dismissible) {
 			reopen()
@@ -125,7 +133,7 @@
 		aria-labelledby={`${id}-title`}
 		aria-describedby={description ? `${id}-description` : undefined}
 		oncancel={onCancel}
-		onclose={() => void onNativeClose()}
+		onclose={(event) => void onNativeClose(event)}
 		onfocusin={onFocusIn}
 		onpointerdown={onPointerDown}
 		onclick={onBackdropClick}
