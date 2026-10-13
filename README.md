@@ -59,7 +59,7 @@ Con el binario, igual: `(umask 077; muelle genkey > muelle.key)`.
 Al arrancar sin usuarios, muelle imprime en el log un link de setup de un solo uso (vence en 24 h):
 
 ```
-{"level":"INFO","msg":"todavía no hay usuarios: abre este link para crear el primero (vence en 24 h)","url":"http://127.0.0.1:18080/setup?token=<TOKEN>"}
+{"level":"INFO","msg":"todavía no hay usuarios: abre este link para crear el primero (vence en 24 h)","event":"setup_url","url":"http://127.0.0.1:18080/setup?token=<TOKEN>"}
 ```
 
 La página `/setup` llega con el panel (Fase 4); mientras tanto, el usuario se crea con `curl`, con el `token` del link. Toda petición que modifica algo con la cookie de sesión tiene que traer el header `Origin` igual a `MUELLE_PANEL_ORIGIN` (si no, `403 bad_origin`):

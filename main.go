@@ -132,8 +132,7 @@ func serve(log *slog.Logger) error {
 	if token, created, err := c.Identity.EnsureSetupInvite(ctx); err != nil {
 		return err
 	} else if created {
-		log.Info("todavía no hay usuarios: abre este link para crear el primero (vence en 24 h)",
-			"url", s.PanelOrigin+"/setup?token="+token)
+		logSetupURL(log, s.PanelOrigin, token)
 	}
 
 	// Las tareas periódicas y los workers de los módulos (deploy, ingress)
@@ -179,6 +178,15 @@ func serve(log *slog.Logger) error {
 		}
 		return nil
 	}
+}
+
+// logSetupURL deja en el log el link de setup de un solo uso. La línea lleva
+// event=setup_url: muelle install (Fase 5) sigue los logs del servicio hasta
+// encontrarla y le imprime la url al usuario (§3.3 paso 8). El mensaje se
+// puede cambiar; event y url no.
+func logSetupURL(log *slog.Logger, origin, token string) {
+	log.Info("todavía no hay usuarios: abre este link para crear el primero (vence en 24 h)",
+		"event", "setup_url", "url", origin+"/setup?token="+token)
 }
 
 // newHTTPServer arma el servidor HTTP con los plazos de muelle. En producción

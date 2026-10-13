@@ -200,3 +200,14 @@ func TestRunServeMemoryLimit(t *testing.T) {
 		})
 	}
 }
+
+// La línea del link de setup lleva event=setup_url y la url completa: install
+// (Fase 5) la busca en los logs del servicio para imprimirla (§3.3 paso 8).
+func TestLogSetupURL(t *testing.T) {
+	var out bytes.Buffer
+	logSetupURL(slog.New(slog.NewJSONHandler(&out, nil)), "https://panel.example.com", "abc123")
+	m := lastLogLine(t, out.String())
+	if m["level"] != "INFO" || m["event"] != "setup_url" || m["url"] != "https://panel.example.com/setup?token=abc123" {
+		t.Fatalf("log=%v", m)
+	}
+}
