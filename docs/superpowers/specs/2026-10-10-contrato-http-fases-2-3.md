@@ -397,7 +397,7 @@ El panel lo pide cada 5 s mientras la pestaña está visible. El backend puede g
 
 **Errores:** `404 not_found` si la app no existe; `503 docker_unavailable`.
 
-### 2.9 `GET {app}/logs?service=<s>&tail=<n>&follow=1` → `text/event-stream` · token
+### 2.9 `GET {app}/logs?service=<s>&tail=<n>|since=<t>&follow=1` → `text/event-stream` · token
 
 Los logs de un servicio, en vivo. No se guarda nada (§10).
 
@@ -407,7 +407,8 @@ Los logs de un servicio, en vivo. No se guarda nada (§10).
 |---|---|
 | `service` | El nombre corto. Obligatorio (`422 invalid` con `service: es obligatorio`). Si no existe en Swarm para la app: `404 not_found` |
 | `tail` | De 0 a 5000; 200 por defecto. Otro valor: `422 invalid` con `tail: …` |
-| `follow` | `1` deja el stream abierto. Si no viene, o es `0`, manda las últimas `tail` líneas, un `end` y cierra |
+| `since` | Una fecha RFC 3339 (el panel manda milisegundos: `2026-10-10T14:31:40.118Z`). Reemplaza a `tail`: si vienen los dos, manda `since` y `tail` no se mira. Se mandan las líneas escritas desde `since`, **inclusive** (la hora de Docker, con nanosegundos, ≥ `since`), hasta las últimas 5000 (`LogOptions{Since: since, Tail: 5000}`). Si no es una fecha: `422 invalid` con `since: …` |
+| `follow` | `1` deja el stream abierto. Si no viene, o es `0`, manda las líneas de `tail` (o de `since`), un `end` y cierra |
 
 **Los eventos:**
 
@@ -420,11 +421,13 @@ data: eof
 ```
 
 - **`log`:** `data` es JSON compacto.
+  - `time` es la hora de Docker, **truncada** al milisegundo (§0; nunca redondeada hacia arriba).
   - `task` es `<servicio>.<slot>`, o `<servicio>.<primeros 7 del id de la tarea>` en un servicio global.
   - `stream` es `stdout` o `stderr`.
   - `line` va sin el `\n` final, cortada a 16 KiB.
 - **Enmascarado:** como el log del deploy (§2.5), con los valores secretos de la app y del stage. Es una defensa extra: las apps a veces imprimen su configuración.
 - **`end`:** se termina el log (el servicio se borró, o no había `follow`). El servidor cierra después.
+- **Reconectar:** el panel vuelve a abrir el stream con `since` = el `time` de la última línea que recibió, sin `tail`: al cortarse el stream, y al volver a una pestaña que estuvo oculta más de 30 s. Como `since` es inclusivo y `time` está truncado, vuelven a llegar las líneas de ese milisegundo, la última incluida, y el panel descarta las que ya tenía (por tarea, stream y texto). Así no se pierde ninguna: con `time` redondeado hacia arriba, o un `since` exclusivo, se perderían las de ese milisegundo que no alcanzaron a llegar. Sin `since`, cada reconexión repetiría las últimas 200.
 
 **Errores antes de abrir:** `404`, `422` y `503 docker_unavailable`.
 
@@ -866,6 +869,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Log por polling | — | Suma `superseded_by` | Para la Action |
 | SSE del deploy | `status` al conectar | Solo si no terminó. El `status` final va siempre después de la última línea | Si no, el panel cerraría antes de leer el log de un deploy que terminó justo |
 | SSE de logs | — | Suma el evento `end`, y `follow=0` | El panel ignora eventos desconocidos |
+| SSE de logs: `since` | Al reconectar, en vez de `tail`: RFC 3339 con ms, inclusivo, hasta las últimas 5000; `422` con `since: …` | Igual. Si vienen `since` y `tail`, manda `since`; `time` va truncado al milisegundo | Sin `since`, cada reconexión repetiría las últimas líneas |
 | SSE, los dos | — | La credencial se revisa cada 60 s; a lo más 8 por principal (`429`) y 1 h por stream | El panel ya trata un stream que se corta |
 | Enmascarado | — | También cada línea de un secreto de varias líneas; nada por debajo de 8 bytes | Una clave PEM no se veía; un `1` tapaba texto ajeno |
 | `GET …/status` | `cpu_percent` y `memory_bytes` por tarea | Por tarea, como lo lee el panel (null fuera del nodo local), y además su suma por servicio. Suma `image` y `update_state` | Compatible |

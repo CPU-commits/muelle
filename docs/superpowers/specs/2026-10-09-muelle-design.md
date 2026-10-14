@@ -391,7 +391,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 | Deploys | `POST …/apps/{a}/deploys`, `GET …/apps/{a}/deploys`, `GET …/deploys/{id}`, `GET …/deploys/{id}/log?offset=N` → `{chunk, next_offset, status}`, `GET …/deploys/{id}/log/stream` (SSE), `POST …/apps/{a}/rollback` |
 | Dominios | `GET/POST …/apps/{a}/domains`, `PATCH/DELETE …/domains/{hostname}`, `POST …/domains/{hostname}/adopt`, `POST …/domains/{hostname}/retry` |
 | Estado | `GET …/apps/{a}/status` (por servicio: réplicas deseadas y corriendo, tareas con estado y error, CPU% y RAM actuales); `GET /proxy` (estado del proxy) |
-| Logs | `GET …/apps/{a}/logs?service=<s>&tail=200&follow=1` (SSE; no se guarda nada) |
+| Logs | `GET …/apps/{a}/logs?service=<s>&tail=200&follow=1`, o `since=<fecha>` en vez de `tail` al reconectar (SSE; no se guarda nada; contrato §2.9) |
 | Administración | `/users` (incluye `DELETE /users/{username}` y `DELETE /users/{username}/totp` para quien perdió su teléfono), `/invites`, `/tokens`, `/registries`, `/settings`, `/audit` |
 | Sesión | `POST /auth/login`, `POST /auth/totp`, `POST /auth/logout`, `POST /auth/setup`, `POST /auth/invite/{token}`, `GET /auth/me`, `POST /auth/totp/setup`, `POST /auth/totp/enable` |
 
