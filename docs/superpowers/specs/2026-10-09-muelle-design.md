@@ -1,7 +1,7 @@
 # muelle — Diseño
 
 > Deploy manager ultraligero sobre Docker Swarm: panel web + API, secretos, stages y proxy con certificados automáticos.
-> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1) 2026-10-13 (etapa de contratos de las Fases 2, 3 y 5) y 2026-10-14 (su revisión: §6.3, Caddy en JSON, el cambio de puertos) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
+> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1), 2026-10-13 (etapa de contratos de las Fases 2, 3 y 5) y 2026-10-14 (su revisión: §6.3, Caddy en JSON, el cambio de puertos) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
 > La API, los puertos entre módulos y la configuración de install de las Fases 2, 3 y 5 están en detalle en [`2026-10-10-contrato-http-fases-2-3.md`](2026-10-10-contrato-http-fases-2-3.md).
 > "muelle" es un nombre provisional.
 
