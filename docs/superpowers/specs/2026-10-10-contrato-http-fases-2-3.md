@@ -147,7 +147,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
 |---|---|---|
 | `src/internal/deploy`, `src/internal/ingress` y el paquete nuevo de install | Fase 2, Fase 3 y Fase 5 | Todo: es suyo |
 | `shared/domain/compose` (nuevo) | Fase 2 | La parte pura del compose (parsear, la lista de §6.3 del diseño, los nombres de los servicios) |
-| `catalog/domain/entity.ValidateCompose` y sus llamadas | Fase 2 | Cambiar la validación por la de `shared/domain/compose`. Nada más de catalog |
+| `catalog/domain/entity.ValidateCompose` y sus llamadas | Fase 2 | Cambiar la validación por la de `shared/domain/compose`. Nada más de catalog: los destinos de dominio no se verifican al guardar, solo en el render (§3.2 y §6.3 del diseño) |
 | `shared/domain/entity` | Fase 3 | Agregar las constantes `panel_cf_*` (§3.6) |
 | `shared/domain/naming`, `shared/domain/validate` | Las tres | Agregar |
 | `shared/infra/out/docker` (`Engine` y `dockertest`) | Las tres | Agregar métodos, cada uno con su fake y sus tests |

@@ -276,7 +276,7 @@ Para cada servicio del compose resultante:
 
 ### 6.3 Restricciones validadas (son errores de render)
 
-muelle tiene `docker.sock` (es root en el host) y la clave maestra. Una app nunca puede montar el socket (contrato §5.3), salir de su contenedor ni leer archivos de muelle. Son errores de render, y también `422` en `compose_yaml` al guardar (la parte pura va en un paquete de `shared/domain`, que usan catalog y deploy).
+muelle tiene `docker.sock` (es root en el host) y la clave maestra. Una app nunca puede montar el socket (contrato §5.3), salir de su contenedor ni leer archivos de muelle. Son errores de render, y también `422` en `compose_yaml` al guardar (la parte pura va en un paquete de `shared/domain`, que usan catalog y deploy). La excepción son los destinos de dominio (abajo), que en la v1 solo verifica el render.
 
 **Lista de permitidos.** El render arma el compose final solo con las claves que conoce. Cualquier otra, en un servicio o en el primer nivel, es un error, salvo las extensiones `x-*`. Así, una clave nueva de la especificación de compose no pasa sin revisarla: `use_api_socket` monta el socket de Docker, y `models`, `provider` o `gpus` no tienen sentido acá.
 
@@ -298,7 +298,7 @@ muelle tiene `docker.sock` (es root en el host) y la clave maestra. Una app nunc
 - **Redes y nombres:** `container_name`, `network_mode`, `links`, `external_links` y `networks:` propias, de primer nivel o de servicio. El render pone la red del stage (§6.2).
 - **Logging:** solo los drivers `json-file`, `local` y `none`. Los demás (`syslog`, `gelf`, `fluentd`…) los corre el daemon en la red del host, y su dirección podría apuntar a un servicio local del host.
 - **Etiquetas `muelle.*`:** las inyecta el render (§6.2), y deploy, ingress y el estado de las apps filtran por ellas. Una del usuario con ese prefijo se rechaza en `labels` y en `deploy.labels` del servicio, y en las de un volumen. Si no, una app podría hacerse pasar por otra app, o por otro stage.
-- **Destinos de dominio:** el destino de un dominio tiene que existir en el compose, y su puerto tiene que ser un entero válido.
+- **Destinos de dominio:** el destino de un dominio tiene que existir en el compose, y su puerto tiene que ser un entero válido. Solo lo verifica el render, con los destinos que lee deploy de `domains` (contrato §1.1): catalog no lee los dominios, así que guardar un compose que deja un dominio sin su servicio no es un error, y el próximo deploy falla con el dominio y el servicio en el mensaje (contrato §3.2).
 
 **La interpolación** de `${VAR}` usa solo las variables resueltas de la app (`ResolveEnv`), nunca el entorno de muelle: en compose-go, `cli.WithEnv` con esas variables, sin `cli.WithOsEnv` ni `cli.WithDotEnv` (que leería un `.env`). Después, `docker stack deploy` vuelve a interpolar el compose final con el entorno de su proceso. Por eso, en el compose final todo `$` va como `$$`, venga del spec de formulario, del compose o del valor de una variable.
 
