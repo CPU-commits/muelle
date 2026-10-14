@@ -545,7 +545,8 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
 - **Crear:**
   - Con token, y el hostname cae en una zona visible (el sufijo más largo):
     - Se crean `A` (y `AAAA` si hay `public_ipv6`) con el `proxied` pedido, y queda `pending` con `tls_mode: cloudflare`.
-    - Si ya hay un registro de ese nombre que muelle no creó, no se toca: `error` con `record_exists`, sin `cf_record_id`.
+    - Si ya hay un registro de ese nombre que muelle no creó (un `A`, un `AAAA` o un `CNAME`), no se toca: `error` con `record_exists`, sin `cf_record_id`.
+    - Los registros que crea muelle llevan el comentario `muelle` en Cloudflare, para reconocerlos en el panel de Cloudflare.
     - Si Cloudflare falla: `error` con `cloudflare`. No se responde `502`: un error de DNS deja el dominio en error, y el `POST` igual responde `201`.
     - Si no hay `public_ip`: `error` con `cloudflare`, y el mensaje "configura la IP pública en Ajustes".
   - Sin token, o sin zona: `tls_mode: http`, `pending`, `proxied: false`, y el registro se crea a mano.
@@ -582,17 +583,17 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
   - Primero se guarda, y después `SyncRoutes`.
   - Un fallo de Caddy no hace fallar la petición: se ve en `GET /proxy` y se reintenta.
   - Las operaciones sobre dominios (y la actualización de los registros de §3.5) van de a una, y no dependen del cliente: si se va a mitad de la petición, la operación termina igual (a lo más 30 s; 20 s en `retry`).
-- `PATCH` de `proxied` actualiza los registros que maneja muelle (el `A` y el `AAAA`). Si Cloudflare falla, se guarda el valor pedido, el dominio queda en `error` con `cloudflare` y se responde `200`. Si funciona y el dominio estaba en `error` con `cloudflare`, vuelve a `pending`.
+- `PATCH` de `proxied` actualiza los registros que maneja muelle (el `A` y el `AAAA`). Si Cloudflare falla (o ya no hay token), se guarda el valor pedido, el dominio queda en `error` con `cloudflare` y se responde `200`. Si funciona y el dominio estaba en `error` con `cloudflare`, vuelve a `pending`.
 - `DELETE`:
   - Con `cf_record_id`, y con token, borra primero los registros en Cloudflare (`A` y `AAAA`). Un registro que ya no existe allá no es error.
   - Si Cloudflare no responde, o rechaza el borrado (un token sin permiso): `502 cloudflare_unavailable`, y no se borra nada en muelle. Para borrarlo solo en muelle, se quita el token en Ajustes.
-  - Sin token, borra solo en muelle, con `{"dns": "kept"}` en la auditoría.
+  - Sin token, borra solo en muelle. Si muelle manejaba registros del dominio, la auditoría lo dice con `{"dns": "kept"}`: quedaron en Cloudflare.
 - `adopt`:
   - Solo con `error` + `record_exists`; si no, `409 nothing_to_adopt`.
   - Necesita el token y `public_ip`. Sin alguno de los dos, el dominio queda en `error` con `cloudflare` y un mensaje que dice cuál falta, y se responde `200`. Lo mismo si Cloudflare falla.
   - Actualiza el contenido del registro existente a la IP pública y **conserva su `proxied`**, que se copia al dominio. Adoptar nunca cambia el modo de Cloudflare (§16); para cambiarlo, un `PATCH` después.
-  - Un `CNAME` de ese nombre se convierte en un `A` a la IP pública, con el mismo `proxied`. Si hay más de un `A` o `CNAME` de ese nombre, no se toca ninguno: `error` con `cloudflare`, y el mensaje pide dejar uno solo.
-  - Con `public_ipv6`, adopta también el `AAAA` que haya (o lo crea, con el mismo `proxied`). Sin `public_ipv6`, un `AAAA` ajeno no se toca ni pasa a manejarlo muelle.
+  - Un `CNAME` de ese nombre se convierte en un `A` a la IP pública, con el mismo `proxied`. Si hay más de un `A` o `CNAME` de ese nombre (o, con `public_ipv6`, más de un `AAAA`), no se toca ninguno: `error` con `cloudflare`, y el mensaje pide dejar uno solo.
+  - Con `public_ipv6`, adopta también el `AAAA` que haya, con su `proxied` (o lo crea, con el del `A`). Sin `public_ipv6`, un `AAAA` ajeno no se toca ni pasa a manejarlo muelle.
   - Si el registro ajeno ya no está, crea los suyos, como al crear el dominio.
   - Guarda `cf_record_id` y deja el dominio `pending`.
 - `retry`, sincrónico, con a lo más 20 s:
@@ -626,7 +627,7 @@ El estado del proxy, para el banner "proxy desincronizado" (§8, §13):
 | `caddy.image`, `caddy.running` | Lo que corre de verdad, según `InspectContainer`. Si el contenedor no existe: `image: null` y `running: false` |
 | `caddy.http_port`, `caddy.https_port` | Los puertos de los ajustes |
 
-Es un estado en memoria, más `InspectContainer`. Con Docker caído: `503 docker_unavailable`. Al arrancar muelle, hasta el primer `POST /load` (el job `"proxy"` corre enseguida), dice `out_of_sync` con el mensaje "muelle todavía no le mandó la configuración a Caddy".
+Es un estado en memoria, más `InspectContainer`. Con Docker caído: `503 docker_unavailable`. Con `disabled` no se consulta Docker: responde `200` con `image: null` y `running: false`, también sin Docker (desarrollo). Al arrancar muelle, hasta el primer `POST /load` (el job `"proxy"` corre enseguida), dice `out_of_sync` con el mensaje "muelle todavía no le mandó la configuración a Caddy".
 
 ### 3.4 Caddy
 
@@ -663,7 +664,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - Es la misma IP que muelle recibe en `X-Real-IP` (`set` la pisa, nunca se reenvía la del cliente) y muestra como `client_ip` en `GET /settings`.
   - Una IP fuera de la lista recibe `403`, y la ruta del panel no se rompe.
 - **Configuración siempre completa**, con `admin.listen` = `naming.CaddyAdminListen` (`unix//run/caddy-admin/admin.sock`).
-- **muelle-caddy**: lo crea y lo recrea `ingress`, solo si `ProxySettings.Enabled(naming.CaddyImageFor(version))`.
+- **muelle-caddy**: lo crea y lo recrea `ingress`, solo si `ProxySettings.Enabled(naming.CaddyImageFor(version))`. Si no (desarrollo), ingress no toca Docker por Caddy: no crea el contenedor, `SyncRoutes` devuelve `nil` sin mandar nada, el job `"proxy"` no hace nada y no se verifican certificados. Los registros DNS sí se manejan igual.
   - **Contenedor:** `naming.CaddyContainer`, `--restart unless-stopped`.
   - **Comando y entorno:** los pone ingress, no la imagen. `Cmd` es `naming.CaddyCommand()` (`caddy run --resume`) y `Env` es `naming.CaddyEnv()` (`CADDY_ADMIN=unix//run/caddy-admin/admin.sock`, `XDG_CONFIG_HOME=/config` y `XDG_DATA_HOME=/data`).
     - Sin autosave (el primer arranque, o un volumen nuevo), Caddy arranca vacío con la admin API en el socket, y el job `"proxy"` le manda la configuración.
@@ -704,6 +705,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
     - IP pública → actualiza los registros que maneja muelle, de los dominios y el del panel (los que fallan dejan su dominio en `error`/`cloudflare`):
       - un `public_ip` nuevo cambia el contenido de los `A`; borrar `public_ip` no toca ningún registro (borrarlos dejaría los sitios sin DNS);
       - un `public_ipv6` nuevo crea el `AAAA` de cada dominio cuyo `A` maneja muelle (si ya hay un `AAAA` ajeno, ese dominio queda en `error`/`cloudflare`) y cambia los que ya maneja; borrarla borra los `AAAA` que maneja muelle;
+      - sin token, los dominios cuyos registros maneja muelle quedan en `error`/`cloudflare`, porque no se pueden actualizar;
     - token nuevo → busca la zona del panel y su registro (§3.4), como el job `"proxy"`. Los dominios que se crearon sin token no cambian solos: el reintento busca su zona (§3.2);
     - puertos o imagen → **agenda** la recreación de muelle-caddy, y no la hace antes de volver;
   - no devuelve error: el resultado se ve en `GET /proxy` y en cada dominio.
@@ -932,6 +934,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | `retry` de `certificate` | Verifica ahora | Si el certificado sigue sin ser válido, vuelve a `pending` con otros 10 min y fuerza la recarga de Caddy | Así Caddy vuelve a intentar la emisión |
 | Verificación de certificados | A los 30 s y cada hora | También cada minuto mientras el dominio sigue `pending`, y la de cada hora mira los `error` + `certificate`; no cambia nada si no llega a Caddy | El panel ve `active` apenas Caddy emite, y un Caddy que arranca no deja los dominios en error |
 | `adopt` y `retry` con cuerpo | Sin cuerpo | Vacío o `{}`; otra cosa es `400 invalid_json` | Como el rollback |
+| `GET /proxy` con `disabled` | — | No consulta Docker: `200` con `image: null` y `running: false`, también sin Docker | El panel muestra "El proxy de muelle está apagado" en desarrollo, en vez de nada |
 | Settings: `cloudflare_zones` | Abierto (¿consulta en cada `GET`?) | Valor guardado al guardar el token, que actualiza el job `"proxy"` | Un `GET` no depende de Cloudflare |
 | Settings: `""` en `public_ip` | El mock lo rechaza | `""` borra `public_ip`, `public_ipv6` y `acme_email` | Hay que poder quitar un valor |
 | Settings: quitar el token | Abierto (el mock rechaza `""`) | `cloudflare_token: ""` lo borra | |
