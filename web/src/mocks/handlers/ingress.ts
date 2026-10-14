@@ -1,5 +1,6 @@
 import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent } from '../api'
+import { deployDb } from '../db/deploy'
 import { appKey, ingressDb, type MockDomain, MOCK_PUBLIC_IP, MOCK_PUBLIC_IPV6 } from '../db/ingress'
 import { requireSession } from '../session'
 
@@ -69,10 +70,31 @@ async function readBody(request: Request): Promise<Record<string, unknown> | Res
 	return apiError(400, 'invalid_json', 'el cuerpo tiene que ser un objeto JSON')
 }
 
-function checkTarget(body: Record<string, unknown>, required: boolean): Response | null {
+/**
+ * En una app de formulario el destino es su único servicio, que se llama como la app. En
+ * una compose no se verifica al guardar (lo verifica el render del deploy). El mock de
+ * deploy no tiene apps compose: se verifica solo en las que ya desplegó, que son de
+ * formulario (las nunca desplegadas, como `agents`, pueden ser compose en el catálogo).
+ */
+function formAppSlug(params: Params): string | null {
+	const slug = param(params, 'a')
+	const app = deployDb.app(param(params, 'p'), param(params, 's'), slug)
+	if (app.deploys.length === 0) return null
+	return app.services.length === 1 && app.services[0] === slug ? slug : null
+}
+
+function checkTarget(
+	params: Params,
+	body: Record<string, unknown>,
+	required: boolean,
+): Response | null {
 	if (required || body.target_service !== undefined) {
 		if (typeof body.target_service !== 'string' || !SERVICE.test(body.target_service)) {
 			return invalid('target_service', 'no es un nombre de servicio válido')
+		}
+		const slug = formAppSlug(params)
+		if (slug !== null && body.target_service !== slug) {
+			return invalid('target_service', `en una app de formulario tiene que ser "${slug}"`)
 		}
 	}
 	if (required || body.target_port !== undefined) {
@@ -85,6 +107,9 @@ function checkTarget(body: Record<string, unknown>, required: boolean): Response
 }
 
 export const ingressHandlers: RequestHandler[] = [
+	// El estado de muelle-caddy (contrato §3.3). Solo con sesión.
+	http.get(api('/proxy'), () => requireSession() ?? HttpResponse.json(ingressDb.proxy())),
+
 	http.get(api(DOMAINS), async ({ params }) => {
 		const denied = requireSession()
 		if (denied) return denied
@@ -103,7 +128,7 @@ export const ingressHandlers: RequestHandler[] = [
 		if (unknownKey) return apiError(400, 'invalid_json', `campo desconocido "${unknownKey}"`)
 		const hostname = typeof body.hostname === 'string' ? body.hostname : ''
 		if (!HOSTNAME.test(hostname)) return invalid('hostname', 'no es un hostname válido')
-		const targetProblem = checkTarget(body, true)
+		const targetProblem = checkTarget(params, body, true)
 		if (targetProblem) return targetProblem
 		if (body.proxied !== undefined && typeof body.proxied !== 'boolean') {
 			return invalid('proxied', 'tiene que ser true o false')
@@ -135,7 +160,7 @@ export const ingressHandlers: RequestHandler[] = [
 			(key) => !['target_service', 'target_port', 'proxied'].includes(key),
 		)
 		if (unknownKey) return apiError(400, 'invalid_json', `campo desconocido "${unknownKey}"`)
-		const targetProblem = checkTarget(body, false)
+		const targetProblem = checkTarget(params, body, false)
 		if (targetProblem) return targetProblem
 		if (body.proxied !== undefined) {
 			if (typeof body.proxied !== 'boolean')
@@ -145,14 +170,20 @@ export const ingressHandlers: RequestHandler[] = [
 			}
 		}
 		await latency()
-		const updated = ingressDb.save({
+		const changed = {
 			...domain,
 			...(typeof body.target_service === 'string'
 				? { targetService: body.target_service }
 				: {}),
 			...(typeof body.target_port === 'number' ? { targetPort: body.target_port } : {}),
 			...(typeof body.proxied === 'boolean' ? { proxied: body.proxied } : {}),
-		})
+		}
+		// Si Cloudflare falla al cambiar Proxied, se guarda lo pedido y el dominio queda en
+		// `error` + `cloudflare`: igual responde 200.
+		const updated =
+			typeof body.proxied === 'boolean' && ingressDb.cloudflareFlaky(domain)
+				? ingressDb.failCloudflare(changed)
+				: ingressDb.save(changed)
 		return HttpResponse.json(domainDto(updated))
 	}),
 
@@ -184,6 +215,10 @@ export const ingressHandlers: RequestHandler[] = [
 			return apiError(409, 'nothing_to_adopt', 'no hay un registro existente que adoptar')
 		}
 		await latency()
+		// Cloudflare falla al adoptar: 200 con el dominio en `error` + `cloudflare`.
+		if (ingressDb.cloudflareFlaky(domain)) {
+			return HttpResponse.json(domainDto(ingressDb.failCloudflare(domain)))
+		}
 		return HttpResponse.json(domainDto(ingressDb.adopt(domain)))
 	}),
 

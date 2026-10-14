@@ -12,6 +12,7 @@ import {
 	adoptRecordMutation,
 	changeTargetMutation,
 	domainsQuery,
+	proxyQuery,
 	removeDomainMutation,
 	retryDomainMutation,
 	setProxiedMutation,
@@ -24,6 +25,9 @@ import {
 	formatTarget,
 	HostnameTaken,
 	hostnameProblem,
+	type ProxyNotice,
+	proxyNotice,
+	type ProxyStatus,
 	suggestedTargets,
 	targetProblem,
 } from '../../../domain'
@@ -73,6 +77,8 @@ export class DomainsViewModel {
 	#targetTouched = $state(false)
 
 	readonly domains: CreateQueryResult<readonly AppDomain[], Error>
+	/** El estado de muelle-caddy: no lee props, va en el campo. */
+	readonly proxy: CreateQueryResult<ProxyStatus, Error> = createQuery(() => proxyQuery())
 	readonly #add = createMutation(() => addDomainMutation(this.#client))
 	readonly #proxied = createMutation(() => setProxiedMutation(this.#client))
 	readonly #changeTarget = createMutation(() => changeTargetMutation(this.#client))
@@ -105,6 +111,20 @@ export class DomainsViewModel {
 
 	get list(): readonly AppDomain[] {
 		return this.domains.data ?? []
+	}
+
+	/**
+	 * El aviso del proxy ("desincronizado", parado, recreándose, apagado). Sin la Fase 3
+	 * (`no_route`), con Docker caído o mientras carga, nada: los dominios tienen sus avisos.
+	 */
+	get proxyNotice(): ProxyNotice | null {
+		return proxyNotice(this.proxy.data)
+	}
+
+	/** El motivo que dio el backend (Caddy rechazó la configuración, un puerto ocupado…). */
+	get proxyError(): string | null {
+		const error = this.proxy.data?.error?.trim()
+		return error ? error.replace(/\.$/, '') : null
 	}
 
 	get isEmpty(): boolean {

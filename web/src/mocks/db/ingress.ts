@@ -12,6 +12,10 @@ import { loadPersisted, savePersisted } from './persist'
 //     "Volver a mirar" (retry) lo crea;
 //   - si contiene `cf-error`, Cloudflare responde con error → Reintentar;
 //   - si contiene `cf-caido`, Cloudflare no responde al borrar (`502`) y no se borra;
+//   - si contiene `cf-intermitente`, Cloudflare falla al cambiar Proxied o al adoptar: se
+//     responde 200 con el dominio en `error` + `cloudflare` (Reintentar lo arregla);
+// - un hostname con `caddy-rechaza` en la primera etiqueta hace que Caddy no acepte la
+//   configuración: `GET /proxy` dice `out_of_sync` (el aviso "proxy desincronizado");
 // - cualquier otro hostname está fuera de Cloudflare (`tls_mode: http`): queda `pending`
 //   ("Esperando DNS") hasta que se toca Verificar (retry), que lo pasa a `active`.
 // Como los deploys, un `pending` con `activeAt` se resuelve solo con la hora.
@@ -299,6 +303,51 @@ export const ingressDb = {
 				lastErrorCode: null,
 				foreignRecord: null,
 				activeAt: now + state.provisionMs,
+			},
+			now,
+		)
+	},
+
+	/** `GET /proxy`: sincronizado, salvo que algún dominio tenga `caddy-rechaza`. */
+	proxy(now = Date.now()) {
+		const caddy = {
+			image: 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0',
+			running: true,
+			http_port: 80,
+			https_port: 443,
+		}
+		const rejected = state.domains.find((domain) =>
+			firstLabel(domain.hostname).includes('caddy-rechaza'),
+		)
+		if (rejected) {
+			return {
+				status: 'out_of_sync' as const,
+				error: `Caddy rechazó la configuración: la ruta de ${rejected.hostname} no es válida`,
+				synced_at: new Date(now - 5 * 60_000).toISOString(),
+				caddy,
+			}
+		}
+		return {
+			status: 'synced' as const,
+			error: null,
+			synced_at: new Date(now - 60_000).toISOString(),
+			caddy,
+		}
+	},
+
+	/** Cloudflare falla al escribir (`cf-intermitente`): el dominio queda en error. */
+	cloudflareFlaky(domain: MockDomain): boolean {
+		return firstLabel(domain.hostname).includes('cf-intermitente')
+	},
+
+	failCloudflare(domain: MockDomain, now = Date.now()): MockDomain {
+		return this.save(
+			{
+				...domain,
+				status: 'error',
+				lastError: 'Cloudflare respondió 500 al actualizar el registro',
+				lastErrorCode: 'cloudflare',
+				activeAt: null,
 			},
 			now,
 		)

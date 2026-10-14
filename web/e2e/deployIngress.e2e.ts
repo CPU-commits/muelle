@@ -153,6 +153,26 @@ test('Dominios: agregar con Proxied, ver cómo se emite el certificado y elimina
 	expect(problems).toEqual([])
 })
 
+test('Dominios: el aviso "proxy desincronizado" cuando Caddy no acepta la configuración', async ({
+	page,
+}) => {
+	const problems = await watch(page)
+	await login(page)
+
+	await page.goto(`${APP}/dominios`)
+	await expect(page.getByRole('list', { name: 'Dominios de la app' })).toBeVisible()
+	await expect(page.getByText('El proxy está desincronizado.')).toHaveCount(0)
+
+	// El mock: un hostname con `caddy-rechaza` deja a Caddy sin aceptar la configuración.
+	await page.getByRole('textbox', { name: 'Hostname' }).fill('caddy-rechaza.tudominio.cl')
+	await page.getByRole('button', { name: 'Agregar' }).click()
+
+	await expect(page.getByText('El proxy está desincronizado.')).toBeVisible()
+	await expect(page.getByText(/Caddy rechazó la configuración/)).toBeVisible()
+
+	expect(problems).toEqual([])
+})
+
 test('las cuatro pantallas entran en un teléfono sin scroll horizontal', async ({ page }) => {
 	const problems = await watch(page)
 	await page.setViewportSize({ width: 375, height: 812 })

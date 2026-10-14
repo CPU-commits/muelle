@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { DNS_RECORD_TYPES, DOMAIN_ERROR_KINDS, DOMAIN_STATUSES, TLS_MODES } from '../../domain'
+import {
+	DNS_RECORD_TYPES,
+	DOMAIN_ERROR_KINDS,
+	DOMAIN_STATUSES,
+	PROXY_SYNC_STATUSES,
+	TLS_MODES,
+} from '../../domain'
 
 // La forma del contrato HTTP de la Fase 3 (`docs/superpowers/specs/2026-10-10-contrato-
 // http-fases-2-3.md`, §3, en `fase-23-base`), resumido en ../../README.md. snake_case como
@@ -37,8 +43,22 @@ export const domainDtoSchema = z.object({
 /** `GET …/apps/{a}/domains`. */
 export const domainListDtoSchema = z.array(domainDtoSchema)
 
+/** `GET /proxy` (contrato §3.3): el estado de muelle-caddy. */
+export const proxyDtoSchema = z.object({
+	status: z.enum(PROXY_SYNC_STATUSES),
+	error: z.string().nullish(),
+	synced_at: timestamp.nullish(),
+	caddy: z.object({
+		image: z.string().nullish(),
+		running: z.boolean(),
+		http_port: z.number().int().nullish(),
+		https_port: z.number().int().nullish(),
+	}),
+})
+
 export type DnsRecordDto = z.infer<typeof dnsRecordDtoSchema>
 export type DomainDto = z.infer<typeof domainDtoSchema>
+export type ProxyDto = z.infer<typeof proxyDtoSchema>
 
 /** Cuerpo de `POST …/apps/{a}/domains`. */
 export interface CreateDomainPayload {

@@ -104,7 +104,8 @@ hora, y quien lo mira toca **Verificar** cuando ya creó el registro.
 | `POST {app}/domains/{hostname}/retry` | —                                                                 | `200 dominio`                 |
 
 - **Crear**: el panel normaliza el hostname (minúsculas, sin punto final) y lo valida
-  antes. `proxied` va siempre, y **en `false` por defecto** (como el contrato): el
+  antes. En una app de formulario, `target_service` tiene que ser el slug de la app (en una
+  compose lo verifica el render del deploy); si no, `422 target_service`. `proxied` va siempre, y **en `false` por defecto** (como el contrato): el
   formulario tiene el switch "Proxied" al lado de "Agregar". Un hostname que ya usa
   cualquier app: `409 conflict`. Tampoco puede ser el dominio del panel (`422 hostname`).
 - **Editar**: `proxied` sobre un dominio sin `cf_record_id` es `422` (el panel no ofrece el
@@ -123,6 +124,41 @@ hora, y quien lo mira toca **Verificar** cuando ya creó el registro.
   `pending`, `certificate` o `active` verifica el certificado ahora; sin zona, la vuelve a
   buscar. Responde con el estado resultante.
 
+## `GET /proxy` → 200 (solo con sesión)
+
+El estado de muelle-caddy, para el aviso "proxy desincronizado" (spec §8 y §13). Lo muestra
+Dominios, arriba del formulario.
+
+```json
+{
+	"status": "synced",
+	"error": null,
+	"synced_at": "2026-10-10T14:20:41Z",
+	"caddy": {
+		"image": "ghcr.io/cpu-commits/muelle-caddy:v0.1.0",
+		"running": true,
+		"http_port": 80,
+		"https_port": 443
+	}
+}
+```
+
+| `status` (y `caddy.running`) | Aviso de Dominios                                                                                        |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `synced`, corriendo          | Ninguno                                                                                                  |
+| `synced`, `running: false`   | "muelle-caddy no está corriendo" (con el `error` del backend si vino)                                    |
+| `out_of_sync`                | "El proxy está desincronizado", con el `error` (Caddy no aceptó la configuración); muelle reintenta solo |
+| `recreating`                 | "Se está recreando el proxy": cambió la imagen o los puertos                                             |
+| `disabled`                   | "El proxy de muelle está apagado": falta el dominio del panel o la imagen de Caddy                       |
+
+- Mientras dice `out_of_sync` o `recreating` se pregunta de nuevo cada 10 s (con la
+  pestaña visible). Cada cambio de un dominio (crear, editar, borrar, adoptar,
+  reintentar) lo vuelve a pedir: una ruta nueva puede dejarlo desincronizado.
+- Sin la Fase 3 (`no_route`), con Docker caído (`503 docker_unavailable`) o mientras carga,
+  no se muestra nada: ni `<ComingSoon>` ni un error (los dominios tienen sus propios avisos).
+- Ajustes no es de este módulo: si quiere el mismo aviso, puede usar `proxyQuery` del
+  barrel.
+
 ## Refresco y avisos
 
 - La lista se refresca cada 5 s **solo** mientras muelle está resolviendo algo ("Emitiendo
@@ -134,8 +170,9 @@ hora, y quien lo mira toca **Verificar** cuando ya creó el registro.
 
 - `DomainsScreen` (props `project`, `stage`, `app` y, del catálogo, `targets`: los
   destinos posibles como `"api:3000"`; los conecta F2).
-- `domainsQuery`, `ingressKeys`, `ingressUseCases`, `domainState` y los tipos `AppDomain`,
-  `DomainState`, `Hostname`.
+- `domainsQuery`, `proxyQuery`, `ingressKeys`, `ingressUseCases`, `domainState`,
+  `proxyNotice` y los tipos `AppDomain`, `DomainState`, `Hostname`, `ProxyStatus`,
+  `ProxyNotice`.
 
 ## Mocks (`pnpm dev:mock`)
 
@@ -148,8 +185,14 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
     - Con `existe` en la primera etiqueta: el registro ya existía (Adoptar). Con
       `existe-tmp`, el registro ajeno desaparece a los 5 s y "Volver a mirar el DNS" lo
       crea.
-    - Con `cf-error`: Cloudflare responde con error (Reintentar).
+    - Con `cf-error`: Cloudflare responde con error al crearlo (Reintentar).
+    - Con `cf-intermitente`: Cloudflare falla al cambiar Proxied o al adoptar (`200` con el
+      dominio en `error` + `cloudflare`).
     - Con `cf-caido`: Cloudflare no responde al borrarlo (`502`, no se borra).
+    - Con `caddy-rechaza`: Caddy no acepta la configuración y `GET /proxy` dice
+      `out_of_sync`.
+- En una app ya desplegada (todas las del mock de deploy son de formulario), el destino
+  tiene que ser el servicio de la app: otro es `422 target_service`.
 - Cualquier otro hostname queda fuera de Cloudflare (y su `proxied` en `false`) hasta que se
   toca Verificar.
 

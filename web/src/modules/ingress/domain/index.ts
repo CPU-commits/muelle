@@ -29,7 +29,12 @@ export {
 	HostnameTaken,
 	NothingToAdopt,
 } from './errors/ingressErrors'
+export type { CaddyState, ProxyNotice, ProxyStatus, ProxySyncStatus } from './entities/proxyStatus'
+export { PROXY_SYNC_STATUSES, proxyNotice, proxySettling } from './entities/proxyStatus'
 export type { DomainRepository, IngressDeps } from './repositories/domainRepository'
+export type { ProxyDeps, ProxyRepository } from './repositories/proxyRepository'
+export type { GetProxyStatus } from './use-cases/getProxyStatus'
+export { makeGetProxyStatus } from './use-cases/getProxyStatus'
 export type { AddDomain, AddDomainInput } from './use-cases/addDomain'
 export { makeAddDomain } from './use-cases/addDomain'
 export type { AdoptRecord } from './use-cases/adoptRecord'

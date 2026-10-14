@@ -1,5 +1,16 @@
-import { type AppDomain, asHostname, type DomainChanges, type NewDomain } from '../../domain'
-import type { CreateDomainPayload, DomainDto, UpdateDomainPayload } from '../dtos/domainDto'
+import {
+	type AppDomain,
+	asHostname,
+	type DomainChanges,
+	type NewDomain,
+	type ProxyStatus,
+} from '../../domain'
+import type {
+	CreateDomainPayload,
+	DomainDto,
+	ProxyDto,
+	UpdateDomainPayload,
+} from '../dtos/domainDto'
 
 export function domainFromDto(dto: DomainDto): AppDomain {
 	const certificate =
@@ -38,5 +49,19 @@ export function updateDomainPayload(changes: DomainChanges): UpdateDomainPayload
 			? { target_service: changes.target.service, target_port: changes.target.port }
 			: {}),
 		...(changes.proxied !== undefined ? { proxied: changes.proxied } : {}),
+	}
+}
+
+export function proxyFromDto(dto: ProxyDto): ProxyStatus {
+	return {
+		status: dto.status,
+		error: dto.error || null,
+		syncedAt: dto.synced_at ? new Date(dto.synced_at) : null,
+		caddy: {
+			image: dto.caddy.image || null,
+			running: dto.caddy.running,
+			httpPort: dto.caddy.http_port ?? null,
+			httpsPort: dto.caddy.https_port ?? null,
+		},
 	}
 }

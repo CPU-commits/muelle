@@ -14,6 +14,7 @@ import {
 	manualPending,
 	recordExists,
 } from '../../../../domain/repositories/__fakes__/domainFixtures'
+import { makeProxyStatus } from '../../../../domain/repositories/__fakes__/inMemoryProxyRepository'
 import { mountViewModel } from '../../../__tests__/mountViewModel'
 import { domainsQuery, PENDING_REFRESH_MS } from '../../../../data'
 import { DomainsViewModel } from '../Domains.viewModel.svelte.ts'
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => ({
 	removeDomain: vi.fn(),
 	adoptRecord: vi.fn(),
 	retryDomain: vi.fn(),
+	getProxyStatus: vi.fn(),
 }))
 
 vi.mock('@/modules/ingress/container', () => ({ ingressUseCases: mocks }))
@@ -50,6 +52,7 @@ describe('DomainsViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mocks.listDomains.mockResolvedValue([ACTIVE, MANUAL, EXISTING])
+		mocks.getProxyStatus.mockResolvedValue(makeProxyStatus())
 	})
 
 	it('lista los dominios y sugiere destinos (los del catálogo primero)', async () => {
@@ -294,5 +297,45 @@ describe('DomainsViewModel', () => {
 		mocks.listDomains.mockResolvedValue([ACTIVE])
 		vm.retryLoad()
 		await vi.waitFor(() => expect(vm.list).toHaveLength(1))
+	})
+
+	it('con el proxy desincronizado avisa, con el motivo del backend', async () => {
+		mocks.getProxyStatus.mockResolvedValue(
+			makeProxyStatus({ status: 'out_of_sync', error: 'Caddy rechazó la configuración' }),
+		)
+		const vm = await mounted()
+
+		await vi.waitFor(() => expect(vm.proxyNotice).toBe('out_of_sync'))
+		expect(vm.proxyError).toBe('Caddy rechazó la configuración')
+	})
+
+	it('sincronizado, o sin la Fase 3 en /proxy, no avisa nada (y la pantalla no es ComingSoon)', async () => {
+		const vm = await mounted()
+		await vi.waitFor(() => expect(vm.proxy.isSuccess).toBe(true))
+		expect(vm.proxyNotice).toBeNull()
+
+		mocks.getProxyStatus.mockRejectedValue(
+			new UnavailableError('Llega con la Fase 3', { phase: 3 }),
+		)
+		const other = await mounted()
+		await vi.waitFor(() => expect(other.proxy.isError).toBe(true))
+		expect(other.proxyNotice).toBeNull()
+		expect(other.pendingPhase).toBeNull()
+	})
+
+	it('agregar un dominio vuelve a mirar el proxy (Caddy puede no aceptar la ruta nueva)', async () => {
+		mocks.addDomain.mockResolvedValue(makeDomain('nuevo.tudominio.cl', { status: 'pending' }))
+		const vm = await mounted()
+		await vi.waitFor(() => expect(mocks.getProxyStatus).toHaveBeenCalledTimes(1))
+		mocks.getProxyStatus.mockResolvedValue(
+			makeProxyStatus({ status: 'out_of_sync', error: 'Caddy rechazó la ruta.' }),
+		)
+
+		vm.setHostname('nuevo.tudominio.cl')
+		await vm.add()
+
+		await vi.waitFor(() => expect(vm.proxyNotice).toBe('out_of_sync'))
+		// Sin el punto final: el texto del aviso sigue después.
+		expect(vm.proxyError).toBe('Caddy rechazó la ruta')
 	})
 })

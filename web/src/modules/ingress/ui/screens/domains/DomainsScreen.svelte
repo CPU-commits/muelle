@@ -54,6 +54,33 @@
 			onRetry={vm.retryLoad}
 		/>
 	{:else}
+		{#if vm.proxyNotice === 'out_of_sync'}
+			<Banner
+				tone="warn"
+				title={m.ingress_proxy_out_of_sync_title()}
+				body={vm.proxyError
+					? m.ingress_proxy_out_of_sync_body({ error: vm.proxyError })
+					: m.ingress_proxy_out_of_sync_generic()}
+			/>
+		{:else if vm.proxyNotice === 'stopped'}
+			<Banner
+				tone="warn"
+				title={m.ingress_proxy_stopped_title()}
+				body={vm.proxyError ?? m.ingress_proxy_stopped_body()}
+			/>
+		{:else if vm.proxyNotice === 'recreating'}
+			<Banner
+				tone="info"
+				title={m.ingress_proxy_recreating_title()}
+				body={m.ingress_proxy_recreating_body()}
+			/>
+		{:else if vm.proxyNotice === 'disabled'}
+			<Banner
+				tone="info"
+				title={m.ingress_proxy_disabled_title()}
+				body={m.ingress_proxy_disabled_body()}
+			/>
+		{/if}
 		<form
 			class={form}
 			aria-label={m.ingress_add_label()}

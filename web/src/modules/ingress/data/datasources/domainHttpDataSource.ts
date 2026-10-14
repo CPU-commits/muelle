@@ -6,6 +6,8 @@ import {
 	type DomainDto,
 	domainDtoSchema,
 	domainListDtoSchema,
+	type ProxyDto,
+	proxyDtoSchema,
 	type UpdateDomainPayload,
 } from '../dtos/domainDto'
 
@@ -49,5 +51,11 @@ export const domainHttpDataSource = {
 	async retry(app: AppRef, hostname: string): Promise<DomainDto> {
 		const payload = await http.post<unknown>(`${domainPath(app, hostname)}/retry`)
 		return parseOrThrow(domainDtoSchema, payload, 'ingress.retry')
+	},
+
+	/** `GET /proxy`: el estado de muelle-caddy (solo con sesión). */
+	async proxy(signal?: AbortSignal): Promise<ProxyDto> {
+		const payload = await http.get<unknown>('/proxy', signal ? { signal } : {})
+		return parseOrThrow(proxyDtoSchema, payload, 'ingress.proxy')
 	},
 }

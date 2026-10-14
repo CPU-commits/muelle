@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { asHostname } from '../../../domain'
-import { domainDtoSchema } from '../../dtos/domainDto'
-import { createDomainPayload, domainFromDto, updateDomainPayload } from '../domainMapper'
+import { domainDtoSchema, proxyDtoSchema } from '../../dtos/domainDto'
+import {
+	createDomainPayload,
+	domainFromDto,
+	proxyFromDto,
+	updateDomainPayload,
+} from '../domainMapper'
 
 const DTO = {
 	hostname: 'api-staging.tudominio.cl',
@@ -96,5 +101,38 @@ describe('payloads', () => {
 			target_service: 'web',
 			target_port: 80,
 		})
+	})
+})
+
+describe('proxyFromDto', () => {
+	it('traduce el estado de muelle-caddy', () => {
+		const dto = proxyDtoSchema.parse({
+			status: 'out_of_sync',
+			error: 'Caddy rechazó la configuración',
+			synced_at: '2026-10-10T14:20:41Z',
+			caddy: {
+				image: 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0',
+				running: true,
+				http_port: 80,
+				https_port: 443,
+			},
+		})
+		expect(proxyFromDto(dto)).toEqual({
+			status: 'out_of_sync',
+			error: 'Caddy rechazó la configuración',
+			syncedAt: new Date('2026-10-10T14:20:41Z'),
+			caddy: {
+				image: 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0',
+				running: true,
+				httpPort: 80,
+				httpsPort: 443,
+			},
+		})
+	})
+
+	it('el schema rechaza un estado que no es del contrato', () => {
+		expect(proxyDtoSchema.safeParse({ status: 'roto', caddy: { running: true } }).success).toBe(
+			false,
+		)
 	})
 })

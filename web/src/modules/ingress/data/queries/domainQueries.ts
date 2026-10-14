@@ -7,6 +7,7 @@ import {
 	type ChangeTargetInput,
 	type DomainRef,
 	hasProvisioning,
+	proxySettling,
 	replaceDomain,
 	type SetProxiedInput,
 	sortDomains,
@@ -15,6 +16,22 @@ import {
 export const ingressKeys = {
 	all: ['ingress'] as QueryKey,
 	domains: (app: AppRef): QueryKey => ['ingress', app.project, app.stage, app.app, 'domains'],
+	proxy: ['ingress', 'proxy'] as QueryKey,
+}
+
+/** Mientras el proxy se está arreglando solo (desincronizado, recreándose), cada cuánto mirar. */
+export const PROXY_SETTLING_REFRESH_MS = 10_000
+
+/** El estado de muelle-caddy, para el aviso "proxy desincronizado". */
+export function proxyQuery() {
+	return queryOptions({
+		queryKey: ingressKeys.proxy,
+		queryFn: ({ signal }) => ingressUseCases.getProxyStatus(signal),
+		staleTime: 10_000,
+		refetchInterval: (query) =>
+			proxySettling(query.state.data) ? PROXY_SETTLING_REFRESH_MS : false,
+		refetchIntervalInBackground: false,
+	})
 }
 
 /** Mientras muelle esté resolviendo un dominio (registro, certificado), la lista se refresca sola. */
@@ -33,6 +50,17 @@ export function domainsQuery(app: AppRef) {
 	})
 }
 
+/**
+ * Cada cambio de un dominio reenvía la configuración de Caddy: el estado del proxy puede
+ * haber cambiado (una ruta que Caddy no acepta lo deja desincronizado).
+ */
+function refreshAfterChange(client: QueryClient, app: AppRef): Promise<void> {
+	return Promise.all([
+		client.invalidateQueries({ queryKey: ingressKeys.domains(app) }),
+		client.invalidateQueries({ queryKey: ingressKeys.proxy }),
+	]).then(() => undefined)
+}
+
 /** Pone en el cache el dominio que devolvió el backend y pide la lista de nuevo. */
 function storeDomain(client: QueryClient, app: AppRef, domain: AppDomain): Promise<void> {
 	client.setQueryData<readonly AppDomain[]>(ingressKeys.domains(app), (current) => {
@@ -40,7 +68,7 @@ function storeDomain(client: QueryClient, app: AppRef, domain: AppDomain): Promi
 		const exists = current.some((item) => item.hostname === domain.hostname)
 		return exists ? replaceDomain(current, domain) : sortDomains([...current, domain])
 	})
-	return client.invalidateQueries({ queryKey: ingressKeys.domains(app) })
+	return refreshAfterChange(client, app)
 }
 
 export function addDomainMutation(client: QueryClient) {
@@ -97,7 +125,7 @@ export function removeDomainMutation(client: QueryClient) {
 			client.setQueryData<readonly AppDomain[]>(ingressKeys.domains(ref.app), (current) =>
 				current?.filter((domain) => domain.hostname !== ref.hostname),
 			)
-			return client.invalidateQueries({ queryKey: ingressKeys.domains(ref.app) })
+			return refreshAfterChange(client, ref.app)
 		},
 	}
 }

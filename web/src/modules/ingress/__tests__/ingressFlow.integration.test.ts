@@ -159,8 +159,13 @@ describe('dominios de una app', () => {
 		const off = await ingressUseCases.setProxied({ app: APP, hostname, proxied: false })
 		expect(off.proxied).toBe(false)
 
-		const moved = await ingressUseCases.changeTarget({ app: APP, hostname, target: 'web:8080' })
-		expect(moved.target).toEqual({ service: 'web', port: 8080 })
+		const moved = await ingressUseCases.changeTarget({ app: APP, hostname, target: 'api:8080' })
+		expect(moved.target).toEqual({ service: 'api', port: 8080 })
+
+		// En una app de formulario el destino es su único servicio, el de la app.
+		await expect(
+			ingressUseCases.changeTarget({ app: APP, hostname, target: 'web:8080' }),
+		).rejects.toMatchObject({ name: 'ValidationError', field: 'target' })
 
 		await expect(
 			ingressUseCases.setProxied({
@@ -292,5 +297,60 @@ describe('contrato de la Fase 3', () => {
 			proxied: !first.proxied,
 		})
 		expect(changed.updatedAt?.getTime()).toBeGreaterThan(first.updatedAt?.getTime() ?? 0)
+	})
+
+	it('Cloudflare que falla al cambiar Proxied o al adoptar: 200 con el dominio en error', async () => {
+		const created = await ingressUseCases.addDomain({
+			app: APP,
+			hostname: 'cf-intermitente.tudominio.cl',
+			target: 'api:3000',
+			proxied: false,
+		})
+		const toggled = await ingressUseCases.setProxied({
+			app: APP,
+			hostname: created.hostname,
+			proxied: true,
+		})
+		// Se guardó lo pedido, y el dominio quedó en error para reintentar.
+		expect(toggled.proxied).toBe(true)
+		expect(domainState(toggled)).toBe('error')
+		expect(toggled.errorKind).toBe('cloudflare')
+
+		const existing = await ingressUseCases.addDomain({
+			app: APP,
+			hostname: 'existe-cf-intermitente.tudominio.cl',
+			target: 'api:3000',
+			proxied: false,
+		})
+		const adopted = await ingressUseCases.adoptRecord({ app: APP, hostname: existing.hostname })
+		expect(adopted.errorKind).toBe('cloudflare')
+	})
+})
+
+describe('GET /proxy', () => {
+	it('sincronizado, con muelle-caddy corriendo', async () => {
+		const proxy = await ingressUseCases.getProxyStatus()
+		expect(proxy.status).toBe('synced')
+		expect(proxy.caddy).toMatchObject({ running: true, httpPort: 80, httpsPort: 443 })
+		expect(proxy.syncedAt).toBeInstanceOf(Date)
+	})
+
+	it('un dominio que Caddy rechaza lo deja desincronizado, con el motivo', async () => {
+		await ingressUseCases.addDomain({
+			app: APP,
+			hostname: 'caddy-rechaza.tudominio.cl',
+			target: 'api:3000',
+			proxied: false,
+		})
+		const proxy = await ingressUseCases.getProxyStatus()
+		expect(proxy.status).toBe('out_of_sync')
+		expect(proxy.error).toMatch(/Caddy rechazó/)
+	})
+
+	it('sin la Fase 3 (no_route) es la fase: la pantalla no muestra nada', async () => {
+		server.use(http.get(api('/proxy'), () => apiError(404, 'no_route', 'no existe')))
+		await expect(ingressUseCases.getProxyStatus()).rejects.toSatisfy(
+			(error) => pendingPhase(error) === 3,
+		)
 	})
 })

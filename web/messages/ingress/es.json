@@ -84,5 +84,14 @@
 	],
 	"ingress_error_cloudflare_unavailable": "Cloudflare no respondió y no se cambió nada. Vuelve a intentarlo en un momento.",
 	"ingress_error_docker": "Docker no responde en el servidor de muelle.",
-	"ingress_menu_recheck": "Volver a mirar el DNS"
+	"ingress_menu_recheck": "Volver a mirar el DNS",
+	"ingress_proxy_out_of_sync_title": "El proxy está desincronizado.",
+	"ingress_proxy_out_of_sync_body": "{error}. muelle reintenta solo; mientras tanto los cambios de dominios pueden no verse.",
+	"ingress_proxy_out_of_sync_generic": "Caddy no aceptó la última configuración. muelle reintenta solo; mientras tanto los cambios de dominios pueden no verse.",
+	"ingress_proxy_stopped_title": "muelle-caddy no está corriendo.",
+	"ingress_proxy_stopped_body": "Los dominios no reciben tráfico hasta que vuelva.",
+	"ingress_proxy_recreating_title": "Se está recreando el proxy.",
+	"ingress_proxy_recreating_body": "Cambió la imagen o los puertos de muelle-caddy: vuelve en unos segundos.",
+	"ingress_proxy_disabled_title": "El proxy de muelle está apagado.",
+	"ingress_proxy_disabled_body": "Falta el dominio del panel o la imagen de Caddy: los dominios no reciben tráfico."
 }
