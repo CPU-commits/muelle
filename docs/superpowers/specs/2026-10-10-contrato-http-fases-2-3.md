@@ -134,6 +134,31 @@ Un `docker stack deploy` cortado por el apagado se resuelve en el próximo arran
 
 Un error de Docker al arrancar nunca detiene a muelle.
 
+### 1.3 Lo que comparten las ramas
+
+Las tres fases corren en paralelo y se integran después. Cada una toca **solo** lo suyo en los lugares compartidos, y ahí solo agrega: no renombra, no cambia firmas, no borra.
+
+| Lugar | Quién lo toca | Qué puede hacer |
+|---|---|---|
+| `src/internal/deploy` / `ingress` / `cmd/install` (nuevo) | Fase 2 / Fase 3 / Fase 5 | Todo: es suyo |
+| `shared/domain/compose` (nuevo) | Fase 2 | La parte pura del compose (parsear, la lista de §6.3 del diseño, los nombres de los servicios) |
+| `catalog/domain/entity.ValidateCompose` y sus llamadas | Fase 2 | Cambiar la validación por la de `shared/domain/compose`. Nada más de catalog |
+| `shared/domain/entity` | Fase 3 | Agregar las constantes `panel_cf_*` (§3.6) |
+| `shared/domain/naming`, `shared/domain/validate` | Las tres | Agregar |
+| `shared/infra/out/docker` (`Engine` y `dockertest`) | Las tres | Agregar métodos, cada uno con su fake y sus tests |
+| `cmd/http/utils` | Fase 2 | Agregar `Revalidate` (§0.3) |
+| `shared/infra/container/container.go` | La fase cuyos `Deps` cambian | Solo las líneas de su módulo |
+| `main.go` | Fase 5 | El subcomando `install` |
+| `go.mod` / `go.sum` | Fase 2 (compose-go) y la que necesite otra | Agregar dependencias; al integrar, el conflicto se resuelve con `go mod tidy` |
+| `0002_deploy.sql` / `0003_ingress.sql` | Fase 2 / Fase 3 | §6, sin tocar las columnas congeladas |
+| README, "Notas para las fases siguientes" | Cada fase, en su bloque | Tachar lo que cumplió y agregar lo que deja |
+| Los documentos de diseño y este contrato | Nadie, salvo para corregir un error | Un cambio de contrato se acuerda antes, no en una rama |
+
+**Columnas congeladas:** otros módulos las leen por SQL (§1.1), así que no cambian de nombre, de tipo ni de sentido:
+- `domains`: `app_id`, `hostname`, `target_service` y `target_port`. Las leen `deploy` (`DomainTargets`) y `catalog` (el conteo antes de borrar una app);
+- `registries`: `id`, `host`, `username` y `password`, cifrada con la AAD `registries:password:<id>`. `ingress` puede leerlas para una `caddy_image` privada;
+- `0001_init.sql` no se edita: sus tablas son de la Fase 1.
+
 ## 2. Deploys (Fase 2, módulo `deploy`)
 
 ### 2.1 El deploy
@@ -801,7 +826,7 @@ networks:
 
 ## 6. Migraciones reservadas
 
-Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` se pueden editar. Las fases no agregan migraciones nuevas: cambian estas, con su test de esquema.
+Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` se pueden editar. Las fases no agregan migraciones nuevas: cambian estas, con su test de esquema, sin tocar las columnas congeladas de §1.3.
 
 - **0002** (deploy):
   - `deploys`: `actor_name`, `superseded_by` y `config_images` además de las columnas de §5.1, con índices por app y por estado activo;
