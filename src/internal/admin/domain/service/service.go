@@ -29,7 +29,9 @@ type ProxyHook interface {
 	// se guarda nada del PATCH.
 	CheckCloudflareToken(ctx context.Context, token string) (zones *int, err error)
 	// ProxySettingsChanged recibe los ajustes de antes y los nuevos, ya
-	// guardados, cuando algo cambió. Corre antes de que el PATCH responda.
+	// guardados, cuando algo cambió. Corre antes de que el PATCH responda;
+	// lo que cortaría la respuesta (recrear muelle-caddy) lo deja para
+	// después de volver (contrato §3.5).
 	ProxySettingsChanged(ctx context.Context, old, next entity.ProxySettings)
 }
 

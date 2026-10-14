@@ -26,7 +26,9 @@ El panel (`web/`, Fase 4) ya está hecho contra una versión supuesta de este co
 | sesión | `utils.AccessSession` | Solo la cookie `muelle_session` (sesión completa). Un token recibe `403 token_not_allowed`. |
 | token | `utils.AccessToken` | La sesión, o un token de API dentro de su alcance. `GET` es lectura; cualquier otro método es escritura (`Principal.Allows`). |
 
-Las peticiones con cookie que modifican algo exigen `Origin` = `MUELLE_PANEL_ORIGIN` (`403 bad_origin`). Los tokens no lo necesitan.
+Las peticiones con cookie que modifican algo exigen un `Origin` permitido; si no, `403 bad_origin`. Los tokens no lo necesitan. Hay dos permitidos (`cmd/http`, hecho):
+- `MUELLE_PANEL_ORIGIN`;
+- el origen en que muelle-caddy sirve el panel según los ajustes: `https://<panel_domain>`, con `:<proxy_https_port>` si no es 443 (`ProxySettings.PanelOrigin`, que da `admin.Module.PanelOrigin`). Así, cambiar los puertos del proxy (§4.1) no deja fuera del panel. Solo se consulta cuando el `Origin` no es `MUELLE_PANEL_ORIGIN`.
 
 ### 0.2 Códigos de error comunes
 
@@ -540,7 +542,7 @@ El estado del proxy, para el banner "proxy desincronizado" (§8, §13):
 
 | Campo | Qué |
 |---|---|
-| `status` | `synced`: la última configuración se aplicó. `out_of_sync`: la última falló, y se reintenta con backoff. `disabled`: `ProxySettings.Enabled` es falso (sin `panel_domain` o sin imagen de Caddy, en desarrollo) |
+| `status` | `synced`: la última configuración se aplicó. `out_of_sync`: la última falló, y se reintenta con backoff. `recreating`: muelle-caddy se va a recrear, o se está recreando, por un cambio de imagen o de puertos (§3.5); termina en `synced` u `out_of_sync`. `disabled`: `ProxySettings.Enabled` es falso (sin `panel_domain` o sin imagen de Caddy, en desarrollo) |
 | `error` | El motivo de `out_of_sync`, o del último fallo del contenedor (un puerto ocupado al recrear, la imagen que no baja) |
 | `synced_at` | El último `POST /load` exitoso |
 | `caddy.image`, `caddy.running` | Lo que corre de verdad, según `InspectContainer` |
@@ -613,11 +615,15 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
 - **`ProxySettingsChanged(ctx, old, next)`** (después de guardar, antes de responder):
   - corre con su propio plazo de 2 min, derivado con `context.WithoutCancel`;
   - aplica, según `next.ChangedKeys(old)`:
-    - IPs, email, token o lista de IPs → regenera la configuración de Caddy;
+    - IPs, email, token o lista de IPs → regenera la configuración de Caddy. `POST /load` no corta las conexiones abiertas, así que la respuesta del `PATCH` sale igual;
     - IP pública → actualiza los registros que maneja muelle (los que fallan dejan su dominio en `error`/`cloudflare`);
-    - puertos o imagen → recrea muelle-caddy;
+    - puertos o imagen → **agenda** la recreación de muelle-caddy, y no la hace antes de volver;
   - no devuelve error: el resultado se ve en `GET /proxy` y en cada dominio.
-  - El `PATCH` responde cuando termina: el panel ya avisa que cambiar los puertos corta unos segundos.
+- **Por qué la recreación va después:** el `PATCH` mismo pasa por muelle-caddy. Si el hook lo borrara antes de responder, el cliente recibiría una conexión cortada por un cambio que sí se guardó.
+  - `ingress.Run` recrea el contenedor 2 s después de que el hook volvió, que alcanza para que la respuesta salga por el Caddy viejo. Mientras tanto, y hasta que termina, `GET /proxy` dice `recreating`.
+  - Dos cambios seguidos se juntan en una sola recreación, con los ajustes que estén guardados en ese momento.
+  - Si muelle se reinicia antes, el job `"proxy"` del arranque recrea el contenedor igual (las diferencias de imagen y puertos, §3.4).
+  - El panel ya avisa que cambiar los puertos corta unos segundos. Si cambió la imagen, o solo el puerto HTTP, sigue en el mismo origen y pregunta `GET /proxy` hasta que deja de decir `recreating`. Si cambió `proxy_https_port`, el origen actual deja de responder: el panel muestra el nuevo, `https://<panel_domain>[:<proxy_https_port>]` (con los valores de la respuesta del `PATCH`), y lleva ahí al usuario. La sesión sigue, porque la cookie no depende del puerto, y ese `Origin` pasa (§0.1).
 
 ### 3.6 Claves de settings que escribe ingress
 
@@ -672,7 +678,8 @@ Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `public_ip
 | `require_2fa: true` sin el 2FA propio | `409 totp_required_first` |
 | Una lista de `panel_allowed_cidrs` que deja fuera `client_ip` | `409 would_lock_out`, salvo que venga `"confirm_lockout": true` |
 
-- Todo se guarda en una transacción. Después, si cambió algo del proxy, se llama a `ProxySettingsChanged`.
+- Todo se guarda en una transacción. Después, si cambió algo del proxy, se llama a `ProxySettingsChanged`. El `PATCH` responde cuando el hook vuelve, y eso es antes de recrear muelle-caddy (§3.5).
+- **Cambiar `proxy_https_port` mueve el panel** a `https://<panel_domain>[:<puerto>]`. Ese origen se acepta en `Origin` aunque `MUELLE_PANEL_ORIGIN` siga con el puerto viejo (§0.1). Pero los links de las invitaciones se arman con `MUELLE_PANEL_ORIGIN`, así que conviene actualizarlo después (§5.2).
 - Un error de DNS al cambiar la IP pública nunca hace fallar el `PATCH` (§9).
 - **Auditoría:** `settings.update` con las claves y sus valores. El token solo aparece como `"set"` o `"removed"`.
 
@@ -711,7 +718,7 @@ install despliega el servicio con estas variables. `settings.Load` las valida en
 
 | Flag de install | Variable | Clave de settings |
 |---|---|---|
-| `--panel-domain D` (+ `--https-port`) | `MUELLE_PANEL_ORIGIN=https://D`, o `https://D:<puerto>` si el puerto HTTPS no es 443 | `panel_domain` (en cada arranque) |
+| `--panel-domain D` (+ `--https-port`) | `MUELLE_PANEL_ORIGIN=https://D`, o `https://D:<puerto>` si el puerto HTTPS no es 443 | `panel_domain` (en cada arranque; ver abajo) |
 | `--email` | `MUELLE_INIT_ACME_EMAIL` | `acme_email` |
 | `--public-ip` (o la detectada, §3.3 paso 5) | `MUELLE_INIT_PUBLIC_IP` | `public_ip` |
 | `--public-ipv6` (opcional) | `MUELLE_INIT_PUBLIC_IPV6` | `public_ipv6` |
@@ -720,6 +727,14 @@ install despliega el servicio con estas variables. `settings.Load` las valida en
 | `--cloudflare-token` | El secreto `muelle_init_cloudflare_token` y `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE=/run/secrets/muelle_init_cloudflare_token` | `cloudflare_token` (cifrado) |
 | `--caddy-image` (avanzado) | `MUELLE_INIT_CADDY_IMAGE` | `caddy_image` |
 | `--advertise-addr` | — (solo `docker swarm init`) | — |
+
+**`MUELLE_PANEL_ORIGIN` después de cambiar los puertos:** install lo fija con el puerto HTTPS de ese momento. Si después se cambia `proxy_https_port` en el panel (la migración de §16 del diseño pasa de 8443 a 443), el panel sigue funcionando en el origen nuevo (§0.1), pero los links de las invitaciones salen con el viejo hasta que se actualiza la variable, lo que reinicia muelle:
+
+```bash
+docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl muelle_muelle
+```
+
+La Fase 5 puede sumarlo a un subcomando (`muelle settings panel-origin`), como `reset-panel-ips` (§4.1).
 
 **Fijas:**
 - `MUELLE_LISTEN=:8080`
@@ -813,7 +828,8 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Settings: quitar el token | Abierto (el mock rechaza `""`) | `cloudflare_token: ""` lo borra | |
 | Settings: token rechazado o Cloudflare caído | — | `422 cloudflare_token` / `502 cloudflare_unavailable` | El panel tiene que mostrar el 502 como reintentable |
 | Settings: lista que te deja fuera | Guarda sugerida | `409 would_lock_out`; se guarda con `confirm_lockout: true` | La pide la revisión del panel |
-| Settings: cambio de puertos | Abierto | El `PATCH` espera a que se recree Caddy (hasta 2 min) y no falla; el resultado va en `GET /proxy` | |
+| Settings: cambio de puertos | Abierto | El `PATCH` responde antes de recrear Caddy, que se recrea 2 s después; `GET /proxy` dice `recreating` mientras tanto. Si cambió `proxy_https_port`, el panel lleva al usuario al origen nuevo | La respuesta pasa por el Caddy que se recrea: si no, el cliente vería una conexión cortada |
+| `Origin` después de cambiar los puertos | — | Pasa también `https://<panel_domain>[:<proxy_https_port>]` | Si no, todo el panel, el login incluido, quedaría en `403 bad_origin` hasta actualizar `MUELLE_PANEL_ORIGIN` |
 | Settings: `client_ip` | String o null | Siempre string | Compatible |
 | Registries: `PATCH` | `{username, password}` | Los dos obligatorios: reemplaza | Igual al payload del panel |
 | Registries: host | Normalizado por el panel | El backend exige la forma canónica y no normaliza; Docker Hub es `docker.io` | |

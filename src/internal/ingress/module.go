@@ -81,8 +81,9 @@ func (m *Module) Jobs() []cron.Job { return nil }
 
 // Run corre lo que ingress necesita en segundo plano hasta que ctx se cancela,
 // y vuelve cuando terminó. Fase 3: los reintentos con backoff (1 s, 2 s… 60 s)
-// de una configuración que Caddy no aceptó y la verificación de un dominio 30 s
-// después de crearlo (§8). El esqueleto no tiene nada que correr.
+// de una configuración que Caddy no aceptó, la verificación de un dominio 30 s
+// después de crearlo (§8) y la recreación de muelle-caddy que agenda
+// ProxySettingsChanged. El esqueleto no tiene nada que correr.
 func (m *Module) Run(ctx context.Context) {}
 
 // EnsureStageNetwork asegura la red overlay attachable del stage
@@ -120,13 +121,14 @@ func (m *Module) CheckCloudflareToken(ctx context.Context, token string) (zones 
 }
 
 // ProxySettingsChanged aplica los ajustes nuevos después de que admin los
-// guardó (PATCH /settings): Caddy (email ACME, IPs del panel, token), los
-// registros DNS que maneja muelle (IP pública) y, si cambiaron los puertos o la
-// imagen, recrea muelle-caddy (§3.1, §9). Corre antes de que el PATCH
-// responda, con su propio plazo (no el ctx de la petición: un cliente que se va
-// no puede dejar a Caddy a medio recrear). No devuelve error: un fallo queda en
-// el estado del proxy (GET /api/v1/proxy) y en el de cada dominio. Fase 3; el
-// esqueleto no hace nada.
+// guardó (PATCH /settings): Caddy (email ACME, IPs del panel, token) y los
+// registros DNS que maneja muelle (IP pública) (§3.1, §9). Corre antes de que
+// el PATCH responda, con su propio plazo (no el ctx de la petición: un cliente
+// que se va no puede dejar el cambio a medias). Si cambiaron los puertos o la
+// imagen, no recrea muelle-caddy acá: lo agenda en Run, 2 s después de volver,
+// porque la respuesta del PATCH sale por ese mismo contenedor (contrato
+// §3.5). No devuelve error: un fallo queda en el estado del proxy (GET
+// /api/v1/proxy) y en el de cada dominio. Fase 3; el esqueleto no hace nada.
 func (m *Module) ProxySettingsChanged(ctx context.Context, old, next entity.ProxySettings) {
 	m.log.Debug("ingress: los ajustes del proxy cambiaron; se aplican con la Fase 3", "claves", next.ChangedKeys(old))
 }
