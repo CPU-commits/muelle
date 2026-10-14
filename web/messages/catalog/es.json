@@ -248,5 +248,8 @@
 
 	"catalog_config_other_card": "otra parte de la configuración",
 
-	"catalog_crumb_stage_variables": "Variables de {stage}"
+	"catalog_crumb_stage_variables": "Variables de {stage}",
+
+	"catalog_compose_syntax_unavailable": "No se pudo revisar la sintaxis",
+	"catalog_compose_syntax_unavailable_body": "El editor no se cargó. Al guardar, muelle solo revisa que el compose no esté vacío."
 }

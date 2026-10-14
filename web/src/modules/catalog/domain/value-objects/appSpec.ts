@@ -117,6 +117,8 @@ const REFERENCE = new RegExp(
 	`^((?:${DOMAIN}/)?${PATH_COMPONENT}(?:/${PATH_COMPONENT})*)(?::(${TAG}))?(?:@(${DIGEST}))?$`,
 )
 const REPOSITORY_PATH_MAX_LENGTH = 255
+const DOCKER_HUB = 'docker.io'
+const LEGACY_DOCKER_HUB = 'index.docker.io'
 const DIGEST_HEX_LENGTH: Readonly<Record<string, number>> = { sha256: 64, sha384: 96, sha512: 128 }
 
 function isValidDigest(digest: string): boolean {
@@ -136,7 +138,10 @@ export function isValidImage(image: string): boolean {
 
 	// `splitDockerDomain`: lo que va antes de la primera "/" es un registro si tiene "." o
 	// ":", es "localhost" o tiene mayúsculas; si no, la imagen es de docker.io.
-	let domain = 'docker.io'
+	// `index.docker.io` es docker.io, y una imagen de docker.io sin "/" es oficial
+	// (`library/<nombre>`), con o sin el registro escrito: el límite de 255 cuenta ese
+	// prefijo.
+	let domain = DOCKER_HUB
 	let remainder = image
 	const slash = image.indexOf('/')
 	const first = slash === -1 ? '' : image.slice(0, slash)
@@ -146,9 +151,9 @@ export function isValidImage(image: string): boolean {
 	) {
 		domain = first
 		remainder = image.slice(slash + 1)
-	} else if (slash === -1) {
-		remainder = `library/${image}`
 	}
+	if (domain === LEGACY_DOCKER_HUB) domain = DOCKER_HUB
+	if (domain === DOCKER_HUB && !remainder.includes('/')) remainder = `library/${remainder}`
 
 	const tagAt = remainder.indexOf(':')
 	const repository = tagAt === -1 ? remainder : remainder.slice(0, tagAt)

@@ -1,8 +1,9 @@
 import type { BeforeNavigate } from '@sveltejs/kit'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup } from 'vitest-browser-svelte'
 import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { toast } from '@/shared/ui/stores'
+import { toast, toasts } from '@/shared/ui/stores'
 import { ValidationError } from '@/shared/domain'
 import { catalogKeys } from '../../../../data'
 import {
@@ -163,7 +164,7 @@ describe('ServiceConfigViewModel', () => {
 		})
 	})
 
-	it('kind_mismatch lo explica y vuelve a cargar la app', async () => {
+	it('kind_mismatch vuelve a cargar la app y lo explica en un toast, que sobrevive a la tarjeta', async () => {
 		mocks.updateApp.mockRejectedValue(new KindMismatch())
 		const client = createQueryClient({ retry: false })
 		const invalidate = vi.spyOn(client, 'invalidateQueries')
@@ -172,8 +173,13 @@ describe('ServiceConfigViewModel', () => {
 		vm.run.form.setFieldValue('replicas', '3')
 		await vm.run.form.handleSubmit()
 
-		expect(vm.run.saver.formError).toBe(m.catalog_error_kind_mismatch())
 		expect(invalidate).toHaveBeenCalledWith({ queryKey: catalogKeys.app(ref) })
+		// La recarga cambia la pantalla al editor de YAML: nada que leer en la tarjeta.
+		expect(vm.run.saver.formError).toBeNull()
+		cleanup()
+		expect(toasts.items).toContainEqual(
+			expect.objectContaining({ tone: 'info', title: m.catalog_error_kind_mismatch() }),
+		)
 	})
 
 	it('un 422 de un campo de otra tarjeta, o de `spec`, va arriba de la tarjeta', async () => {
