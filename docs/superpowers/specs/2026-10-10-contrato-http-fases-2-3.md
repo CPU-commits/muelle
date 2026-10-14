@@ -405,10 +405,16 @@ Los logs de un servicio, en vivo. No se guarda nada (§10).
 
 | Query | Qué |
 |---|---|
-| `service` | El nombre corto. Obligatorio (`422 invalid` con `service: es obligatorio`). Si no existe en Swarm para la app: `404 not_found` |
+| `service` | El nombre corto. Obligatorio (`422 invalid` con `service: es obligatorio`). Tiene que ser un slug de servicio, de hasta 16 caracteres (§5.2 regla 1 del diseño); si no, `422 invalid` con `service: …`. Si no existe en Swarm para la app: `404 not_found` (ver abajo) |
 | `tail` | De 0 a 5000; 200 por defecto. Otro valor: `422 invalid` con `tail: …` |
 | `since` | Una fecha RFC 3339 (el panel manda milisegundos: `2026-10-10T14:31:40.118Z`). Reemplaza a `tail`: si vienen los dos, manda `since` y `tail` no se mira. Se mandan las líneas escritas desde `since`, **inclusive** (la hora de Docker, con nanosegundos, ≥ `since`), hasta las últimas 5000 (`LogOptions{Since: since, Tail: 5000}`). Si no es una fecha: `422 invalid` con `since: …` |
 | `follow` | `1` deja el stream abierto. Si no viene, o es `0`, manda las líneas de `tail` (o de `since`), un `end` y cierra |
+
+**Cómo se busca el servicio.** `InspectService` y `ServiceLogs` de Docker también aceptan un id o un prefijo de id, y este endpoint acepta tokens: el parámetro nunca llega tal cual a Docker.
+1. Se valida como slug (arriba): sin `_`, no alcanza el servicio de otra app.
+2. Se busca con `InspectService(naming.Service(p, s, a, service))`. Ese nombre lleva `_`, así que nunca es un id ni un prefijo de id (los de Swarm son `[a-z0-9]`).
+3. El servicio tiene que llevar todas las etiquetas de `naming.AppLabels(p, s, a)`. Si no existe, o no las lleva (uno con ese nombre que no creó muelle): `404 not_found`.
+4. `ServiceLogs` recibe el `ID` que devolvió la búsqueda.
 
 **Los eventos:**
 
