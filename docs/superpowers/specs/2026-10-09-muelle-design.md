@@ -95,23 +95,30 @@ Ambos viven en el nodo manager.
 
 ```
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/cpu-commits/muelle install \
+  ghcr.io/cpu-commits/muelle:<versión> install \
   --panel-domain panel.tudominio.cl --email tu@correo \
-  [--cloudflare-token …] [--public-ip …] [--advertise-addr …] [--http-port 80] [--https-port 443]
+  [--cloudflare-token …] [--public-ip …] [--public-ipv6 …] [--advertise-addr …] \
+  [--http-port 80] [--https-port 443] [--caddy-image …] [--reinstall]
 ```
 
-Pasos:
-1. Verifica Docker. Si Swarm no está activo, ejecuta `docker swarm init` (con `--advertise-addr` si la máquina tiene varias IPs).
-2. **Si los puertos elegidos para el proxy están ocupados (p. ej. 80/443 por el Traefik de Dokploy), aborta** con un mensaje claro que sugiere `--http-port`/`--https-port` (ver §16).
-3. Crea la red `muelle_panel`.
-4. Genera una clave maestra de 32 bytes, la guarda como secreto Swarm `muelle_master_key` e **imprime la clave una sola vez** para que el usuario la respalde.
-5. Detecta la IP pública si no se pasó `--public-ip` (vía `https://1.1.1.1/cdn-cgi/trace`) y la imprime.
-6. Despliega el stack `muelle` (solo el servicio muelle). Los flags de instalación se le pasan como configuración inicial (variables `MUELLE_INIT_*`; el token de Cloudflare, como el secreto Swarm `muelle_init_cloudflare_token`). muelle la guarda en settings solo en el primer arranque de la base: después mandan los cambios del panel, y un reinicio no devuelve lo que se borró ahí. El detalle está en el contrato de las fases 2 y 3, §5.
-7. En ese primer arranque, muelle crea el contenedor muelle-caddy (§3.1) y envía la ruta del panel.
-8. Imprime una URL de setup de un solo uso (`https://panel…/setup?token=…`, vence en 24 h) para crear el primer usuario.
-9. Sobre el dominio del panel: con `--cloudflare-token`, muelle crea su registro DNS y usa DNS-01; sin token, el registro DNS tiene que existir de antemano y se usa HTTP-01 (que exige `--http-port 80`).
+Sin `:<versión>` se usa `:latest`, la última versión final. `--cloudflare-token -` lee el token de stdin (`docker run -i`), así no queda en el historial de la shell.
+
+Pasos (el orden y los detalles están en el contrato de las fases 2 y 3, §5.4). install no cambia nada hasta el paso 4, así un puerto ocupado aborta sin dejar nada:
+1. Verifica Docker y el estado del Swarm, y que no haya una instalación anterior (con `--reinstall`, reusa la clave maestra de una que se borró con `docker stack rm muelle`).
+2. Detecta la IP pública si no se pasó `--public-ip` (vía `https://1.1.1.1/cdn-cgi/trace`) y la imprime. Si no puede, avisa y sigue.
+3. **Si los puertos elegidos para el proxy están ocupados (p. ej. 80/443 por el Traefik de Dokploy), aborta** con un mensaje claro que sugiere `--http-port`/`--https-port` (ver §16).
+4. Si Swarm no está activo, ejecuta `docker swarm init` (con `--advertise-addr` si la máquina tiene varias IPs).
+5. Crea la red `muelle_panel`.
+6. Genera una clave maestra de 32 bytes y la guarda como secreto Swarm `muelle_master_key`.
+7. Despliega el stack `muelle` (solo el servicio muelle, fijo al nodo donde corrió install, porque `muelle_data` es un volumen local). Los flags de instalación se le pasan como configuración inicial (variables `MUELLE_INIT_*`; el token de Cloudflare, como el secreto Swarm `muelle_init_cloudflare_token`). muelle la guarda en settings solo en el primer arranque de la base: después mandan los cambios del panel, y un reinicio no devuelve lo que se borró ahí. El detalle está en el contrato de las fases 2 y 3, §5. Si el deploy falla, install borra la red y los secretos que creó.
+8. **Imprime la clave maestra una sola vez** para que el usuario la respalde.
+9. En ese primer arranque, muelle crea el contenedor muelle-caddy (§3.1) y envía la ruta del panel.
+10. Imprime una URL de setup de un solo uso (`https://panel…/setup?token=…`, vence en 24 h) para crear el primer usuario. Si muelle ya tiene usuarios (una reinstalación), lo dice.
+11. Sobre el dominio del panel: con `--cloudflare-token`, muelle crea su registro DNS y usa DNS-01; sin token, el registro DNS tiene que existir de antemano y se usa HTTP-01, que necesita que el puerto 80 público llegue a `--http-port` (install avisa si no es 80).
 
 **Actualizar muelle:** `docker service update --image ghcr.io/cpu-commits/muelle:<versión> muelle_muelle`. Los sitios no se ven afectados, porque Caddy es un contenedor aparte.
+
+**Recuperar el acceso** si la lista de IPs permitidas te deja fuera del panel: `docker exec <contenedor de muelle> muelle settings reset-panel-ips` vacía la lista y reinicia muelle, que al arrancar reenvía la configuración a Caddy (contrato §4.1 y §5.4).
 
 ## 4. Componentes (Go)
 
@@ -466,22 +473,32 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 
 ## 14. GitHub Action (`action/action.yml`)
 
-Composite action en bash, con `curl` y `jq` (ambos vienen en los runners de GitHub).
+Composite action en bash, con `curl` y `jq` (ambos vienen en los runners de GitHub). El script es `action/deploy.sh`; `action.yml` solo le pasa las entradas por variables de entorno, nunca dentro del `run:` (así una entrada no puede inyectar comandos).
 
 **Entradas:**
 - `url`, `token`, `app` (`proyecto/stage/app`): obligatorias.
 - `image`: opcional.
-- `images-json`: opcional, para apps compose.
-- `env-json`: opcional.
-- `env-exclude`: lista separada por comas; siempre se agregan `GITHUB_TOKEN`, `MUELLE_URL` y `MUELLE_TOKEN`.
+- `images-json`: opcional, para apps compose (un objeto `servicio → ref`). `image` e `images-json` juntos son un error.
+- `env-json`: opcional (un objeto de strings).
+- `env-exclude`: lista separada por comas; siempre se agregan `GITHUB_TOKEN`, `MUELLE_URL` y `MUELLE_TOKEN`. La comparación no distingue mayúsculas: `toJson(secrets)` trae el token del runner como `github_token`.
 - `env-secret`: por defecto `true`.
-- `timeout`: segundos, por defecto 600.
+- `timeout`: segundos, por defecto 600, contados desde que se creó el deploy.
+
+**Salidas:** `deploy-id` y `status` (el estado final, o el último que vio si se pasó el timeout).
 
 **Pasos:**
-1. Si viene `env-json`, filtra las claves excluidas y hace `PUT …/apps/{a}/env`.
-2. `POST …/deploys`.
-3. Hace polling de `…/log?offset=N` cada 3 s e imprime el log.
-4. Sale con código ≠ 0 si el deploy termina `failed` o si se pasa el timeout. Si termina `superseded` (lo reemplazó un deploy más nuevo de la misma app), emite un `::warning::` con el id del nuevo deploy y sale con 0.
+1. Si viene `env-json`, filtra las claves excluidas y hace `PUT …/apps/{a}/env`. `PUT` reemplaza todo el set de la app: una variable que no viene se borra. Se reintenta hasta 3 veces si muelle no responde o responde 5xx.
+2. `POST …/deploys`, una sola vez (no es idempotente).
+3. Hace polling de `…/log?offset=N` (sobre el `status_url` de la respuesta) e imprime el log. Mientras llegan líneas pide la siguiente parte enseguida; con un `chunk` vacío espera 3 s. Si muelle no responde, o responde 5xx o 429, reintenta hasta el timeout. El log va entre `::stop-commands::<token al azar>` y `::<token>::`: lo que imprime una app nunca se lee como un comando del runner (`::error::`, `::add-mask::`…).
+4. Termina cuando el `status` es final y el `chunk` viene vacío:
+   - `succeeded`: código 0;
+   - `failed`: un `::error::` con el `error` del deploy y código 1;
+   - `superseded` (lo reemplazó un deploy más nuevo de la misma app): un `::warning::` con el id del nuevo (`superseded_by`, que trae la respuesta del log) y código 0;
+   - el timeout: un `::error::` y código 1. El deploy sigue en muelle.
+
+Una respuesta de error de muelle se muestra con su `code` y su `message`; un `404 no_route` dice que ese muelle todavía no tiene la API de deploys.
+
+**Versión de la action:** se referencia con el tag de una versión (`@v0.1.0`) o con el de su versión mayor, que se mueve en cada release (`@v0` mientras no haya 1.0; README, "Publicar una versión").
 
 **Ejemplo para auditfy** (reemplaza `sync-env.yaml` y `deploy.yaml`; `migrate.yaml` no cambia):
 
@@ -491,7 +508,7 @@ deploy:
   runs-on: ubuntu-latest
   environment: ${{ github.ref_name == 'master' && 'production' || 'staging' }}
   steps:
-    - uses: CPU-commits/muelle/action@v1
+    - uses: CPU-commits/muelle/action@v0
       with:
         url: ${{ secrets.MUELLE_URL }}
         token: ${{ secrets.MUELLE_TOKEN }}
