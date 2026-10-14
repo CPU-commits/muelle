@@ -37,6 +37,8 @@ export interface AppDomain {
 	readonly certificate: Certificate | null
 	readonly records: readonly DnsRecord[]
 	readonly createdAt: Date | null
+	/** El último cambio del dominio (estado, destino, Proxied…). */
+	readonly updatedAt: Date | null
 }
 
 /** Lo que pide "Agregar". */

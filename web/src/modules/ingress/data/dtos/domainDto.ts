@@ -1,10 +1,9 @@
 import { z } from 'zod'
 import { DNS_RECORD_TYPES, DOMAIN_ERROR_KINDS, DOMAIN_STATUSES, TLS_MODES } from '../../domain'
 
-// La Fase 3 todavía no existe en el backend: esta forma sale del spec (§5.1 tabla
-// `domains`, §8, §9 y §10) y de las suposiciones anotadas en ../../README.md, que es lo
-// que la Fase 3 tiene que respetar (o cambiar acá y en el README). snake_case como el
-// resto de la API; los campos desconocidos se descartan.
+// La forma del contrato HTTP de la Fase 3 (`docs/superpowers/specs/2026-10-10-contrato-
+// http-fases-2-3.md`, §3, en `fase-23-base`), resumido en ../../README.md. snake_case como
+// el resto de la API; los campos desconocidos se descartan.
 
 const timestamp = z.iso.datetime({ offset: true })
 
@@ -24,12 +23,15 @@ export const domainDtoSchema = z.object({
 	cf_record_id: z.string().nullish(),
 	status: z.enum(DOMAIN_STATUSES),
 	last_error: z.string().nullish(),
-	// Un código que el panel no conoce se trata como "sin código" (Reintentar).
+	// Con `status: error` siempre viene (la migración 0003 lo garantiza). Un código que el
+	// panel no conoce se trata como un error cualquiera (Reintentar).
 	last_error_code: z.enum(DOMAIN_ERROR_KINDS).nullish().catch(null),
 	cert_issuer: z.string().nullish(),
 	cert_expires_at: timestamp.nullish(),
+	// Calculados con los ajustes actuales: `[]` sin IP pública.
 	records: z.array(dnsRecordDtoSchema).default([]),
 	created_at: timestamp.nullish(),
+	updated_at: timestamp.nullish(),
 })
 
 /** `GET …/apps/{a}/domains`. */

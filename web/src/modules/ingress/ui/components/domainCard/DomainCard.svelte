@@ -88,6 +88,18 @@
 					},
 				]
 			: []),
+		// El registro ajeno puede ya no estar: muelle vuelve a mirar y, si no está, lo crea.
+		...(current === 'record_exists'
+			? [
+					{
+						kind: 'action' as const,
+						id: 'recheck',
+						label: m.ingress_menu_recheck(),
+						icon: 'refresh' as const,
+						onSelect: onRetry,
+					},
+				]
+			: []),
 		{ kind: 'separator', id: 'separator' },
 		{
 			kind: 'action',

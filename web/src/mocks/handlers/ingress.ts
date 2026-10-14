@@ -43,6 +43,7 @@ function domainDto(domain: MockDomain) {
 			{ type: 'AAAA', name: domain.hostname, content: MOCK_PUBLIC_IPV6 },
 		],
 		created_at: iso(domain.createdAt),
+		updated_at: iso(domain.updatedAt ?? domain.createdAt),
 	}
 }
 
@@ -159,8 +160,16 @@ export const ingressHandlers: RequestHandler[] = [
 		const denied = requireSession()
 		if (denied) return denied
 		const hostname = param(params, 'hostname')
-		if (!ingressDb.find(keyOf(params), hostname)) return domainNotFound(hostname)
+		const domain = ingressDb.find(keyOf(params), hostname)
+		if (!domain) return domainNotFound(hostname)
 		await latency()
+		if (ingressDb.cloudflareDown(domain)) {
+			return apiError(
+				502,
+				'cloudflare_unavailable',
+				'Cloudflare no respondió: no se borró nada',
+			)
+		}
 		ingressDb.remove(keyOf(params), hostname)
 		return noContent()
 	}),

@@ -81,5 +81,8 @@
 				"countPlural=*": "{count} domains have errors: {hostnames}."
 			}
 		}
-	]
+	],
+	"ingress_error_cloudflare_unavailable": "Cloudflare did not respond and nothing changed. Try again in a moment.",
+	"ingress_error_docker": "Docker is not responding on the muelle server.",
+	"ingress_menu_recheck": "Check the DNS again"
 }

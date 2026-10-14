@@ -81,5 +81,8 @@
 				"countPlural=*": "{count} dominios tienen errores: {hostnames}."
 			}
 		}
-	]
+	],
+	"ingress_error_cloudflare_unavailable": "Cloudflare no respondió y no se cambió nada. Vuelve a intentarlo en un momento.",
+	"ingress_error_docker": "Docker no responde en el servidor de muelle.",
+	"ingress_menu_recheck": "Volver a mirar el DNS"
 }

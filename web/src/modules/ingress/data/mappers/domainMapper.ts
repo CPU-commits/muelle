@@ -19,6 +19,7 @@ export function domainFromDto(dto: DomainDto): AppDomain {
 		certificate,
 		records: dto.records.map((record) => ({ ...record })),
 		createdAt: dto.created_at ? new Date(dto.created_at) : null,
+		updatedAt: dto.updated_at ? new Date(dto.updated_at) : null,
 	}
 }
 

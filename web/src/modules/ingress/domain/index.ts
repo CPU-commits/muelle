@@ -22,7 +22,13 @@ export {
 	sortDomains,
 	suggestedTargets,
 } from './entities/appDomain'
-export { DomainNotFound, HostnameTaken, NothingToAdopt } from './errors/ingressErrors'
+export {
+	DomainNotFound,
+	CloudflareUnavailable,
+	DockerUnavailable,
+	HostnameTaken,
+	NothingToAdopt,
+} from './errors/ingressErrors'
 export type { DomainRepository, IngressDeps } from './repositories/domainRepository'
 export type { AddDomain, AddDomainInput } from './use-cases/addDomain'
 export { makeAddDomain } from './use-cases/addDomain'

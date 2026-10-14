@@ -9,7 +9,9 @@ import { ingressUseCases } from '../container'
 import {
 	type AppRef,
 	asHostname,
+	CloudflareUnavailable,
 	dnsMode,
+	DockerUnavailable,
 	DomainNotFound,
 	domainState,
 	HostnameTaken,
@@ -211,5 +213,84 @@ describe('contra un backend sin la Fase 3', () => {
 		await expect(
 			ingressUseCases.adoptRecord({ app: APP, hostname: asHostname('x.tudominio.cl') }),
 		).rejects.toSatisfy((error) => pendingPhase(error) === 3)
+	})
+})
+
+describe('contrato de la Fase 3', () => {
+	it('adoptar conserva el Proxied del registro ajeno y lo copia al dominio', async () => {
+		const hostname = asHostname('webhooks-staging.tudominio.cl')
+		const before = (await ingressUseCases.listDomains(APP)).find(
+			(domain) => domain.hostname === hostname,
+		)
+		expect(before?.proxied).toBe(false)
+
+		const adopted = await ingressUseCases.adoptRecord({ app: APP, hostname })
+		expect(adopted.proxied).toBe(true)
+		expect(adopted.recordId).not.toBeNull()
+		expect(adopted.status).toBe('pending')
+	})
+
+	it('reintentar un "ya existe": si el registro ajeno sigue, sigue igual', async () => {
+		const created = await ingressUseCases.addDomain({
+			app: APP,
+			hostname: 'existe.tudominio.cl',
+			target: 'api:3000',
+			proxied: false,
+		})
+		expect(domainState(created)).toBe('record_exists')
+
+		const again = await ingressUseCases.retryDomain({ app: APP, hostname: created.hostname })
+		expect(domainState(again)).toBe('record_exists')
+	})
+
+	it('reintentar un "ya existe" cuyo registro ajeno ya no está lo crea', async () => {
+		const created = await ingressUseCases.addDomain({
+			app: APP,
+			hostname: 'existe-tmp.tudominio.cl',
+			target: 'api:3000',
+			proxied: false,
+		})
+		// El registro ajeno se borró en Cloudflare.
+		const stored = ingressDb.findAnywhere(created.hostname)
+		if (!stored) throw new Error('sin dominio')
+		ingressDb.save({ ...stored, foreignRecord: { proxied: true, goneAt: 0 } })
+
+		const retried = await ingressUseCases.retryDomain({ app: APP, hostname: created.hostname })
+		expect(retried.status).toBe('pending')
+		expect(retried.recordId).not.toBeNull()
+	})
+
+	it('borrar con Cloudflare caído es CloudflareUnavailable y no borra nada', async () => {
+		const created = await ingressUseCases.addDomain({
+			app: APP,
+			hostname: 'cf-caido.tudominio.cl',
+			target: 'api:3000',
+			proxied: false,
+		})
+		await expect(
+			ingressUseCases.removeDomain({ app: APP, hostname: created.hostname }),
+		).rejects.toBeInstanceOf(CloudflareUnavailable)
+		const domains = await ingressUseCases.listDomains(APP)
+		expect(domains.some((domain) => domain.hostname === created.hostname)).toBe(true)
+	})
+
+	it('Docker caído (503 docker_unavailable) es DockerUnavailable', async () => {
+		server.use(
+			http.get(api(DOMAINS), () => apiError(503, 'docker_unavailable', 'Docker no responde')),
+		)
+		await expect(ingressUseCases.listDomains(APP)).rejects.toBeInstanceOf(DockerUnavailable)
+	})
+
+	it('cada dominio trae updated_at, que cambia con cada cambio', async () => {
+		const [first] = await ingressUseCases.listDomains(APP)
+		if (!first) throw new Error('sin dominios')
+		expect(first.updatedAt).toBeInstanceOf(Date)
+		await wait(5)
+		const changed = await ingressUseCases.setProxied({
+			app: APP,
+			hostname: first.hostname,
+			proxied: !first.proxied,
+		})
+		expect(changed.updatedAt?.getTime()).toBeGreaterThan(first.updatedAt?.getTime() ?? 0)
 	})
 })

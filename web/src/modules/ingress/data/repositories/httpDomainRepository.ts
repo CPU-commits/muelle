@@ -1,6 +1,13 @@
 import type { ApiError } from '@/shared/data/http/errors'
 import { type DomainErrorMap, withDomainErrors } from '@/shared/data/http/domainErrors'
-import { DomainNotFound, type DomainRepository, HostnameTaken, NothingToAdopt } from '../../domain'
+import {
+	CloudflareUnavailable,
+	DockerUnavailable,
+	DomainNotFound,
+	type DomainRepository,
+	HostnameTaken,
+	NothingToAdopt,
+} from '../../domain'
 import { domainHttpDataSource } from '../datasources/domainHttpDataSource'
 import { domainFromDto, createDomainPayload, updateDomainPayload } from '../mappers/domainMapper'
 
@@ -14,19 +21,21 @@ const FIELDS = {
 	proxied: 'proxied',
 } as const
 
+// `502 cloudflare_unavailable` y `503 docker_unavailable` (contrato §0.2), con su texto.
+const UPSTREAM = {
+	cloudflare_unavailable: (error: ApiError) => new CloudflareUnavailable(cause(error)),
+	docker_unavailable: (error: ApiError) => new DockerUnavailable(cause(error)),
+}
+
 // Todo es de la Fase 3: contra un backend sin ella, la ruta no existe (`no_route` /
 // `method_not_allowed`) y es `UnavailableError` con `phase: 3`.
-const LIST_ERRORS: DomainErrorMap = { phase: 3, fields: FIELDS }
+const LIST_ERRORS: DomainErrorMap = { phase: 3, fields: FIELDS, codes: UPSTREAM }
 
-// Al crear, un 409 es el hostname tomado (es único en todo muelle).
-// TODO(Fase 3): sacar el `conflict` genérico cuando el backend mande `hostname_taken`.
+// Al crear, `409 conflict` es el hostname tomado (es único en todo muelle).
 const CREATE_ERRORS: DomainErrorMap = {
 	phase: 3,
 	fields: FIELDS,
-	codes: {
-		conflict: (error) => new HostnameTaken(cause(error)),
-		hostname_taken: (error) => new HostnameTaken(cause(error)),
-	},
+	codes: { ...UPSTREAM, conflict: (error) => new HostnameTaken(cause(error)) },
 }
 
 // Las rutas de UN dominio: `not_found` es ese dominio (no la ruta, que es `no_route`).
@@ -34,6 +43,7 @@ const ONE_DOMAIN_ERRORS: DomainErrorMap = {
 	phase: 3,
 	fields: FIELDS,
 	codes: {
+		...UPSTREAM,
 		not_found: (error) => new DomainNotFound(cause(error)),
 		nothing_to_adopt: (error) => new NothingToAdopt(cause(error)),
 	},

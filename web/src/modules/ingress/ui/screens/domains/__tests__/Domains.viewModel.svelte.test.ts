@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
 import { UnavailableError, ValidationError } from '@/shared/domain'
-import { DomainNotFound, HostnameTaken, type AppDomain } from '../../../../domain'
+import {
+	CloudflareUnavailable,
+	DomainNotFound,
+	HostnameTaken,
+	type AppDomain,
+} from '../../../../domain'
 import {
 	APP,
 	makeDomain,
@@ -208,6 +213,17 @@ describe('DomainsViewModel', () => {
 		vm.cancelRemove()
 		expect(vm.removing).toBeNull()
 		expect(vm.removeError).toBeNull()
+	})
+
+	it('con Cloudflare caído el diálogo dice que no se borró nada', async () => {
+		mocks.removeDomain.mockRejectedValueOnce(new CloudflareUnavailable())
+		const vm = await mounted()
+
+		vm.askRemove(EXISTING)
+		await vm.confirmRemove()
+
+		expect(vm.removing?.hostname).toBe(EXISTING.hostname)
+		expect(vm.removeError).toBe(m.ingress_error_cloudflare_unavailable())
 	})
 
 	it('si otra persona ya lo borró, se cierra y se pide la lista de nuevo', async () => {

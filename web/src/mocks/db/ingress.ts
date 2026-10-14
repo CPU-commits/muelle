@@ -7,8 +7,11 @@ import { loadPersisted, savePersisted } from './persist'
 // - un hostname bajo `tudominio.cl` cae en una zona de Cloudflare: muelle crea el
 //   registro y a los ~3 s el dominio pasa a `active` con su certificado;
 //   - si la primera etiqueta contiene `existe` (`existe.tudominio.cl`), el registro ya
-//     existía: `error` con `record_exists` → Adoptar;
+//     existía (con Proxied prendido): `error` con `record_exists` → Adoptar, que copia su
+//     Proxied al dominio. Con `existe-tmp`, el registro ajeno desaparece a los 5 s y
+//     "Volver a mirar" (retry) lo crea;
 //   - si contiene `cf-error`, Cloudflare responde con error → Reintentar;
+//   - si contiene `cf-caido`, Cloudflare no responde al borrar (`502`) y no se borra;
 // - cualquier otro hostname está fuera de Cloudflare (`tls_mode: http`): queda `pending`
 //   ("Esperando DNS") hasta que se toca Verificar (retry), que lo pasa a `active`.
 // Como los deploys, un `pending` con `activeAt` se resuelve solo con la hora.
@@ -39,7 +42,10 @@ export interface MockDomain {
 	certExpiresAt: number | null
 	/** Cuándo un `pending` pasa solo a `active` (null: hasta que alguien haga retry). */
 	activeAt: number | null
+	/** El registro que ya existía en Cloudflare (`record_exists`): su Proxied, y si se va. */
+	foreignRecord?: { proxied: boolean; goneAt: number | null } | null
 	createdAt: number
+	updatedAt?: number
 }
 
 interface IngressState {
@@ -137,9 +143,13 @@ function provision(
 			...zone,
 			recordId: null,
 			status: 'error',
-			lastError: 'el registro ya existe',
+			lastError: 'ya hay un registro con ese nombre que muelle no creó',
 			lastErrorCode: 'record_exists',
 			activeAt: null,
+			foreignRecord: {
+				proxied: true,
+				goneAt: label.includes('existe-tmp') ? now + 5000 : null,
+			},
 		}
 	}
 	if (label.includes('cf-error')) {
@@ -173,9 +183,10 @@ function seedApp(project: string, stage: string, app: string, now: number): Mock
 	)
 	return [
 		{ ...active, certExpiresAt: Date.parse('2027-01-08T00:00:00Z') },
-		// El del diseño: el registro de "webhooks-staging" ya existía en Cloudflare.
+		// El del diseño: el registro de "webhooks-staging" ya existía en Cloudflare (con
+		// Proxied prendido, que se copia al adoptar).
 		provision(
-			{ ...base, hostname: `webhooks-${stage}.${MOCK_ZONE}`, proxied: true },
+			{ ...base, hostname: `webhooks-${stage}.${MOCK_ZONE}`, proxied: false },
 			now,
 			true,
 		),
@@ -236,12 +247,13 @@ export const ingressDb = {
 		return domain
 	},
 
-	save(domain: MockDomain): MockDomain {
+	save(domain: MockDomain, now = Date.now()): MockDomain {
+		const saved = { ...domain, updatedAt: now }
 		state.domains = state.domains.map((item) =>
-			item.app === domain.app && item.hostname === domain.hostname ? domain : item,
+			item.app === saved.app && item.hostname === saved.hostname ? saved : item,
 		)
 		commit()
-		return domain
+		return saved
 	},
 
 	remove(key: string, hostname: string): void {
@@ -251,29 +263,49 @@ export const ingressDb = {
 		commit()
 	},
 
-	/** Adoptar: muelle toma el registro y emite el certificado. */
+	/**
+	 * Adoptar: muelle apunta el registro a su IP y emite el certificado. Conserva el
+	 * Proxied del registro y lo copia al dominio (adoptar no cambia hacia dónde va el tráfico).
+	 */
 	adopt(domain: MockDomain, now = Date.now()): MockDomain {
-		return this.save({
-			...domain,
-			recordId: recordId(domain.hostname),
-			status: 'pending',
-			lastError: null,
-			lastErrorCode: null,
-			activeAt: now + state.provisionMs,
-		})
+		return this.save(
+			{
+				...domain,
+				proxied: domain.foreignRecord?.proxied ?? domain.proxied,
+				foreignRecord: null,
+				recordId: recordId(domain.hostname),
+				status: 'pending',
+				lastError: null,
+				lastErrorCode: null,
+				activeAt: now + state.provisionMs,
+			},
+			now,
+		)
 	},
 
-	/** Reintentar / Verificar. */
+	/** Reintentar / Verificar. Con `record_exists`, vuelve a mirar: si ya no está, lo crea. */
 	retry(domain: MockDomain, now = Date.now()): MockDomain {
-		if (domain.tlsMode === 'http') return this.save(issued(domain, now))
-		if (domain.lastErrorCode === 'record_exists') return domain
-		return this.save({
-			...domain,
-			recordId: domain.recordId ?? recordId(domain.hostname),
-			status: 'pending',
-			lastError: null,
-			lastErrorCode: null,
-			activeAt: now + state.provisionMs,
-		})
+		if (domain.tlsMode === 'http') return this.save(issued(domain, now), now)
+		if (domain.lastErrorCode === 'record_exists') {
+			const goneAt = domain.foreignRecord?.goneAt ?? null
+			if (goneAt === null || goneAt > now) return this.save(domain, now)
+		}
+		return this.save(
+			{
+				...domain,
+				recordId: domain.recordId ?? recordId(domain.hostname),
+				status: 'pending',
+				lastError: null,
+				lastErrorCode: null,
+				foreignRecord: null,
+				activeAt: now + state.provisionMs,
+			},
+			now,
+		)
+	},
+
+	/** Cloudflare no responde al borrar el registro (`cf-caido`): `502` y no se borra. */
+	cloudflareDown(domain: MockDomain): boolean {
+		return domain.recordId !== null && firstLabel(domain.hostname).includes('cf-caido')
 	},
 }

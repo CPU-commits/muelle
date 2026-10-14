@@ -21,6 +21,7 @@ const DTO = {
 		{ type: 'AAAA', name: 'api-staging.tudominio.cl', content: '2001:db8::24' },
 	],
 	created_at: '2026-10-01T12:00:00Z',
+	updated_at: '2026-10-02T08:30:00Z',
 }
 
 describe('domainFromDto', () => {
@@ -41,6 +42,7 @@ describe('domainFromDto', () => {
 				{ type: 'AAAA', name: 'api-staging.tudominio.cl', content: '2001:db8::24' },
 			],
 			createdAt: new Date('2026-10-01T12:00:00Z'),
+			updatedAt: new Date('2026-10-02T08:30:00Z'),
 		})
 	})
 

@@ -1,10 +1,12 @@
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { formatDate, type StatusTone } from '@/shared/ui'
+import { describeError, formatDate, type StatusTone } from '@/shared/ui'
 import { DomainError, pendingPhase, UnavailableError, ValidationError } from '@/shared/domain'
 import {
 	type AppDomain,
 	certificateExpiresSoon,
+	CloudflareUnavailable,
 	dnsMode,
+	DockerUnavailable,
 	DomainNotFound,
 	type DomainState,
 	type HostnameProblem,
@@ -110,7 +112,9 @@ export function ingressErrorMessage(error: unknown): string {
 	if (error instanceof HostnameTaken) return m.ingress_error_taken()
 	if (error instanceof DomainNotFound) return m.ingress_error_not_found()
 	if (error instanceof NothingToAdopt) return m.ingress_error_nothing_to_adopt()
-	if (error instanceof UnavailableError) return m.common_unavailable()
+	if (error instanceof CloudflareUnavailable) return m.ingress_error_cloudflare_unavailable()
+	if (error instanceof DockerUnavailable) return m.ingress_error_docker()
+	if (error instanceof UnavailableError) return describeError(error)
 	if (error instanceof ValidationError) return sentence(error.message)
 	if (error instanceof DomainError && error.code === 'rate_limited') return error.message
 	return m.common_error_generic()
