@@ -67,7 +67,7 @@ Los streams (`…/log/stream` y `…/logs`) son `text/event-stream`:
 - **Errores antes de abrir:** un error antes del primer byte se responde como siempre (JSON con status). Después, solo se puede cerrar el stream.
 - **La credencial se revisa mientras dura:** cada 60 s (cada 4 heartbeats), el handler vuelve a validar la credencial con que se abrió, la cookie o el Bearer, con su alcance. Si ya no vale (la sesión se cerró o venció, el token se revocó o venció, o ya no alcanza a ese proyecto), cierra el stream sin mandar nada más. Para eso `utils.Kit` suma `Revalidate(r, access) error` (Fase 2), que repite las comprobaciones de `Handle` sin escribir la respuesta.
 - **Límites:**
-  - A lo más 4 streams abiertos a la vez por principal (la misma sesión o el mismo token), sumando los de deploys y los de logs. Cada uno tiene un stream de Docker abierto. El quinto recibe `429 rate_limited`, antes de abrir.
+  - A lo más 8 streams abiertos a la vez por principal (la misma sesión o el mismo token), sumando los de deploys y los de logs: alcanza para el panel abierto en varias pestañas, y acota los streams de Docker que tienen abiertos los de logs. El noveno recibe `429 rate_limited`, antes de abrir.
   - Un stream dura a lo más 1 h. El de logs termina con `end` (`data: timeout`); el de un deploy cierra sin el `status` final, y el cliente sigue por polling o reconecta con `Last-Event-ID`.
   - El panel ya trata así un stream que se corta: deja de leer y decide (polling, reconectar, o preguntar por la sesión).
 
@@ -281,7 +281,7 @@ El polling de la API (la GitHub Action, §14) y el respaldo del panel cuando el 
 - Cada valor secreto de `ResolveEnv`, de la app y del stage, se reemplaza por `***`, del más largo al más corto.
 - **Un valor de varias líneas** (una clave PEM) se enmascara entero y, además, línea por línea: el log se procesa por línea, así que el valor entero casi nunca aparece en una. Cada línea del valor, sin los espacios de los bordes, cuenta como otro valor a enmascarar.
 - **Un valor, o una línea de un valor, de menos de 8 bytes no se enmascara.** `1`, `true` o `3000` taparían texto que no tiene nada que ver, y la GitHub Action guarda todo como secreto por defecto (`env-secret`, §14 del diseño). El panel puede advertirlo al guardar un secreto así.
-- La línea se enmascara antes de cortarla a 8 KiB (§2.5) o a 16 KiB (§2.9), así un corte no deja la mitad de un secreto a la vista.
+- La línea se enmascara antes de cortarla (a 8 KiB acá, a 16 KiB en §2.9), así un corte no deja la mitad de un secreto a la vista.
 
 **La respuesta:**
 - `chunk` va desde `offset`, hasta 64 KiB y siempre en líneas completas. Puede ser `""`.
@@ -740,6 +740,8 @@ docker run --rm -v muelle_data:/data alpine sh -c \
 
 Después se reinicia muelle (`docker service update --force muelle_muelle`), o se espera al job `"proxy"`, que reenvía la configuración cada 5 min. La Fase 5 agrega el subcomando `muelle settings reset-panel-ips`, que hace lo mismo con `docker exec` en el contenedor de muelle.
 
+Lo mismo sirve si los puertos nuevos del proxy estaban ocupados: muelle-caddy no vuelve solo a los viejos (§3.4), y sin Caddy no se llega al panel. Se vuelven a poner los de antes (`UPDATE settings SET value='8443' WHERE key='proxy_https_port'`, y lo mismo con `proxy_http_port`), y el job `"proxy"` recrea el contenedor.
+
 ## 5. Fase 5: install e imágenes
 
 ### 5.1 Nombres fijos (`shared/domain/naming`)
@@ -864,7 +866,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Log por polling | — | Suma `superseded_by` | Para la Action |
 | SSE del deploy | `status` al conectar | Solo si no terminó. El `status` final va siempre después de la última línea | Si no, el panel cerraría antes de leer el log de un deploy que terminó justo |
 | SSE de logs | — | Suma el evento `end`, y `follow=0` | El panel ignora eventos desconocidos |
-| SSE, los dos | — | La credencial se revisa cada 60 s; a lo más 4 por principal (`429`) y 1 h por stream | El panel ya trata un stream que se corta |
+| SSE, los dos | — | La credencial se revisa cada 60 s; a lo más 8 por principal (`429`) y 1 h por stream | El panel ya trata un stream que se corta |
 | Enmascarado | — | También cada línea de un secreto de varias líneas; nada por debajo de 8 bytes | Una clave PEM no se veía; un `1` tapaba texto ajeno |
 | `GET …/status` | `cpu_percent` y `memory_bytes` por tarea | Por tarea, como lo lee el panel (null fuera del nodo local), y además su suma por servicio. Suma `image` y `update_state` | Compatible |
 | `GET …/deploys` | Los últimos 20 | Hasta 22: los 20 más nuevos, más el actual y su anterior si son más viejos | La retención nunca borra la versión que corre ni el destino del rollback |
