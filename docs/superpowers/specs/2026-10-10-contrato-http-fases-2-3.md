@@ -218,9 +218,14 @@ Si una ref ya trae digest (`…@sha256:…`), el paso 2 solo verifica que exista
 
 ### 2.3 `GET {app}/deploys` → 200 · token
 
-Un array plano con los últimos 20, del más nuevo al más viejo (§5.2 regla 7). Cada elemento tiene la forma de §2.1.
+Un array plano con los deploys que guarda la retención, del más nuevo al más viejo (§5.2 regla 7): hasta 22. Cada elemento tiene la forma de §2.1.
 
-La retención se aplica al cerrar cada deploy: borra los más viejos que no estén `queued` ni `running`.
+**La retención** se aplica al cerrar cada deploy. Se quedan:
+- los 20 más nuevos;
+- siempre, aunque sean más viejos, el deploy actual (el `succeeded` más reciente) y el `succeeded` anterior, que es el destino del rollback (§2.7);
+- los `queued` y `running`, que nunca se borran.
+
+El resto se borra. Así, 20 deploys fallidos seguidos (un CI que empuja un build roto) no borran la versión que corre. Sin el deploy actual, un deploy sin cuerpo volvería a la ref de la configuración (§2.2, "Qué imagen se despliega", paso 2), por ejemplo `:staging` en vez del `sha-…` de CI, y el rollback respondería `409 no_previous_deploy`.
 
 ### 2.4 `GET {app}/deploys/{id}` → 200 · token
 
@@ -313,7 +318,9 @@ El estado real en Swarm de los servicios de la app (filtrados por `naming.AppLab
           "health": "healthy",
           "node": "manager-1",
           "since": "2026-10-10T14:20:05Z",
-          "error": null
+          "error": null,
+          "cpu_percent": 1.7,
+          "memory_bytes": 311427072
         }
       ]
     }
@@ -330,7 +337,7 @@ El estado real en Swarm de los servicios de la app (filtrados por `naming.AppLab
 | `image` | La imagen de sus tareas (`Service.Image`) |
 | `replicas_desired` | `Service.Replicas`, o `DesiredTasks` en un servicio global |
 | `replicas_running` | `RunningTasks` |
-| `cpu_percent`, `memory_bytes` | La suma de las tareas que corren en el nodo local (`ContainerStats`, en paralelo, con un plazo total de 2 s). `cpu_percent` es el % de un núcleo, como `docker stats`. Null si no se pudo medir |
+| `cpu_percent`, `memory_bytes` | La suma de `tasks[].cpu_percent` y de `tasks[].memory_bytes` que no son null. Null si no se midió ninguna |
 | `memory_limit_bytes` | El límite de **cada** tarea (`Service.MemoryLimitBytes`); null si no tiene |
 | `update_state` | `Service.Update.State`, o null si nunca se actualizó |
 
@@ -346,6 +353,9 @@ El estado real en Swarm de los servicios de la app (filtrados por `naming.AppLab
 | `node` | El hostname del nodo (`Node`, con caché) |
 | `since` | `Task.UpdatedAt` |
 | `error` | `Task.Err`; null si está vacío |
+| `cpu_percent`, `memory_bytes` | Los de su contenedor (`ContainerStats`), si la tarea corre en el nodo local. `cpu_percent` es el % de un núcleo, como `docker stats`. Null si la tarea no está en el nodo local, no corre o no se pudo medir. Las muestras se toman en paralelo, con un plazo total de 2 s |
+
+El panel lee los valores de cada tarea (suma el CPU y promedia la RAM de las que se midieron, para compararla con `memory_limit_bytes`, que es por tarea). Las sumas del servicio son para otros clientes.
 
 El panel lo pide cada 5 s mientras la pestaña está visible. El backend puede guardar la respuesta en caché hasta 2 s por app.
 
@@ -813,7 +823,8 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Log por polling | — | Suma `superseded_by` | Para la Action |
 | SSE del deploy | `status` al conectar | Solo si no terminó. El `status` final va siempre después de la última línea | Si no, el panel cerraría antes de leer el log de un deploy que terminó justo |
 | SSE de logs | — | Suma el evento `end`, y `follow=0` | El panel ignora eventos desconocidos |
-| `GET …/status` | — | Suma `image` y `update_state`; `cpu_percent` y `memory_bytes` son la suma de las tareas del nodo local | Compatible |
+| `GET …/status` | `cpu_percent` y `memory_bytes` por tarea | Por tarea, como lo lee el panel (null fuera del nodo local), y además su suma por servicio. Suma `image` y `update_state` | Compatible |
+| `GET …/deploys` | Los últimos 20 | Hasta 22: los 20 más nuevos, más el actual y su anterior si son más viejos | La retención nunca borra la versión que corre ni el destino del rollback |
 | Rollback sin anterior | `409 no_previous_deploy` (o `conflict`) | `409 no_previous_deploy` | Igual |
 | Rutas de un dominio | Bajo la app | Bajo la app | Igual |
 | Hostname repetido | `409 conflict` o `hostname_taken` | `409 conflict` | El código genérico ya existe |

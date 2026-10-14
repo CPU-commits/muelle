@@ -234,7 +234,7 @@ La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`
 4. **Cambios pendientes.** Cambiar variables (de la app o de su stage), spec o compose actualiza `config_changed_at` y no redespliega. El panel muestra "cambios pendientes" mientras `config_changed_at > last_deployed_at`. **Los dominios no pasan por el deploy:** crearlos, editarlos o borrarlos aplica de inmediato el DNS y las rutas de Caddy, porque no afectan al compose.
 5. **Digest.** Cada deploy guarda el digest exacto de cada imagen, y el compose final referencia `repo:tag@sha256:…`.
 6. **Rollback.** El deploy "actual" es el `succeeded` más reciente. El rollback toma las imágenes (con digest) del `succeeded` inmediatamente anterior y despliega con la configuración **actual** (variables, spec). Si no hay un `succeeded` anterior, responde `409`. Las variables no se versionan en la v1.
-7. **Retención.** Últimos 20 deploys por app; `audit_events` 180 días; las sesiones vencidas o sin uso se borran cada hora.
+7. **Retención.** Últimos 20 deploys por app, más siempre el actual y el `succeeded` anterior (el destino del rollback), aunque sean más viejos; `audit_events` 180 días; las sesiones vencidas o sin uso se borran cada hora.
 
 ## 6. Render: del modelo al compose final
 
