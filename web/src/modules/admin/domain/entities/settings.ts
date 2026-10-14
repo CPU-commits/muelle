@@ -1,0 +1,59 @@
+import type { RoadmapPhase } from '@/shared/domain'
+
+// Los ajustes de `GET /settings`. En la Fase 1 el backend solo tiene `require_2fa`; el
+// resto (proxy, DNS, certificados e IPs permitidas, spec §5.1 y §8–9) llega con la Fase 3
+// como campos nuevos del mismo endpoint. Mientras falten, la sección es `null` y la
+// pantalla muestra "Llega con la Fase 3".
+
+/** La fase en la que llegan `proxy` y `panelAccess`. */
+export const PROXY_SETTINGS_PHASE: RoadmapPhase = 3
+
+/** El token de Cloudflare es de solo escritura: solo se sabe si está y qué ve. */
+export interface CloudflareStatus {
+	readonly tokenSet: boolean
+	/** Cuántas zonas ve el token, si el backend lo sabe. */
+	readonly zones: number | null
+}
+
+export interface ProxySettings {
+	readonly cloudflare: CloudflareStatus
+	/** `''` si todavía no se configuró. */
+	readonly publicIpv4: string
+	/** Opcional: `''` es sin IPv6. */
+	readonly publicIpv6: string
+	readonly acmeEmail: string
+	/** Se define al instalar; el panel solo lo muestra. */
+	readonly panelDomain: string
+	readonly httpPort: number
+	readonly httpsPort: number
+}
+
+export interface PanelAccess {
+	/** Vacía: el panel se abre desde cualquier IP. */
+	readonly allowedCidrs: readonly string[]
+	/** La IP con la que el backend ve esta sesión, para avisar antes de dejarla afuera. */
+	readonly clientIp: string | null
+}
+
+export interface Settings {
+	readonly require2fa: boolean
+	/** `null`: el backend todavía no tiene la Fase 3. */
+	readonly proxy: ProxySettings | null
+	/** `null`: el backend todavía no tiene la Fase 3. */
+	readonly panelAccess: PanelAccess | null
+}
+
+/**
+ * Un `PATCH /settings`: solo van los campos presentes. Uno que el backend no tiene
+ * todavía responde 400, así que la pantalla no los manda mientras su sección es `null`.
+ */
+export interface SettingsPatch {
+	readonly require2fa?: boolean
+	readonly publicIpv4?: string
+	readonly publicIpv6?: string
+	readonly acmeEmail?: string
+	readonly httpPort?: number
+	readonly httpsPort?: number
+	readonly panelAllowedCidrs?: readonly string[]
+	readonly cloudflareToken?: string
+}
