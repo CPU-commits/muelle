@@ -619,6 +619,18 @@ http.post(api('/projects'), async ({ request }) => {
   que ya dejaste corriendo.
 - `static/mockServiceWorker.js` solo queda en un build con `VITE_USE_MOCKS=1`: el adapter
   (`svelte.config.js`) lo borra de cualquier otro.
+- **`pnpm test` corre en un network namespace propio**, con solo `lo`
+  (`scripts/isolated-net.mjs`, con `unshare -rn`). Chromium corta todas las peticiones en
+  curso, también las de localhost, con `ERR_NETWORK_CHANGED` cada vez que cambia una IP del
+  host, y Docker cambia una cada vez que arranca o borra un contenedor (otro worktree con
+  tests de integración alcanza). En los tests de navegador salían archivos con "Failed to
+  fetch dynamically imported module" (0 tests) y, si el corte caía en el arranque de un
+  tester, vitest esperaba para siempre al 0 % de CPU. Adentro del namespace Chromium no ve
+  esos cambios (y el puerto 63315 es siempre el propio). Si `unshare -rn` no anda (macOS, un CI que lo bloquea) avisa y corre
+  con la red del host; `MUELLE_TEST_HOST_NET=1` lo saltea. `pnpm test:watch` no se aísla.
+- Si igual una corrida se queda sin progreso, `scripts/vitest-stall-watchdog.mjs` (un
+  reporter) la corta a los 120 s con la lista de archivos que no terminaron:
+  `testTimeout`/`hookTimeout` no cubren un tester que no arrancó.
 
 ### CSP
 

@@ -52,6 +52,9 @@ export default defineConfig(({ mode }) => {
 		],
 		test: {
 			expect: { requireAssertions: true },
+			// Si una corrida se queda sin progreso (un tester del navegador que no arrancó),
+			// el watchdog la corta con la lista de lo que no terminó en vez de colgarse.
+			reporters: ['default', './scripts/vitest-stall-watchdog.mjs'],
 			projects: [
 				{
 					// Componentes y viewModels: navegador real. Un viewModel llama a
