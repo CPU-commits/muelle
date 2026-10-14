@@ -32,14 +32,12 @@
 	let autoScrollTop = -1
 	let scrollerElement: HTMLElement | null = null
 
-	// Corre de nuevo cada vez que cambian `count` o `follow` (un attachment es un effect).
-	// Baja en el próximo frame, cuando las líneas nuevas ya están pintadas.
+	// Corre de nuevo cada vez que cambian `count` o `follow` (un attachment es un effect,
+	// y corre con las líneas nuevas ya en el DOM): baja en el acto, antes del próximo frame.
 	const stickToBottom: Attachment<HTMLDivElement> = (element) => {
 		scrollerElement = element
 		void count
-		if (!follow) return
-		const frame = requestAnimationFrame(() => toBottom(element))
-		return () => cancelAnimationFrame(frame)
+		if (follow) toBottom(element)
 	}
 
 	// Las líneas que se pintan recién al llegar al final (`content-visibility: auto`, una
