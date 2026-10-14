@@ -135,6 +135,12 @@ Hallazgos de la revisión de código que las próximas fases deben respetar.
 - La retención guarda siempre el deploy actual y el destino del rollback, además de los 20 más nuevos (contrato §2.3).
 - Enmascarar también cada línea de un secreto de varias líneas, y nada de menos de 8 bytes (contrato §2.5).
 - Los SSE revisan la credencial cada 60 s y tienen límites por principal y de duración (contrato §0.3).
+- Un deploy sin cuerpo le quita el digest a una ref con tag, pero una ref sin tag (`…@sha256:…`) queda fija: sin el digest, Docker la leería como `:latest` (contrato §2.2).
+
+**Fase 2, estado y logs**
+- `GET …/logs` acepta `since` en vez de `tail` (inclusivo, hasta 5000 líneas), con `time` truncado al milisegundo: el panel lo manda al reconectar (contrato §2.9).
+- El servicio de los logs se busca por `naming.Service(p, s, a, service)` y con las etiquetas de la app, nunca con el parámetro tal cual: Docker también acepta un id o un prefijo de id (contrato §2.9).
+- Las medidas de `GET …/status` (`ContainerStats`) se guardan 5 s por app (contrato §2.8).
 
 **Fase 3**
 - Crear un stage ya crea la red overlay y conecta Caddy (etapa de contratos).
