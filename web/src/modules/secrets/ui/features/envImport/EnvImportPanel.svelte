@@ -213,7 +213,7 @@
 		confirmLabel={vm.confirmLabel}
 		cancelLabel={m.common_cancel()}
 		loading={vm.isSubmitting}
-		error={vm.isConfirming ? vm.serverError : null}
+		error={vm.confirmError}
 		onConfirm={() => void vm.confirmImport()}
 		onCancel={vm.cancelConfirm}
 	/>

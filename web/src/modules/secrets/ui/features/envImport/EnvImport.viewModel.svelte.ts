@@ -125,6 +125,15 @@ export class EnvImportViewModel {
 		return this.confirming !== null
 	}
 
+	/**
+	 * El error del diálogo de confirmar. Un getter y no una expresión en el markup: el
+	 * compilador guarda esa expresión en un valor reactivo suscrito a `serverError`, que
+	 * sigue vivo al cerrar y retiene el panel (y el textarea con lo pegado).
+	 */
+	get confirmError(): string | null {
+		return this.isConfirming ? this.serverError : null
+	}
+
 	/** Lo más grave manda en el título: borrar, después mostrar, después ocultar. */
 	get confirmTitle(): string {
 		const plan = this.confirming
