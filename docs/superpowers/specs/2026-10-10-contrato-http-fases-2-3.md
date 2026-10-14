@@ -552,22 +552,52 @@ Es un estado en memoria, más `InspectContainer`. Con Docker caído: `503 docker
 
 Lo del diseño (§3.1 y §8), con estas precisiones:
 
-- **IPs permitidas en el panel:** el matcher es **`client_ip`** (`{"client_ip": {"ranges": […]}}`), no `remote_ip`.
+- **La configuración es JSON** (`POST /load`), así que los atajos del Caddyfile no existen: cada placeholder va con su nombre completo. En particular, `{client_ip}` es un atajo del Caddyfile (`caddyconfig/httpcaddyfile/shorthands.go`) de `{http.vars.client_ip}`. En JSON llega tal cual, y entonces `X-Real-IP` no trae una IP: `utils.ClientIP` cae a la IP de Caddy, todos los límites y bloqueos del login quedan en una sola IP (cualquiera dejaría fuera a todos), y `client_ip` y `would_lock_out` miran la IP de Caddy. El test golden de la Fase 3 (§15 del diseño) verifica que no quede ningún atajo (`{client_ip}`, `{host}`, `{remote_host}`…).
+- **Las piezas del panel**, en JSON (un esqueleto: el resto, TLS y las rutas de las apps, según §8 del diseño):
+
+  ```json
+  {
+    "admin": { "listen": "unix//run/caddy-admin/admin.sock" },
+    "apps": { "http": { "servers": { "muelle": {
+      "listen": [":443"],
+      "trusted_proxies": { "source": "static", "ranges": ["173.245.48.0/20", "…los rangos de Cloudflare"] },
+      "client_ip_headers": ["CF-Connecting-IP", "X-Forwarded-For"],
+      "routes": [{
+        "match": [{ "host": ["panel.tudominio.cl"] }],
+        "handle": [{ "handler": "subroute", "routes": [
+          { "match": [{ "not": [{ "client_ip": { "ranges": ["190.5.6.0/24"] } }] }],
+            "handle": [{ "handler": "static_response", "status_code": 403 }] },
+          { "handle": [{ "handler": "reverse_proxy",
+              "upstreams": [{ "dial": "muelle_muelle:8080" }],
+              "headers": { "request": { "set": { "X-Real-IP": ["{http.vars.client_ip}"] } } } }] }
+        ] }],
+        "terminal": true
+      }]
+    } } } }
+  }
+  ```
+
+- **IPs permitidas en el panel:** el matcher es **`client_ip`** (`{"client_ip": {"ranges": […]}}`), no `remote_ip`. Sin `panel_allowed_cidrs`, no va la ruta del `403`.
   - `remote_ip` mira el peer directo, que con el panel `proxied` es el edge de Cloudflare.
-  - `client_ip` usa la IP real que resuelve `servers.trusted_proxies`: los rangos de Cloudflare (`{"source": "static", "ranges": […]}`), con `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`.
-  - Es la misma IP que muelle recibe en `X-Real-IP` y muestra como `client_ip` en `GET /settings`.
+  - `client_ip` usa la IP real que resuelve `trusted_proxies` del servidor: los rangos de Cloudflare (`{"source": "static", "ranges": […]}`), con `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`. Esos headers solo cuentan si el peer está en esos rangos: un cliente que llega directo no puede poner su IP.
+  - Es la misma IP que muelle recibe en `X-Real-IP` (`set` la pisa, nunca se reenvía la del cliente) y muestra como `client_ip` en `GET /settings`.
   - Una IP fuera de la lista recibe `403`, y la ruta del panel no se rompe.
-- **Configuración siempre completa**, con `admin.listen: "unix//run/caddy-admin/admin.sock"` (`naming.CaddyAdminSocket`).
+- **Configuración siempre completa**, con `admin.listen` = `naming.CaddyAdminListen` (`unix//run/caddy-admin/admin.sock`).
 - **muelle-caddy**: lo crea y lo recrea `ingress`, solo si `ProxySettings.Enabled(naming.CaddyImageFor(version))`.
   - **Contenedor:** `naming.CaddyContainer`, `--restart unless-stopped`.
+  - **Comando y entorno:** los pone ingress, no la imagen. `Cmd` es `naming.CaddyCommand()` (`caddy run --resume`) y `Env` es `naming.CaddyEnv()` (`CADDY_ADMIN=unix//run/caddy-admin/admin.sock`, `XDG_CONFIG_HOME=/config` y `XDG_DATA_HOME=/data`).
+    - Sin autosave (el primer arranque, o un volumen nuevo), Caddy arranca vacío con la admin API en el socket, y el job `"proxy"` le manda la configuración.
+    - Con autosave, `--resume` retoma la última configuración que mandó muelle, que ya trae `admin.listen`: los sitios vuelven sin esperar a muelle.
+    - El CMD de una imagen de Caddy típica (`caddy run --config /etc/caddy/Caddyfile --adapter caddyfile`) deja la admin API en TCP (`localhost:2019`) y el socket nunca aparece. Por eso no se usa, y la imagen de la Fase 5 no necesita un CMD ni un archivo de configuración propios. Una `caddy_image` propia sirve si trae el módulo `dns.providers.cloudflare`.
+    - `XDG_*` dejan el autosave y los certificados en sus volúmenes aunque la imagen no defina esas variables. Si no, se perderían al recrear el contenedor, y se volverían a emitir los certificados.
   - **Puertos:** `proxy_http_port` → 80/tcp, y `proxy_https_port` → 443/tcp y 443/udp.
-  - **Volúmenes:** `muelle_caddy_data:/data`, `muelle_caddy_config:/config` y `muelle_caddy_admin:/run/caddy-admin`.
+  - **Volúmenes:** `muelle_caddy_data:/data`, `muelle_caddy_config:/config` y `muelle_caddy_admin:/run/caddy-admin` (`naming.CaddyDataDir`, `CaddyConfigDir` y `CaddyAdminDir`).
   - **Redes:** se crea en `muelle_panel` y se conecta a cada red de stage.
-  - **Cuándo se recrea:** si cambian la imagen o los puertos, o si corre sin publicar sus puertos (`len(PublishedPorts) == 0` con `Ports` no vacío).
+  - **Cuándo se recrea:** si cambian la imagen, los puertos o el comando (`Container.Cmd`), o si corre sin publicar sus puertos (`len(PublishedPorts) == 0` con `Ports` no vacío).
   - **Recrear es** borrar y crear uno nuevo, **nunca rearrancar el mismo.** Docker 29 arranca sin puertos un contenedor cuyo arranque falló con `ErrPortInUse` (el fake lo imita).
   - **Puerto ocupado** (`docker.ErrPortInUse`): el contenedor anterior ya no existe. Se reintenta con los mismos ajustes en el job `"proxy"` y el error queda en `GET /proxy`. No se vuelve solo a los puertos viejos.
 - **Imagen:** `caddy_image` si está, o `naming.CaddyImageFor(version)`. Se baja con `PullImage` (anónimo) si `InspectImage` da `ErrNotFound`.
-- **Ruta del panel:** `panel_domain → naming.MuelleService:naming.MuellePort` (`muelle_muelle:8080`), con `header_up X-Real-IP {client_ip}`.
+- **Ruta del panel:** `panel_domain → naming.MuelleService:naming.MuellePort` (`muelle_muelle:8080`), con `X-Real-IP` = `{http.vars.client_ip}` en `headers.request.set` del `reverse_proxy` (el JSON de arriba).
 - **TLS del panel:**
   - `cloudflare` si hay token y `panel_domain` cae en una zona visible; si no, `http`.
   - El registro DNS del panel se crea solo si no existe. Uno existente nunca se toca, y en la v1 no se adopta.
