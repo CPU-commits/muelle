@@ -1,8 +1,16 @@
 <script lang="ts">
-	import { m } from '@/shared/ui/i18n/paraglide/messages'
-	import { EmptyState, PageHeader } from '@/shared/ui'
+	import { page } from '$app/state'
+	import { DeploysScreen } from '@/modules/deploy'
+	import type { PageProps } from './$types'
+
+	// `?deploy=144` abre ese deploy (lo usan "Desplegar", "Rollback" y el "Último deploy" del
+	// Resumen). El `kind` del catálogo, para el diálogo de deploy, lo conecta F2.
+	let { params }: PageProps = $props()
 </script>
 
-<!-- Placeholder de F0: lo reemplaza F1-deploy-ingress con su pantalla. -->
-<PageHeader title={m.nav_app_deploys()} />
-<EmptyState icon="clock" title={m.common_wip_title()} body={m.common_wip_body()} />
+<DeploysScreen
+	project={params.p}
+	stage={params.s}
+	app={params.a}
+	deployParam={page.url.searchParams.get('deploy')}
+/>

@@ -1,14 +1,11 @@
 <script lang="ts">
-	import { m } from '@/shared/ui/i18n/paraglide/messages'
-	import { EmptyState, PageHeader } from '@/shared/ui'
+	import { SummaryScreen } from '@/modules/deploy'
 	import type { PageProps } from './$types'
 
+	// El Resumen de la app: es dueño del encabezado grande (nombre, estado, Rollback y
+	// Desplegar). Lo del catálogo (`kind`, `pendingChanges`, `pendingChangesHref`) lo
+	// conecta F2 con el barrel de `catalog`.
 	let { params }: PageProps = $props()
 </script>
 
-<!-- Placeholder de F0: lo reemplaza F1-deploy-ingress con el Resumen (estado, réplicas,
-     CPU/RAM, Desplegar y Rollback). El header grande de la app (nombre, kind, imagen,
-     cambios pendientes y las acciones) es de esta página, con la query y el componente
-     del resumen que exporta el barrel de `catalog`. -->
-<PageHeader title={params.a} titleSize="lg" />
-<EmptyState icon="clock" title={m.common_wip_title()} body={m.common_wip_body()} />
+<SummaryScreen project={params.p} stage={params.s} app={params.a} />
