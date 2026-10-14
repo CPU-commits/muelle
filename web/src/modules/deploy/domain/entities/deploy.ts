@@ -57,8 +57,8 @@ export function currentDeploy(deploys: readonly Deploy[]): Deploy | null {
 
 /**
  * A dónde vuelve un rollback: el `succeeded` inmediatamente anterior al actual. Null si
- * no hay (el backend responde 409). El historial guarda los últimos 20, así que null acá
- * no garantiza el 409: el backend decide.
+ * no hay (el backend responde `409 no_previous_deploy`). La retención del historial
+ * (contrato §2.3) siempre guarda el actual y su anterior, así que null acá es definitivo.
  */
 export function rollbackTarget(deploys: readonly Deploy[]): Deploy | null {
 	const succeeded = newestFirst(deploys).filter((deploy) => deploy.status === 'succeeded')

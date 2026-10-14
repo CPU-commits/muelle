@@ -85,7 +85,7 @@ export class DeploysViewModel {
 	readonly deploys: CreateQueryResult<readonly Deploy[], Error>
 	/** Solo para saber los servicios en el diálogo de deploy. */
 	readonly status: CreateQueryResult<AppStatus, Error>
-	/** El `?deploy=` que no está en el historial (más viejo que los últimos 20, o borrado). */
+	/** El `?deploy=` que no está en el historial (más viejo que la retención, o borrado). */
 	readonly linked: CreateQueryResult<Deploy, Error>
 
 	readonly selected: Deploy | null

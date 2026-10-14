@@ -235,12 +235,12 @@ Solo deja de seguir cuando quien lee sube (rueda, teclado o la barra).
 
 Los logs en vivo de un servicio (no se guarda nada).
 
-| Query     | Qué                                                                                                                                                      |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `service` | El nombre corto. **Obligatorio**: sin él, `422 invalid` con `service: es obligatorio`. Si no existe en Swarm, `404 not_found`                            |
-| `tail`    | De 0 a 5000 (200 por defecto). El panel manda 100, 200 o 500                                                                                             |
-| `follow`  | Siempre `1` desde el panel                                                                                                                               |
-| `since`   | **Pendiente en el backend (Fase 2).** Al reconectar, la hora de la última línea (RFC 3339 con ms): las últimas `tail` de lo escrito desde ahí, inclusive |
+| Query     | Qué                                                                                                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `service` | El nombre corto. **Obligatorio**: sin él, `422 invalid` con `service: es obligatorio`. Si no existe en Swarm, `404 not_found`                                             |
+| `tail`    | De 0 a 5000 (200 por defecto). El panel manda 100, 200 o 500                                                                                                              |
+| `follow`  | Siempre `1` desde el panel                                                                                                                                                |
+| `since`   | **Pendiente en el backend (Fase 2).** Al reconectar, **en vez de `tail`**: la hora de la última línea (RFC 3339 con ms). Todo lo escrito desde ahí, inclusive, hasta 5000 |
 
 ```
 event: log
@@ -273,10 +273,10 @@ logfmt o `level`/`severity` de un JSON).
   el cliente HTTP manda al login y no se reintenta. Un `429` (más de 8 streams abiertos por
   la misma sesión, contando los de deploys) tampoco se ve: espera como cualquier otro.
 - **Pestaña oculta más de 30 s**: cierra el stream y lo retoma al volver.
-- **Al reconectar** manda `since` y `tail`, y descarta lo de antes de `since` y, de ese mismo
-  milisegundo, tantas copias de cada línea como ya tenía. Mientras el backend no soporte
-  `since` (lo ignora y manda las últimas `tail`), el panel nunca repite: si falta algo,
-  queda el hueco.
+- **Al reconectar** manda `since` (sin `tail`), y descarta lo de antes de `since` y, de ese
+  mismo milisegundo, tantas copias de cada línea como ya tenía. Mientras el backend no
+  soporte `since` (lo ignora y manda las últimas 200, su `tail` por defecto), el panel
+  nunca repite: si falta algo, queda el hueco.
 - El backend vuelve a validar la sesión cada 60 s y cierra el stream si ya no vale: el
   panel lo ve como un corte; al reconectar el stream no abre, pregunta por la sesión y va
   al login.
@@ -322,6 +322,6 @@ se abre una app se siembra el historial del diseño (#139–#143) y un #144 que 
 ## Diferencias con el contrato
 
 - **`since` en `GET {app}/logs`**: el panel lo manda al reconectar y el mock lo cumple; el
-  contrato todavía no lo tiene (se suma a la Fase 2). Sin él el panel sigue andando: no
-  repite líneas y acepta el hueco.
+  contrato todavía no lo tiene (se suma a la Fase 2: RFC 3339, inclusivo, reemplaza a
+  `tail`, hasta 5000). Sin él el panel sigue andando: no repite líneas y acepta el hueco.
 - Nada más: el resto de este archivo es lo que dice el contrato.

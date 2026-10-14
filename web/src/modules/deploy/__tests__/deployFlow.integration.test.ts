@@ -427,8 +427,11 @@ describe('contrato de la Fase 2', () => {
 		const api = status.services[0]
 		expect(api?.image).toMatch(/^ghcr\.io\/.+@sha256:[0-9a-f]{64}$/)
 		expect(api?.updateState).toBe('completed')
-		// CPU y RAM por tarea: la del otro nodo, sin medir.
-		expect(api?.tasks.some((task) => task.cpuPercent === null)).toBe(true)
+		// CPU, RAM y health por tarea: la del otro nodo, sin medir.
+		const remote = api?.tasks.find((task) => task.node === 'worker-1')
+		expect(remote?.cpuPercent).toBeNull()
+		expect(remote?.memoryBytes).toBeNull()
+		expect(remote?.health).toBeNull()
 	})
 
 	it('Docker caído (503 docker_unavailable) es DockerUnavailable, con su texto', async () => {
@@ -530,6 +533,30 @@ describe('contrato de la Fase 2', () => {
 			),
 		)
 		expect(events.at(-1)).toEqual({ kind: 'end', reason: 'timeout' })
+	})
+
+	it('al reconectar manda since en vez de tail', async () => {
+		const urls: URL[] = []
+		server.use(
+			http.get(api(`${APP_PATH}/logs`), ({ request }) => {
+				urls.push(new URL(request.url))
+				return sseBody(['event: end\ndata: eof'])
+			}),
+		)
+		await collect(
+			deployUseCases.streamAppLogs(
+				{
+					app: APP,
+					service: 'api',
+					tail: 500,
+					since: new Date('2026-10-10T14:31:51.517Z'),
+				},
+				new AbortController().signal,
+			),
+		)
+		expect(urls[0]?.searchParams.get('since')).toBe('2026-10-10T14:31:51.517Z')
+		expect(urls[0]?.searchParams.has('tail')).toBe(false)
+		expect(urls[0]?.searchParams.get('follow')).toBe('1')
 	})
 
 	it('el mock pide el servicio, como el backend (422 service)', async () => {

@@ -77,7 +77,7 @@ export function liveDeploysQuery(app: AppRef) {
 	})
 }
 
-/** Un deploy por id (el `?deploy=` que ya no está en los últimos 20, o que no existe). */
+/** Un deploy por id (el `?deploy=` que ya no está en el historial, o que no existe). */
 export function deployQuery(app: AppRef, id: DeployId | null, options: QueryToggles = {}) {
 	return queryOptions({
 		queryKey: deployKeys.one(app, id ?? (0 as DeployId)),

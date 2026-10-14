@@ -87,7 +87,8 @@ function statusDto(app: MockApp, now: number) {
 					slot,
 					state: 'running',
 					desired_state: 'running',
-					health: 'healthy',
+					// El health sale del contenedor en el nodo de muelle: el de otro nodo, null.
+					health: local ? 'healthy' : null,
 					node: local ? 'manager-1' : 'worker-1',
 					since: iso(finished - (app.replicas - slot) * 14_000),
 					error: null,
@@ -398,7 +399,7 @@ function appLogLine(app: MockApp, service: string, sequence: number): string {
 }
 
 /** Desde dónde: las últimas `tail` líneas, o todo lo escrito desde `since` (inclusivo, como Docker). */
-/** Las últimas `tail` y, con `since`, solo de lo escrito desde ahí (inclusivo, como Docker). */
+/** Las últimas `tail` o, con `since`, todo lo escrito desde ahí (inclusivo), hasta 5000. */
 interface LogStart {
 	readonly tail: number
 	readonly since: number | null
@@ -414,8 +415,10 @@ function appLogStream(
 	return sseResponse(request, async (send, isOpen) => {
 		const now = Date.now()
 		const last = Math.floor(now / APP_LOG_TICK_MS)
-		let first = last - start.tail + 1
-		if (start.since !== null) first = Math.max(first, Math.ceil(start.since / APP_LOG_TICK_MS))
+		const first =
+			start.since === null
+				? last - start.tail + 1
+				: Math.max(Math.ceil(start.since / APP_LOG_TICK_MS), last - MAX_LOG_TAIL + 1)
 		for (let sequence = first; sequence <= last; sequence += 1) {
 			if (!send(sseEvent('log', appLogLine(app, service, sequence)))) return
 		}
@@ -591,8 +594,8 @@ export const deployHandlers: RequestHandler[] = [
 		if (!Number.isInteger(tail) || tail < 0 || tail > MAX_LOG_TAIL) {
 			return invalid('tail', `tiene que ser un entero entre 0 y ${MAX_LOG_TAIL}`)
 		}
-		// Al reconectar el panel manda `since` (la hora de la última línea). Pendiente en el
-		// backend (Fase 2): el mock ya lo cumple.
+		// Al reconectar el panel manda `since` (la hora de la última línea) en vez de `tail`.
+		// Pendiente en el backend (Fase 2): el mock ya lo cumple.
 		const sinceParam = url.searchParams.get('since')
 		let since: number | null = null
 		if (sinceParam !== null) {

@@ -73,6 +73,21 @@ describe('SummaryViewModel', () => {
 		expect(vm.actionsEnabled).toBe(true)
 	})
 
+	it('con 22 deploys (la retención) y sin un exitoso anterior, ya sabe que no hay rollback', async () => {
+		// 21 fallidos y el actual: la retención guarda siempre el actual y su anterior.
+		mocks.listDeploys.mockResolvedValue([
+			makeDeploy(200),
+			...Array.from({ length: 21 }, (_, index) =>
+				makeDeploy(199 - index, { status: 'failed' }),
+			),
+		])
+		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+
+		await vi.waitFor(() => expect(vm.current?.id).toBe(200))
+		expect(vm.rollbackTarget).toBeNull()
+		expect(vm.historyComplete).toBe(true)
+	})
+
 	it('se refresca cada 5 s solo con la pestaña visible, y al volver pide enseguida', async () => {
 		setVisibility('visible')
 		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))

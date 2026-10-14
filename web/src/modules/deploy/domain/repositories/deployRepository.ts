@@ -11,7 +11,7 @@ import type { DeployId } from '../value-objects/deployId'
 // Contra un backend sin la Fase 2, todo rechaza con `UnavailableError` (`phase: 2`).
 export interface DeployRepository {
 	status(app: AppRef, signal?: AbortSignal): Promise<AppStatus>
-	/** El historial, del más nuevo al más viejo (los últimos 20). */
+	/** El historial, del más nuevo al más viejo (hasta 22, con la retención del contrato §2.3). */
 	list(app: AppRef, signal?: AbortSignal): Promise<readonly Deploy[]>
 	get(app: AppRef, id: DeployId, signal?: AbortSignal): Promise<Deploy>
 	create(app: AppRef, request: DeployRequest): Promise<DeployAccepted>

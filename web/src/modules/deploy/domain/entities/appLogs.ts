@@ -35,12 +35,12 @@ export const DEFAULT_LOG_TAIL: LogTail = 200
 
 export interface AppLogsQuery {
 	readonly service: string
-	/** Las últimas N; con `since`, las últimas N de las escritas desde ahí. */
+	/** Las últimas N (sin `since`). */
 	readonly tail: LogTail
 	/**
-	 * Al reconectar: solo lo escrito desde este momento (inclusivo). Así no se pierde lo que
-	 * pasó mientras estaba cortado. Pendiente en el backend (Fase 2): mientras lo ignore,
-	 * llegan las últimas `tail` y el panel descarta lo repetido.
+	 * Al reconectar, en vez de `tail`: todo lo escrito desde este momento (inclusivo), hasta
+	 * 5000. Así no se pierde lo que pasó mientras estaba cortado. Pendiente en el backend
+	 * (Fase 2): mientras lo ignore, llegan las últimas 200 y el panel descarta lo repetido.
 	 */
 	readonly since?: Date
 }

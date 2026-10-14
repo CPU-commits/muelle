@@ -26,9 +26,6 @@ import {
 	swarmServiceName,
 } from '../../../domain'
 
-/** Los deploys que guarda el backend por app (spec §5.2 regla 7). */
-const HISTORY_LIMIT = 20
-
 export interface SummaryProps {
 	readonly project: string
 	readonly stage: string
@@ -182,8 +179,12 @@ export class SummaryViewModel {
 		return rollbackTarget(this.history)
 	}
 
+	/**
+	 * La retención (contrato §2.3) siempre guarda el actual y su anterior: con el historial
+	 * cargado, si no hay destino de rollback, es que no hay.
+	 */
 	get historyComplete(): boolean {
-		return this.deploys.isSuccess && this.history.length < HISTORY_LIMIT
+		return this.deploys.isSuccess
 	}
 
 	/** La imagen actual de cada servicio (para el placeholder del diálogo). */

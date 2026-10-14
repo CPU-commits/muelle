@@ -16,8 +16,8 @@ export interface RollbackDialogProps {
 	/** A dónde vuelve según el historial (el succeeded anterior al actual), si se sabe. */
 	readonly target: Deploy | null
 	/**
-	 * El historial está entero (menos de 20 deploys): si no hay `target`, el backend va a
-	 * responder 409 seguro y se avisa antes de intentarlo.
+	 * El historial se cargó (la retención siempre guarda el actual y su anterior): si no hay
+	 * `target`, el backend va a responder 409 seguro y se avisa antes de intentarlo.
 	 */
 	readonly historyComplete: boolean
 	readonly onDone: (id: DeployId) => void

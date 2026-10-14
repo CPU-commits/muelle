@@ -84,7 +84,7 @@ export const deployHttpDataSource = {
 		return eventStream(url, [DEPLOY_LOG_EVENT, DEPLOY_STATUS_EVENT], signal)
 	},
 
-	/** SSE `…/logs?service&tail[&since]&follow=1`: eventos `log` (una línea JSON) y `end`. */
+	/** SSE `…/logs?service&(tail|since)&follow=1`: eventos `log` (una línea JSON) y `end`. */
 	streamAppLogs(
 		app: AppRef,
 		service: string,
@@ -92,11 +92,11 @@ export const deployHttpDataSource = {
 		since: Date | null,
 		signal: AbortSignal,
 	): AsyncGenerator<StreamItem, void, undefined> {
-		// Al reconectar va también `since` (la hora de la última línea): las últimas `tail`
-		// de lo escrito desde ahí. Un backend que todavía no lo soporta lo ignora y manda las
-		// últimas `tail`: el panel descarta lo repetido.
+		// Al reconectar va `since` (la hora de la última línea) en vez de `tail`: todo lo
+		// escrito desde ahí, hasta 5000. Un backend que todavía no lo soporta lo ignora y manda
+		// las últimas 200 (su `tail` por defecto): el panel descarta lo repetido.
 		const query = since
-			? { service, tail, since: since.toISOString(), follow: 1 }
+			? { service, since: since.toISOString(), follow: 1 }
 			: { service, tail, follow: 1 }
 		const url = apiUrl(`${appPath(app)}/logs`, query)
 		return eventStream(url, [APP_LOG_EVENT, APP_LOG_END_EVENT], signal)
