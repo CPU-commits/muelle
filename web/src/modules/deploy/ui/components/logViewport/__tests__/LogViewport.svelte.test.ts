@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { userEvent } from 'vitest/browser'
 import LogViewportHarness, { type HarnessApi } from './LogViewportHarness.svelte'
+import RealLinesHarness, { type RealLinesApi } from './RealLinesHarness.svelte'
 
 async function mounted(initial = 0): Promise<HarnessApi> {
 	let api: HarnessApi | undefined
@@ -79,5 +80,84 @@ describe('LogViewport', () => {
 
 		await expect.poll(() => api.follow).toBe(true)
 		await expect.poll(() => distanceToBottom(scroller)).toBeLessThanOrEqual(2)
+	})
+})
+
+// Con las líneas de verdad (content-visibility, el corte de las largas): las que se pintan
+// recién al llegar al final son más altas que su alto estimado, y el contenido crece
+// después del scroll. El final tiene que quedar a la vista igual.
+describe.each(['logs', 'deploys'] as const)('LogViewport con las líneas de %s', (variant) => {
+	const long = (index: number) =>
+		`RÁFAGA ${index} ${'lorem ipsum dolor sit amet '.repeat(8)}`.slice(0, 200)
+
+	async function mountedReal(width = 480): Promise<RealLinesApi> {
+		let api: RealLinesApi | undefined
+		await render(RealLinesHarness, {
+			variant,
+			width,
+			onReady: (value: RealLinesApi) => {
+				api = value
+			},
+		})
+		if (!api) throw new Error('el harness no expuso su API')
+		return api
+	}
+
+	function lastLineVisible(scroller: HTMLElement): boolean {
+		const items = scroller.querySelectorAll('li')
+		const last = items[items.length - 1]
+		if (!last) return false
+		const line = last.getBoundingClientRect()
+		const box = scroller.getBoundingClientRect()
+		return line.bottom <= box.bottom + 1 && line.top >= box.top - 1
+	}
+
+	async function settle(): Promise<void> {
+		for (let frame = 0; frame < 4; frame += 1) await nextFrame()
+		await wait(50)
+	}
+
+	it('una ráfaga de 30 líneas de 200 caracteres deja la última a la vista', async () => {
+		const api = await mountedReal()
+		api.push(Array.from({ length: 200 }, (_, index) => long(index)))
+		await settle()
+		const scroller = api.scroller
+		if (!scroller) throw new Error('sin scroller')
+
+		for (let round = 0; round < 3; round += 1) {
+			api.push(Array.from({ length: 30 }, (_, index) => long(1000 + round * 30 + index)))
+			await settle()
+			expect(api.follow).toBe(true)
+			expect(lastLineVisible(scroller)).toBe(true)
+			expect(distanceToBottom(scroller)).toBeLessThanOrEqual(2)
+		}
+	})
+
+	it('una línea larga cada 50 ms sigue mostrando la última', async () => {
+		const api = await mountedReal(375)
+		api.push(Array.from({ length: 100 }, (_, index) => long(index)))
+		await settle()
+		const scroller = api.scroller
+		if (!scroller) throw new Error('sin scroller')
+
+		for (let tick = 0; tick < 30; tick += 1) {
+			api.push([long(500 + tick)])
+			await wait(50)
+		}
+		await settle()
+		expect(api.follow).toBe(true)
+		expect(lastLineVisible(scroller)).toBe(true)
+	})
+
+	it('quieto después de la ráfaga, la última sigue a la vista', async () => {
+		const api = await mountedReal()
+		api.push(Array.from({ length: 300 }, (_, index) => long(index)))
+		await settle()
+		const scroller = api.scroller
+		if (!scroller) throw new Error('sin scroller')
+
+		await wait(400)
+		expect(lastLineVisible(scroller)).toBe(true)
+		expect(distanceToBottom(scroller)).toBeLessThanOrEqual(2)
 	})
 })

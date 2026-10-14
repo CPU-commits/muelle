@@ -3,7 +3,7 @@
 	import type { Attachment } from 'svelte/attachments'
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import { Button, Icon } from '@/shared/ui'
-	import { jumpSlot, root, scroller, sizes } from './styles.css'
+	import { anchored, content, jumpSlot, root, scroller, sizes } from './styles.css'
 
 	// La caja con scroll de un log. Mientras `follow` es true, cada línea nueva (`count`)
 	// baja hasta el final. Si quien lee sube, avisa `onFollowChange(false)` y deja de
@@ -40,6 +40,19 @@
 		if (!follow) return
 		const frame = requestAnimationFrame(() => toBottom(element))
 		return () => cancelAnimationFrame(frame)
+	}
+
+	// Las líneas que se pintan recién al llegar al final (`content-visibility: auto`, una
+	// larga que se parte en varias) son más altas que su alto estimado: el contenido crece
+	// DESPUÉS del scroll y la última queda abajo, fuera de la vista. Mientras se sigue, cada
+	// cambio de alto del contenido vuelve a bajar (el callback corre después del layout y
+	// antes de pintar, así no se ve el salto).
+	const pinWhileFollowing: Attachment<HTMLDivElement> = (element) => {
+		const observer = new ResizeObserver(() => {
+			if (follow && scrollerElement) toBottom(scrollerElement)
+		})
+		observer.observe(element)
+		return () => observer.disconnect()
 	}
 
 	function toBottom(element: HTMLElement): void {
@@ -91,7 +104,7 @@
 	<!-- Una región con scroll tiene que poder recibir el foco para leerse con teclado. -->
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div
-		class={[scroller, sizes[size]]}
+		class={[scroller, sizes[size], !follow && anchored]}
 		role="region"
 		aria-label={label}
 		tabindex="0"
@@ -99,7 +112,9 @@
 		{@attach stickToBottom}
 		{@attach watchInput}
 	>
-		{@render children()}
+		<div class={content} {@attach pinWhileFollowing}>
+			{@render children()}
+		</div>
 	</div>
 	{#if !follow}
 		<div class={jumpSlot}>
