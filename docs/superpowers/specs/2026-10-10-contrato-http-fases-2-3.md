@@ -236,15 +236,19 @@ No se llama a Docker al encolar: con Docker caído igual se responde `202`, y el
 
 Para cada servicio, en este orden:
 1. El override del cuerpo, si viene.
-2. Si no, la ref sin digest de ese servicio en el **deploy actual** (el `succeeded` más reciente). Una excepción: si la ref de la configuración (`spec.image` o el `image:` del compose) cambió desde ese deploy, se usa la de la configuración. Para saberlo, cada deploy guarda en `deploys.config_images` las refs de la configuración que leyó.
+2. Si no, la ref de ese servicio en el **deploy actual** (el `succeeded` más reciente). Ahí está resuelta (`ref@sha256:…`), y el digest se quita solo si la ref tiene tag:
+   - `ghcr.io/x/y:sha-3f9c2e1@sha256:…` vuelve a `ghcr.io/x/y:sha-3f9c2e1`, y el tag se resuelve de nuevo;
+   - `ghcr.io/x/y@sha256:…`, sin tag, queda fija en su digest. Sin él quedaría `ghcr.io/x/y`, que Docker lee como `:latest`: otra imagen, sin aviso.
+
+   Una excepción: si la ref de la configuración (`spec.image` o el `image:` del compose) cambió desde ese deploy, se usa la de la configuración. Para saberlo, cada deploy guarda en `deploys.config_images` las refs de la configuración que leyó.
 3. Si el servicio no estaba en el deploy actual (primer deploy, o un servicio nuevo del compose), la ref de la configuración.
 
 Así:
-- un deploy sin cuerpo después de un deploy de CI con `sha-…` mantiene esa imagen;
+- un deploy sin cuerpo después de un deploy de CI con `sha-…` mantiene esa imagen, y uno de CI por digest (`@sha256:…`, sin tag) mantiene ese digest;
 - editar `spec.image` en el panel y desplegar sin override usa la imagen nueva;
 - un rollback no se deshace con el próximo deploy sin cuerpo.
 
-Si una ref ya trae digest (`…@sha256:…`), el paso 2 solo verifica que exista y que haya acceso, y lo conserva.
+Si una ref ya trae digest (`…@sha256:…`), la resolución (§7 paso 2 del diseño) solo verifica que exista y que haya acceso, y lo conserva.
 
 ### 2.3 `GET {app}/deploys` → 200 · token
 
