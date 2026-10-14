@@ -136,7 +136,11 @@ type Service struct {
 	// RunningTasks y DesiredTasks los calcula Swarm (ServiceStatus).
 	RunningTasks uint64
 	DesiredTasks uint64
-	// HasHealthcheck dice si sus contenedores tienen un healthcheck activo.
+	// HasHealthcheck dice si el spec del servicio define un healthcheck (y no
+	// es NONE). Solo mira el spec: un HEALTHCHECK de la imagen que el spec no
+	// pisa da false, aunque los contenedores lo corran. Para la convergencia
+	// no hace falta: con cualquier healthcheck, Swarm deja la tarea en starting
+	// hasta que está healthy, así que RunningTasks ya cuenta solo las sanas.
 	HasHealthcheck bool
 	// MemoryLimitBytes y NanoCPUs son los límites de cada tarea
 	// (deploy.resources.limits); 0 si no tiene.
