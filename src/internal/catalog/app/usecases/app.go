@@ -202,6 +202,11 @@ func NewDeleteApp(d Deps) *DeleteApp { return &DeleteApp{d} }
 // app con dominios devuelve ErrNotEmpty sin tocar nada: primero se borran sus
 // dominios, que limpian sus registros de Cloudflare (§9). Si Docker no
 // responde, la app queda y se puede reintentar.
+//
+// Un dominio creado entre el conteo y el borrado no pasa: la clave foránea
+// (domains.app_id RESTRICT) hace fallar el DELETE, que el repositorio devuelve
+// como ErrNotEmpty (409), no como un error interno. En esa carrera el stack ya
+// se borró y la app queda sin servicios, hasta el próximo deploy.
 func (uc *DeleteApp) Execute(ctx context.Context, project, stage, slug string) error {
 	if uc.d.Runtime != nil || uc.d.Domains != nil {
 		a, err := uc.d.Apps.Get(ctx, project, stage, slug)
