@@ -1,6 +1,6 @@
 # muelle — Contrato de las Fases 2, 3 y 5
 
-> Fecha: 2026-10-13 · Estado: aprobado para la etapa de contratos (rama `fase-23-base`).
+> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos) · Estado: aprobado para la etapa de contratos (rama `fase-23-base`).
 > Complementa el diseño ([`2026-10-09-muelle-design.md`](2026-10-09-muelle-design.md)); las referencias `§N` apuntan a sus secciones. Donde este documento y el diseño difieren, manda este documento, y el diseño ya se actualizó.
 
 Las Fases 2 (deploy), 3 (ingress) y 5 (distribución) se implementan **en paralelo**, cada una en su rama y sin hablar con las otras. Este documento fija lo que comparten:
@@ -96,7 +96,7 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 | catalog → deploy | `catalog/domain/service.AppRuntime`: `RemoveApp(ctx, p, s, a)` | `deploy.Module` (hecho: `docker stack rm`) | Al borrar una app (Fase 2: además detiene su worker). Opcional |
 | deploy → secrets | `deploy/domain/service.EnvResolver`: `ResolveEnv(ctx, appID) (vars, secretValues, err)` | `secrets.Module` (hecho) | Las variables del stage con las de la app encima, y los valores secretos para enmascarar el log |
 | deploy → ingress | `deploy/domain/service.Ingress`: `EnsureStageNetwork`, `SyncRoutes(ctx) error` | `ingress.Module` (red hecha; `SyncRoutes` es esqueleto) | §7 pasos 4 y 7 |
-| admin → ingress | `admin/domain/service.ProxyHook`: `CheckCloudflareToken`, `ProxySettingsChanged(ctx, old, next)` | `ingress.Module` (esqueleto: no verifica y no aplica) | Ver §4.3 |
+| admin → ingress | `admin/domain/service.ProxyHook`: `CheckCloudflareToken`, `ProxySettingsChanged(ctx, old, next)` | `ingress.Module` (esqueleto: no verifica y no aplica) | Ver §3.5 |
 
 **Lecturas por SQL** (un adaptador en `infra/out/service` del que lee, que puede leer la tabla de otro módulo):
 
@@ -135,7 +135,7 @@ Un `docker stack deploy` cortado por el apagado se resuelve en el próximo arran
   - borra las redes con etiquetas de stage (`muelle.project`/`muelle.stage`) cuyo stage ya no existe;
   - reenvía la configuración completa.
 - El job `"certificados"`, cada hora.
-- `ingress.Run` lleva los reintentos con backoff (1 s, 2 s… 60 s) de una configuración que Caddy no aceptó, y la verificación de un dominio 30 s después de crearlo.
+- `ingress.Run` lleva los reintentos con backoff (1 s, 2 s… 60 s) de una configuración que Caddy no aceptó, la verificación de un dominio 30 s después de crearlo y la recreación de muelle-caddy que agenda `ProxySettingsChanged` (§3.5).
 
 Un error de Docker al arrancar nunca detiene a muelle.
 
