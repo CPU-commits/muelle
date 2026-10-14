@@ -559,6 +559,37 @@ describe('contrato de la Fase 2', () => {
 		expect(urls[0]?.searchParams.get('follow')).toBe('1')
 	})
 
+	it('el SSE del log responde 422 offset (antes de abrir) con un offset que pasa el log', async () => {
+		const error = await client
+			.get(`/projects/auditfy/stages/staging/apps/api/deploys/143/log/stream`, {
+				query: { offset: 10_000_000 },
+			})
+			.catch((caught: unknown) => caught)
+		expect(error).toBeInstanceOf(ApiError)
+		expect((error as ApiError).status).toBe(422)
+		expect((error as ApiError).message).toMatch(/^offset: /)
+	})
+
+	it('con since, el mock no mira tail', async () => {
+		const controller = new AbortController()
+		const events = await collect(
+			deployUseCases.streamAppLogs(
+				{ app: APP, service: 'api', tail: 100, since: new Date(Date.now() - 5000) },
+				controller.signal,
+			),
+			1,
+		)
+		controller.abort()
+		expect(events[0]).toEqual({ kind: 'open' })
+		// Un tail fuera de rango junto a since no es 422: con since, tail no se mira.
+		const result = await client
+			.get(`/projects/auditfy/stages/staging/apps/api/logs`, {
+				query: { service: 'api', since: new Date().toISOString(), tail: 99_999, follow: 0 },
+			})
+			.catch((caught: unknown) => caught)
+		expect(result).not.toMatchObject({ status: 422 })
+	})
+
 	it('el mock pide el servicio, como el backend (422 service)', async () => {
 		const error = await client
 			.get(`/projects/auditfy/stages/staging/apps/api/logs`, { query: { tail: 100 } })

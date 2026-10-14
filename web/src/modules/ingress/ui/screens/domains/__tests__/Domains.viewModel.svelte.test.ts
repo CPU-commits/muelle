@@ -338,4 +338,55 @@ describe('DomainsViewModel', () => {
 		// Sin el punto final: el texto del aviso sigue después.
 		expect(vm.proxyError).toBe('Caddy rechazó la ruta')
 	})
+
+	it('agregar uno que vuelve en error (201) no dice "agregado": avisa el error', async () => {
+		const broken = makeDomain('cf-error.tudominio.cl', {
+			status: 'error',
+			errorKind: 'cloudflare',
+			recordId: null,
+			lastError: 'Cloudflare respondió 403',
+			certificate: null,
+		})
+		mocks.addDomain.mockResolvedValue(broken)
+		const vm = await mounted()
+		vm.setHostname('cf-error.tudominio.cl')
+
+		await vm.add()
+
+		expect(toastTitles()).not.toContain(m.ingress_toast_added({ hostname: broken.hostname }))
+		expect(toastTitles()).toContain(m.ingress_toast_added_error({ hostname: broken.hostname }))
+		expect(vm.hostname).toBe('')
+	})
+
+	it('agregar uno cuyo registro ya existe pide adoptarlo', async () => {
+		const existing = recordExists('existe.tudominio.cl')
+		mocks.addDomain.mockResolvedValue(existing)
+		const vm = await mounted()
+		vm.setHostname('existe.tudominio.cl')
+
+		await vm.add()
+
+		expect(toastTitles()).not.toContain(m.ingress_toast_added({ hostname: existing.hostname }))
+		expect(toastTitles()).toContain(
+			m.ingress_toast_added_exists({ hostname: existing.hostname }),
+		)
+	})
+
+	it('adoptar que vuelve en error (200) no dice "adoptado"', async () => {
+		mocks.adoptRecord.mockResolvedValue({
+			...EXISTING,
+			errorKind: 'cloudflare',
+			lastError: 'Cloudflare respondió 500',
+		})
+		const vm = await mounted()
+		const adoptedBefore = toastTitles().filter((title) => title === m.ingress_toast_adopted())
+
+		await vm.adopt(EXISTING)
+
+		const adoptedAfter = toastTitles().filter((title) => title === m.ingress_toast_adopted())
+		expect(adoptedAfter).toHaveLength(adoptedBefore.length)
+		expect(toastTitles()).toContain(
+			m.ingress_toast_adopt_failed({ hostname: EXISTING.hostname }),
+		)
+	})
 })

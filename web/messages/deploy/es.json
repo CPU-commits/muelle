@@ -33,7 +33,6 @@
 	"deploy_live": "En vivo · cada 5 s",
 	"deploy_live_paused": "En pausa mientras la pestaña está oculta",
 	"deploy_replicas": "Réplicas",
-	"deploy_replicas_value": "{running} / {desired}",
 	"deploy_cpu": "CPU",
 	"deploy_cpu_unit": "%",
 	"deploy_memory": "Memoria",

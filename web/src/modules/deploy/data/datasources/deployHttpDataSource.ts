@@ -78,8 +78,9 @@ export const deployHttpDataSource = {
 		offset: LogOffset,
 		signal: AbortSignal,
 	): AsyncGenerator<StreamItem, void, undefined> {
-		// `offset` va en la query para empezar donde se quedó el polling; al reconectar,
-		// un EventSource manda además `Last-Event-ID` con el último `id` recibido.
+		// `offset` va en la query para empezar desde ahí. El panel no deja que el EventSource
+		// reconecte solo (un corte sigue por polling desde el último `id`): `Last-Event-ID` no
+		// llega a mandarse.
 		const url = apiUrl(`${appPath(app)}/deploys/${id}/log/stream`, offset ? { offset } : {})
 		return eventStream(url, [DEPLOY_LOG_EVENT, DEPLOY_STATUS_EVENT], signal)
 	},

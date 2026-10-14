@@ -574,9 +574,16 @@ export const deployHandlers: RequestHandler[] = [
 		const deploy = findDeploy(app, param(params, 'id'))
 		if (!deploy) return deployNotFound(param(params, 'id'))
 		const url = new URL(request.url)
+		// `Last-Event-ID` gana sobre `?offset`; los dos, como en el polling: un entero ≥ 0 que
+		// no pase el largo del log, o `422 offset` antes de abrir el stream.
 		const lastEventId = request.headers.get('last-event-id')
 		const from = Number(lastEventId ?? url.searchParams.get('offset') ?? '0')
-		return logStream(request, app, deploy, Number.isInteger(from) && from > 0 ? from : 0)
+		if (!Number.isInteger(from) || from < 0) {
+			return invalid('offset', 'tiene que ser un entero ≥ 0')
+		}
+		const length = encoder.encode(deployDb.view(app, deploy, Date.now()).log).length
+		if (from > length) return invalid('offset', 'pasa el largo del log')
+		return logStream(request, app, deploy, from)
 	}),
 
 	http.get(api(`${APP}/logs`), ({ params, request }) => {
@@ -590,18 +597,18 @@ export const deployHandlers: RequestHandler[] = [
 			return apiError(404, 'not_found', `no existe el servicio "${service}"`)
 		}
 		const follow = url.searchParams.get('follow') === '1'
+		// Al reconectar el panel manda `since` (la hora de la última línea) en vez de `tail`:
+		// con `since`, `tail` no se mira. Pendiente en el backend (Fase 2): el mock ya lo cumple.
+		const sinceParam = url.searchParams.get('since')
+		if (sinceParam !== null) {
+			const since = Date.parse(sinceParam)
+			if (Number.isNaN(since)) return invalid('since', 'tiene que ser una fecha RFC 3339')
+			return appLogStream(request, app, service, { tail: MAX_LOG_TAIL, since }, follow)
+		}
 		const tail = Number(url.searchParams.get('tail') ?? '200')
 		if (!Number.isInteger(tail) || tail < 0 || tail > MAX_LOG_TAIL) {
 			return invalid('tail', `tiene que ser un entero entre 0 y ${MAX_LOG_TAIL}`)
 		}
-		// Al reconectar el panel manda `since` (la hora de la última línea) en vez de `tail`.
-		// Pendiente en el backend (Fase 2): el mock ya lo cumple.
-		const sinceParam = url.searchParams.get('since')
-		let since: number | null = null
-		if (sinceParam !== null) {
-			since = Date.parse(sinceParam)
-			if (Number.isNaN(since)) return invalid('since', 'tiene que ser una fecha RFC 3339')
-		}
-		return appLogStream(request, app, service, { tail, since }, follow)
+		return appLogStream(request, app, service, { tail, since: null }, follow)
 	}),
 ]

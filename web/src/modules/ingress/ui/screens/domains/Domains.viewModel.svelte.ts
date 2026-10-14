@@ -21,6 +21,7 @@ import {
 	type AppDomain,
 	type AppRef,
 	DomainNotFound,
+	domainState,
 	failingDomains,
 	formatTarget,
 	HostnameTaken,
@@ -221,10 +222,7 @@ export class DomainsViewModel {
 				target,
 				proxied: this.proxied,
 			})
-			toast.success(
-				m.ingress_toast_added({ hostname: domain.hostname }),
-				m.ingress_toast_added_body(),
-			)
+			this.#announceAdded(domain)
 			this.hostname = ''
 		} catch (error) {
 			if (error instanceof HostnameTaken) this.hostnameError = m.ingress_error_taken()
@@ -246,11 +244,22 @@ export class DomainsViewModel {
 
 	adopt = async (domain: AppDomain): Promise<void> => {
 		try {
-			await this.#adopt.mutateAsync({ app: this.ref, hostname: domain.hostname })
-			toast.success(
-				m.ingress_toast_adopted(),
-				m.ingress_toast_adopted_body({ hostname: domain.hostname }),
-			)
+			const adopted = await this.#adopt.mutateAsync({
+				app: this.ref,
+				hostname: domain.hostname,
+			})
+			// Un 200 puede traer el dominio en error (Cloudflare falló al adoptar).
+			if (domainState(adopted) === 'error') {
+				toast.info(
+					m.ingress_toast_adopt_failed({ hostname: adopted.hostname }),
+					this.#errorText(adopted),
+				)
+			} else {
+				toast.success(
+					m.ingress_toast_adopted(),
+					m.ingress_toast_adopted_body({ hostname: adopted.hostname }),
+				)
+			}
 		} catch (error) {
 			this.#toastError(error)
 		}
@@ -328,6 +337,37 @@ export class DomainsViewModel {
 			}
 			this.removeError = ingressErrorMessage(error)
 		}
+	}
+
+	/**
+	 * Un 201 no quiere decir que salió bien: el dominio puede volver en error (Cloudflare
+	 * falló) o con un registro que ya existía. El aviso dice lo que pasó de verdad.
+	 */
+	#announceAdded(domain: AppDomain): void {
+		const hostname = domain.hostname
+		switch (domainState(domain)) {
+			case 'error':
+				toast.info(m.ingress_toast_added_error({ hostname }), this.#errorText(domain))
+				return
+			case 'record_exists':
+				toast.info(
+					m.ingress_toast_added_exists({ hostname }),
+					m.ingress_toast_added_exists_body(),
+				)
+				return
+			case 'waiting_dns':
+				toast.success(
+					m.ingress_toast_added({ hostname }),
+					m.ingress_toast_added_manual_body(),
+				)
+				return
+			default:
+				toast.success(m.ingress_toast_added({ hostname }), m.ingress_toast_added_body())
+		}
+	}
+
+	#errorText(domain: AppDomain): string {
+		return domain.lastError ? sentence(domain.lastError) : m.ingress_error_fallback()
 	}
 
 	#toastError(error: unknown): void {

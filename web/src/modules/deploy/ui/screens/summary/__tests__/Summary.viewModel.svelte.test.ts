@@ -88,6 +88,17 @@ describe('SummaryViewModel', () => {
 		expect(vm.historyComplete).toBe(true)
 	})
 
+	it('sin un deploy exitoso en el historial, la imagen sale de lo que corre en Swarm', async () => {
+		mocks.listDeploys.mockResolvedValue([makeDeploy(150, { status: 'failed' })])
+		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+
+		await vi.waitFor(() => expect(vm.health).toBe('running'))
+		await vi.waitFor(() =>
+			expect(vm.imageOf('api')?.ref).toBe('ghcr.io/auditfy/api:sha-3f9c2e1'),
+		)
+		expect(vm.imageOf('api')?.digest).toMatch(/^sha256:/)
+	})
+
 	it('se refresca cada 5 s solo con la pestaña visible, y al volver pide enseguida', async () => {
 		setVisibility('visible')
 		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))

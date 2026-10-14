@@ -25,6 +25,10 @@
 	const NEAR_BOTTOM_PX = 24
 	/** Teclas que suben: quien lee quiere ver lo de antes. */
 	const UP_KEYS = new Set(['ArrowUp', 'PageUp', 'Home'])
+	/** Lo que tiene que bajar el dedo para contar como "subir" (menos es un toque). */
+	const TOUCH_SLOP_PX = 8
+
+	let touchStartY: number | null = null
 
 	// El `scrollTop` que dejó el último scroll automático. Con líneas llegando rápido, entre
 	// ese scroll y su evento crece el contenido: el evento ve "lejos del final" aunque nadie
@@ -59,10 +63,14 @@
 	}
 
 	// "Ir al final" baja en el acto: un evento de scroll viejo que llegue antes del próximo
-	// frame ya ve el final y no vuelve a apagar el seguimiento.
-	function jumpToEnd(): void {
+	// frame ya ve el final y no vuelve a apagar el seguimiento. El botón desaparece al
+	// seguir: si tenía el foco, pasa al log (y no se cae a <body>).
+	function jumpToEnd(event: MouseEvent): void {
+		const button = event.currentTarget
+		const hadFocus = button instanceof HTMLElement && button.contains(document.activeElement)
 		if (scrollerElement) toBottom(scrollerElement)
 		onFollowChange(true)
+		if (hadFocus) scrollerElement?.focus({ preventScroll: true })
 	}
 
 	function onScroll(event: Event & { currentTarget: HTMLDivElement }): void {
@@ -86,14 +94,37 @@
 		if (UP_KEYS.has(event.key) && follow) onFollowChange(false)
 	}
 
+	// En un teléfono: el dedo que baja sube el log. Un arrastre lento mientras llegan líneas
+	// no alcanza para alejarse del final antes de que el seguimiento vuelva a bajar.
+	function onTouchStart(event: TouchEvent): void {
+		touchStartY = event.touches[0]?.clientY ?? null
+	}
+
+	function onTouchMove(event: TouchEvent): void {
+		const y = event.touches[0]?.clientY
+		if (touchStartY === null || y === undefined) return
+		if (y - touchStartY > TOUCH_SLOP_PX && follow) onFollowChange(false)
+	}
+
+	// Agarrar la barra de scroll (el puntero sobre la caja misma, no sobre una línea).
+	function onPointerDown(event: PointerEvent): void {
+		if (event.target === event.currentTarget && follow) onFollowChange(false)
+	}
+
 	// Solo se escucha (el scroll con rueda o teclado es el nativo de la región): por eso
 	// va con addEventListener y no como handler de un elemento no interactivo.
 	const watchInput: Attachment<HTMLDivElement> = (element) => {
 		element.addEventListener('wheel', onWheel, { passive: true })
 		element.addEventListener('keydown', onKeydown)
+		element.addEventListener('touchstart', onTouchStart, { passive: true })
+		element.addEventListener('touchmove', onTouchMove, { passive: true })
+		element.addEventListener('pointerdown', onPointerDown)
 		return () => {
 			element.removeEventListener('wheel', onWheel)
 			element.removeEventListener('keydown', onKeydown)
+			element.removeEventListener('touchstart', onTouchStart)
+			element.removeEventListener('touchmove', onTouchMove)
+			element.removeEventListener('pointerdown', onPointerDown)
 		}
 	}
 </script>

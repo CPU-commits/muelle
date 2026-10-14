@@ -16,6 +16,7 @@
 		Switch,
 	} from '@/shared/ui'
 	import { DomainCard } from '../../components/domainCard'
+	import { ingressErrorMessage } from '../../components/labels/domainLabels'
 	import { type DomainsProps, DomainsViewModel } from './Domains.viewModel.svelte.ts'
 	import {
 		editForm,
@@ -49,7 +50,7 @@
 	{:else if vm.loadError}
 		<ErrorState
 			title={m.ingress_error_title()}
-			body={m.common_unavailable()}
+			body={ingressErrorMessage(vm.loadError)}
 			retryLabel={m.common_retry()}
 			onRetry={vm.retryLoad}
 		/>

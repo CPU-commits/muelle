@@ -21,6 +21,7 @@ import {
 	type ServiceImage,
 	type ServiceStatus,
 	type ServiceTask,
+	splitImageRef,
 	stackName,
 	stageNetwork,
 	swarmServiceName,
@@ -209,7 +210,11 @@ export class SummaryViewModel {
 
 	imageOf = (service: string): ServiceImage | null => {
 		const current = this.current
-		return current ? imageOf(current, service) : null
+		const deployed = current ? imageOf(current, service) : null
+		if (deployed) return deployed
+		// Sin un deploy exitoso en el historial: lo que corre según Swarm.
+		const image = this.status.data?.services.find((item) => item.name === service)?.image
+		return image ? { service, ...splitImageRef(image) } : null
 	}
 
 	swarmName = (service: string): string => swarmServiceName(this.ref, service)

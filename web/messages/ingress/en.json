@@ -93,5 +93,10 @@
 	"ingress_proxy_recreating_title": "The proxy is being recreated.",
 	"ingress_proxy_recreating_body": "The muelle-caddy image or ports changed: it is back in a few seconds.",
 	"ingress_proxy_disabled_title": "The muelle proxy is off.",
-	"ingress_proxy_disabled_body": "The panel domain or the Caddy image is missing: domains get no traffic."
+	"ingress_proxy_disabled_body": "The panel domain or the Caddy image is missing: domains get no traffic.",
+	"ingress_toast_added_error": "{hostname} was added, but with an error",
+	"ingress_toast_added_exists": "{hostname} was added: the record already existed",
+	"ingress_toast_added_exists_body": "There is a record with that name in Cloudflare that muelle did not create. Adopt it so muelle manages it.",
+	"ingress_toast_added_manual_body": "Create the DNS record shown and press Verify.",
+	"ingress_toast_adopt_failed": "Could not adopt the record for {hostname}"
 }

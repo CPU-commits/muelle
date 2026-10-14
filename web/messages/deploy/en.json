@@ -33,7 +33,6 @@
 	"deploy_live": "Live · every 5 s",
 	"deploy_live_paused": "Paused while the tab is hidden",
 	"deploy_replicas": "Replicas",
-	"deploy_replicas_value": "{running} / {desired}",
 	"deploy_cpu": "CPU",
 	"deploy_cpu_unit": "%",
 	"deploy_memory": "Memory",

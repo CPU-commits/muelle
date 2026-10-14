@@ -81,6 +81,60 @@ describe('LogViewport', () => {
 		await expect.poll(() => api.follow).toBe(true)
 		await expect.poll(() => distanceToBottom(scroller)).toBeLessThanOrEqual(2)
 	})
+
+	it('"Ir al final" con el foco en el botón lo pasa al log (no se cae a <body>)', async () => {
+		const api = await mounted(300)
+		await nextFrame()
+		const scroller = api.scroller
+		if (!scroller) throw new Error('sin scroller')
+		scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }))
+		scroller.scrollTop = 0
+		await expect.poll(() => api.follow).toBe(false)
+
+		const jump = document.querySelector<HTMLButtonElement>('button')
+		jump?.focus()
+		jump?.click()
+
+		await expect.poll(() => api.follow).toBe(true)
+		await expect.poll(() => document.activeElement).toBe(scroller)
+	})
+
+	it('arrastrar el dedo hacia abajo (subir en el log) deja de seguir', async () => {
+		const api = await mounted(300)
+		await nextFrame()
+		const scroller = api.scroller
+		if (!scroller) throw new Error('sin scroller')
+		const touch = (clientY: number) =>
+			new Touch({ identifier: 1, target: scroller, clientX: 100, clientY })
+
+		scroller.dispatchEvent(
+			new TouchEvent('touchstart', { touches: [touch(200)], bubbles: true }),
+		)
+		// Unos píxeles no cuentan (un toque); bajar el dedo de verdad sí.
+		scroller.dispatchEvent(
+			new TouchEvent('touchmove', { touches: [touch(202)], bubbles: true }),
+		)
+		expect(api.follow).toBe(true)
+		scroller.dispatchEvent(
+			new TouchEvent('touchmove', { touches: [touch(240)], bubbles: true }),
+		)
+		expect(api.follow).toBe(false)
+	})
+
+	it('agarrar la barra de scroll (pointerdown en la caja) deja de seguir', async () => {
+		const api = await mounted(300)
+		await nextFrame()
+		const scroller = api.scroller
+		if (!scroller) throw new Error('sin scroller')
+
+		// En una línea (elegir texto) no cuenta; en la caja misma (la barra), sí.
+		scroller
+			.querySelector('li')
+			?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+		expect(api.follow).toBe(true)
+		scroller.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+		expect(api.follow).toBe(false)
+	})
 })
 
 // Con las líneas de verdad (content-visibility, el corte de las largas): las que se pintan
