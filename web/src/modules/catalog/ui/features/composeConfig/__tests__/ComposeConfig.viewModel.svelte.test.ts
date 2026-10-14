@@ -1,8 +1,9 @@
 import type { BeforeNavigate } from '@sveltejs/kit'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup } from 'vitest-browser-svelte'
 import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { toast } from '@/shared/ui/stores'
+import { toast, toasts } from '@/shared/ui/stores'
 import { ValidationError } from '@/shared/domain'
 import { catalogKeys } from '../../../../data'
 import { appRefFrom, type ComposeApp, KindMismatch } from '../../../../domain'
@@ -13,7 +14,25 @@ import { ComposeConfigViewModel } from '../ComposeConfig.viewModel.svelte.ts'
 const mocks = vi.hoisted(() => ({
 	updateApp: vi.fn(),
 	guards: [] as ((navigation: BeforeNavigate) => void)[],
+	chunksFail: false,
 }))
+
+// Los chunks del editor (CodeMirror y la gramática de YAML), o uno que no baja.
+vi.mock('../../../components/yamlEditor', async (importOriginal) => {
+	const original = await importOriginal<typeof import('../../../components/yamlEditor')>()
+	const offline = () => Promise.reject(new Error('Failed to fetch dynamically imported module'))
+	return {
+		...original,
+		loadYamlEditor: () => {
+			if (!mocks.chunksFail) return original.loadYamlEditor()
+			// En la pantalla lo atiende el {:catch} del editor; acá no hay pantalla.
+			const failed = offline()
+			failed.catch(() => {})
+			return failed
+		},
+		loadYamlSyntax: () => (mocks.chunksFail ? offline() : original.loadYamlSyntax()),
+	}
+})
 
 vi.mock('@/modules/catalog/container', () => ({
 	catalogUseCases: {
@@ -63,6 +82,7 @@ describe('ComposeConfigViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mocks.guards.length = 0
+		mocks.chunksFail = false
 		mocks.updateApp.mockImplementation(async ({ changes }) => ({ ...app, ...changes }))
 	})
 
@@ -152,7 +172,7 @@ describe('ComposeConfigViewModel', () => {
 		expect(vm.check).toEqual({ kind: 'rejected', message: m.catalog_error_compose_too_large() })
 	})
 
-	it('kind_mismatch vuelve a cargar la app en vez de pedir que se recargue la página', async () => {
+	it('kind_mismatch vuelve a cargar la app y lo explica en un toast, que sobrevive al editor', async () => {
 		mocks.updateApp.mockRejectedValue(new KindMismatch())
 		const client = createQueryClient({ retry: false })
 		const invalidate = vi.spyOn(client, 'invalidateQueries')
@@ -162,7 +182,45 @@ describe('ComposeConfigViewModel', () => {
 		await vm.save()
 
 		expect(invalidate).toHaveBeenCalledWith({ queryKey: catalogKeys.app(ref) })
-		expect(vm.check).toEqual({ kind: 'rejected', message: m.catalog_error_kind_mismatch() })
+		// La recarga cambia la pantalla de editor: nada que leer adentro del que se va.
+		expect(vm.check).toEqual({ kind: 'idle' })
+		cleanup()
+		expect(toasts.items).toContainEqual(
+			expect.objectContaining({ tone: 'info', title: m.catalog_error_kind_mismatch() }),
+		)
+	})
+
+	it('si el chunk del editor no baja, el textarea guarda igual, sin revisar la sintaxis', async () => {
+		mocks.chunksFail = true
+		const info = vi.spyOn(toast, 'info')
+		const success = vi.spyOn(toast, 'success')
+		const vm = await mount()
+		await expect(vm.editor).rejects.toThrow()
+
+		// Sintaxis rota y todo: el backend solo pide que no esté vacío.
+		const broken = 'services:\n  web:\n    image: [nginx\n'
+		vm.setDraft(broken)
+		await vm.save()
+		expect(mocks.updateApp).toHaveBeenCalledWith({ ref, changes: { composeYaml: broken } })
+		expect(vm.check).toEqual({ kind: 'idle' })
+
+		// Validar no dice "válido": avisa que no pudo revisar la sintaxis.
+		await vm.validate()
+		expect(success).not.toHaveBeenCalledWith(
+			m.catalog_compose_valid(),
+			m.catalog_compose_valid_body(),
+		)
+		expect(info).toHaveBeenCalledWith(
+			m.catalog_compose_syntax_unavailable(),
+			m.catalog_compose_syntax_unavailable_body(),
+		)
+
+		// Un servicio repetido se sigue frenando: no depende del chunk.
+		mocks.updateApp.mockClear()
+		vm.setDraft('services:\n  web:\n    image: a\n  web:\n    image: b\n')
+		await vm.save()
+		expect(mocks.updateApp).not.toHaveBeenCalled()
+		expect(vm.check.kind).toBe('problems')
 	})
 
 	it('Descartar vuelve al YAML guardado; ir a una línea pide el foco', async () => {

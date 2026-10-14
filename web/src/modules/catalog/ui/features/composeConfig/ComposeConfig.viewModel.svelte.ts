@@ -43,7 +43,9 @@ export class ComposeConfigViewModel {
 
 	/** El componente del editor: CodeMirror se baja recién acá, no con el resto del panel. */
 	readonly editor = loadYamlEditor()
-	readonly #syntax = loadYamlSyntax()
+	// Si el chunk no baja (sin red, un deploy que lo borró), el YAML se edita en el textarea
+	// y se guarda igual, sin la revisión de sintaxis: el backend solo pide que no esté vacío.
+	readonly #syntax = loadYamlSyntax().catch(() => null)
 
 	readonly #app: () => ComposeApp
 	readonly #client = useQueryClient()
@@ -92,7 +94,14 @@ export class ComposeConfigViewModel {
 		const problems = await this.#problems(this.draft)
 		this.check =
 			problems.length > 0 ? { kind: 'problems', problems, onSave: false } : { kind: 'idle' }
-		if (problems.length === 0) {
+		if (problems.length > 0) return
+		// Sin el chunk no se revisó la sintaxis: decir "válido" sería mentir.
+		if ((await this.#syntax) === null) {
+			toast.info(
+				m.catalog_compose_syntax_unavailable(),
+				m.catalog_compose_syntax_unavailable_body(),
+			)
+		} else {
 			toast.success(m.catalog_compose_valid(), m.catalog_compose_valid_body())
 		}
 	}
@@ -126,9 +135,12 @@ export class ComposeConfigViewModel {
 			toast.success(m.catalog_compose_saved(), m.catalog_config_saved_body())
 		} catch (error) {
 			// La app es de formulario ahora (otra pestaña): se vuelve a cargar y la pantalla
-			// cambia sola de editor.
+			// cambia sola de editor. La explicación va en un toast: este editor se desmonta con
+			// la recarga y un error en él no se llegaría a leer.
 			if (error instanceof KindMismatch) {
+				toast.info(m.catalog_error_kind_mismatch())
 				void this.#client.invalidateQueries({ queryKey: catalogKeys.app(this.ref) })
+				return
 			}
 			this.check = { kind: 'rejected', message: catalogErrorMessage(error) }
 		}
@@ -144,11 +156,10 @@ export class ComposeConfigViewModel {
 	}
 
 	async #problems(yaml: string): Promise<ComposeLineProblem[]> {
-		const { yamlSyntaxErrorLines } = await this.#syntax
-		const syntax: ComposeLineProblem[] = yamlSyntaxErrorLines(yaml).map((line) => ({
-			line,
-			kind: 'syntax',
-		}))
+		const checker = await this.#syntax
+		const syntax: ComposeLineProblem[] = (checker?.yamlSyntaxErrorLines(yaml) ?? []).map(
+			(line) => ({ line, kind: 'syntax' }),
+		)
 		const duplicates: ComposeLineProblem[] = summarizeCompose(yaml)
 			.filter((service) => service.duplicate)
 			.map((service) => ({

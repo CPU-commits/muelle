@@ -84,6 +84,27 @@ describe('appSpec', () => {
 		expect(isValidImage('a'.repeat(248))).toBe(false)
 	})
 
+	it('docker.io e index.docker.io escritos también cuentan `library/` (splitDockerDomain)', () => {
+		// Los bordes salen de correr ParseNormalizedNamed (distribution/reference v0.6.0).
+		const a = (count: number) => 'a'.repeat(count)
+		const cases: [string, boolean][] = [
+			[`docker.io/${a(247)}`, true],
+			[`docker.io/${a(248)}`, false],
+			[`docker.io/${a(255)}`, false],
+			[`docker.io/${a(247)}:v1`, true],
+			[`docker.io/${a(248)}:v1`, false],
+			[`index.docker.io/${a(247)}`, true],
+			[`index.docker.io/${a(248)}`, false],
+			// Con una "/" en el path no es oficial: no se agrega `library/`.
+			[`docker.io/team/${a(250)}`, true],
+			[`docker.io/team/${a(251)}`, false],
+			[`index.docker.io/team/${a(251)}`, false],
+		]
+		for (const [image, valid] of cases) {
+			expect(isValidImage(image), `${image.slice(0, 24)}… (${image.length})`).toBe(valid)
+		}
+	})
+
 	it('nombra los campos como el backend (TestParseRejects de appspec_test.go)', () => {
 		const withHealth = (healthcheck: Healthcheck) => spec({ healthcheck })
 		const cases: [string, AppSpec, string][] = [

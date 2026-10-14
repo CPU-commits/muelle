@@ -248,5 +248,8 @@
 
 	"catalog_config_other_card": "another part of the configuration",
 
-	"catalog_crumb_stage_variables": "{stage} variables"
+	"catalog_crumb_stage_variables": "{stage} variables",
+
+	"catalog_compose_syntax_unavailable": "The syntax couldn't be checked",
+	"catalog_compose_syntax_unavailable_body": "The editor didn't load. On save, muelle only checks that the compose isn't empty."
 }

@@ -157,10 +157,16 @@ export function serverFieldMessage(field: string, backend: string): string {
 		case 'healthcheck':
 		case 'healthcheck.type':
 			return m.catalog_error_healthcheck_shape()
+		// El backend usa el mismo campo para el formato y para "no va con este tipo"
+		// (appspec.go): el texto del formato solo cuando el motivo es el formato.
 		case 'healthcheck.path':
-			return specMessages.healthcheckPath()
+			return /empezar con/.test(backend)
+				? specMessages.healthcheckPath()
+				: m.catalog_error_healthcheck_shape()
 		case 'healthcheck.command':
-			return specMessages.healthcheckCommand()
+			return /obligatorio/.test(backend)
+				? specMessages.healthcheckCommand()
+				: m.catalog_error_healthcheck_shape()
 		case 'volumes':
 			return specMessages.volumesTooMany()
 		case 'resources':

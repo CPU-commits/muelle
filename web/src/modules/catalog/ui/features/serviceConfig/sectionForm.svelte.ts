@@ -123,9 +123,12 @@ export class SectionSaver<V> {
 				return null
 			}
 			// La app es compose ahora (otra pestaña): se vuelve a cargar y la pantalla cambia
-			// sola al editor de YAML.
+			// sola al editor de YAML. La explicación va en un toast: esta tarjeta se desmonta
+			// con la recarga y un error en ella no se llegaría a leer.
 			if (error instanceof KindMismatch) {
+				toast.info(m.catalog_error_kind_mismatch())
 				void this.#client.invalidateQueries({ queryKey: catalogKeys.app(appRefOf(app)) })
+				return null
 			}
 			this.formError = catalogErrorMessage(error)
 			return null
