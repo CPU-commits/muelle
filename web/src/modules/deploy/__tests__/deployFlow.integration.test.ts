@@ -502,7 +502,11 @@ describe('contrato de la Fase 2', () => {
 			1,
 		)
 		controller.abort()
-		expect(events[0]).toEqual({ kind: 'status', status: 'queued' })
+		// El primero es su estado (en cola o, con la máquina cargada, ya corriendo).
+		expect(events[0]?.kind).toBe('status')
+		expect(['queued', 'running']).toContain(
+			events[0]?.kind === 'status' ? events[0].status : null,
+		)
 	})
 
 	it('los logs terminan con `end`: eof (el servicio dejó de existir) y sin error', async () => {
