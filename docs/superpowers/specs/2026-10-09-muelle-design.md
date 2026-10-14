@@ -74,7 +74,7 @@ Ambos viven en el nodo manager.
 - Redes: `muelle_panel` y todas las redes de stage.
 - Arranca con `caddy run --resume` y `CADDY_ADMIN=unix//run/caddy-admin/admin.sock`, que pone ingress al crear el contenedor (`naming.CaddyCommand` y `naming.CaddyEnv`), sin depender del CMD de la imagen. Sin autosave, Caddy arranca vacío con la admin API en el socket; con autosave, retoma la última configuración (contrato §3.4).
 - **Por qué no es servicio Swarm:** un contenedor standalone se puede conectar a una red overlay attachable **en caliente** (`docker network connect`). A un servicio Swarm, agregarle una red lo recrea, y eso tumbaría todos los sitios cada vez que se crea un stage.
-- **Ciclo de vida:** al arrancar, y cada vez que cambian la imagen o los puertos de Caddy, muelle se asegura de que el contenedor exista con la imagen, los puertos, los volúmenes y las redes correctas. Recrearlo (al actualizar Caddy o cambiar puertos) provoca una caída de pocos segundos. Cuando el cambio viene de Ajustes, se recrea 2 s después de responder el `PATCH`, que también pasa por Caddy (contrato §3.5).
+- **Ciclo de vida:** al arrancar, y cada vez que cambian la imagen o los puertos de Caddy, muelle se asegura de que el contenedor exista con la imagen, los puertos, los volúmenes y las redes correctas. Recrearlo (al actualizar Caddy o cambiar puertos) provoca una caída de pocos segundos. Cuando el cambio viene de Ajustes, se recrea 2 s después de responder el `PATCH`, que también pasa por Caddy (contrato §3.5). En desarrollo (sin dominio del panel o sin imagen de Caddy) muelle no crea el contenedor ni le manda configuración (contrato §3.4).
 
 **muelle** (servicio Swarm del stack `muelle`, restricción `node.role == manager`)
 - Imagen mínima con el binario de muelle (estático, sin CGO) y el CLI de `docker` (para `docker stack deploy`).
@@ -360,7 +360,7 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
   - Nota: el token de Cloudflare queda en el `autosave.json` del volumen `muelle_caddy_config`.
 - **IP real del cliente:** `servers.trusted_proxies` con los rangos de IP de Cloudflare (lista estática dentro de muelle, que se actualiza con cada versión) y `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`. En la ruta del panel, Caddy reenvía a muelle la IP real en `X-Real-IP`: en el JSON, `"headers": {"request": {"set": {"X-Real-IP": ["{http.vars.client_ip}"]}}}` en el `reverse_proxy`. El atajo `{client_ip}` es solo del Caddyfile y en JSON no se reemplaza (contrato §3.4). muelle confía en ese header porque Caddy es el único otro miembro de `muelle_panel`, la única red de muelle: lo acepta solo si la conexión viene de loopback o de una dirección privada (RFC 1918, ULA), y si no usa la IP de la conexión. Por eso el puerto de muelle (`MUELLE_LISTEN`, `:8080`) nunca se publica.
 - Las escrituras a Caddy pasan por un mutex global. Si fallan, el panel muestra "proxy desincronizado" (`GET /proxy`) y se reintenta con backoff (1 s, 2 s, 4 s… hasta 60 s). Además, cada 5 minutos un proceso reenvía todo.
-- **Verificación de certificados:** cada hora, y 30 s después de crear un dominio, muelle se conecta por TLS a `muelle-caddy:443` con SNI = hostname a través de `muelle_panel`. Lee el emisor y el vencimiento del certificado servido y actualiza `cert_issuer`/`cert_expires_at`. Si el certificado es inválido o vence en menos de 14 días, el dominio pasa a `error`.
+- **Verificación de certificados:** 30 s después de crear, adoptar o reintentar un dominio, cada minuto mientras sigue `pending` y cada hora para todos, muelle se conecta por TLS a `muelle-caddy:443` con SNI = hostname a través de `muelle_panel`. Lee el emisor y el vencimiento del certificado servido y, si es válido, actualiza `cert_issuer`/`cert_expires_at`. Si el certificado es inválido o vence en menos de 14 días, el dominio pasa a `error` (uno `pending`, recién 10 min después de su último cambio); uno en `error` por el certificado vuelve a `active` cuando ya es válido. Si muelle no llega a Caddy, o el proxy no está sincronizado, no cambia nada (contrato §3.1).
 
 ## 9. DNS (Cloudflare)
 
@@ -369,9 +369,9 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
   2. Se crea un registro `A` (y `AAAA` si hay `public_ipv6`) apuntando a la IP pública, con el `proxied` elegido. Se guarda `cf_record_id`.
   3. Se usa `tls_mode: cloudflare`.
 - **Si el hostname no pertenece a ninguna zona:** `tls_mode: http`, `cf_record_id` nulo, y el panel indica que el registro DNS se crea a mano.
-- **Si el registro ya existe y no lo creó muelle:** no se sobrescribe. El dominio queda en `error` ("el registro ya existe") con la acción **Adoptar**, que actualiza el contenido y guarda el `cf_record_id`.
+- **Si el registro ya existe y no lo creó muelle** (un `A`, `AAAA` o `CNAME` de ese nombre): no se sobrescribe. El dominio queda en `error` ("el registro ya existe") con la acción **Adoptar**, que actualiza el contenido y guarda el `cf_record_id`.
 - **Cambiar `proxied` o la IP pública:** actualiza los registros que maneja muelle.
-- **Al borrar un dominio:** solo se borra el registro en Cloudflare si `cf_record_id` no es nulo.
+- **Al borrar un dominio:** solo se borra el registro en Cloudflare si `cf_record_id` no es nulo. Si Cloudflare no responde o rechaza el borrado, no se borra nada (`502`), así no quedan registros huérfanos.
 - **Si Cloudflare responde con error:** el dominio queda en `error` con el mensaje y un botón para reintentar. **Un error de DNS nunca bloquea un deploy.**
 
 ## 10. API (`/api/v1`)
