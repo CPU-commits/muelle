@@ -473,6 +473,9 @@ Se valida en su forma canónica, sin normalizar: minúsculas, etiquetas `[a-z0-9
   - el paso 2 pasa la credencial del host de cada imagen a `DistributionDigest` (exacta por host; sin credencial es anónima);
   - el paso 5 pasa a `DeployStack` solo las credenciales de los hosts que usa el compose.
 - Cambiar o borrar un registry no redespliega nada.
+- **Limitación aceptada (v1): las credenciales son de todo muelle, no de un proyecto.** Un token con alcance al proyecto A puede mandar `{"image": "ghcr.io/<otra-org>/<privada>"}`: muelle la resuelve y la baja con la credencial de `ghcr.io`, y la corre en la app de A. Así, ese token llega a cualquier imagen que vea la credencial, también a las de otro proyecto.
+  - Se acepta porque solo una sesión maneja las credenciales, y una sesión puede hacer todo (§10.1 del diseño). El token ya puede correr la imagen que quiera en sus apps; lo nuevo es que puede leer las imágenes privadas que ve la credencial.
+  - Para acotarlo, la credencial debería ver solo las imágenes que despliega muelle (un token de solo lectura de esa organización). El panel puede decirlo al guardar un registry.
 
 ### 2.11 Lo que escribe el deploy en el log
 

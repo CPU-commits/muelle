@@ -441,6 +441,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
   - El compose final no se persiste.
   - `details` de la auditoría nunca incluye valores.
 - **Limitación aceptada:** quien tenga acceso a Docker en el host puede ver las variables con `docker inspect`. Esa persona ya es root.
+- **Limitación aceptada:** las credenciales de los registries son de todo muelle, una por host. Un token con alcance a un proyecto puede desplegar en sus apps cualquier imagen que vea esa credencial, también una privada de otro proyecto (contrato §2.10).
 - **Clave maestra:** se imprime en la instalación y se puede volver a leer con `docker exec` en el contenedor de muelle (`/run/secrets/muelle_master_key`). Si se pierde junto con el secreto Swarm, los secretos no se pueden recuperar.
 - **Verificación de la clave:** en el primer arranque muelle guarda en `settings` un valor de control cifrado con la clave maestra. En cada arranque lo descifra, y si falla no arranca ("clave maestra incorrecta"). Así, recrear el secreto Swarm con otra clave no mezcla datos cifrados con dos claves.
 - **Ids no reutilizables:** las tablas cuyos ids forman parte de la AAD (`stages`, `apps`, `users`) usan `AUTOINCREMENT`, para que un valor cifrado sacado de un backup no descifre en una fila nueva con el mismo id.
