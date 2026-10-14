@@ -248,6 +248,21 @@ function withDigests(images: Record<string, string>): Record<string, string> {
 	)
 }
 
+/** Una línea del log se corta a 8 KiB con `…` (contrato §2.5). */
+const LOG_LINE_MAX_BYTES = 8 * 1024
+const lineEncoder = new TextEncoder()
+
+function joinLog(lines: readonly string[]): string {
+	return `${lines.map(capLine).join('\n')}\n`
+}
+
+function capLine(line: string): string {
+	if (lineEncoder.encode(line).length <= LOG_LINE_MAX_BYTES) return line
+	let cut = line
+	while (lineEncoder.encode(`${cut}…`).length > LOG_LINE_MAX_BYTES) cut = cut.slice(0, -64)
+	return `${cut}…`
+}
+
 export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView {
 	const lines = [queuedLine(deploy)]
 	if (deploy.supersededAt !== undefined && deploy.supersededAt <= now) {
@@ -256,7 +271,7 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 		)
 		return {
 			status: 'superseded',
-			log: `${lines.join('\n')}\n`,
+			log: joinLog(lines),
 			startedAt: null,
 			finishedAt: deploy.supersededAt,
 			error: null,
@@ -267,7 +282,7 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 	if (elapsed < 0) {
 		return {
 			status: 'queued',
-			log: `${lines.join('\n')}\n`,
+			log: joinLog(lines),
 			startedAt: null,
 			finishedAt: null,
 			error: null,
@@ -287,7 +302,7 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 	if (elapsed < duration) {
 		return {
 			status: 'running',
-			log: `${lines.join('\n')}\n`,
+			log: joinLog(lines),
 			startedAt: deploy.startAt,
 			finishedAt: null,
 			error: null,
@@ -296,7 +311,7 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 	}
 	return {
 		status: script.status,
-		log: `${lines.join('\n')}\n`,
+		log: joinLog(lines),
 		startedAt: deploy.startAt,
 		finishedAt: deploy.startAt + duration,
 		error: script.error,
