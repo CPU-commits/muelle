@@ -4,6 +4,7 @@ package settings
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"net/url"
 	"os"
@@ -31,7 +32,8 @@ type Settings struct {
 }
 
 // Init son las variables MUELLE_INIT_* que escribe install en el servicio de
-// muelle. Lo que no está queda en cero.
+// muelle. Lo que no está queda en cero. El token va en claro: String,
+// GoString y LogValue lo ocultan, también dentro de Settings.
 type Init struct {
 	PublicIP        string // MUELLE_INIT_PUBLIC_IP (IPv4)
 	PublicIPv6      string // MUELLE_INIT_PUBLIC_IPV6
@@ -40,6 +42,28 @@ type Init struct {
 	ProxyHTTPSPort  int    // MUELLE_INIT_PROXY_HTTPS_PORT (443 si no está)
 	CloudflareToken string // el contenido de MUELLE_INIT_CLOUDFLARE_TOKEN_FILE (un secreto Swarm)
 	CaddyImage      string // MUELLE_INIT_CADDY_IMAGE: fija la imagen de muelle-caddy
+}
+
+// String es Init con el token como "***" (si hay).
+func (i Init) String() string {
+	if i.CloudflareToken != "" {
+		i.CloudflareToken = "***"
+	}
+	type plain Init // sin métodos: no vuelve a llamar a String
+	return fmt.Sprintf("%+v", plain(i))
+}
+
+// GoString es String para %#v.
+func (i Init) GoString() string { return i.String() }
+
+// LogValue es String para slog: el JSONHandler serializaría el struct.
+func (i Init) LogValue() slog.Value { return slog.StringValue(i.String()) }
+
+// LogValue es Settings para slog, con el token de Init oculto (fmt usa
+// Init.String en el campo).
+func (s Settings) LogValue() slog.Value {
+	type plain Settings
+	return slog.StringValue(fmt.Sprintf("%+v", plain(s)))
 }
 
 // PanelDomain es el host de PanelOrigin si es un dominio (el que enruta

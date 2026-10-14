@@ -3,6 +3,8 @@ package dto
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -57,7 +59,8 @@ type PatchSettingsInput struct {
 
 // InitialSettings es la configuración inicial de install (MUELLE_INIT_*, Fase
 // 5). Se aplica solo en el primer arranque de la base: cada valor que no es
-// cero se guarda si la clave todavía no está.
+// cero se guarda si la clave todavía no está. El token va en claro: String,
+// GoString y LogValue lo ocultan, también dentro de StartupSettings.
 type InitialSettings struct {
 	PublicIP        string
 	PublicIPv6      string
@@ -68,11 +71,33 @@ type InitialSettings struct {
 	CaddyImage      string
 }
 
+// String es InitialSettings con el token como "***" (si hay).
+func (i InitialSettings) String() string {
+	if i.CloudflareToken != "" {
+		i.CloudflareToken = "***"
+	}
+	type plain InitialSettings // sin métodos: no vuelve a llamar a String
+	return fmt.Sprintf("%+v", plain(i))
+}
+
+// GoString es String para %#v.
+func (i InitialSettings) GoString() string { return i.String() }
+
+// LogValue es String para slog: el JSONHandler serializaría el struct.
+func (i InitialSettings) LogValue() slog.Value { return slog.StringValue(i.String()) }
+
 // StartupSettings es lo que el contenedor le pasa a admin al arrancar.
 type StartupSettings struct {
 	// PanelDomain es el host de MUELLE_PANEL_ORIGIN si es un dominio; si no, "".
 	PanelDomain string
 	Init        InitialSettings
+}
+
+// LogValue es StartupSettings para slog, con el token oculto (fmt usa
+// InitialSettings.String en el campo).
+func (s StartupSettings) LogValue() slog.Value {
+	type plain StartupSettings
+	return slog.StringValue(fmt.Sprintf("%+v", plain(s)))
 }
 
 // ListAuditInput: Limit nil = 100 y Before nil = desde el último evento.

@@ -1,6 +1,9 @@
 package settings
 
 import (
+	"bytes"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -244,5 +247,29 @@ func TestPanelDomain(t *testing.T) {
 		if got := (Settings{PanelOrigin: origin}).PanelDomain(); got != want {
 			t.Errorf("PanelDomain(%q) = %q, esperaba %q", origin, got, want)
 		}
+	}
+}
+
+// El token de Cloudflare de MUELLE_INIT_CLOUDFLARE_TOKEN_FILE nunca sale en
+// un %v ni en un log, ni solo ni dentro de Settings.
+func TestInitDoesNotPrintToken(t *testing.T) {
+	const token = "cf-token-1234567890abcdef"
+	s := Settings{PanelOrigin: "https://panel.tudominio.cl", Init: Init{PublicIP: "203.0.113.7", CloudflareToken: token}}
+	var out []string
+	for _, v := range []any{s.Init, &s.Init, s, &s} {
+		out = append(out, fmt.Sprintf("%v", v), fmt.Sprintf("%+v", v), fmt.Sprintf("%#v", v), fmt.Sprint(v))
+	}
+	var buf bytes.Buffer
+	for _, h := range []slog.Handler{slog.NewJSONHandler(&buf, nil), slog.NewTextHandler(&buf, nil)} {
+		slog.New(h).Info("arranque", "init", s.Init, "settings", s)
+	}
+	out = append(out, buf.String())
+	for _, o := range out {
+		if strings.Contains(o, token) {
+			t.Fatalf("filtra el token: %s", o)
+		}
+	}
+	if !strings.Contains(s.Init.String(), "203.0.113.7") || !strings.Contains(s.Init.String(), "***") {
+		t.Fatalf("String esconde solo el token: %s", s.Init.String())
 	}
 }
