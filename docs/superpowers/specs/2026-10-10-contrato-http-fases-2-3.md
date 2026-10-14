@@ -93,7 +93,7 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 | De → a | Puerto (dónde se declara) | Lo implementa | Para qué |
 |---|---|---|---|
 | catalog → ingress | `catalog/domain/service.StageNetworks`: `EnsureStageNetwork`, `RemoveStageNetwork` | `ingress.Module` (hecho) | Crear y borrar la red overlay del stage, y conectar o desconectar Caddy (§3.2). Opcional en `catalog.Deps`: con `nil`, catalog no toca Docker |
-| catalog → deploy | `catalog/domain/service.AppRuntime`: `RemoveApp(ctx, p, s, a)` | `deploy.Module` (hecho: `docker stack rm`) | Al borrar una app (Fase 2: además detiene su worker). Opcional |
+| catalog → deploy | `catalog/domain/service.AppRuntime`: `RemoveApp(ctx, p, s, a)` | `deploy.Module` (hecho: `docker stack rm`) | Al borrar una app. Fase 2: antes del `stack rm`, deja de aceptar deploys de la app por 2 min (`409 conflict`, lo que tarda catalog en borrar la fila), cancela el deploy en curso (`failed`: "la app se borró durante el deploy") y marca `failed` los `queued`. Si el `stack rm` falla, vuelve a aceptar deploys enseguida. Opcional |
 | deploy → secrets | `deploy/domain/service.EnvResolver`: `ResolveEnv(ctx, appID) (vars, secretValues, err)` | `secrets.Module` (hecho) | Las variables del stage con las de la app encima, y los valores secretos para enmascarar el log |
 | deploy → ingress | `deploy/domain/service.Ingress`: `EnsureStageNetwork`, `SyncRoutes(ctx) error` | `ingress.Module` (red hecha; `SyncRoutes` es esqueleto) | §7 pasos 4 y 7 |
 | admin → ingress | `admin/domain/service.ProxyHook`: `CheckCloudflareToken`, `ProxySettingsChanged(ctx, old, next)` | `ingress.Module` (esqueleto: no verifica y no aplica) | Ver §3.5 |
@@ -122,11 +122,15 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 
 **`deploy.Run(ctx)`** (Fase 2) hace, en orden, la reconciliación de §7:
 1. Guarda `manager_node_id` con `Docker.Info().NodeID` si falta. Con Docker caído, lo reintenta en el primer deploy.
-2. Cierra los deploys `running` según el estado real de sus servicios (la misma regla de convergencia del paso 6), con una línea en su log: "muelle se reinició durante el deploy".
-3. Retoma los `queued`.
-4. Queda con un worker por app hasta que `ctx` se cancela.
+2. Arranca un worker por cada app que tiene un deploy `running` o `queued`. Cada worker cierra primero el `running` que quedó del arranque anterior, con una línea en su log ("muelle se reinició durante el deploy"):
+   - si ningún servicio de la app lleva la etiqueta `muelle.deploy` de ese deploy, `docker stack deploy` nunca llegó a Swarm: `failed` ("muelle se reinició antes de aplicar el deploy; Swarm no cambió");
+   - si solo algunos la llevan, el CLI se cortó a mitad: `failed`;
+   - si todos la llevan, sigue esperando la convergencia como en el paso 6 (con el `deploy_timeout_s` de la app, contado desde ahí) y lo cierra igual que un deploy normal;
+   - con Docker caído, el deploy queda `running` y el worker reintenta cada 15 s. Los `queued` de esa app esperan detrás; las otras apps siguen.
+3. Después, cada worker retoma el `queued` de su app.
+4. Queda con un worker por app hasta que `ctx` se cancela. Un worker sin nada que hacer termina, y el próximo deploy de su app lo vuelve a crear.
 
-Un `docker stack deploy` cortado por el apagado se resuelve en el próximo arranque, por el paso 2.
+Un `docker stack deploy` cortado por el apagado se resuelve en el próximo arranque, por el paso 2: el apagado nunca cierra un deploy, lo deja `running`.
 
 **`ingress`** (Fase 3):
 - El job `"proxy"`, cada 5 min y al arrancar:
@@ -147,7 +151,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
 |---|---|---|
 | `src/internal/deploy`, `src/internal/ingress` y el paquete nuevo de install | Fase 2, Fase 3 y Fase 5 | Todo: es suyo |
 | `shared/domain/compose` (nuevo) | Fase 2 | La parte pura del compose (parsear, la lista de §6.3 del diseño, los nombres de los servicios) |
-| `catalog/domain/entity.ValidateCompose` y sus llamadas | Fase 2 | Cambiar la validación por la de `shared/domain/compose`. Nada más de catalog: los destinos de dominio no se verifican al guardar, solo en el render (§3.2 y §6.3 del diseño) |
+| `catalog/domain/entity.ValidateCompose` y sus llamadas | Fase 2 | Cambiar la validación por la de `shared/domain/compose`, con los nombres de servicio únicos por stage, y sumar `services` a la respuesta de una app (§2.12). Nada más de catalog: los destinos de dominio no se verifican al guardar, solo en el render (§3.2 y §6.3 del diseño) |
 | `shared/domain/entity` | Fase 3 | Agregar las constantes `panel_cf_*` (§3.6) |
 | `shared/domain/naming`, `shared/domain/validate` | Las tres | Agregar |
 | `shared/infra/out/docker` (`Engine` y `dockertest`) | Las tres | Agregar métodos, cada uno con su fake y sus tests |
@@ -190,7 +194,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
 | `id` | int > 0 | Autoincremental; nunca se reutiliza |
 | `status` | `queued` · `running` · `succeeded` · `failed` · `superseded` | Los finales son `succeeded`, `failed` y `superseded` |
 | `trigger` | `panel` · `api` · `rollback` | `panel` si lo pidió una sesión, `api` si un token, `rollback` por `POST …/rollback` |
-| `images` | objeto `servicio → ref` | **Mientras está `queued`:** los overrides del cuerpo (`{}` si no hubo). **Desde que se resolvieron (§7 paso 2):** todos los servicios, con `ref@sha256:…`. Si falló antes de resolver, quedan los overrides |
+| `images` | objeto `servicio → ref` | **Mientras está `queued`:** los overrides del cuerpo (`{}` si no hubo); en un rollback, las imágenes del deploy al que vuelve (§2.7). **Desde que se resolvieron (§7 paso 2):** todos los servicios, con `ref@sha256:…`. Si falló antes de resolver, quedan los overrides |
 | `actor_type` | `user` · `token` | |
 | `actor_id` | int o null | El id del usuario o del token |
 | `actor_name` | string | El username o el nombre del token **al crear el deploy**: sigue aunque se borren. Nunca es null |
@@ -225,6 +229,9 @@ Crea un deploy y lo encola (§7 paso 1). El cuerpo es opcional; vacío es lo mis
   - `image: …` o `images.<servicio>: …` si la ref no pasa `validate.ImageRef`;
   - `images.<servicio>: el servicio no existe en la app` (según la configuración actual).
 - `400 invalid_json`.
+- `409 conflict`: la app se está borrando (`DELETE` de la app en curso; dura a lo más 2 min, ver `RemoveApp` en §1.1).
+
+El orden: primero la app (`404`), después el cuerpo (`400`) y al final su validación (`422`).
 
 **Al encolar:** los deploys `queued` de la misma app pasan a `superseded`, con `superseded_by` = el nuevo y `finished_at`. Solo sobrevive el último. Un deploy `running` no se toca: el nuevo espera.
 
@@ -234,21 +241,26 @@ No se llama a Docker al encolar: con Docker caído igual se responde `202`, y el
 
 #### Qué imagen se despliega
 
+Cada deploy guarda dos cosas por servicio, además de `images` (la ref resuelta):
+- `deploys.requested_images`: la ref **pedida**, la que se resolvió. Tiene digest solo si alguien lo fijó a propósito: un override con digest, una ref de la configuración con digest, o un rollback (que pide las refs resueltas del deploy al que vuelve);
+- `deploys.config_images`: la ref de la configuración (`spec.image`, o el `image:` del compose ya interpolado) que leyó el deploy.
+
 Para cada servicio, en este orden:
 1. El override del cuerpo, si viene.
-2. Si no, la ref de ese servicio en el **deploy actual** (el `succeeded` más reciente). Ahí está resuelta (`ref@sha256:…`), y el digest se quita solo si la ref tiene tag:
-   - `ghcr.io/x/y:sha-3f9c2e1@sha256:…` vuelve a `ghcr.io/x/y:sha-3f9c2e1`, y el tag se resuelve de nuevo;
-   - `ghcr.io/x/y@sha256:…`, sin tag, queda fija en su digest. Sin él quedaría `ghcr.io/x/y`, que Docker lee como `:latest`: otra imagen, sin aviso.
+2. Si no, la ref **pedida** de ese servicio en el **deploy actual** (el `succeeded` más reciente), tal cual: un tag se vuelve a resolver y un digest queda fijo. Nunca se le quita un digest a una ref: así no se pierde uno fijado a propósito, y `ghcr.io/x/y@sha256:…` nunca pasa a `ghcr.io/x/y`, que Docker leería como `:latest`.
 
-   Una excepción: si la ref de la configuración (`spec.image` o el `image:` del compose) cambió desde ese deploy, se usa la de la configuración. Para saberlo, cada deploy guarda en `deploys.config_images` las refs de la configuración que leyó.
+   Una excepción: si la ref de la configuración cambió desde ese deploy (es distinta de su `config_images`), se usa la de la configuración.
 3. Si el servicio no estaba en el deploy actual (primer deploy, o un servicio nuevo del compose), la ref de la configuración.
 
 Así:
-- un deploy sin cuerpo después de un deploy de CI con `sha-…` mantiene esa imagen, y uno de CI por digest (`@sha256:…`, sin tag) mantiene ese digest;
+- un deploy sin cuerpo después de un deploy de CI con `sha-…` mantiene esa imagen (y vuelve a resolver el tag), y uno de CI por digest (`@sha256:…`) mantiene ese digest;
+- un digest fijado en la configuración (`spec.image: ghcr.io/x/y:1.2@sha256:…`) o en un override se mantiene en los deploys sin cuerpo que siguen;
 - editar `spec.image` en el panel y desplegar sin override usa la imagen nueva;
-- un rollback no se deshace con el próximo deploy sin cuerpo.
+- **un rollback no se deshace con el próximo deploy sin cuerpo:** el rollback pide las refs con digest, y el deploy sin cuerpo las repite. Para volver a seguir un tag que se mueve (`:staging`) después de un rollback, se despliega con override o se cambia la ref en la configuración.
 
 Si una ref ya trae digest (`…@sha256:…`), la resolución (§7 paso 2 del diseño) solo verifica que exista y que haya acceso, y lo conserva.
+
+**La ref resuelta** (`images`) es la pedida, con el tag explícito y el digest: `nginx` → `nginx:latest@sha256:…`, `ghcr.io/x/y:sha-1` → `ghcr.io/x/y:sha-1@sha256:…`. Una ref pedida con digest queda igual (`ghcr.io/x/y@sha256:…` no gana un `:latest`).
 
 ### 2.3 `GET {app}/deploys` → 200 · token
 
@@ -274,11 +286,11 @@ El polling de la API (la GitHub Action, §14) y el respaldo del panel cuando el 
 ```
 
 **El log:**
-- Es un texto con una línea por evento: `<RFC 3339 con ms> <texto>\n`.
+- Es un texto con una línea por evento: `<RFC 3339 con ms> <texto>\n`. La hora lleva siempre tres decimales (`14:32:07.120Z`), y el texto nunca trae `\r` (se quita): un `\r` cortaría el evento del SSE.
 - Ya viene enmascarado, con las reglas de abajo.
 - Solo crece: los offsets son bytes desde el principio y nunca se mueven.
-- Una línea larga se corta a 8 KiB con `…`.
-- **Tope de 256 KB:** al llegar, se agrega una vez `… (log truncado: se superaron los 256 KB)` y se descartan las líneas siguientes. Se reservan 4 KiB para las líneas de cierre (el resultado, el error), que siempre se escriben.
+- Una línea larga se corta a 8 KiB con `…` (la línea entera, sin el `\n`, mide a lo más 8192 bytes; el corte respeta UTF-8).
+- **Tope de 256 KB** (262 144 bytes): las líneas normales entran mientras el log no pase de 256 KB − 4 KiB. La primera que no entra agrega una vez `… (log truncado: se superaron los 256 KB)`, y las siguientes se descartan. Los 4 KiB reservados son para las líneas de cierre (el resultado, el error), que siempre se escriben. La marca de que el log se truncó queda en la base (`deploys.log_truncated`), así sigue valiendo después de un reinicio.
 - Cada línea se guarda en la base **antes** de transmitirse por SSE: lo que se vio por el stream ya está en `?offset`.
 
 **El enmascarado** (el mismo en el SSE del deploy, §2.6, y en los logs de las apps, §2.9):
@@ -286,6 +298,7 @@ El polling de la API (la GitHub Action, §14) y el respaldo del panel cuando el 
 - **Un valor de varias líneas** (una clave PEM) se enmascara entero y, además, línea por línea: el log se procesa por línea, así que el valor entero casi nunca aparece en una. Cada línea del valor, sin los espacios de los bordes, cuenta como otro valor a enmascarar.
 - **Un valor, o una línea de un valor, de menos de 8 bytes no se enmascara.** `1`, `true` o `3000` taparían texto que no tiene nada que ver, y la GitHub Action guarda todo como secreto por defecto (`env-secret`, §14 del diseño). El panel puede advertirlo al guardar un secreto así.
 - La línea se enmascara antes de cortarla (a 8 KiB acá, a 16 KiB en §2.9), así un corte no deja la mitad de un secreto a la vista.
+- **Las líneas que parte el cliente de Docker:** `shared/infra/out/docker` entrega una línea de más de 16 KiB en pedazos, y los que siguen al primero llegan sin hora ni tarea (`LogLine.Time` cero y `TaskID` vacío). Antes de enmascarar, cada pedazo así se une al anterior del mismo stream, hasta 64 KiB (el resto se descarta), y recién después se corta. Vale para los logs de las tareas que entran al log del deploy (§2.11) y para §2.9. Un secreto que cruza el corte de 16 KiB que hace el propio Docker en su `json-file` (dos líneas con hora) no se detecta: es una limitación aceptada.
 
 **La respuesta:**
 - `chunk` va desde `offset`, hasta 64 KiB y siempre en líneas completas. Puede ser `""`.
@@ -327,7 +340,12 @@ data: succeeded
 
 Sin cuerpo (o `{}`; otra cosa es `400 invalid_json`). Responde como §2.2. Crea un deploy con `trigger: "rollback"` y las imágenes, con digest, del `succeeded` inmediatamente anterior al actual (§5.2 regla 6). Usa la configuración **actual**.
 
-Si no hay deploy actual, o no hay un `succeeded` anterior: `409 no_previous_deploy`.
+Si no hay deploy actual, o no hay un `succeeded` anterior: `409 no_previous_deploy`. Si la app se está borrando, `409 conflict` (§2.2).
+
+**Las imágenes:**
+- El destino se elige al encolar: las refs resueltas (`images`) de ese `succeeded` pasan a ser los overrides del rollback, y se ven en su `images` mientras está `queued` (§2.1).
+- Al correr, un servicio del destino que ya no está en la configuración se omite, con una línea en el log. Un servicio de la configuración que no estaba en el destino sigue la regla de §2.2, como en un deploy sin cuerpo.
+- Como pide refs con digest, el próximo deploy sin cuerpo repite esas imágenes (§2.2).
 
 Dos rollbacks seguidos alternan entre las dos últimas versiones: es la regla del diseño, y el panel lo muestra como "Rollback a #N".
 
@@ -391,7 +409,7 @@ El estado real en Swarm de los servicios de la app (filtrados por `naming.AppLab
 | `state`, `desired_state` | Los de Swarm, tal cual |
 | `health` | `healthy`, `unhealthy` o `starting`, del contenedor en el nodo local (`InspectContainer`); null si no tiene healthcheck o no está en este nodo |
 | `node` | El hostname del nodo (`Node`, con caché) |
-| `since` | `Task.UpdatedAt` |
+| `since` | `Task.UpdatedAt`, truncada al milisegundo (Docker la da con nanosegundos; §0) |
 | `error` | `Task.Err`; null si está vacío |
 | `cpu_percent`, `memory_bytes` | Los de su contenedor (`ContainerStats`), si la tarea corre en el nodo local. `cpu_percent` es el % de un núcleo, como `docker stats`. Null si la tarea no está en el nodo local, no corre o no se pudo medir. Las muestras se toman en paralelo, con un plazo total de 2 s |
 
@@ -415,7 +433,9 @@ Los logs de un servicio, en vivo. No se guarda nada (§10).
 | `service` | El nombre corto. Obligatorio (`422 invalid` con `service: es obligatorio`). Tiene que ser un slug de servicio, de hasta 16 caracteres (§5.2 regla 1 del diseño); si no, `422 invalid` con `service: …`. Si no existe en Swarm para la app: `404 not_found` (ver abajo) |
 | `tail` | De 0 a 5000; 200 por defecto. Otro valor: `422 invalid` con `tail: …` |
 | `since` | Una fecha RFC 3339 (el panel manda milisegundos: `2026-10-10T14:31:40.118Z`). Reemplaza a `tail`: si vienen los dos, manda `since` y `tail` no se mira. Se mandan las líneas escritas desde `since`, **inclusive** (la hora de Docker, con nanosegundos, ≥ `since`), hasta las últimas 5000 (`LogOptions{Since: since, Tail: 5000}`). Si no es una fecha: `422 invalid` con `since: …` |
-| `follow` | `1` deja el stream abierto. Si no viene, o es `0`, manda las líneas de `tail` (o de `since`), un `end` y cierra |
+| `follow` | `1` deja el stream abierto. Si no viene, o es `0`, manda las líneas de `tail` (o de `since`), un `end` y cierra. Otro valor: `422 invalid` con `follow: …` |
+
+El orden de los errores: primero la app (`404`), después la query (`422`, en el orden de la tabla) y al final el servicio en Swarm (`404`, `503`).
 
 **Cómo se busca el servicio.** `InspectService` y `ServiceLogs` de Docker también aceptan un id o un prefijo de id, y este endpoint acepta tokens: el parámetro nunca llega tal cual a Docker.
 1. Se valida como slug (arriba): sin `_`, no alcanza el servicio de otra app.
@@ -437,10 +457,10 @@ data: eof
   - `time` es la hora de Docker, **truncada** al milisegundo (§0; nunca redondeada hacia arriba).
   - `task` es `<servicio>.<slot>`, o `<servicio>.<primeros 7 del id de la tarea>` en un servicio global.
   - `stream` es `stdout` o `stderr`.
-  - `line` va sin el `\n` final, cortada a 16 KiB.
-- **Enmascarado:** como el log del deploy (§2.5), con los valores secretos de la app y del stage. Es una defensa extra: las apps a veces imprimen su configuración.
+  - `line` va sin el `\n` final, cortada a 16 KiB con `…` (el corte respeta UTF-8; un byte inválido sale como U+FFFD).
+- **Enmascarado:** como el log del deploy (§2.5), con los valores secretos de la app y del stage, y con los pedazos de una línea larga unidos antes. Es una defensa extra: las apps a veces imprimen su configuración.
 - **`end`:** se termina el log (el servicio se borró, o no había `follow`). El servidor cierra después.
-- **Reconectar:** el panel vuelve a abrir el stream con `since` = el `time` de la última línea que recibió, sin `tail`: al cortarse el stream, y al volver a una pestaña que estuvo oculta más de 30 s. Como `since` es inclusivo y `time` está truncado, vuelven a llegar las líneas de ese milisegundo, la última incluida, y el panel descarta las que ya tenía (por tarea, stream y texto). Así no se pierde ninguna: con `time` redondeado hacia arriba, o un `since` exclusivo, se perderían las de ese milisegundo que no alcanzaron a llegar. Sin `since`, cada reconexión repetiría las últimas 200.
+- **Reconectar:** el panel vuelve a abrir el stream con `since` = el `time` de la última línea que recibió (`{service, since, follow: 1}`; si además manda `tail`, no se mira): al cortarse el stream, y al volver a una pestaña que estuvo oculta más de 30 s. Como `since` es inclusivo y `time` está truncado, vuelven a llegar las líneas de ese milisegundo, la última incluida, y el panel descarta las que ya tenía (por tarea, stream y texto). Así no se pierde ninguna: con `time` redondeado hacia arriba, o un `since` exclusivo, se perderían las de ese milisegundo que no alcanzaron a llegar. Sin `since`, cada reconexión repetiría las últimas 200.
 
 **Errores antes de abrir:** `404`, `422` y `503 docker_unavailable`.
 
@@ -472,6 +492,7 @@ Se valida en su forma canónica, sin normalizar: minúsculas, etiquetas `[a-z0-9
 - **Uso en el deploy:**
   - el paso 2 pasa la credencial del host de cada imagen a `DistributionDigest` (exacta por host; sin credencial es anónima);
   - el paso 5 pasa a `DeployStack` solo las credenciales de los hosts que usa el compose.
+  - `docker.RegistryAuth` y `docker.StackDeploy` (que lleva el compose final, con los valores de las variables) se imprimen sin la contraseña ni el compose: `String`, `GoString`, `LogValue` y `MarshalJSON` los ocultan, así un `slog`, un `%v` o un `json.Marshal` no los filtran.
 - Cambiar o borrar un registry no redespliega nada.
 - **Limitación aceptada (v1): las credenciales son de todo muelle, no de un proyecto.** Un token con alcance al proyecto A puede mandar `{"image": "ghcr.io/<otra-org>/<privada>"}`: muelle la resuelve y la baja con la credencial de `ghcr.io`, y la corre en la app de A. Así, ese token llega a cualquier imagen que vea la credencial, también a las de otro proyecto.
   - Se acepta porque solo una sesión maneja las credenciales, y una sesión puede hacer todo (§10.1 del diseño). El token ya puede correr la imagen que quiera en sus apps; lo nuevo es que puede leer las imágenes privadas que ve la credencial.
@@ -484,7 +505,7 @@ No es un contrato de texto (los clientes deciden por `status`), pero cada paso d
 ```
 … deploy #145 de auditfy/staging/api (api · github-actions)
 … resolviendo imágenes
-…   api: ghcr.io/aumi-app/backend-app:sha-3f9c2e1 → sha256:9b2d…
+…   api: ghcr.io/aumi-app/backend-app:sha-3f9c2e1 → sha256:9b2de1f4a7c3…
 … render: 1 servicio
 … red auditfy_staging lista
 … docker stack deploy auditfy_staging_api
@@ -495,7 +516,30 @@ No es un contrato de texto (los clientes deciden por `status`), pero cada paso d
 … succeeded en 34 s                      (o: failed: <motivo>)
 ```
 
-Con `rollback_*` o `paused` (§7 paso 6), el log recibe el `Status.Err` de la última tarea fallida y sus últimas 50 líneas (`TaskLogs`). Un error de `SyncRoutes` es solo una advertencia (§13).
+- La primera línea lleva el `trigger` y el `actor_name`. El digest se muestra con sus primeros 12 caracteres; el completo está en `images`.
+- Leer la configuración (el spec, o el compose interpolado con las variables) va con "resolviendo imágenes", porque de ahí salen los servicios y sus refs. Un compose que no pasa la validación falla ahí con `failed: render: compose_yaml: …`.
+- Con `rollback_*` o `paused` (§7 paso 6), el log recibe el `Status.Err` de la última tarea fallida y sus últimas 50 líneas (`TaskLogs`). Con el timeout, el estado de cada servicio que no llegó (`web: 0/2 réplicas corriendo`) y el `Status.Err` de su última tarea fallida, si hay.
+- Un error de `SyncRoutes` es solo una advertencia (§13). Mientras la Fase 3 no está, `SyncRoutes` devuelve `ErrNotImplemented` y cada deploy deja esa advertencia.
+- Un deploy que cerró la reconciliación (§1.2) suma "muelle se reinició durante el deploy" antes de su resultado.
+- Todo lo que se escribe pasa por el enmascarado (§2.5), también la salida del CLI y los mensajes de error del render.
+
+### 2.12 Los servicios de una app (catalog, Fase 2)
+
+`GET {app}` y `GET …/apps` (catalog) suman `services`, para que el formulario de un dominio ofrezca los destinos (`target_service`, `target_port`, §3.2) sin esperar al primer deploy:
+
+```json
+{ "slug": "front", "kind": "compose", "…": "…", "services": [{ "name": "api", "ports": [3000] }, { "name": "web", "ports": [] }] }
+```
+
+| Campo | Qué |
+|---|---|
+| `services` | Siempre está, ordenado por `name`. App de formulario: un servicio con el slug de la app. App compose: los servicios del compose guardado (`shared/domain/compose.Services`). `[]` si el compose guardado no se puede leer |
+| `name` | El nombre corto del servicio |
+| `ports` | Los puertos que declara, ordenados: el `port` del spec en una app de formulario; los de `expose` en una app compose (un entero, o `N/tcp`; los rangos y los `${VAR}` se omiten). `[]` si no declara ninguno. No se publican: son solo una sugerencia para el destino |
+
+Es solo lectura: viene de la configuración guardada, no de Swarm.
+
+**Al guardar un compose** (`POST`/`PATCH` de la app), catalog lo valida con `shared/domain/compose` (§6.3 del diseño): `422 invalid` con `compose_yaml: …`. Además, ningún servicio puede llamarse como otro servicio del stage (§5.2 regla 2 del diseño): `compose_yaml: el servicio "web" ya existe en la app "front" del stage…`. Y una app de formulario nueva no puede tener el slug de un servicio de una app compose del stage: `slug: …`.
 
 ## 3. Dominios y proxy (Fase 3, módulo `ingress`) · sesión
 
@@ -866,7 +910,7 @@ networks:
 Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` se pueden editar. Las fases no agregan migraciones nuevas: cambian estas, con su test de esquema, sin tocar las columnas congeladas de §1.3.
 
 - **0002** (deploy):
-  - `deploys`: `actor_name`, `superseded_by` y `config_images` además de las columnas de §5.1, con índices por app y por estado activo;
+  - `deploys`: `actor_name`, `superseded_by`, `config_images`, `requested_images` (§2.2) y `log_truncated` (§2.5) además de las columnas de §5.1, con índices por app y por estado activo;
   - `registries`: con `created_at` y `updated_at`.
 - **0003** (ingress): `domains`, con:
   - `cf_record_id_aaaa`, `last_error_code`, `created_at` y `updated_at`;
@@ -886,7 +930,11 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Log por polling: `offset` más allá del final | No es error: `chunk: ""` y `next_offset` = el final | `422 invalid` con `offset: …` (también en el SSE, antes de abrir) | El log solo crece, así que ese offset es un error del cliente. El panel no lo ve: solo manda los `next_offset` que recibió |
 | SSE del deploy | `status` al conectar | Solo si no terminó. El `status` final va siempre después de la última línea | Si no, el panel cerraría antes de leer el log de un deploy que terminó justo |
 | SSE de logs | — | Suma el evento `end`, y `follow=0` | El panel ignora eventos desconocidos |
-| SSE de logs: `since` | Al reconectar, en vez de `tail`: RFC 3339 con ms, inclusivo, hasta las últimas 5000; `422` con `since: …` | Igual. Si vienen `since` y `tail`, manda `since`; `time` va truncado al milisegundo | Sin `since`, cada reconexión repetiría las últimas líneas |
+| SSE de logs: `since` | Al reconectar manda `{service, since, follow: 1}`: RFC 3339 con ms, inclusivo, hasta las últimas 5000; `422` con `since: …` | Igual. Si vienen `since` y `tail`, manda `since` y `tail` no se mira (así sirve también un cliente que manda los dos); `time` va truncado al milisegundo. `follow` distinto de `0`/`1` es `422 follow` | Sin `since`, cada reconexión repetiría las últimas líneas |
+| Servicios de una app | El formulario de un dominio pide el destino a mano | `GET` de una app (catalog) suma `services: [{name, ports}]` (§2.12) | Ofrecer los destinos sin esperar al primer deploy |
+| Guardar un compose | Validación al guardar | `422 compose_yaml` con las reglas de §6.3 del diseño, y con un servicio que choca con otro del stage. Una app de formulario nueva con el slug de un servicio compose del stage: `422 slug` | Los servicios de un stage comparten la red (§5.2 regla 2) |
+| Deploy o rollback de una app que se está borrando | — | `409 conflict` (a lo más 2 min) | No desplegar un stack que el `DELETE` acaba de borrar |
+| Deploy sin cuerpo después de un rollback | — | Repite las imágenes del rollback (con digest); para volver a seguir un tag, override o cambiar la configuración | El rollback no se deshace solo (§2.2) |
 | SSE, los dos | — | La credencial se revisa cada 60 s; a lo más 8 por principal (`429`) y 1 h por stream | El panel ya trata un stream que se corta |
 | Enmascarado | — | También cada línea de un secreto de varias líneas; nada por debajo de 8 bytes | Una clave PEM no se veía; un `1` tapaba texto ajeno |
 | `GET …/status` | `cpu_percent` y `memory_bytes` por tarea | Por tarea, como lo lee el panel (null fuera del nodo local), y además su suma por servicio. Suma `image` y `update_state` | Compatible |

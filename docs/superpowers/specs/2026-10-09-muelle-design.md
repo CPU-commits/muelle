@@ -211,7 +211,7 @@ proyecto (auditfy)
 | `apps` | `id`, `stage_id`, `slug` (único por stage), `kind` (`service`\|`compose`), `spec` (JSON, solo si es `service`), `compose_yaml` (solo si es `compose`), `deploy_timeout_s` (por defecto 300), `storage_node_id` (nodo donde viven sus volúmenes), `config_changed_at`, `last_deployed_at` |
 | `env_vars` | `id`, `stage_id` o `app_id` (exactamente uno, con borrado en cascada), `key`, `value` (cifrado, siempre), `secret` (bool), `updated_at`; única la clave por dueño |
 | `domains` | `id`, `app_id` (una app con dominios no se borra), `hostname` (único global), `target_service`, `target_port`, `proxied` (bool), `tls_mode` (`cloudflare`\|`http`), `cf_zone_id`, `cf_record_id` y `cf_record_id_aaaa` (nulos si muelle no maneja el registro), `status` (`pending`\|`active`\|`error`), `last_error_code` (`record_exists`\|`cloudflare`\|`certificate`, solo con `error`), `last_error`, `cert_issuer`, `cert_expires_at`, `created_at`, `updated_at` |
-| `deploys` | `id`, `app_id`, `status` (`queued`\|`running`\|`succeeded`\|`failed`\|`superseded`), `images` (JSON `servicio → ref@digest`), `config_images` (las refs de la configuración que leyó el deploy), `trigger` (`panel`\|`api`\|`rollback`), `actor_type` (`user`\|`token`), `actor_id`, `actor_name` (copiado al crear), `superseded_by`, `error`, `log` (texto, truncado a 256 KB), `created_at`, `started_at`, `finished_at` |
+| `deploys` | `id`, `app_id`, `status` (`queued`\|`running`\|`succeeded`\|`failed`\|`superseded`), `images` (JSON `servicio → ref@digest`), `requested_images` (las refs pedidas, antes de resolver), `config_images` (las refs de la configuración que leyó el deploy), `trigger` (`panel`\|`api`\|`rollback`), `actor_type` (`user`\|`token`), `actor_id`, `actor_name` (copiado al crear), `superseded_by`, `error`, `log` (texto, truncado a 256 KB, con `log_truncated`), `created_at`, `started_at`, `finished_at` |
 | `registries` | `id`, `host` (único), `username`, `password` (cifrado), `created_at`, `updated_at` |
 | `users` | `id`, `username` (único), `password_hash`, `totp_secret` (cifrado, nulo si no tiene 2FA), `totp_pending` (cifrado, generado pero sin confirmar), `created_by`, `created_at` |
 | `invites` | `id`, `token_hash`, `created_by`, `expires_at`, `used_at` |
@@ -233,7 +233,7 @@ La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`
    - **Claves:** el prefijo `COMPOSE_` está reservado, porque compose-go lee esas variables del entorno (nombre del proyecto, perfiles).
 4. **Cambios pendientes.** Cambiar variables (de la app o de su stage), spec o compose actualiza `config_changed_at` y no redespliega. El panel muestra "cambios pendientes" mientras `config_changed_at > last_deployed_at`. **Los dominios no pasan por el deploy:** crearlos, editarlos o borrarlos aplica de inmediato el DNS y las rutas de Caddy, porque no afectan al compose.
 5. **Digest.** Cada deploy guarda el digest exacto de cada imagen, y el compose final referencia `repo:tag@sha256:…`.
-6. **Rollback.** El deploy "actual" es el `succeeded` más reciente. El rollback toma las imágenes (con digest) del `succeeded` inmediatamente anterior y despliega con la configuración **actual** (variables, spec). Si no hay un `succeeded` anterior, responde `409`. Las variables no se versionan en la v1.
+6. **Rollback.** El deploy "actual" es el `succeeded` más reciente. El rollback toma las imágenes (con digest) del `succeeded` inmediatamente anterior y despliega con la configuración **actual** (variables, spec). Si no hay un `succeeded` anterior, responde `409`. Las variables no se versionan en la v1. Un deploy sin cuerpo después del rollback repite esas imágenes con su digest: el rollback no se deshace solo (contrato §2.2).
 7. **Retención.** Últimos 20 deploys por app, más siempre el actual y el `succeeded` anterior (el destino del rollback), aunque sean más viejos; `audit_events` 180 días; las sesiones vencidas o sin uso se borran cada hora.
 
 ## 6. Render: del modelo al compose final
@@ -254,9 +254,11 @@ La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`
 
 - `healthcheck.type` (Swarm ejecuta el healthcheck **dentro** del contenedor, así que el binario tiene que existir en la imagen):
   - `http`: genera la forma exec `["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:<port><path>"]`, sin shell; requiere `wget`. El path tampoco admite metacaracteres de shell (`&`, `;`, `|`, `$`, comillas, espacios).
-  - `bun-http`: genera `CMD bun -e "fetch('http://127.0.0.1:<port><path>').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`.
-  - `command`: un comando libre.
-  - `none`: sin healthcheck. El panel advierte que entonces no hay garantía de cero downtime.
+  - `bun-http`: genera la forma exec `["CMD", "bun", "-e", "fetch('http://127.0.0.1:<port><path>').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]`.
+  - `command`: un comando libre, en forma exec (`["CMD", …command]`, sin shell; para un shell, `["sh", "-c", "…"]`).
+  - `none`: muelle no agrega healthcheck (si la imagen trae un `HEALTHCHECK`, sigue valiendo). El panel advierte que entonces no hay garantía de cero downtime.
+  - Los tiempos (`interval_s`, `timeout_s`, `start_period_s`) van como duraciones (`10s`) y `retries` tal cual.
+- `command`, si no está vacío, va en forma exec (`command: [...]`). `resources.memory_mb` y `resources.cpus` van a `deploy.resources.limits`. Cada volumen es un volumen nombrado del stack (`<stack>_<name>`) montado en `mount`. Todas las variables resueltas van como `environment`.
 
 ### 6.2 Inyecciones (las mismas para ambos tipos)
 
@@ -269,8 +271,12 @@ Para cada servicio del compose resultante:
 | `deploy.update_config` | `parallelism: 1`, `order: start-first`, `failure_action: rollback`, `monitor: 30s` | Sí, si lo define |
 | `deploy.rollback_config` | `parallelism: 1`, `order: start-first` | Sí, si lo define |
 | Servicios con volúmenes | `order: stop-first` en update y rollback (dos instancias escribiendo el mismo volumen lo corrompen) y la restricción `node.id == <storage_node_id>` | Sí, si define su propia restricción de nodo |
-| Etiquetas | `muelle.project`, `muelle.stage`, `muelle.app`, `muelle.deploy` | Se agregan. Una etiqueta `muelle.*` del usuario es un error de render (§6.3) |
+| Etiquetas | `muelle.project`, `muelle.stage`, `muelle.app` y `muelle.deploy` en el servicio (`deploy.labels`); las tres primeras en sus contenedores (`labels`) | Se agregan. Una etiqueta `muelle.*` del usuario es un error de render (§6.3) |
 | Imagen | `ref@sha256:…` resuelta | — |
+
+- **Campo por campo:** en `logging`, `update_config` y `rollback_config`, lo que el usuario define gana, y los campos que no define se completan con los de la tabla. Un servicio con volúmenes recibe `order: stop-first` en vez de `start-first`, salvo que el usuario ponga su propio `order`.
+- **`muelle.deploy` no va en los contenedores:** cambia en cada deploy, y en el contenedor cambiaría la plantilla de las tareas, así que Swarm reiniciaría todos los servicios de la app en cada deploy, aunque no cambien. Con la etiqueta solo en el servicio, un deploy que no cambia nada de un servicio no lo reinicia.
+- **El compose final va en JSON** (YAML 1.2 es un superconjunto: `docker stack deploy` lo lee igual), con las claves ordenadas. Así no hay ambigüedades de tipos de YAML (`on`, `no`, `010`) y el golden de los tests es estable.
 
 `storage_node_id` toma por defecto el `manager_node_id` en el primer deploy de una app con volúmenes. Los volúmenes nombrados quedan como `<stack>_<nombre>`, con el driver local.
 
@@ -281,14 +287,18 @@ muelle tiene `docker.sock` (es root en el host) y la clave maestra. Una app nunc
 **Lista de permitidos.** El render arma el compose final solo con las claves que conoce. Cualquier otra, en un servicio o en el primer nivel, es un error, salvo las extensiones `x-*`. Así, una clave nueva de la especificación de compose no pasa sin revisarla: `use_api_socket` monta el socket de Docker, y `models`, `provider` o `gpus` no tienen sentido acá.
 
 - **Primer nivel:** `services`, `volumes` (ver abajo) y `x-*`. `version` se acepta y se descarta. `name` no: el nombre del proyecto lo fija el render.
-- **Servicio:** `image`, `command`, `entrypoint`, `environment`, `healthcheck`, `deploy`, `labels`, `logging`, `volumes`, `tmpfs`, `user`, `working_dir`, `stop_grace_period`, `stop_signal`, `read_only`, `init`, `ulimits`, `cap_drop`, `hostname`, `domainname`, `extra_hosts`, `dns`, `dns_search`, `dns_opt`, `expose`, `tty`, `stdin_open`, `platform` y `x-*`. `depends_on` y `restart` se aceptan y se descartan: Swarm los ignora, y así no se rompe un compose que ya existe.
-- **Dentro de `deploy`:** `mode`, `replicas`, `placement`, `resources` (`cpus` y `memory` en `limits` y `reservations`), `restart_policy`, `update_config`, `rollback_config`, `endpoint_mode` y `labels`.
+- **Servicio:** `image` (obligatoria), `command`, `entrypoint`, `environment`, `healthcheck`, `deploy`, `labels`, `logging`, `volumes`, `tmpfs`, `user`, `working_dir`, `stop_grace_period`, `stop_signal`, `read_only`, `init`, `ulimits`, `cap_drop`, `hostname`, `domainname`, `extra_hosts`, `dns`, `dns_search`, `expose`, `tty`, `stdin_open` y `x-*`. `depends_on`, `restart` y `platform` se aceptan y se descartan: Swarm los ignora (la plataforma la elige por el manifiesto de la imagen y el nodo), y así no se rompe un compose que ya existe.
+- **Dentro de `healthcheck`:** `test`, `interval`, `timeout`, `retries`, `start_period`, `start_interval` y `disable`.
+- **Dentro de `deploy`:** `mode` (`replicated` o `global`; los jobs no: son comandos de release, §1), `replicas`, `placement` (`constraints`, `preferences` con `spread`, `max_replicas_per_node`), `resources` (`cpus` y `memory` en `limits` y `reservations`), `restart_policy` (`condition`, `delay`, `max_attempts`, `window`), `update_config` y `rollback_config` (`parallelism`, `delay`, `failure_action`, `monitor`, `max_failure_ratio`, `order`), `endpoint_mode` y `labels`.
+- **Dentro de `logging`:** `driver` y `options` (libres, porque el driver ya está acotado: abajo).
+- **Nombres:** cada servicio y cada volumen es un slug de hasta 16 caracteres (§5.2 regla 1), y un compose tiene de 1 a 32 servicios.
+- **`dns_opt` no:** `docker stack deploy` lo rechaza (su esquema no lo tiene), así que se rechaza al guardar, con ese motivo.
 
 **Rechazados, y por qué** (la lista de permitidos ya los deja fuera; se nombran para que el mensaje lo explique y para que haya un test por cada uno):
 
 - **Publicar o construir:** `ports:` (no soportado en la v1) y `build:` (las imágenes vienen de un registry).
 - **Montar el host:**
-  - en `volumes:` de un servicio, todo lo que no sea `type: volume` sobre un volumen del compose, o `type: tmpfs`: los bind mounts (`/ruta:/x`, `./x:/x`, `type: bind`), `npipe`, `cluster` e `image`;
+  - en `volumes:` de un servicio, todo lo que no sea `type: volume` sobre un volumen del compose (con `read_only` y `volume.nocopy`), o `type: tmpfs` (con `tmpfs.size` y `tmpfs.mode`): los bind mounts (`/ruta:/x`, `./x:/x`, `type: bind`), `npipe`, `cluster` e `image`, un volumen anónimo (sin `source`), y `volume.subpath`;
   - en `volumes:` de primer nivel, `driver`, `driver_opts`, `external` y `name` (solo queda `labels`). Un volumen con `driver_opts: {type: none, o: bind, device: /var/run}` monta una ruta del host con el driver local, y le da a la app `docker.sock`. `external` o `name` llegan a volúmenes de otro stack o de muelle (`muelle_data`). Los volúmenes quedan como `<stack>_<nombre>` con el driver local (§6.2);
   - `devices`, `device_cgroup_rules` y `volumes_from`.
 - **Escalar privilegios o salir del aislamiento:** `privileged`, `cap_add`, `security_opt`, `sysctls`, `pid`, `ipc`, `uts`, `userns_mode`, `cgroup`, `cgroup_parent`, `runtime`, `isolation` y `credential_spec`.
@@ -297,10 +307,15 @@ muelle tiene `docker.sock` (es root en el host) y la clave maestra. Una app nunc
   - `env_file`, `label_file`, `extends` e `include`, que hacen que compose-go lea archivos.
 - **Redes y nombres:** `container_name`, `network_mode`, `links`, `external_links` y `networks:` propias, de primer nivel o de servicio. El render pone la red del stage (§6.2).
 - **Logging:** solo los drivers `json-file`, `local` y `none`. Los demás (`syslog`, `gelf`, `fluentd`…) los corre el daemon en la red del host, y su dirección podría apuntar a un servicio local del host.
-- **Etiquetas `muelle.*`:** las inyecta el render (§6.2), y deploy, ingress y el estado de las apps filtran por ellas. Una del usuario con ese prefijo se rechaza en `labels` y en `deploy.labels` del servicio, y en las de un volumen. Si no, una app podría hacerse pasar por otra app, o por otro stage.
+- **Etiquetas `muelle.*`:** las inyecta el render (§6.2), y deploy, ingress y el estado de las apps filtran por ellas. Una del usuario con ese prefijo se rechaza en `labels` y en `deploy.labels` del servicio, y en las de un volumen. Si no, una app podría hacerse pasar por otra app, o por otro stage. Lo mismo con `com.docker.stack.*`, que pone `docker stack deploy` (y con la que `docker stack rm` encuentra lo que borra).
+- **El entorno de cada servicio** (sus variables ya interpoladas; en una app de formulario, todas las del stage y la app) tiene que caber en lo que Linux le da a un proceso al arrancar (`execve`): cada `CLAVE=valor` hasta 128 KiB, y el total (con 8 bytes más por variable) hasta 1,5 MiB. `ARG_MAX` suele ser 2 MiB, y el resto queda para los argumentos y el entorno de la imagen. Si no cabe, el contenedor ni arranca (`E2BIG`). Solo lo verifica el render.
 - **Destinos de dominio:** el destino de un dominio tiene que existir en el compose, y su puerto tiene que ser un entero válido. Solo lo verifica el render, con los destinos que lee deploy de `domains` (contrato §1.1): catalog no lee los dominios, así que guardar un compose que deja un dominio sin su servicio no es un error, y el próximo deploy falla con el dominio y el servicio en el mensaje (contrato §3.2).
 
-**La interpolación** de `${VAR}` usa solo las variables resueltas de la app (`ResolveEnv`), nunca el entorno de muelle: en compose-go, `cli.WithEnv` con esas variables, sin `cli.WithOsEnv` ni `cli.WithDotEnv` (que leería un `.env`). Después, `docker stack deploy` vuelve a interpolar el compose final con el entorno de su proceso. Por eso, en el compose final todo `$` va como `$$`, venga del spec de formulario, del compose o del valor de una variable.
+**La interpolación** de `${VAR}` usa solo las variables resueltas de la app (`ResolveEnv`), nunca el entorno de muelle: en compose-go, el `loader` con `ConfigDetails.Environment` = esas variables y un `LookupValue` que solo mira ahí, sin `cli.WithOsEnv` ni `cli.WithDotEnv` (que leería un `.env`). Una `${VAR}` sin definir y sin valor por defecto es un error de render (`${VAR:-x}`, `${VAR-x}` y `${VAR:+x}` no). Después, `docker stack deploy` vuelve a interpolar el compose final con el entorno de su proceso. Por eso, en el compose final todo `$` va como `$$`, venga del spec de formulario, del compose o del valor de una variable (en los valores; las claves no se interpolan).
+
+**Al guardar**, catalog valida sin interpolar (todavía no hay variables): la lista de permitidos, los rechazos y los nombres. Lo que depende del valor de una variable (un `logging.driver: ${D}`, la imagen) se verifica en el render.
+
+**compose-go no lee archivos:** el compose va en memoria (`ConfigFile.Content`), con `SkipInclude`, `SkipExtends`, `SkipResolveEnvironment` y `SkipResolveLabels` (que leerían `include`, `extends.file`, `env_file` y `label_file`), `ResolvePaths: false` y un `WorkingDir` que no existe. Esas claves quedan en el modelo y la lista de permitidos las rechaza.
 
 **Defensa extra:** el CLI corre en un directorio temporal vacío (`runCLI`), así una ruta relativa que se le escape al render no resuelve dentro de los archivos de muelle. No reemplaza a la validación: una ruta absoluta, o con `..`, no se frena con eso.
 
@@ -316,22 +331,27 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
 **Pasos:**
 
 1. **Encolar.** Se valida la autenticación y el alcance. Se crea el deploy `queued` y se responde `202 {id, status_url}`. Si la app ya tenía deploys `queued`, se marcan `superseded`: solo sobrevive el último. Cada app tiene un worker que corre un deploy a la vez; apps distintas pueden desplegar en paralelo.
-2. **Resolver imágenes.** Se llama a `GET /distribution/{ref}/json` de la API de Docker con `X-Registry-Auth` del registry que corresponda. Si falla (no existe, sin permiso): `failed` y Swarm no se toca.
-3. **Render.** Ver §6. Si falla: `failed` y Swarm no se toca.
+2. **Resolver imágenes.** Se lee la configuración de la app (el spec, o el compose interpolado con sus variables: de ahí salen los servicios y sus refs) y se elige la ref de cada servicio (contrato §2.2). Para cada una se llama a `GET /distribution/{ref}/json` de la API de Docker con `X-Registry-Auth` del registry que corresponda (exacto por host; sin credencial, anónimo), con un plazo de 60 s por imagen. Si falla (no existe, sin permiso, Docker no responde): `failed` y Swarm no se toca.
+3. **Render.** Ver §6. Si falla: `failed` y Swarm no se toca. Si la app tiene volúmenes y todavía no tiene `storage_node_id`, se fija acá (§6.2).
 4. **Asegurar redes.** Se crea la red del stage si no existe y se verifica que muelle-caddy esté conectado a ella.
 5. **Aplicar.**
    - Se escribe un `DOCKER_CONFIG` temporal (`0700`) con las credenciales de los registries.
    - Se ejecuta `docker stack deploy --with-registry-auth --prune --detach=true -c - <stack>`, pasando el compose por stdin.
    - Se borra el directorio temporal, aunque el comando falle.
-   - El stderr del comando va al log.
-6. **Esperar convergencia** (polling cada 2 s por el SDK, con el `deploy_timeout_s` de la app):
-   - Servicio con `UpdateStatus`:
+   - La salida del comando (stdout y stderr) va al log, enmascarada. El comando tiene un plazo de 2 min.
+6. **Esperar convergencia** (polling cada 2 s por el SDK, con el `deploy_timeout_s` de la app). Se miran los servicios del compose final, y para cada uno el `UpdateStatus` de **este** deploy: el que empezó después de aplicar (`StartedAt` ≥ el momento en que se aplicó, con 2 s de margen). Uno más viejo es de un deploy anterior.
+   - Servicio con `UpdateStatus` de este deploy:
      - `completed` → OK.
-     - `rollback_started`, `rollback_completed` o `paused` → `failed`. El log recibe el `Status.Err` de la última tarea fallida y sus últimas 50 líneas de log.
-   - Servicio nuevo (sin `UpdateStatus`): OK cuando las tareas corriendo igualan a `replicas` y, si hay healthcheck, todas están `healthy`.
-   - Se pasa el timeout → `failed` con "timeout esperando convergencia". Swarm sigue actuando por su cuenta; el estado real se ve en el panel.
-7. **Rutas.** Se regenera y envía la configuración de Caddy (§8), por si el deploy agregó o quitó servicios que son destino de un dominio.
-8. **Cerrar.** El deploy pasa a `succeeded`, se guardan las imágenes con digest y se actualiza `last_deployed_at`.
+     - `rollback_started`, `rollback_completed`, `rollback_paused` o `paused` → `failed`. El log recibe el `Status.Err` de la última tarea fallida y sus últimas 50 líneas de log.
+     - `updating` → se sigue esperando.
+   - Servicio nuevo (creado por este deploy): OK cuando las tareas corriendo llegan a las deseadas (`replicas`, o `DesiredTasks` en uno global). Con healthcheck, Swarm deja la tarea en `starting` hasta que está `healthy`, así que ya cuenta solo las sanas.
+   - Servicio que ya existía y sin `UpdateStatus` de este deploy: su plantilla no cambió (solo `muelle.deploy`, §6.2) y Swarm no lo actualiza. OK cuando pasaron 5 s desde que se aplicó (lo que tarda Swarm en empezar una actualización) y las tareas corriendo llegan a las deseadas.
+   - Se pasa el timeout → `failed` con "timeout esperando convergencia", y el estado de cada servicio que no llegó. Swarm sigue actuando por su cuenta; el estado real se ve en el panel.
+   - Si Docker deja de responder mientras se espera, se reintenta hasta el timeout.
+7. **Rutas.** Se regenera y envía la configuración de Caddy (§8), por si el deploy agregó o quitó servicios que son destino de un dominio. Un error es solo una advertencia en el log (§13).
+8. **Cerrar.** El deploy pasa a `succeeded` (las imágenes con digest ya quedaron en el paso 2), `last_deployed_at` avanza hasta el `started_at` del deploy (el momento en que leyó la configuración: un cambio guardado mientras corría sigue pendiente) y se aplica la retención (§5.2 regla 7).
+
+Un deploy que termina `failed` también aplica la retención. El apagado de muelle nunca cierra un deploy: lo deja `running` para la reconciliación.
 
 **Log del deploy:**
 - Cada paso escribe en el log, con timestamp.
@@ -339,7 +359,7 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
 - El panel lo recibe por SSE; la API, por polling con `?offset=N`.
 
 **Reconciliación al arrancar muelle:**
-- Los deploys en `running` se reevalúan contra el estado real del servicio y se cierran como `succeeded` o `failed`.
+- Los deploys en `running` se reevalúan contra el estado real del servicio y se cierran como `succeeded` o `failed`: si sus servicios llevan su etiqueta `muelle.deploy`, se sigue esperando la convergencia (paso 6); si ninguno la lleva, nunca llegó a Swarm (detalle en el contrato, §1.2).
 - Los deploys en `queued` se retoman.
 - Se asegura el contenedor muelle-caddy y sus redes (§3.1), se reenvía la configuración a Caddy y se verifica que existan las redes de todos los stages.
 
@@ -514,7 +534,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - **Contratos entre módulos:** como los módulos no se importan (§4.1), lo que uno lee o escribe de las tablas de otro se prueba con el contenedor completo (`shared/infra/container`).
 
 **Unitarios:**
-- `render`: golden files (`testdata/*.input.yaml` → `*.golden.yaml`) cubriendo:
+- `render`: golden files (`testdata/render/*.input.json` → `*.golden.json`, porque el compose final va en JSON, §6.2) cubriendo:
   - inyección de la red del stage, logging, update_config y etiquetas
   - servicios con volúmenes (stop-first y restricción de nodo)
   - respeto de los overrides del usuario
