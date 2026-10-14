@@ -777,7 +777,10 @@ Lo mismo sirve si los puertos nuevos del proxy estaban ocupados: muelle-caddy no
 | Contenedores | `muelle-caddy`, que crea ingress en el primer arranque, no install; y `muelle-install-probe` (`naming.InstallProbeContainer`), el de la prueba de puertos, que install borra siempre |
 | Etiqueta de Swarm | `com.docker.swarm.service.name` (`naming.LabelSwarmService`): la pone Swarm en cada contenedor de una tarea. `muelle settings reset-panel-ips` la usa para saber a qué servicio pertenece (§5.4) |
 
-install acepta un `--name-prefix` oculto que cambia el `muelle` de todos estos nombres (`<p>`, `<p>_muelle`, `<p>_panel`, `<p>_data`, `<p>_master_key`, `<p>-install-probe`…). Es solo para los tests de integración: con otro prefijo, muelle-caddy, que ingress crea con los nombres fijos, no comparte la red ni el socket con ese muelle.
+install acepta tres flags ocultos, solo para los tests de integración (no salen en la ayuda):
+- `--name-prefix <p>` cambia el `muelle` de todos estos nombres: `<p>` (stack), `<p>_muelle`, `<p>_panel`, `<p>_data`, `<p>_caddy_admin`, `<p>_master_key`, `<p>_init_cloudflare_token`, `<p>-install-probe` y `<p>-caddy` (el contenedor que mira `--reinstall`). Los arma `naming.InstallNamesFor(p)`; con `muelle` da los nombres fijos de arriba. Con otro prefijo, muelle-caddy, que ingress crea con los nombres fijos, no comparte la red ni el socket con ese muelle.
+- `--image <ref>`: la imagen de muelle que se despliega y con la que se prueba los puertos (§5.4), en vez de `naming.MuelleImageFor(version)`. Así el test usa una imagen construida en el nodo.
+- `--panel-origin <origen>`: reemplaza el `MUELLE_PANEL_ORIGIN` que arma `--panel-domain` (con él, `--panel-domain` no hace falta). El test pasa una IP (`https://127.0.0.1:<puerto>`): sin `panel_domain`, `ProxySettings.Enabled` es falso e ingress queda `disabled` (§3.3), así el muelle del test nunca crea muelle-caddy ni la red `muelle_panel`, que tienen nombres fijos. El test lo verifica: si alguno de los dos aparece durante el test, falla (no los borra).
 
 ### 5.2 La configuración inicial: `MUELLE_INIT_*`
 
@@ -786,13 +789,13 @@ install despliega el servicio con estas variables. `settings.Load` las valida en
 **Se aplican una sola vez**, en el primer arranque de la base: `admin.ApplyStartupSettings` guarda en la misma transacción la marca `init_applied`, y en los arranques siguientes no mira `MUELLE_INIT_*`. En ese primer arranque guarda cada valor que no es cero si la clave todavía no está, y deja un evento `settings.init` con las claves, sin valores.
 
 - **Por qué una marca, y no "si la clave falta":** las variables y el secreto del token quedan en el servicio. Sin la marca, lo que el admin borra en el panel volvería con cualquier reinicio (`docker service update --image`, un nodo que se reinicia). Borrar el token (`cloudflare_token: ""`) borra la clave, así que un token quitado, quizás por filtrado, volvería a usarse en Caddy y en el DNS.
-- **Una reinstalación sobre el mismo volumen `muelle_data`** ya tuvo su primer arranque: los flags de install no cambian ningún ajuste. install lo avisa ("la base ya existe: cambia los ajustes en el panel").
+- **Una reinstalación sobre el mismo volumen `muelle_data`** ya tuvo su primer arranque: los flags de install no cambian ningún ajuste. install lo avisa si el volumen existe ("la base ya existe: cambia los ajustes en el panel").
 
 | Flag de install | Variable | Clave de settings |
 |---|---|---|
-| `--panel-domain D` (+ `--https-port`) | `MUELLE_PANEL_ORIGIN=https://D`, o `https://D:<puerto>` si el puerto HTTPS no es 443 | `panel_domain` (en cada arranque; ver abajo) |
-| `--email` | `MUELLE_INIT_ACME_EMAIL` | `acme_email` |
-| `--public-ip` (o la detectada, §3.3 paso 5) | `MUELLE_INIT_PUBLIC_IP` | `public_ip` |
+| `--panel-domain D` (+ `--https-port`), obligatorio salvo con `--panel-origin` (§5.1) | `MUELLE_PANEL_ORIGIN=https://D`, o `https://D:<puerto>` si el puerto HTTPS no es 443 | `panel_domain` (en cada arranque; ver abajo) |
+| `--email`, obligatorio | `MUELLE_INIT_ACME_EMAIL` | `acme_email` |
+| `--public-ip` (o la detectada, §3.3 paso 2 del diseño) | `MUELLE_INIT_PUBLIC_IP` | `public_ip` |
 | `--public-ipv6` (opcional) | `MUELLE_INIT_PUBLIC_IPV6` | `public_ipv6` |
 | `--http-port` (por defecto 80) | `MUELLE_INIT_PROXY_HTTP_PORT`, siempre, también con 80 | `proxy_http_port` |
 | `--https-port` (por defecto 443) | `MUELLE_INIT_PROXY_HTTPS_PORT`, siempre, también con 443 | `proxy_https_port` |
@@ -800,6 +803,8 @@ install despliega el servicio con estas variables. `settings.Load` las valida en
 | `--caddy-image` (avanzado) | `MUELLE_INIT_CADDY_IMAGE` | `caddy_image` |
 | `--advertise-addr` | — (solo `docker swarm init`; con el Swarm ya activo se ignora, con un aviso) | — |
 | `--reinstall` | — (ver §5.4) | — |
+
+Los flags se validan antes de tocar Docker, con las mismas reglas que `PATCH /settings` (§4.1): `validate.Hostname`, `Email`, `IPv4`, `IPv6`, `Port` e `ImageRef`; los dos puertos distintos; y el token con la forma de un token de Cloudflare (de 20 a 512 caracteres visibles, sin espacios). Uno que no sirve termina con código 2 y el nombre del flag.
 
 **`MUELLE_PANEL_ORIGIN` después de cambiar los puertos:** install lo fija con el puerto HTTPS de ese momento. Si después se cambia `proxy_https_port` en el panel (la migración de §16 del diseño pasa de 8443 a 443), el panel sigue funcionando en el origen nuevo (§0.1), pero los links de las invitaciones salen con el viejo hasta que se actualiza la variable, lo que reinicia muelle:
 
@@ -878,19 +883,21 @@ networks:
 1. Valida los flags (código 2 si no sirven).
 2. Docker (`Info`): si no responde, aborta y sugiere montar `/var/run/docker.sock`. Un nodo worker, o un Swarm `pending`, `error` o `locked`, aborta. Un Swarm `inactive` se inicia en el paso 7.
 3. Una instalación anterior (abajo).
-4. La IP pública, si no vino `--public-ip` (§3.3 paso 5 del diseño). Si no se puede detectar, es un aviso y la variable no va.
+4. La IP pública, si no vino `--public-ip` (§3.3 paso 2 del diseño): la línea `ip=` de `https://1.1.1.1/cdn-cgi/trace`, con un plazo de 5 s. Solo IPv4: una respuesta que no es una IPv4 canónica cuenta como no detectada (la IPv6 va solo con `--public-ipv6`). Si no se puede detectar, es un aviso y la variable no va.
 5. La imagen: `InspectImage` y, si da `ErrNotFound`, `PullImage`.
 6. La prueba de puertos (abajo).
 7. `InitSwarm(--advertise-addr)` solo si el Swarm está `inactive`. Su id de nodo (o el de `Info.NodeID`) va en la restricción `node.id` de §5.3.
 8. La red, los secretos y el stack. Si `DeployStack` falla, install borra lo que creó en esta corrida (los secretos y la red, no el Swarm) y no imprime la clave.
 9. La clave maestra, impresa una sola vez, y después el link de setup.
 
+**Salida:** la clave maestra y el link de setup (o el aviso de que muelle ya tiene usuarios) van a stdout; el avance y los avisos, a stderr. Así `docker run … install > install.txt` guarda solo lo que hay que conservar. Código 0 si terminó con el link (o con usuarios), 1 si algo falló (también el plazo del link), 2 si un flag no sirve. Ctrl-C cancela; lo que se crea en esta corrida antes de que `DeployStack` funcione se borra igual, como si `DeployStack` fallara.
+
 **Una instalación anterior:**
 - Si el servicio `muelle_muelle` existe, aborta siempre: muelle ya está instalado, y se actualiza con `docker service update --image` (abajo).
 - Sin `--reinstall`, si existe el secreto `muelle_master_key` o el volumen `muelle_data`, aborta: una clave nueva no descifraría esa base (`clave maestra incorrecta`). El mensaje ofrece `--reinstall` o borrar el secreto y el volumen (se pierden los datos).
-- Con `--reinstall` (para volver a desplegar después de un `docker stack rm muelle`), el secreto `muelle_master_key` tiene que existir: se reusa y no se imprime ninguna clave. Si viene `--cloudflare-token` y el secreto del token existe, se borra y se crea de nuevo; si no viene, el secreto que quedó no se toca y el stack no lo monta. install avisa que los ajustes de install no se aplican sobre una base que ya arrancó (§5.2).
+- Con `--reinstall` (para volver a desplegar después de un `docker stack rm muelle`), el secreto `muelle_master_key` tiene que existir: se reusa y no se imprime ninguna clave. Si viene `--cloudflare-token` y el secreto del token existe, se borra y se crea de nuevo; si no viene, el secreto que quedó no se toca y el stack no lo monta. Si el volumen `muelle_data` existe, install avisa que los ajustes de install no se aplican sobre una base que ya arrancó (§5.2).
 
-**Puertos ocupados (§3.3 paso 2 del diseño):** install corre dentro de un contenedor, así que no puede probar el puerto con `net.Listen`.
+**Puertos ocupados (§3.3 paso 3 del diseño):** install corre dentro de un contenedor, así que no puede probar el puerto con `net.Listen`.
 - Crea el contenedor temporal `muelle-install-probe`, con el comando `help`, que publica los mismos puertos que muelle-caddy: `--http-port`/tcp, `--https-port`/tcp y `--https-port`/udp (HTTP/3), y lo arranca. Uno que quedó de una corrida cortada se borra antes.
 - Su imagen es la de muelle que se va a desplegar: `naming.MuelleImageFor(version)` (la de la versión de install), o `--image` (oculto, para los tests). Quien corre install pudo usar otro tag (`:latest`, o ninguno), así que esa imagen puede no estar en el nodo: se baja en el paso 5. Un binario sin versión publicada (`dev`) no instala sin `--image`.
 - `docker.ErrPortInUse` es "ocupado": se aborta con la sugerencia de `--http-port`/`--https-port`.
@@ -902,10 +909,11 @@ networks:
 
 **Clave maestra:** `crypto.GenerateKey()`, que se guarda con `CreateSecret(naming.MasterKeySecret, …)` y se imprime **una sola vez**, después de que `DeployStack` funcionó.
 
-**El link de setup (§3.3 paso 8):**
+**El link de setup (§3.3 paso 10 del diseño):**
 - install busca la línea JSON con `"event":"setup_url"` y lee su `url`. La escribe `logSetupURL` en `main.go`; el mensaje puede cambiar, `event` y `url` no.
 - **Solo vale la de la tarea que corre ahora.** Cada arranque sin usuarios invalida el link anterior (`EnsureSetupInvite`). Si la primera tarea se reinició, los logs del servicio traen varias líneas `setup_url`, y solo la última sirve. Por eso install lee los de la tarea actual (`ListTasks` del servicio: la de `desired_state: running` y `state: running`, la más nueva) con `TaskLogs`, desde el principio y con `Follow`. Si esa tarea cambia durante el plazo, vuelve a buscar la actual y su línea.
 - **`"event":"listening"`:** serve la escribe cuando empieza a atender (`muelle escuchando`), siempre después de la de `setup_url`. Si llega sin un `setup_url` antes en la misma tarea, muelle ya tiene usuarios: install lo dice y termina bien.
+- Una línea de nivel `ERROR` de esa tarea (muelle no arrancó: una variable que no sirve, la clave) se muestra en stderr mientras se espera: Swarm reintenta la tarea, y el error explica por qué no llega el link.
 - El plazo es de 2 min. Si se pasa, el stack queda desplegado e install termina con código 1 y sugiere `docker service logs muelle_muelle`.
 
 **Actualizar:** `docker service update --image ghcr.io/cpu-commits/muelle:<v> muelle_muelle`.
@@ -919,7 +927,9 @@ docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle
 ```
 
 - Abre la base de `MUELLE_DATA_DIR` (sin migrar; si no existe, aborta y dice que corra con `docker exec`) y deja `panel_allowed_cidrs` en `[]` con `admin.ResetPanelAllowedCIDRs`, en una transacción, con un evento `settings.update` de actor `system` y details `{"panel_allowed_cidrs": [], "via": "cli"}`. Si la lista ya estaba vacía no escribe nada y lo dice (el problema es otro, quizás los puertos del proxy).
-- Después reinicia su propio servicio, como `docker service update --force`: busca su contenedor por el hostname (`os.Hostname`, que es el id) y lee `com.docker.swarm.service.name`, y llama a `ForceUpdateService` (`docker.ServiceRestarter`, Fase 5). Al arrancar, el job `"proxy"` le manda a Caddy la configuración sin la lista. Con `--no-restart` solo cambia la base e imprime el comando para reiniciar a mano.
+- Después reinicia su propio servicio, como `docker service update --force`: busca su contenedor por el hostname (`os.Hostname`, que es el id) y lee `com.docker.swarm.service.name`, y llama a `ForceUpdateService` (`docker.ServiceRestarter`, Fase 5). Al arrancar, el job `"proxy"` le manda a Caddy la configuración sin la lista. Reinicia también si la lista ya estaba vacía: ese arranque le reenvía la configuración a Caddy, que es lo que sirve si el problema es otro. Con `--no-restart` solo cambia la base e imprime el comando para reiniciar a mano.
+- Si no puede reiniciar (no encuentra su contenedor, el contenedor no tiene la etiqueta, o Docker falla), la base ya quedó cambiada: lo dice, imprime el comando para reiniciar a mano y termina con código 1.
+- Códigos: 0 si terminó bien, 1 si algo falló, 2 si los argumentos no sirven.
 - El reinicio corta unos segundos el panel y los streams. Un deploy en curso se resuelve con la reconciliación (§1.2).
 
 **Imágenes:**
@@ -927,15 +937,17 @@ docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle
 - Alpine trae un `/tmp` escribible con permisos `1777` (`os.TempDir()`): `DeployStack` crea ahí el `DOCKER_CONFIG` temporal y el directorio de trabajo del CLI. Una imagen `scratch` o distroless no lo trae, y tampoco tiene el `cat` con que se relee la clave maestra (§12 del diseño).
 - `deploy/caddy/Dockerfile`: `xcaddy` (la imagen `caddy:<v>-builder-alpine`) con `github.com/caddy-dns/cloudflare`, en versiones fijas, sobre `caddy:<v>-alpine`. No necesita un CMD ni un archivo de configuración propios: el comando y el entorno los pone ingress (§3.4).
 - Las imágenes base van fijadas por tag y digest. Se publican para `linux/amd64`.
+- **Publicación:** `.github/workflows/release.yml` construye y sube las dos imágenes al empujar un tag `vX.Y.Z[-sufijo]` (el mismo formato que `naming.MuelleImageFor`), después de los tests. El tag de la imagen es el del git; `:latest` solo para las versiones finales de muelle, y nunca para muelle-caddy. Con `workflow_dispatch`, construye sin subir (para probar los `Dockerfile`).
 - **Cookie:** el prefijo `__Host-muelle_session` con cookies `Secure` no es de la Fase 5 (los archivos son de identity y de `cmd/http/utils`): queda en las notas del README para la integración.
 
 ### 5.5 El panel embebido
 
-- **Compilación:** el build de `web/` (`pnpm build` → `web/build`) se copia en `src/cmd/http/panel/build/` (ignorado por git) y se compila con `-tags panel`, que activa `//go:embed all:build` (sin `all:` se pierde `_app/`). Sin el tag, `go build ./...` y `go test ./...` funcionan sin el panel, y toda ruta del panel responde `404` con una página corta que dice que el binario no lo trae.
-- **Al arrancar** se leen del embed `200.html` y `csp-header.txt`. Si falta alguno, o la CSP no es una sola línea, muelle no arranca.
-- **Qué rutas:** todo lo que no es `/api` ni `/api/…` y no tiene una ruta registrada. `/api/v1/…` sin ruta sigue siendo `404 no_route` (§0.2), y una ruta con otro método, `405 method_not_allowed`. El `Origin` se revisa antes, como en toda petición.
-- **Qué responde:** el archivo del build si existe con ese path; si no, `200.html` con `200`, que resuelve el router del panel. Excepciones: un `/_app/…` que no existe responde `404` (un chunk viejo nunca recibe HTML), y `csp-header.txt` no se sirve (responde `200.html`). Solo `GET` y `HEAD`; otro método es `405 method_not_allowed`, en JSON, con `Allow: GET, HEAD`.
-- **Headers** en todas las respuestas del panel:
+- **Compilación:** el build de `web/` (`pnpm build` → `web/build`) se copia en `src/cmd/http/panel/build/` (ignorado por git) y se compila con `-tags panel`, que activa `//go:embed all:build` (sin `all:` se pierde `_app/`). Sin el tag, `go build ./...` y `go test ./...` funcionan sin el panel, y toda ruta del panel responde `404` con una página corta que dice que el binario no lo trae (con `Content-Security-Policy: default-src 'none'`, `nosniff` y `no-cache`).
+- **Al arrancar** se leen del embed `200.html` y `csp-header.txt`. Si falta alguno, o la CSP está vacía o no es una sola línea, muelle no arranca.
+- **Qué rutas:** todo lo que no es `/api` ni `/api/…` y no tiene una ruta registrada. `/api/v1/…` sin ruta sigue siendo `404 no_route` (§0.2), y una ruta registrada con otro método, `405 method_not_allowed` del mux (fuera de `/api` no hay ninguna). El `Origin` se revisa antes, como en toda petición.
+- **Qué responde:** el archivo del build si existe con ese path (el path se limpia antes, y un directorio cuenta como que no existe); si no, `200.html` con `200`, que resuelve el router del panel. `/` es `200.html`. Excepciones: un `/_app/…` que no existe responde `404` en texto (un chunk viejo nunca recibe HTML), y `csp-header.txt` no se sirve (responde `200.html`). Solo `GET` y `HEAD` (con `Range` y las condiciones de `http.ServeContent`); otro método es `405 method_not_allowed`, en JSON, con `Allow: GET, HEAD`.
+- **ETag:** los archivos fuera de `_app/immutable/` (el `200.html`, `_app/version.json`, el favicon) llevan un `ETag` fuerte con el sha256 de su contenido, calculado al arrancar, así el `no-cache` revalida con `304`. Los de `_app/immutable/` no lo necesitan, y no se leen enteros al arrancar: una página del embed que no se lee no suma RSS (§1 del diseño).
+- **Headers** en todas las respuestas del panel (también el `404` y el `405`):
   - `Content-Security-Policy`: el contenido de `csp-header.txt` (la política del `<meta>` más `frame-ancestors 'none'`);
   - `X-Content-Type-Options: nosniff`, con el `Content-Type` de una tabla propia (`.js` es `text/javascript; charset=utf-8`, `.woff2` es `font/woff2`…), sin depender de `/etc/mime.types`;
   - `Referrer-Policy: same-origin`: los links con secretos (`/setup?token=…`, `/invite/<token>`) nunca salen del origen. No es `no-referrer` porque con esa política el navegador manda `Origin: null` en un `POST` que no es `fetch` (un `<form>` nativo), y muelle lo rechazaría con `403 bad_origin`;

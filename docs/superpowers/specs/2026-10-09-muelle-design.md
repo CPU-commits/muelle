@@ -477,6 +477,8 @@ Composite action en bash, con `curl` y `jq` (ambos vienen en los runners de GitH
 
 **Entradas:**
 - `url`, `token`, `app` (`proyecto/stage/app`): obligatorias.
+  - `url` es el origen del panel (`https://panel.tudominio.cl`); una `/` final se quita. Tiene que ser `https://`, salvo `http://localhost` o `http://127.0.0.1` (el token nunca viaja en claro).
+  - `app` son tres slugs separados por `/` (§5.2 regla 1), así no puede cambiar la ruta de la petición.
 - `image`: opcional.
 - `images-json`: opcional, para apps compose (un objeto `servicio → ref`). `image` e `images-json` juntos son un error.
 - `env-json`: opcional (un objeto de strings).
@@ -484,19 +486,21 @@ Composite action en bash, con `curl` y `jq` (ambos vienen en los runners de GitH
 - `env-secret`: por defecto `true`.
 - `timeout`: segundos, por defecto 600, contados desde que se creó el deploy.
 
+Las entradas se validan antes de cualquier petición: `images-json` y `env-json` tienen que ser objetos JSON con valores string, `env-secret` es `true` o `false`, y `timeout` un entero mayor que 0. Si algo no sirve, un `::error::` y código 1, sin tocar muelle.
+
 **Salidas:** `deploy-id` y `status` (el estado final, o el último que vio si se pasó el timeout).
 
 **Pasos:**
-1. Si viene `env-json`, filtra las claves excluidas y hace `PUT …/apps/{a}/env`. `PUT` reemplaza todo el set de la app: una variable que no viene se borra. Se reintenta hasta 3 veces si muelle no responde o responde 5xx.
-2. `POST …/deploys`, una sola vez (no es idempotente).
-3. Hace polling de `…/log?offset=N` (sobre el `status_url` de la respuesta) e imprime el log. Mientras llegan líneas pide la siguiente parte enseguida; con un `chunk` vacío espera 3 s. Si muelle no responde, o responde 5xx o 429, reintenta hasta el timeout. El log va entre `::stop-commands::<token al azar>` y `::<token>::`: lo que imprime una app nunca se lee como un comando del runner (`::error::`, `::add-mask::`…).
+1. Si viene `env-json`, filtra las claves excluidas y hace `PUT …/apps/{a}/env` con `{"vars": {…}, "secret": <env-secret>}`. `PUT` reemplaza todo el set de la app: una variable que no viene se borra. Hasta 3 intentos (con 2 s y 4 s entre ellos) si muelle no responde o responde 5xx.
+2. `POST …/deploys`, una sola vez (no es idempotente). Si no hay respuesta, falla sin reintentar: el deploy puede haberse creado, y el mensaje dice que se revise en el panel.
+3. Hace polling de `…/log?offset=N` (sobre el `status_url` de la respuesta, que tiene que empezar con `/api/v1/`: el token solo va a `url`) e imprime el log. Mientras llegan líneas pide la siguiente parte enseguida; con un `chunk` vacío espera 3 s. Si muelle no responde, o responde 5xx o 429, reintenta hasta el timeout. El log va entre `::stop-commands::<token al azar>` y `::<token>::`: lo que imprime una app nunca se lee como un comando del runner (`::error::`, `::add-mask::`…).
 4. Termina cuando el `status` es final y el `chunk` viene vacío:
    - `succeeded`: código 0;
-   - `failed`: un `::error::` con el `error` del deploy y código 1;
+   - `failed`: un `::error::` con el `error` del deploy (lo lee de `GET` sobre el `status_url`) y código 1;
    - `superseded` (lo reemplazó un deploy más nuevo de la misma app): un `::warning::` con el id del nuevo (`superseded_by`, que trae la respuesta del log) y código 0;
    - el timeout: un `::error::` y código 1. El deploy sigue en muelle.
 
-Una respuesta de error de muelle se muestra con su `code` y su `message`; un `404 no_route` dice que ese muelle todavía no tiene la API de deploys.
+Una respuesta de error de muelle se muestra con su `code` y su `message`; un `404 no_route` dice que ese muelle todavía no tiene la API de deploys. Un `4xx` que no es `429` no se reintenta, en ningún paso. Los mensajes de `::error::` y `::warning::` van escapados como pide GitHub (`%`, `\r`, `\n`).
 
 **Versión de la action:** se referencia con el tag de una versión (`@v0.1.0`) o con el de su versión mayor, que se mueve en cada release (`@v0` mientras no haya 1.0; README, "Publicar una versión").
 
