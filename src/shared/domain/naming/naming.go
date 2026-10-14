@@ -107,6 +107,14 @@ const (
 	CaddyAdminDir = "/run/caddy-admin"
 	// CaddyAdminSocket es el socket unix de la admin API de Caddy.
 	CaddyAdminSocket = CaddyAdminDir + "/admin.sock"
+	// CaddyAdminListen es CaddyAdminSocket como dirección de red de Caddy: el
+	// admin.listen de cada configuración que manda ingress y el CADDY_ADMIN
+	// con que arranca muelle-caddy (CaddyEnv).
+	CaddyAdminListen = "unix/" + CaddyAdminSocket
+	// CaddyDataDir y CaddyConfigDir son donde se montan CaddyDataVolume y
+	// CaddyConfigVolume en muelle-caddy (XDG_DATA_HOME y XDG_CONFIG_HOME).
+	CaddyDataDir   = "/data"
+	CaddyConfigDir = "/config"
 
 	// MasterKeySecret es el secreto Swarm con la clave maestra, montado en
 	// /run/secrets/muelle_master_key (MUELLE_MASTER_KEY_FILE por defecto).
@@ -120,6 +128,23 @@ const (
 	MuelleImage = "ghcr.io/cpu-commits/muelle"
 	CaddyImage  = "ghcr.io/cpu-commits/muelle-caddy"
 )
+
+// CaddyCommand es el comando con que ingress crea muelle-caddy (Fase 3), sin
+// depender del CMD de la imagen: el de una imagen de Caddy típica carga un
+// Caddyfile y deja la admin API en TCP (localhost:2019), sin el socket.
+// --resume carga el autosave de CaddyConfigDir si existe (la última
+// configuración que mandó muelle, que ya trae admin.listen); si no, Caddy
+// arranca vacío, con la admin API en CADDY_ADMIN (CaddyEnv). Devuelve un slice
+// nuevo en cada llamada.
+func CaddyCommand() []string { return []string{"caddy", "run", "--resume"} }
+
+// CaddyEnv es el entorno de muelle-caddy (Fase 3): CADDY_ADMIN pone la admin
+// API en el socket desde el primer arranque, sin un archivo de configuración
+// en la imagen, y XDG_* dejan el autosave y los certificados en sus volúmenes
+// aunque la imagen no los defina. Devuelve un slice nuevo en cada llamada.
+func CaddyEnv() []string {
+	return []string{"CADDY_ADMIN=" + CaddyAdminListen, "XDG_CONFIG_HOME=" + CaddyConfigDir, "XDG_DATA_HOME=" + CaddyDataDir}
+}
 
 // releaseRe es una versión publicada: v<mayor>.<menor>.<parche>, con un sufijo opcional (-rc.1).
 var releaseRe = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)

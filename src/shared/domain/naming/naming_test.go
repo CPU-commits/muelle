@@ -2,6 +2,7 @@ package naming
 
 import (
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -148,5 +149,30 @@ func TestImagesForVersion(t *testing.T) {
 		if got := CaddyImageFor(version); got != want[1] {
 			t.Errorf("CaddyImageFor(%q) = %q, esperaba %q", version, got, want[1])
 		}
+	}
+}
+
+// muelle-caddy arranca igual con cualquier imagen (la de la Fase 5 o una
+// caddy_image propia): el comando y el entorno los pone ingress al crear el
+// contenedor, no el CMD de la imagen, que en una imagen de Caddy típica deja
+// la admin API en TCP y sin el socket.
+func TestCaddyRuntime(t *testing.T) {
+	if CaddyAdminListen != "unix//run/caddy-admin/admin.sock" {
+		t.Errorf("CaddyAdminListen = %q", CaddyAdminListen)
+	}
+	if CaddyDataDir != "/data" || CaddyConfigDir != "/config" {
+		t.Errorf("montajes: %q %q", CaddyDataDir, CaddyConfigDir)
+	}
+	if got := CaddyCommand(); !slices.Equal(got, []string{"caddy", "run", "--resume"}) {
+		t.Errorf("CaddyCommand() = %q", got)
+	}
+	want := []string{"CADDY_ADMIN=unix//run/caddy-admin/admin.sock", "XDG_CONFIG_HOME=/config", "XDG_DATA_HOME=/data"}
+	if got := CaddyEnv(); !slices.Equal(got, want) {
+		t.Errorf("CaddyEnv() = %q", got)
+	}
+	// Cada llamada da una copia: quien la modifica no cambia la de otro.
+	CaddyCommand()[0], CaddyEnv()[0] = "x", "x"
+	if CaddyCommand()[0] != "caddy" || CaddyEnv()[0] != want[0] {
+		t.Error("CaddyCommand y CaddyEnv deben devolver un slice nuevo")
 	}
 }
