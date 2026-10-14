@@ -49,7 +49,9 @@ test('de una app a Proyectos, al stage y entre tabs, sin errores', async ({ page
 
 	// App → variables del stage: se queda sin `a`, y cambia un ShellHeader por otro.
 	await page.goto('/projects/auditfy/stages/staging/apps/api')
-	await location(page).getByRole('link', { name: 'staging' }).click()
+	// El stage es un selector (F1-catalog): sus variables son la primera opción.
+	await location(page).getByRole('button', { name: 'Stage staging, cambiar' }).click()
+	await page.getByRole('menuitem', { name: 'Variables de staging' }).click()
 	await expect(page).toHaveURL(/\/stages\/staging\/variables$/)
 	await expect(page.getByRole('heading', { name: 'Variables del stage' })).toBeVisible()
 	await expect(tabs(page)).toHaveCount(0)
