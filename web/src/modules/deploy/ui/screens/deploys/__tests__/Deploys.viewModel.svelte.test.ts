@@ -257,4 +257,15 @@ describe('DeploysViewModel', () => {
 
 		expect(signals[0]?.aborted).toBe(true)
 	})
+
+	it('si el backend no reconoce el offset, el log se vuelve a leer de cero sin repetir', async () => {
+		mocks.followDeployLog.mockImplementation(
+			scripted([chunk('uno\n', 4), { kind: 'reset' }, chunk('uno\ndos\n', 8)]),
+		)
+		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
+
+		await vi.waitFor(() =>
+			expect(vm.log.lines.map((line) => line.text)).toEqual(['uno', 'dos']),
+		)
+	})
 })

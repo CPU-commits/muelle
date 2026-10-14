@@ -52,7 +52,9 @@
 				"input history",
 				"local historyPlural = history: plural"
 			],
-			"selectors": ["historyPlural"],
+			"selectors": [
+				"historyPlural"
+			],
 			"match": {
 				"historyPlural=one": "{running} corriendo · 1 histórica",
 				"historyPlural=*": "{running} corriendo · {history} históricas"
@@ -119,8 +121,13 @@
 	"deploy_logs_lines": "Líneas de log",
 	"deploy_logs_new_lines": [
 		{
-			"declarations": ["input count", "local countPlural = count: plural"],
-			"selectors": ["countPlural"],
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
 			"match": {
 				"countPlural=one": "1 línea nueva en pausa",
 				"countPlural=*": "{count} líneas nuevas en pausa"
@@ -146,8 +153,14 @@
 	"deploy_memory_with_limit": "MB c/u · límite {limit}",
 	"deploy_usage_sampled": [
 		{
-			"declarations": ["input sampled", "input total", "local totalPlural = total: plural"],
-			"selectors": ["totalPlural"],
+			"declarations": [
+				"input sampled",
+				"input total",
+				"local totalPlural = total: plural"
+			],
+			"selectors": [
+				"totalPlural"
+			],
 			"match": {
 				"totalPlural=one": "{sampled} de 1 réplica medida (solo las del nodo de muelle)",
 				"totalPlural=*": "{sampled} de {total} réplicas medidas (solo las del nodo de muelle)"
@@ -159,5 +172,10 @@
 	"deploy_logs_resume": "Reanudar",
 	"deploy_logs_new_lines_announce": "Hay líneas nuevas",
 	"deploy_logs_unreachable_title": "No se pudo conectar a los logs.",
-	"deploy_logs_retrying_body": "Se vuelve a intentar sola en unos segundos; las líneas de antes se quedan."
+	"deploy_logs_retrying_body": "Se vuelve a intentar sola en unos segundos; las líneas de antes se quedan.",
+	"deploy_logs_ended_title": "El servicio dejó de existir.",
+	"deploy_logs_ended_body": "No hay más logs que seguir. Si lo vuelves a desplegar, reconecta.",
+	"deploy_logs_ended_empty": "No llegaron líneas.",
+	"deploy_logs_restart": "Volver a conectar",
+	"deploy_error_docker": "Docker no responde en el servidor de muelle (o el nodo no es manager de un Swarm)."
 }

@@ -49,6 +49,8 @@ export function makeTask(overrides: Partial<ServiceTask> = {}): ServiceTask {
 export function makeService(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
 	return {
 		name: 'api',
+		image: `ghcr.io/auditfy/api:sha-3f9c2e1@sha256:${'9b2de1f4'.repeat(8)}`,
+		updateState: 'completed',
 		desiredReplicas: 2,
 		runningReplicas: 2,
 		memoryLimitBytes: 512 * 1024 * 1024,

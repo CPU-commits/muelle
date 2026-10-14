@@ -2,6 +2,7 @@ import { apiUrl, http } from '@/shared/data/http/client'
 import { parseOrThrow } from '@/shared/data/http/parse'
 import type { AppRef, DeployId, LogOffset, LogTail } from '../../domain'
 import {
+	APP_LOG_END_EVENT,
 	APP_LOG_EVENT,
 	type AppStatusDto,
 	appStatusDtoSchema,
@@ -83,7 +84,7 @@ export const deployHttpDataSource = {
 		return eventStream(url, [DEPLOY_LOG_EVENT, DEPLOY_STATUS_EVENT], signal)
 	},
 
-	/** SSE `…/logs?service&tail|since&follow=1`: eventos `log` con una línea JSON cada uno. */
+	/** SSE `…/logs?service&tail[&since]&follow=1`: eventos `log` (una línea JSON) y `end`. */
 	streamAppLogs(
 		app: AppRef,
 		service: string,
@@ -91,12 +92,13 @@ export const deployHttpDataSource = {
 		since: Date | null,
 		signal: AbortSignal,
 	): AsyncGenerator<StreamItem, void, undefined> {
-		// Al reconectar va `since` (desde la última línea) y no `tail`: el backend manda todo lo
-		// escrito desde ese momento.
+		// Al reconectar va también `since` (la hora de la última línea): las últimas `tail`
+		// de lo escrito desde ahí. Un backend que todavía no lo soporta lo ignora y manda las
+		// últimas `tail`: el panel descarta lo repetido.
 		const query = since
-			? { service, since: since.toISOString(), follow: 1 }
+			? { service, tail, since: since.toISOString(), follow: 1 }
 			: { service, tail, follow: 1 }
 		const url = apiUrl(`${appPath(app)}/logs`, query)
-		return eventStream(url, [APP_LOG_EVENT], signal)
+		return eventStream(url, [APP_LOG_EVENT, APP_LOG_END_EVENT], signal)
 	},
 }

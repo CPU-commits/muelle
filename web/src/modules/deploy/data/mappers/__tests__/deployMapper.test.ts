@@ -98,6 +98,11 @@ describe('appStatusFromDto', () => {
 			services: [
 				{
 					name: 'api',
+					image: `ghcr.io/x/api:sha-3f9c2e1@${DIGEST}`,
+					update_state: 'completed',
+					// Las sumas por servicio (para otros clientes) no se usan: se leen las tareas.
+					cpu_percent: 3.4,
+					memory_bytes: 1024,
 					replicas_desired: 2,
 					replicas_running: 1,
 					memory_limit_bytes: 2048,
@@ -124,6 +129,8 @@ describe('appStatusFromDto', () => {
 			services: [
 				{
 					name: 'api',
+					image: `ghcr.io/x/api:sha-3f9c2e1@${DIGEST}`,
+					updateState: 'completed',
 					desiredReplicas: 2,
 					runningReplicas: 1,
 					memoryLimitBytes: 2048,
@@ -162,7 +169,19 @@ describe('appStatusFromDto', () => {
 describe('log', () => {
 	it('logPageFromDto pasa el offset siguiente', () => {
 		const dto = logPageDtoSchema.parse({ chunk: 'a\n', next_offset: 2, status: 'running' })
-		expect(logPageFromDto(dto)).toEqual({ chunk: 'a\n', nextOffset: 2, status: 'running' })
+		expect(logPageFromDto(dto)).toEqual({
+			chunk: 'a\n',
+			nextOffset: 2,
+			status: 'running',
+			supersededBy: null,
+		})
+		const superseded = logPageDtoSchema.parse({
+			chunk: '',
+			next_offset: 2,
+			status: 'superseded',
+			superseded_by: 146,
+		})
+		expect(logPageFromDto(superseded).supersededBy).toBe(146)
 	})
 
 	it('appLogLineFromDto lee el nivel sin tocar el texto', () => {

@@ -1,11 +1,10 @@
 import { z } from 'zod'
 import { ACTOR_TYPES, DEPLOY_STATUSES, DEPLOY_TRIGGERS } from '../../domain'
 
-// La Fase 2 todavía no existe en el backend: estas formas salen del spec (§5.1 tabla
-// `deploys`, §7 y §10) y de las suposiciones anotadas en ../../README.md, que es lo que
-// la Fase 2 tiene que respetar (o cambiar acá y en el README). snake_case como el resto
-// de la API. Los objetos de Zod descartan los campos que no conocen: si el backend suma
-// algo, el panel no se rompe.
+// Las formas del contrato HTTP de la Fase 2 (`docs/superpowers/specs/2026-10-10-contrato-
+// http-fases-2-3.md`, §2, en `fase-23-base`), resumido en ../../README.md. snake_case como
+// el resto de la API. Los objetos de Zod descartan los campos que no conocen: si el
+// backend suma algo, el panel no se rompe.
 
 const timestamp = z.iso.datetime({ offset: true })
 
@@ -21,13 +20,19 @@ export const taskDtoSchema = z.object({
 	node: z.string().nullish(),
 	since: timestamp.nullish(),
 	error: z.string().nullish(),
-	// Solo las tareas del nodo de muelle se miden: el resto, null.
+	// Solo las tareas del nodo de muelle se miden: el resto, null. El panel lee estas.
 	cpu_percent: z.number().nonnegative().nullish(),
 	memory_bytes: z.number().nonnegative().nullish(),
 })
 
 export const serviceStatusDtoSchema = z.object({
 	name: z.string().min(1),
+	image: z.string().nullish(),
+	// `Service.UpdateStatus.State`, o null si nunca se actualizó.
+	update_state: z.string().nullish(),
+	// Las sumas de las tareas medidas, para otros clientes: el panel suma las de las tareas.
+	cpu_percent: z.number().nonnegative().nullish(),
+	memory_bytes: z.number().nonnegative().nullish(),
 	replicas_desired: z.number().int().nonnegative(),
 	replicas_running: z.number().int().nonnegative(),
 	memory_limit_bytes: z.number().nonnegative().nullish(),
@@ -46,6 +51,7 @@ export const deployDtoSchema = z.object({
 	images: z.record(z.string(), z.string()),
 	trigger: z.enum(DEPLOY_TRIGGERS),
 	actor_type: z.enum(ACTOR_TYPES),
+	actor_id: z.number().int().nullish(),
 	// Una copia del nombre al crear el deploy: nunca null, puede ser "".
 	actor_name: z.string(),
 	error: z.string().nullish(),
@@ -62,6 +68,7 @@ export const deployListDtoSchema = z.array(deployDtoSchema)
 /** `POST …/deploys` y `POST …/rollback` (202). */
 export const deployAcceptedDtoSchema = z.object({
 	id: z.number().int().positive(),
+	status: deployStatusDtoSchema.optional(),
 	status_url: z.string().optional(),
 })
 
@@ -70,6 +77,7 @@ export const logPageDtoSchema = z.object({
 	chunk: z.string(),
 	next_offset: z.number().int().nonnegative(),
 	status: deployStatusDtoSchema,
+	superseded_by: z.number().int().positive().nullish(),
 })
 
 /** El `data` de cada evento `log` del SSE de `GET …/apps/{a}/logs`. */
@@ -94,8 +102,10 @@ export type CreateDeployPayload =
 	| { image: string }
 	| { images: Record<string, string> }
 
-// Los eventos del SSE (ver el README): `log` con una línea por evento y el offset
-// siguiente en el `id`; `status` con el estado del deploy en el `data`.
+// Los eventos del SSE (contrato §2.6 y §2.9): `log` con una línea por evento y el offset
+// siguiente en el `id`; `status` con el estado del deploy en el `data`; en los logs de una
+// app, `end` (`eof` o `timeout`) antes de cerrar.
 export const DEPLOY_LOG_EVENT = 'log'
 export const DEPLOY_STATUS_EVENT = 'status'
 export const APP_LOG_EVENT = 'log'
+export const APP_LOG_END_EVENT = 'end'

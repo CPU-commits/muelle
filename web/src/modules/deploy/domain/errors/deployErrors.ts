@@ -16,6 +16,14 @@ export class NoPreviousDeploy extends ConflictError {
 	}
 }
 
+/** `503 docker_unavailable`: Docker no responde, o el nodo no es manager de un Swarm. */
+export class DockerUnavailable extends UnavailableError {
+	constructor(options?: ErrorOptions) {
+		super('Docker no responde', { ...options, reason: 'server' })
+		this.name = 'DockerUnavailable'
+	}
+}
+
 /**
  * El stream SSE (log de un deploy o logs en vivo) no abrió o se cortó. El log de un deploy
  * sigue por polling; los logs en vivo ofrecen reconectar.

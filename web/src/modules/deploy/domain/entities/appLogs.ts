@@ -15,10 +15,18 @@ export interface AppLogLine {
 	readonly level: LogLevel
 }
 
-/** Lo que llega por el stream: primero `open` (conectado) y después las líneas. */
+/**
+ * Por qué terminó el log (el evento `end` del contrato):
+ * - `eof`: el servicio dejó de existir (o se pidió sin `follow`): no hay más que seguir;
+ * - `timeout`: el stream llegó a su hora de vida; se puede volver a conectar enseguida.
+ */
+export type LogEndReason = 'eof' | 'timeout'
+
+/** Lo que llega por el stream: primero `open` (conectado), las líneas y, a veces, `end`. */
 export type AppLogEvent =
 	| { readonly kind: 'open' }
 	| { readonly kind: 'line'; readonly line: AppLogLine }
+	| { readonly kind: 'end'; readonly reason: LogEndReason }
 
 /** "Últimas N" del selector de líneas iniciales. `0` = solo lo nuevo. */
 export const LOG_TAILS = [100, 200, 500] as const
@@ -27,10 +35,12 @@ export const DEFAULT_LOG_TAIL: LogTail = 200
 
 export interface AppLogsQuery {
 	readonly service: string
+	/** Las últimas N; con `since`, las últimas N de las escritas desde ahí. */
 	readonly tail: LogTail
 	/**
-	 * Al reconectar: solo lo escrito desde este momento (inclusivo), en vez de `tail`.
-	 * Así no se pierde lo que pasó mientras estaba cortado ni se repite lo de antes.
+	 * Al reconectar: solo lo escrito desde este momento (inclusivo). Así no se pierde lo que
+	 * pasó mientras estaba cortado. Pendiente en el backend (Fase 2): mientras lo ignore,
+	 * llegan las últimas `tail` y el panel descarta lo repetido.
 	 */
 	readonly since?: Date
 }
@@ -143,41 +153,71 @@ export function logTasks(lines: readonly AppLogLine[]): string[] {
 	return [...tasks].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
 }
 
-/** Lo que identifica una línea dentro de un mismo instante (para no repetirla). */
+/** Lo que identifica una línea dentro de un mismo milisegundo (para no repetirla). */
 export function lineKey(line: AppLogLine): string {
 	return `${line.task ?? ''}|${line.stream}|${line.text}`
 }
 
-/** Desde dónde seguir al reconectar: la hora de la última línea y las de ese instante. */
+/** La foto de una reconexión: desde cuándo, y cuántas veces llegó cada línea de ese ms. */
 export interface ResumePoint {
 	readonly since: Date
-	readonly seen: ReadonlySet<string>
-}
-
-/** El punto de reconexión después de recibir `line` (las líneas sin hora no lo mueven). */
-export function advanceResumePoint(
-	point: ResumePoint | null,
-	line: AppLogLine,
-): ResumePoint | null {
-	if (!line.time) return point
-	const key = lineKey(line)
-	const time = line.time.getTime()
-	if (!point || time > point.since.getTime()) return { since: line.time, seen: new Set([key]) }
-	if (time === point.since.getTime() && !point.seen.has(key)) {
-		return { since: point.since, seen: new Set([...point.seen, key]) }
-	}
-	return point
+	readonly seen: ReadonlyMap<string, number>
 }
 
 /**
- * Al reconectar con `since` (inclusivo) vuelve a llegar lo del último instante que ya se
- * tenía: es repetida una línea de antes de `since`, o de ese mismo milisegundo y ya vista.
+ * La hora de la última línea recibida y las que llegaron en ese mismo milisegundo, para
+ * reconectar con `since` sin repetir. Se actualiza en el lugar: miles de líneas en el mismo
+ * milisegundo no copian nada, y lo de un milisegundo se descarta cuando la hora avanza.
  */
-export function isRepeatedAfterResume(line: AppLogLine, point: ResumePoint): boolean {
-	if (!line.time) return false
-	const time = line.time.getTime()
+export class ResumeTracker {
+	#since: Date | null = null
+	readonly #seen = new Map<string, number>()
+
+	/** Una línea que se mostró (las sin hora, o con una hora anterior, no lo mueven). */
+	note(line: AppLogLine): void {
+		if (!line.time) return
+		const time = line.time.getTime()
+		const last = this.#since?.getTime() ?? Number.NEGATIVE_INFINITY
+		if (time < last) return
+		if (time > last) {
+			this.#since = line.time
+			this.#seen.clear()
+		}
+		const key = lineKey(line)
+		this.#seen.set(key, (this.#seen.get(key) ?? 0) + 1)
+	}
+
+	/** La foto para la próxima conexión; null si todavía no llegó ninguna línea con hora. */
+	point(): ResumePoint | null {
+		return this.#since ? { since: this.#since, seen: new Map(this.#seen) } : null
+	}
+
+	clear(): void {
+		this.#since = null
+		this.#seen.clear()
+	}
+}
+
+/**
+ * Lo que descarta una conexión que siguió con `since` (inclusivo): todo lo de antes (un
+ * backend que todavía no soporta `since` manda las últimas `tail` igual) y, de ese mismo
+ * milisegundo, tantas copias de cada línea como ya se tenían. Nunca repite: si falta algo,
+ * queda el hueco. Devuelve `true` para una línea repetida.
+ */
+export function makeResumeFilter(point: ResumePoint): (line: AppLogLine) => boolean {
 	const from = point.since.getTime()
-	return time < from || (time === from && point.seen.has(lineKey(line)))
+	const remaining = new Map(point.seen)
+	return (line) => {
+		if (!line.time) return false
+		const time = line.time.getTime()
+		if (time < from) return true
+		if (time > from) return false
+		const key = lineKey(line)
+		const left = remaining.get(key) ?? 0
+		if (left === 0) return false
+		remaining.set(key, left - 1)
+		return true
+	}
 }
 
 /** La primera espera antes de reconectar un stream de logs que se cortó. */

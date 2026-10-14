@@ -4,22 +4,21 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { pendingPhase, type RoadmapPhase, UnauthorizedError } from '@/shared/domain'
 import { appStatusQuery, streamAppLogs } from '../../../data'
 import {
-	advanceResumePoint,
 	appendCapped,
 	type AppLogLine,
 	type AppRef,
 	type AppStatus,
 	DEFAULT_LOG_TAIL,
-	isRepeatedAfterResume,
 	LOG_LINE_CAP,
 	LOG_TAILS,
 	type LogTail,
 	logTasks,
+	makeResumeFilter,
 	matchesFilter,
 	RECONNECT_BASE_MS,
 	RECONNECT_MAX_MS,
 	reconnectDelayMs,
-	type ResumePoint,
+	ResumeTracker,
 } from '../../../domain'
 
 export interface LogsProps {
@@ -41,8 +40,17 @@ export interface KeyedLine {
  * - `retrying`: se cortó (o no abrió) y espera para volver a intentar.
  * - `asleep`: cerrado porque la pestaña lleva un rato oculta; sigue al volver.
  * - `stopped`: la sesión venció (el cliente HTTP ya mandó al login).
+ * - `ended`: el backend terminó el log (`end` con `eof`: el servicio dejó de existir). No
+ *   se reconecta solo.
  */
-export type LogConnection = 'idle' | 'connecting' | 'live' | 'retrying' | 'asleep' | 'stopped'
+export type LogConnection =
+	| 'idle'
+	| 'connecting'
+	| 'live'
+	| 'retrying'
+	| 'asleep'
+	| 'stopped'
+	| 'ended'
 
 /** Por qué no está en vivo: se cortó estando abierto, o no llegó a abrir. */
 export type LogProblem = 'dropped' | 'unreachable'
@@ -68,7 +76,8 @@ export const DEFAULT_LOG_TIMING: LogTiming = {
 /** Cada cuánto se pintan las líneas que llegaron (un log ruidoso no repinta por línea). */
 export const LOG_FLUSH_MS = 100
 
-type ConnectOutcome = 'closed' | 'asleep' | 'unauthorized'
+/** `expired`: el stream llegó a su hora de vida (`end` con `timeout`). */
+type ConnectOutcome = 'closed' | 'asleep' | 'unauthorized' | 'ended' | 'expired'
 
 // Logs (App-Logs.dc.html): en vivo por SSE desde Docker, por servicio. Pausar congela lo
 // que se ve y guarda lo que llega; reanudar lo suma. En memoria quedan las últimas
@@ -99,8 +108,10 @@ export class LogsViewModel {
 	#sequence = 0
 	#incoming: KeyedLine[] = []
 	#flushTimer: ReturnType<typeof setTimeout> | null = null
-	/** La hora de la última línea y las que llegaron en ese instante: desde ahí se reconecta. */
-	#resumePoint: ResumePoint | null = null
+	/** La hora de la última línea y las que llegaron en ese ms: desde ahí se reconecta. */
+	readonly #resume = new ResumeTracker()
+	/** "Volver a conectar" después de un `end`: otro stream, de cero. */
+	#session = $state(0)
 	#hiddenTimer: ReturnType<typeof setTimeout> | null = null
 	#asleep = false
 	/** Cierra el stream abierto (la pestaña lleva oculta un rato). */
@@ -139,6 +150,7 @@ export class LogsViewModel {
 			const ref = this.ref
 			const service = this.service
 			const tail = this.tail
+			void this.#session
 			if (service === null) return
 			const controller = new AbortController()
 			untrack(() => void this.#run(ref, service, tail, controller.signal))
@@ -186,6 +198,14 @@ export class LogsViewModel {
 	/** Se llegó al tope: las más viejas se están descartando. */
 	get isCapped(): boolean {
 		return this.lines.length >= LOG_LINE_CAP
+	}
+
+	/** Lo que dice la caja sin líneas que mostrar. */
+	get emptyText(): string {
+		if (this.isFiltering && this.lines.length > 0) return m.deploy_logs_no_match()
+		if (this.connection === 'connecting') return m.deploy_logs_connecting()
+		if (this.connection === 'ended') return m.deploy_logs_ended_empty()
+		return m.deploy_logs_waiting()
 	}
 
 	/**
@@ -244,11 +264,17 @@ export class LogsViewModel {
 		void this.status.refetch()
 	}
 
+	/** Después de que el servicio dejó de existir: lo busca de nuevo y vuelve a conectar. */
+	restart = (): void => {
+		void this.status.refetch()
+		this.#session += 1
+	}
+
 	async #run(ref: AppRef, service: string, tail: LogTail, signal: AbortSignal): Promise<void> {
 		this.#incoming = []
 		this.lines = []
 		this.pending = []
-		this.#resumePoint = null
+		this.#resume.clear()
 		this.problem = null
 		let attempt = 0
 		while (!signal.aborted) {
@@ -266,6 +292,17 @@ export class LogsViewModel {
 				return
 			}
 			if (outcome === 'asleep') continue
+			if (outcome === 'ended') {
+				this.connection = 'ended'
+				this.problem = null
+				return
+			}
+			// Llegó a su hora de vida: se sigue enseguida, sin aviso ni espera.
+			if (outcome === 'expired') {
+				attempt = 0
+				this.problem = null
+				continue
+			}
 			// Uno que anduvo un buen rato no hereda la espera larga de cortes anteriores.
 			if (this.problem === 'dropped' && Date.now() - started >= this.#timing.stableStreamMs) {
 				attempt = 0
@@ -296,20 +333,25 @@ export class LogsViewModel {
 			controller.abort()
 		}
 		this.#closeForHidden = closeForHidden
-		// Con líneas ya vistas se sigue desde la última (`since` es inclusivo: lo de ese
-		// instante que ya estaba se descarta). Sin ninguna, `tail` de nuevo.
-		const resume = this.#resumePoint
+		// Con líneas ya vistas se sigue desde la última (`since` es inclusivo): lo de antes, y
+		// lo de ese milisegundo que ya estaba, se descarta. Sin ninguna, `tail` de nuevo.
+		const point = this.#resume.point()
+		const isRepeat = point ? makeResumeFilter(point) : null
 		let opened = false
+		let ended: 'eof' | 'timeout' | null = null
 		this.connection = 'connecting'
 		try {
-			const input = { app: ref, service, tail, ...(resume ? { since: resume.since } : {}) }
+			const input = { app: ref, service, tail, ...(point ? { since: point.since } : {}) }
 			for await (const event of streamAppLogs(input, controller.signal)) {
 				if (controller.signal.aborted) break
 				if (event.kind === 'open') {
 					opened = true
 					this.connection = 'live'
 					this.problem = null
-				} else if (!resume || !isRepeatedAfterResume(event.line, resume)) {
+				} else if (event.kind === 'end') {
+					ended = event.reason
+					break
+				} else if (!isRepeat?.(event.line)) {
 					this.#enqueue(event.line)
 				}
 			}
@@ -322,6 +364,8 @@ export class LogsViewModel {
 			if (!outer.aborted) this.#flush()
 		}
 		if (asleep) return 'asleep'
+		if (ended === 'eof') return 'ended'
+		if (ended === 'timeout') return 'expired'
 		// "Se cortó" solo si estuvo abierto (en esta conexión o antes de la racha de intentos).
 		if (!outer.aborted)
 			this.problem = opened || this.problem === 'dropped' ? 'dropped' : 'unreachable'
@@ -388,7 +432,7 @@ export class LogsViewModel {
 	}
 
 	#remember(line: AppLogLine): void {
-		this.#resumePoint = advanceResumePoint(this.#resumePoint, line)
+		this.#resume.note(line)
 	}
 
 	#flush = (): void => {

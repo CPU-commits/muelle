@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
+	import { deployErrorMessage } from '../../components/labels/deployErrorMessage'
 	import {
 		Banner,
 		Button,
@@ -49,7 +50,7 @@
 	{:else if vm.loadError}
 		<ErrorState
 			title={m.deploy_logs_error_title()}
-			body={m.common_unavailable()}
+			body={deployErrorMessage(vm.loadError)}
 			retryLabel={m.common_retry()}
 			onRetry={vm.retry}
 		/>
@@ -129,6 +130,20 @@
 			</Banner>
 		{/if}
 
+		{#if vm.connection === 'ended'}
+			<Banner
+				tone="info"
+				title={m.deploy_logs_ended_title()}
+				body={m.deploy_logs_ended_body()}
+			>
+				{#snippet action()}
+					<Button variant="secondary" size="sm" onclick={vm.restart}>
+						{m.deploy_logs_restart()}
+					</Button>
+				{/snippet}
+			</Banner>
+		{/if}
+
 		<!-- Se anuncia una vez; la cuenta, que cambia con cada línea, queda fuera. -->
 		<p class={srOnly} role="status">{vm.announcement}</p>
 		<p class={status}>
@@ -149,13 +164,7 @@
 				size="lg"
 			>
 				{#if vm.visibleLines.length === 0}
-					<p class={placeholder}>
-						{vm.isFiltering && vm.lines.length > 0
-							? m.deploy_logs_no_match()
-							: vm.connection === 'connecting'
-								? m.deploy_logs_connecting()
-								: m.deploy_logs_waiting()}
-					</p>
+					<p class={placeholder}>{vm.emptyText}</p>
 				{:else}
 					<ol class={lines}>
 						{#each vm.visibleLines as keyed (keyed.key)}

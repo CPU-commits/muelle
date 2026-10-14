@@ -1,3 +1,4 @@
+import { ValidationError } from '@/shared/domain'
 import { type DeployLogEvent, LOG_START, type LogOffset } from '../entities/deployLog'
 import { LogStreamFailed } from '../errors/deployErrors'
 import type { DeployDeps } from '../repositories/deployRepository'
@@ -50,8 +51,22 @@ export function makeFollowDeployLog({ deploys, wait }: DeployDeps): FollowDeploy
 			yield { kind: 'polling' }
 		}
 
+		let restarted = false
 		while (!signal.aborted) {
-			const page = await deploys.readLog(input.app, input.id, offset, signal)
+			let page
+			try {
+				page = await deploys.readLog(input.app, input.id, offset, signal)
+			} catch (error) {
+				// `422 offset`: el offset no es del log (no debería pasar: solo se usan los que
+				// mandó el servidor). Se lee de nuevo desde el principio, una vez.
+				if (error instanceof ValidationError && error.field === 'offset' && !restarted) {
+					restarted = true
+					offset = LOG_START
+					yield { kind: 'reset' }
+					continue
+				}
+				throw error
+			}
 			if (signal.aborted) return
 			if (page.chunk) yield { kind: 'chunk', text: page.chunk, nextOffset: page.nextOffset }
 			offset = page.nextOffset

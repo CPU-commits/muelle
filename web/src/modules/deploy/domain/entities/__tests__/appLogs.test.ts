@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
-	advanceResumePoint,
 	type AppLogLine,
 	appendCapped,
-	isRepeatedAfterResume,
 	lineKey,
 	logTasks,
+	makeResumeFilter,
 	matchesFilter,
 	parseAppLogText,
 	reconnectDelayMs,
+	ResumeTracker,
 	stripAnsi,
 } from '../appLogs'
 
@@ -120,35 +120,74 @@ describe('reconectar', () => {
 		level: 'info',
 	})
 
-	it('advanceResumePoint sigue la hora más nueva y junta las líneas de ese instante', () => {
-		let point = advanceResumePoint(null, line('sin hora'))
-		expect(point).toBeNull()
+	it('ResumeTracker sigue la hora más nueva y cuenta las líneas de ese milisegundo', () => {
+		const tracker = new ResumeTracker()
+		tracker.note(line('sin hora'))
+		expect(tracker.point()).toBeNull()
 
-		point = advanceResumePoint(point, at('2026-10-10T14:31:51.517Z', 'a'))
-		point = advanceResumePoint(point, at('2026-10-10T14:31:51.517Z', 'b', 'api.2'))
+		tracker.note(at('2026-10-10T14:31:51.517Z', 'a'))
+		tracker.note(at('2026-10-10T14:31:51.517Z', 'a'))
+		tracker.note(at('2026-10-10T14:31:51.517Z', 'b', 'api.2'))
 		// Una línea de otra tarea que llega tarde con una hora anterior no lo mueve.
-		point = advanceResumePoint(point, at('2026-10-10T14:31:51.000Z', 'tarde'))
+		tracker.note(at('2026-10-10T14:31:51.000Z', 'tarde'))
+		let point = tracker.point()
 		expect(point?.since.toISOString()).toBe('2026-10-10T14:31:51.517Z')
+		expect(point?.seen.get(lineKey(at('2026-10-10T14:31:51.517Z', 'a')))).toBe(2)
 		expect(point?.seen.size).toBe(2)
 
-		point = advanceResumePoint(point, at('2026-10-10T14:31:52.000Z', 'c'))
+		// La hora avanza: lo del milisegundo anterior se descarta.
+		tracker.note(at('2026-10-10T14:31:52.000Z', 'c'))
+		point = tracker.point()
 		expect(point?.since.toISOString()).toBe('2026-10-10T14:31:52.000Z')
-		expect([...(point?.seen ?? [])]).toEqual([lineKey(at('2026-10-10T14:31:52.000Z', 'c'))])
+		expect([...(point?.seen.keys() ?? [])]).toEqual([
+			lineKey(at('2026-10-10T14:31:52.000Z', 'c')),
+		])
+
+		tracker.clear()
+		expect(tracker.point()).toBeNull()
 	})
 
-	it('isRepeatedAfterResume descarta lo de antes de since y lo ya visto en ese instante', () => {
-		const point = advanceResumePoint(null, at('2026-10-10T14:31:51.517Z', 'ya estaba'))
+	it('makeResumeFilter descarta lo de antes de since y las copias ya vistas de ese ms', () => {
+		const tracker = new ResumeTracker()
+		tracker.note(at('2026-10-10T14:31:51.517Z', 'ya estaba'))
+		tracker.note(at('2026-10-10T14:31:51.517Z', 'dos veces'))
+		tracker.note(at('2026-10-10T14:31:51.517Z', 'dos veces'))
+		const point = tracker.point()
 		if (!point) throw new Error('sin punto')
+		const isRepeat = makeResumeFilter(point)
 
-		expect(isRepeatedAfterResume(at('2026-10-10T14:31:50.000Z', 'vieja'), point)).toBe(true)
-		expect(isRepeatedAfterResume(at('2026-10-10T14:31:51.517Z', 'ya estaba'), point)).toBe(true)
+		// Lo de antes: un backend que todavía no soporta `since` manda las últimas igual.
+		expect(isRepeat(at('2026-10-10T14:31:50.000Z', 'vieja'))).toBe(true)
+		expect(isRepeat(at('2026-10-10T14:31:51.517Z', 'ya estaba'))).toBe(true)
+		// Una tercera copia de "dos veces" en ese ms es nueva: se tenían dos.
+		expect(isRepeat(at('2026-10-10T14:31:51.517Z', 'dos veces'))).toBe(true)
+		expect(isRepeat(at('2026-10-10T14:31:51.517Z', 'dos veces'))).toBe(true)
+		expect(isRepeat(at('2026-10-10T14:31:51.517Z', 'dos veces'))).toBe(false)
 		// Mismo instante pero otra línea (u otra tarea): es nueva.
-		expect(isRepeatedAfterResume(at('2026-10-10T14:31:51.517Z', 'otra'), point)).toBe(false)
-		expect(
-			isRepeatedAfterResume(at('2026-10-10T14:31:51.517Z', 'ya estaba', 'api.2'), point),
-		).toBe(false)
-		expect(isRepeatedAfterResume(at('2026-10-10T14:31:52.000Z', 'nueva'), point)).toBe(false)
+		expect(isRepeat(at('2026-10-10T14:31:51.517Z', 'otra'))).toBe(false)
+		expect(isRepeat(at('2026-10-10T14:31:51.517Z', 'ya estaba', 'api.2'))).toBe(false)
+		expect(isRepeat(at('2026-10-10T14:31:52.000Z', 'nueva'))).toBe(false)
 		// Sin hora no se puede saber: se muestra.
-		expect(isRepeatedAfterResume(line('sin hora'), point)).toBe(false)
+		expect(isRepeat(line('sin hora'))).toBe(false)
+	})
+
+	it('10 000 líneas en el mismo milisegundo no copian nada por línea', () => {
+		const tracker = new ResumeTracker()
+		const lines = Array.from({ length: 10_000 }, (_, index) =>
+			at('2026-10-10T14:31:51.517Z', `línea ${index}`),
+		)
+		const started = performance.now()
+		for (const item of lines) tracker.note(item)
+		const point = tracker.point()
+		if (!point) throw new Error('sin punto')
+		const isRepeat = makeResumeFilter(point)
+		const repeated = lines.filter((item) => isRepeat(item)).length
+		const elapsed = performance.now() - started
+
+		expect(point.seen.size).toBe(10_000)
+		expect(repeated).toBe(10_000)
+		expect(isRepeat(at('2026-10-10T14:31:51.517Z', 'otra más'))).toBe(false)
+		// Copiar el conjunto en cada línea (lo de antes) eran ~50 millones de inserciones.
+		expect(elapsed).toBeLessThan(250)
 	})
 })

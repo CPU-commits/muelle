@@ -28,6 +28,8 @@ export interface MockDeploy {
 	scenario: MockScenario
 	/** servicio → ref (sin digest; el digest sale de la ref). */
 	images: Record<string, string>
+	/** Lo que pidió el cuerpo (contrato §2.1: es lo que muestra `images` hasta resolver). */
+	overrides?: Record<string, string>
 	trigger: MockTrigger
 	actorType: 'user' | 'token'
 	actorName: string
@@ -258,7 +260,7 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 			startedAt: null,
 			finishedAt: deploy.supersededAt,
 			error: null,
-			images: { ...deploy.images },
+			images: { ...(deploy.overrides ?? deploy.images) },
 		}
 	}
 	const elapsed = now - deploy.startAt
@@ -269,7 +271,7 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 			startedAt: null,
 			finishedAt: null,
 			error: null,
-			images: { ...deploy.images },
+			images: { ...(deploy.overrides ?? deploy.images) },
 		}
 	}
 	const script = scriptFor(app, deploy)
@@ -278,7 +280,10 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 		if (step.at <= elapsed) lines.push(`${iso(deploy.startAt + step.at)} ${step.text}`)
 	}
 	const resolved = script.resolvedAt !== null && elapsed >= script.resolvedAt
-	const images = resolved ? withDigests(deploy.images) : { ...deploy.images }
+	// Hasta resolver (y si falló antes), los overrides; desde ahí, todos con digest.
+	const images = resolved
+		? withDigests(deploy.images)
+		: { ...(deploy.overrides ?? deploy.images) }
 	if (elapsed < duration) {
 		return {
 			status: 'running',
@@ -434,10 +439,29 @@ function seedApp(project: string, stage: string, slug: string, now: number): Moc
 
 export interface CreateInput {
 	images: Record<string, string>
+	/** Lo que vino en el cuerpo (`{}` si nada). */
+	overrides?: Record<string, string>
 	trigger: MockTrigger
 	actorName: string
 	rollbackOf?: number
 	scenario?: MockScenario
+}
+
+/**
+ * La retención del contrato (§2.3): los 20 más nuevos y, aunque sean más viejos, el actual
+ * (el succeeded más reciente), su anterior (el destino del rollback) y los que están en cola
+ * o corriendo. Hasta 22.
+ */
+function retained(app: MockApp, now: number): MockDeploy[] {
+	const newest = [...app.deploys].sort((a, b) => b.id - a.id)
+	const keep = new Set(newest.slice(0, 20).map((deploy) => deploy.id))
+	const succeeded = newest.filter((deploy) => view(app, deploy, now).status === 'succeeded')
+	for (const deploy of succeeded.slice(0, 2)) keep.add(deploy.id)
+	for (const deploy of newest) {
+		const status = view(app, deploy, now).status
+		if (status === 'queued' || status === 'running') keep.add(deploy.id)
+	}
+	return newest.filter((deploy) => keep.has(deploy.id)).sort((a, b) => a.id - b.id)
 }
 
 function scenarioFor(images: Record<string, string>): MockScenario {
@@ -505,14 +529,14 @@ export const deployDb = {
 			scale: state.liveScale,
 			scenario: input.scenario ?? scenarioFor(input.images),
 			images: input.images,
+			overrides: input.overrides ?? {},
 			trigger: input.trigger,
 			actorType: 'user',
 			actorName: input.actorName,
 			...(input.rollbackOf !== undefined ? { rollbackOf: input.rollbackOf } : {}),
 		}
 		app.deploys.push(deploy)
-		// Retención: los últimos 20 por app (spec §5.2 regla 7).
-		app.deploys = [...app.deploys].sort((a, b) => a.id - b.id).slice(-20)
+		app.deploys = retained(app, now)
 		commit()
 		return deploy
 	},

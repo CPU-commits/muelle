@@ -4,15 +4,26 @@ import { api, apiError } from '@/mocks/api'
 import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { deployDb } from '@/mocks/db/deploy'
 import { server } from '@/mocks/server'
-import { pendingPhase, UnauthorizedError, UnavailableError, ValidationError } from '@/shared/domain'
+import { http as client } from '@/shared/data/http/client'
+import { ApiError } from '@/shared/data/http/errors'
+import {
+	ConflictError,
+	pendingPhase,
+	UnauthorizedError,
+	UnavailableError,
+	ValidationError,
+} from '@/shared/domain'
 import { deployUseCases } from '../container'
+import { httpDeployRepository } from '../data/repositories/httpDeployRepository'
 import {
 	type AppLogEvent,
 	type AppRef,
 	appHealth,
 	asDeployId,
+	asLogOffset,
 	type DeployLogEvent,
 	DeployNotFound,
+	DockerUnavailable,
 	LogStreamFailed,
 	NoPreviousDeploy,
 } from '../domain'
@@ -399,5 +410,133 @@ describe('contra un backend sin la Fase 2', () => {
 		const result = deployUseCases.getAppStatus(APP)
 		await expect(result).rejects.toBeInstanceOf(UnavailableError)
 		await expect(result).rejects.toSatisfy((error) => pendingPhase(error) === null)
+	})
+})
+
+/** Una respuesta SSE armada a mano: los eventos y cierra. */
+function sseBody(events: readonly string[]): Response {
+	return new Response(`${events.join('\n\n')}\n\n`, {
+		headers: { 'content-type': 'text/event-stream' },
+	})
+}
+
+describe('contrato de la Fase 2', () => {
+	it('el estado trae la imagen y el estado de la actualización de cada servicio', async () => {
+		const status = await deployUseCases.getAppStatus(APP)
+		const api = status.services[0]
+		expect(api?.image).toMatch(/^ghcr\.io\/.+@sha256:[0-9a-f]{64}$/)
+		expect(api?.updateState).toBe('completed')
+		// CPU y RAM por tarea: la del otro nodo, sin medir.
+		expect(api?.tasks.some((task) => task.cpuPercent === null)).toBe(true)
+	})
+
+	it('Docker caído (503 docker_unavailable) es DockerUnavailable, con su texto', async () => {
+		server.use(
+			http.get(api(`${APP_PATH}/status`), () =>
+				apiError(503, 'docker_unavailable', 'Docker no responde'),
+			),
+		)
+		await expect(deployUseCases.getAppStatus(APP)).rejects.toBeInstanceOf(DockerUnavailable)
+	})
+
+	it('el rollback sin anterior es solo no_previous_deploy: un conflict es otro 409', async () => {
+		server.use(
+			http.post(api(`${APP_PATH}/rollback`), () => apiError(409, 'conflict', 'otra cosa')),
+		)
+		const result = deployUseCases.rollback(APP)
+		await expect(result).rejects.toBeInstanceOf(ConflictError)
+		await expect(result).rejects.not.toBeInstanceOf(NoPreviousDeploy)
+	})
+
+	it('el log por polling: un offset más allá del final es 422 offset', async () => {
+		const result = httpDeployRepository.readLog(APP, asDeployId(143), asLogOffset(10_000_000))
+		await expect(result).rejects.toBeInstanceOf(ValidationError)
+		await expect(result).rejects.toMatchObject({ field: 'offset' })
+	})
+
+	it('el log por polling trae superseded_by en un deploy reemplazado', async () => {
+		const first = await deployUseCases.createDeploy({
+			app: APP,
+			services: ['api'],
+			overrides: {},
+		})
+		const second = await deployUseCases.createDeploy({
+			app: APP,
+			services: ['api'],
+			overrides: {},
+		})
+		const page = await httpDeployRepository.readLog(APP, first.id, asLogOffset(0))
+		expect(page.status).toBe('superseded')
+		expect(page.supersededBy).toBe(second.id)
+	})
+
+	it('el SSE de un deploy terminado manda las líneas y después el status final, sin uno al conectar', async () => {
+		const events = await collect(
+			httpDeployRepository.streamLog(
+				APP,
+				asDeployId(143),
+				asLogOffset(0),
+				new AbortController().signal,
+			),
+		)
+		expect(events[0]?.kind).toBe('chunk')
+		expect(events.filter((event) => event.kind === 'status')).toEqual([
+			{ kind: 'status', status: 'succeeded' },
+		])
+		expect(events.at(-1)).toEqual({ kind: 'status', status: 'succeeded' })
+	})
+
+	it('el SSE de un deploy en curso empieza con su status', async () => {
+		const { id } = await deployUseCases.createDeploy({
+			app: APP,
+			services: ['api'],
+			overrides: {},
+		})
+		const controller = new AbortController()
+		const events = await collect(
+			httpDeployRepository.streamLog(APP, id, asLogOffset(0), controller.signal),
+			1,
+		)
+		controller.abort()
+		expect(events[0]).toEqual({ kind: 'status', status: 'queued' })
+	})
+
+	it('los logs terminan con `end`: eof (el servicio dejó de existir) y sin error', async () => {
+		server.use(
+			http.get(api(`${APP_PATH}/logs`), () =>
+				sseBody([
+					'event: log\ndata: {"time":"2026-10-10T14:31:40.118Z","task":"api.1","stream":"stdout","line":"última"}',
+					'event: end\ndata: eof',
+				]),
+			),
+		)
+		const events = await collect(
+			deployUseCases.streamAppLogs(
+				{ app: APP, service: 'api', tail: 100 },
+				new AbortController().signal,
+			),
+		)
+		expect(events.map((event) => event.kind)).toEqual(['open', 'line', 'end'])
+		expect(events.at(-1)).toEqual({ kind: 'end', reason: 'eof' })
+	})
+
+	it('los logs que llegan a su hora de vida terminan con `end` timeout', async () => {
+		server.use(http.get(api(`${APP_PATH}/logs`), () => sseBody(['event: end\ndata: timeout'])))
+		const events = await collect(
+			deployUseCases.streamAppLogs(
+				{ app: APP, service: 'api', tail: 100 },
+				new AbortController().signal,
+			),
+		)
+		expect(events.at(-1)).toEqual({ kind: 'end', reason: 'timeout' })
+	})
+
+	it('el mock pide el servicio, como el backend (422 service)', async () => {
+		const error = await client
+			.get(`/projects/auditfy/stages/staging/apps/api/logs`, { query: { tail: 100 } })
+			.catch((caught: unknown) => caught)
+		expect(error).toBeInstanceOf(ApiError)
+		expect((error as ApiError).status).toBe(422)
+		expect((error as ApiError).message).toBe('service: es obligatorio')
 	})
 })

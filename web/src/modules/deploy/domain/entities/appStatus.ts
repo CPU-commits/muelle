@@ -25,8 +25,17 @@ export interface ServiceTask {
 	readonly memoryBytes: number | null
 }
 
+/**
+ * `Service.UpdateStatus.State` de Swarm (`updating`, `completed`, `paused`,
+ * `rollback_started`, `rollback_paused`, `rollback_completed`), o null si nunca se actualizó.
+ */
+export type ServiceUpdateState = string
+
 export interface ServiceStatus {
 	readonly name: string
+	/** La imagen de sus tareas (`Service.Image`), con digest; null si no vino. */
+	readonly image: string | null
+	readonly updateState: ServiceUpdateState | null
 	readonly desiredReplicas: number
 	readonly runningReplicas: number
 	/** El límite de RAM de CADA tarea (`resources.memory_mb`), en bytes. */

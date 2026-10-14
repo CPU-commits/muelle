@@ -12,6 +12,7 @@ import {
 	imageName,
 	latestDeploy,
 	replicaCount,
+	splitImageRef,
 	weakestService,
 } from '../../../domain'
 import { healthLabel, healthTone } from '../../components/labels/deployLabels'
@@ -121,9 +122,14 @@ export class AppDeployState {
 	 */
 	get image(): string | null {
 		const images = this.currentDeploy?.images ?? []
-		if (images.length === 0) return null
 		if (images.length === 1) return images[0]?.ref ?? null
-		return images.map((image) => image.service).join(' · ')
+		if (images.length > 1) return images.map((image) => image.service).join(' · ')
+		// Sin el historial (o sin un deploy exitoso): lo que corre según Swarm.
+		const services = this.#status.data?.services ?? []
+		const [only] = services
+		if (services.length === 1 && only?.image) return splitImageRef(only.image).ref
+		if (services.length > 1) return services.map((service) => service.name).join(' · ')
+		return null
 	}
 
 	/** Igual que `image`, más corto: solo el nombre (`backend-app:sha-3f9c2e1`). */

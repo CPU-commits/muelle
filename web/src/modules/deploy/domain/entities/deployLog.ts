@@ -1,6 +1,7 @@
 import type { Brand } from '@/shared/domain'
 import type { DeployStatus } from '../value-objects/deployStatus'
 import { stripAnsi } from './appLogs'
+import type { DeployId } from '../value-objects/deployId'
 
 // El log de un deploy (spec §7): texto, una línea por evento, cada una con su timestamp.
 // Los valores de variables `secret` ya llegan reemplazados por `***`.
@@ -19,9 +20,12 @@ export function asLogOffset(raw: number): LogOffset {
 
 /** Una página de `GET …/deploys/{id}/log?offset=N`. */
 export interface LogPage {
+	/** Siempre líneas completas, hasta 64 KiB. */
 	readonly chunk: string
 	readonly nextOffset: LogOffset
 	readonly status: DeployStatus
+	/** En un `superseded`: el deploy que lo reemplazó. */
+	readonly supersededBy: DeployId | null
 }
 
 /** Lo que llega mientras se sigue un log, por SSE o por polling. */
@@ -30,6 +34,11 @@ export type DeployLogEvent =
 	| { readonly kind: 'status'; readonly status: DeployStatus }
 	/** SSE falló o se cortó: lo que sigue llega por polling desde el último offset. */
 	| { readonly kind: 'polling' }
+	/**
+	 * El backend no reconoció el offset (`422 offset`): el log se vuelve a leer desde el
+	 * principio, y lo que se tenía se descarta.
+	 */
+	| { readonly kind: 'reset' }
 
 /** Las líneas que se guardan en memoria, en el log de un deploy y en los logs en vivo. */
 export const LOG_LINE_CAP = 5000

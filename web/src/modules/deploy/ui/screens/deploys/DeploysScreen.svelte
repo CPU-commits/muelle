@@ -85,7 +85,7 @@
 	{:else if vm.loadError}
 		<ErrorState
 			title={m.deploy_deploys_error_title()}
-			body={m.common_unavailable()}
+			body={deployErrorMessage(vm.loadError)}
 			retryLabel={m.common_retry()}
 			onRetry={vm.retry}
 		/>

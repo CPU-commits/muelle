@@ -61,7 +61,14 @@ class ControlledStream {
 			}
 			if (item instanceof Error) throw item
 			yield item
+			// Como el repositorio: después de `end` no hay más que leer.
+			if (item.kind === 'end') return
 		}
+	}
+
+	end(reason: 'eof' | 'timeout'): void {
+		this.#queue.push({ kind: 'end', reason })
+		this.#wake?.()
 	}
 
 	push(...lines: AppLogLine[]): void {
@@ -217,6 +224,59 @@ describe('LogsViewModel', () => {
 		stream.refuse = null
 		await vi.waitFor(() => expect(vm.connection).toBe('live'))
 		expect(vm.problem).toBeNull()
+	})
+
+	it('un backend que ignora since manda las últimas otra vez: no se repite nada', async () => {
+		const vm = await mounted({ ...FAST, reconnectBaseMs: 300, reconnectMaxMs: 300 })
+		stream.push(
+			logLine('uno', 'api.1', 'info', '2026-10-10T14:31:50.000Z'),
+			logLine('dos', 'api.1', 'info', '2026-10-10T14:31:51.517Z'),
+		)
+		await vi.waitFor(() => expect(vm.lines).toHaveLength(2))
+		stream.fail()
+		await vi.waitFor(() => expect(stream.inputs).toHaveLength(2))
+		await vi.waitFor(() => expect(vm.connection).toBe('live'))
+
+		// Las últimas 200 de nuevo (lo de antes de `since`), y después lo nuevo.
+		stream.push(
+			logLine('cero', 'api.1', 'info', '2026-10-10T14:31:49.000Z'),
+			logLine('uno', 'api.1', 'info', '2026-10-10T14:31:50.000Z'),
+			logLine('dos', 'api.1', 'info', '2026-10-10T14:31:51.517Z'),
+			logLine('tres', 'api.1', 'info', '2026-10-10T14:31:52.000Z'),
+		)
+		await vi.waitFor(() => expect(vm.lines).toHaveLength(3))
+		expect(vm.lines.map((keyed) => keyed.line.text)).toEqual(['uno', 'dos', 'tres'])
+	})
+
+	it('`end` con eof: el servicio dejó de existir, no reconecta solo', async () => {
+		const vm = await mounted()
+		stream.push(logLine('última'))
+		await vi.waitFor(() => expect(vm.lines).toHaveLength(1))
+
+		stream.end('eof')
+		await vi.waitFor(() => expect(vm.connection).toBe('ended'))
+		await new Promise((resolve) => setTimeout(resolve, 80))
+		expect(stream.inputs).toHaveLength(1)
+		expect(vm.problem).toBeNull()
+		expect(vm.lines.map((keyed) => keyed.line.text)).toEqual(['última'])
+
+		// "Volver a conectar": de cero, con `tail`.
+		vm.restart()
+		await vi.waitFor(() => expect(vm.connection).toBe('live'))
+		expect(stream.inputs).toHaveLength(2)
+		expect(stream.inputs[1]?.since).toBeUndefined()
+	})
+
+	it('`end` con timeout: vuelve a conectar enseguida desde la última línea, sin aviso', async () => {
+		const vm = await mounted({ ...FAST, reconnectBaseMs: 60_000, reconnectMaxMs: 60_000 })
+		stream.push(logLine('antes', 'api.1', 'info', '2026-10-10T14:31:51.517Z'))
+		await vi.waitFor(() => expect(vm.lines).toHaveLength(1))
+
+		stream.end('timeout')
+		await vi.waitFor(() => expect(stream.inputs).toHaveLength(2))
+		await vi.waitFor(() => expect(vm.connection).toBe('live'))
+		expect(vm.problem).toBeNull()
+		expect(stream.inputs[1]?.since?.toISOString()).toBe('2026-10-10T14:31:51.517Z')
 	})
 
 	it('"Reconectar ahora" no espera el backoff', async () => {

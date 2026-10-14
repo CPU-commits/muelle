@@ -45,6 +45,8 @@ export function taskFromDto(dto: TaskDto): ServiceTask {
 export function serviceStatusFromDto(dto: ServiceStatusDto): ServiceStatus {
 	return {
 		name: dto.name,
+		image: dto.image || null,
+		updateState: dto.update_state || null,
 		desiredReplicas: dto.replicas_desired,
 		runningReplicas: dto.replicas_running,
 		memoryLimitBytes: dto.memory_limit_bytes ?? null,
@@ -78,7 +80,12 @@ export function deployAcceptedFromDto(dto: DeployAcceptedDto): DeployAccepted {
 }
 
 export function logPageFromDto(dto: LogPageDto): LogPage {
-	return { chunk: dto.chunk, nextOffset: asLogOffset(dto.next_offset), status: dto.status }
+	return {
+		chunk: dto.chunk,
+		nextOffset: asLogOffset(dto.next_offset),
+		status: dto.status,
+		supersededBy: dto.superseded_by ? asDeployId(dto.superseded_by) : null,
+	}
 }
 
 export function appLogLineFromDto(dto: AppLogLineDto): AppLogLine {

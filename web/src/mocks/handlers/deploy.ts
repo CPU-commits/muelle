@@ -34,6 +34,7 @@ function deployDto(deploy: MockDeploy, current: DeployView) {
 		images: current.images,
 		trigger: deploy.trigger,
 		actor_type: deploy.actorType,
+		actor_id: deploy.actorType === 'user' ? 1 : 4,
 		actor_name: deploy.actorName,
 		error: current.error,
 		created_at: new Date(deploy.createdAt).toISOString(),
@@ -132,11 +133,31 @@ function statusDto(app: MockApp, now: number) {
 						failed.scenario === 'healthcheck' ? 'unhealthy container' : 'no such image',
 				})
 			}
+			// Primero las vigentes; después por slot y de la más nueva a la más vieja.
+			tasks.sort(
+				(a, b) =>
+					Number(b.desired_state === 'running') - Number(a.desired_state === 'running') ||
+					Number(a.slot ?? 0) - Number(b.slot ?? 0) ||
+					String(b.since ?? '').localeCompare(String(a.since ?? '')),
+			)
+			const measured = tasks.filter((task) => typeof task.cpu_percent === 'number')
+			const sum = (key: 'cpu_percent' | 'memory_bytes') =>
+				measured.length === 0
+					? null
+					: measured.reduce((total, task) => total + Number(task[key] ?? 0), 0)
 			return {
 				name: service,
+				image: currentView.images[service] ?? null,
 				replicas_desired: app.replicas,
 				replicas_running: app.replicas,
+				// Las sumas son para otros clientes: el panel lee las de cada tarea.
+				cpu_percent:
+					sum('cpu_percent') === null
+						? null
+						: Math.round(Number(sum('cpu_percent')) * 10) / 10,
+				memory_bytes: sum('memory_bytes'),
 				memory_limit_bytes: deployDb.memoryLimit,
+				update_state: starting ? 'updating' : 'completed',
 				tasks,
 			}
 		}),
@@ -168,11 +189,12 @@ function imagesFromBody(
 	}
 	if (body.image !== undefined) {
 		if (app.services.length !== 1 || app.services[0] !== app.app) {
-			return invalid('image', 'una app compose recibe images por servicio')
+			return invalid('image', 'una app compose recibe images, por servicio')
 		}
 		if (typeof body.image !== 'string' || !isValidImageRef(body.image)) {
 			return invalid('image', 'no es una referencia de imagen válida')
 		}
+		// Se guarda sin digest: el mock lo calcula de la ref al resolver.
 		return { [app.app]: body.image.split('@')[0] ?? body.image }
 	}
 	if (body.images !== undefined) {
@@ -194,12 +216,37 @@ function imagesFromBody(
 
 function accepted(params: Params, deploy: MockDeploy) {
 	const path = `/api/v1/projects/${param(params, 'p')}/stages/${param(params, 's')}/apps/${param(params, 'a')}/deploys/${deploy.id}`
-	return HttpResponse.json({ id: deploy.id, status_url: path }, { status: 202 })
+	return HttpResponse.json(
+		{ id: deploy.id, status: 'queued', status_url: path },
+		{ status: 202, headers: { location: path } },
+	)
+}
+
+/** Lo que pidió el cuerpo: `{image}` es el único servicio de una app de formulario. */
+function overridesOf(app: MockApp, body: DeployBody): Record<string, string> {
+	if (typeof body.image === 'string') return { [app.app]: body.image }
+	if (typeof body.images === 'object' && body.images !== null) {
+		return { ...(body.images as Record<string, string>) }
+	}
+	return {}
 }
 
 // --- SSE ---------------------------------------------------------------------
 
 const encoder = new TextEncoder()
+const decoder = new TextDecoder()
+
+/** Lo más que trae un `chunk` del polling (contrato §2.5), siempre en líneas completas. */
+const LOG_CHUNK_MAX = 64 * 1024
+const NEWLINE = 0x0a
+
+/** Desde `offset` (bytes), hasta 64 KiB y cortado en el último `\n`. */
+function logChunk(bytes: Uint8Array, offset: number): { chunk: string; next: number } {
+	let end = Math.min(bytes.length, offset + LOG_CHUNK_MAX)
+	const lastNewline = bytes.lastIndexOf(NEWLINE, end - 1)
+	end = lastNewline >= offset ? lastNewline + 1 : offset
+	return { chunk: decoder.decode(bytes.subarray(offset, end)), next: end }
+}
 
 /** Un evento SSE con `event:`, `id:` opcional y el `data:` (una línea por renglón). */
 function sseEvent(event: string, data: string, id?: string): Uint8Array {
@@ -263,26 +310,43 @@ function sseResponse(
 /** Cada cuánto el stream del log mira si el deploy avanzó. */
 const LOG_TICK_MS = 250
 
+function isFinal(status: string): boolean {
+	return status !== 'queued' && status !== 'running'
+}
+
+// Contrato §2.6: el `status` va al conectar solo si el deploy no terminó, y cada vez que
+// cambia; el final, siempre después de la última línea. Los `id` son bytes del log.
 function logStream(request: Request, app: MockApp, deploy: MockDeploy, from: number) {
 	return sseResponse(request, async (send, isOpen) => {
 		let offset = from
 		let status: string | null = null
+		let lastSent = Date.now()
+		const first = deployDb.view(app, deploy, Date.now())
+		if (!isFinal(first.status)) {
+			status = first.status
+			if (!send(sseEvent('status', status))) return
+		}
 		while (isOpen()) {
 			const current = deployDb.view(app, deploy, Date.now())
-			// Las líneas nuevas primero, después el estado: el cierre (`succeeded`) llega
-			// cuando el log ya está completo.
-			const rest = current.log.slice(offset)
+			const bytes = encoder.encode(current.log)
+			const rest = decoder.decode(bytes.subarray(offset))
 			const lines = rest.split('\n')
 			lines.pop()
 			for (const line of lines) {
-				offset += line.length + 1
+				offset += encoder.encode(line).length + 1
 				if (!send(sseEvent('log', line, String(offset)))) return
+				lastSent = Date.now()
 			}
 			if (current.status !== status) {
 				status = current.status
 				if (!send(sseEvent('status', status))) return
+				lastSent = Date.now()
 			}
-			if (current.status !== 'queued' && current.status !== 'running') return
+			if (isFinal(current.status)) return
+			if (Date.now() - lastSent >= SSE_HEARTBEAT_MS) {
+				if (!send(encoder.encode(': ping\n\n'))) return
+				lastSent = Date.now()
+			}
 			await delay(LOG_TICK_MS)
 		}
 	})
@@ -313,7 +377,10 @@ const LOG_POOL: readonly string[] = [
 
 /** Cada cuánto llega una línea nueva a los logs en vivo. */
 const APP_LOG_TICK_MS = 1100
-/** Para que un stream olvidado no quede corriendo para siempre en la pestaña. */
+/**
+ * La hora de vida de un stream de logs (el backend: 1 h). Al llegar manda `end` con
+ * `timeout` y cierra; el panel reconecta enseguida.
+ */
 const APP_LOG_MAX_MS = 15 * 60_000
 
 /** El máximo de `tail` (y de lo que se manda de una vez con `since`). */
@@ -331,7 +398,11 @@ function appLogLine(app: MockApp, service: string, sequence: number): string {
 }
 
 /** Desde dónde: las últimas `tail` líneas, o todo lo escrito desde `since` (inclusivo, como Docker). */
-type LogStart = { readonly tail: number } | { readonly since: number }
+/** Las últimas `tail` y, con `since`, solo de lo escrito desde ahí (inclusivo, como Docker). */
+interface LogStart {
+	readonly tail: number
+	readonly since: number | null
+}
 
 function appLogStream(
 	request: Request,
@@ -343,18 +414,24 @@ function appLogStream(
 	return sseResponse(request, async (send, isOpen) => {
 		const now = Date.now()
 		const last = Math.floor(now / APP_LOG_TICK_MS)
-		const first =
-			'since' in start
-				? Math.max(Math.ceil(start.since / APP_LOG_TICK_MS), last - MAX_LOG_TAIL + 1)
-				: last - start.tail + 1
+		let first = last - start.tail + 1
+		if (start.since !== null) first = Math.max(first, Math.ceil(start.since / APP_LOG_TICK_MS))
 		for (let sequence = first; sequence <= last; sequence += 1) {
 			if (!send(sseEvent('log', appLogLine(app, service, sequence)))) return
 		}
-		if (!follow) return
+		// Sin `follow`: las últimas `tail`, un `end` y se cierra.
+		if (!follow) {
+			send(sseEvent('end', 'eof'))
+			return
+		}
 		const until = now + APP_LOG_MAX_MS
 		let sequence = last
 		let heartbeat = now
-		while (isOpen() && Date.now() < until) {
+		while (isOpen()) {
+			if (Date.now() >= until) {
+				send(sseEvent('end', 'timeout'))
+				return
+			}
 			sequence += 1
 			await delay(Math.max(0, sequence * APP_LOG_TICK_MS - Date.now()))
 			if (!send(sseEvent('log', appLogLine(app, service, sequence)))) return
@@ -413,7 +490,12 @@ export const deployHandlers: RequestHandler[] = [
 		if (images instanceof Response) return images
 		const deploy = deployDb.create(
 			app,
-			{ images, trigger: 'panel', actorName: sessionUser()?.username ?? 'felipe' },
+			{
+				images,
+				overrides: overridesOf(app, body as DeployBody),
+				trigger: 'panel',
+				actorName: sessionUser()?.username ?? 'felipe',
+			},
 			now,
 		)
 		await delay(latency())
@@ -438,6 +520,8 @@ export const deployHandlers: RequestHandler[] = [
 			app,
 			{
 				images: { ...source.images },
+				// Las imágenes del succeeded anterior son lo que "pide" un rollback.
+				overrides: { ...source.images },
 				trigger: 'rollback',
 				actorName: sessionUser()?.username ?? 'felipe',
 				rollbackOf: source.id,
@@ -469,11 +553,14 @@ export const deployHandlers: RequestHandler[] = [
 			return invalid('offset', 'tiene que ser un entero ≥ 0')
 		}
 		const current = deployDb.view(app, deploy, Date.now())
-		const start = Math.min(offset, current.log.length)
+		const bytes = encoder.encode(current.log)
+		if (offset > bytes.length) return invalid('offset', 'pasa el largo del log')
+		const { chunk, next } = logChunk(bytes, offset)
 		return HttpResponse.json({
-			chunk: current.log.slice(start),
-			next_offset: current.log.length,
+			chunk,
+			next_offset: next,
 			status: current.status,
+			superseded_by: current.status === 'superseded' ? (deploy.supersededBy ?? null) : null,
 		})
 	}),
 
@@ -494,22 +581,24 @@ export const deployHandlers: RequestHandler[] = [
 		if (denied) return denied
 		const app = appOf(params)
 		const url = new URL(request.url)
-		const service = url.searchParams.get('service') ?? app.services[0] ?? ''
+		const service = url.searchParams.get('service') ?? ''
+		if (!service) return invalid('service', 'es obligatorio')
 		if (!app.services.includes(service)) {
 			return apiError(404, 'not_found', `no existe el servicio "${service}"`)
 		}
 		const follow = url.searchParams.get('follow') === '1'
-		// Al reconectar el panel manda `since` (la hora de la última línea) en vez de `tail`.
-		const sinceParam = url.searchParams.get('since')
-		if (sinceParam !== null) {
-			const since = Date.parse(sinceParam)
-			if (Number.isNaN(since)) return invalid('since', 'tiene que ser una fecha RFC 3339')
-			return appLogStream(request, app, service, { since }, follow)
-		}
 		const tail = Number(url.searchParams.get('tail') ?? '200')
 		if (!Number.isInteger(tail) || tail < 0 || tail > MAX_LOG_TAIL) {
 			return invalid('tail', `tiene que ser un entero entre 0 y ${MAX_LOG_TAIL}`)
 		}
-		return appLogStream(request, app, service, { tail }, follow)
+		// Al reconectar el panel manda `since` (la hora de la última línea). Pendiente en el
+		// backend (Fase 2): el mock ya lo cumple.
+		const sinceParam = url.searchParams.get('since')
+		let since: number | null = null
+		if (sinceParam !== null) {
+			since = Date.parse(sinceParam)
+			if (Number.isNaN(since)) return invalid('since', 'tiene que ser una fecha RFC 3339')
+		}
+		return appLogStream(request, app, service, { tail, since }, follow)
 	}),
 ]

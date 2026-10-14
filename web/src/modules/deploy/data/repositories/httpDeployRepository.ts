@@ -12,13 +12,16 @@ import {
 	type DeployLogEvent,
 	DeployNotFound,
 	type DeployRepository,
+	DockerUnavailable,
 	isDeployStatus,
+	isTerminalStatus,
 	LogStreamFailed,
 	NoPreviousDeploy,
 } from '../../domain'
 import { deployHttpDataSource } from '../datasources/deployHttpDataSource'
 import { EventStreamError, type StreamMessage } from '../datasources/eventStream'
 import {
+	APP_LOG_END_EVENT,
 	APP_LOG_EVENT,
 	appLogLineDtoSchema,
 	DEPLOY_LOG_EVENT,
@@ -35,27 +38,25 @@ import {
 
 const cause = (error: ApiError) => ({ cause: error })
 
+// `503 docker_unavailable` (contrato §0.2): Docker no responde, con su propio texto.
+const docker = { docker_unavailable: (error: ApiError) => new DockerUnavailable(cause(error)) }
+
 // Todo es de la Fase 2: contra un backend sin ella, la ruta no existe (`no_route` /
 // `method_not_allowed`) y es `UnavailableError` con `phase: 2`: la pantalla muestra
 // <ComingSoon>. Un `not_found` es otra cosa: el recurso no existe.
-const DEPLOY_ERRORS: DomainErrorMap = { phase: 2 }
+const DEPLOY_ERRORS: DomainErrorMap = { phase: 2, codes: docker }
 
 // Las rutas de UN deploy (`…/deploys/{id}`, su log): `not_found` es ese deploy. Va en
 // `codes` para que gane siempre; la ruta inexistente (`no_route`) sigue siendo la fase.
 const ONE_DEPLOY_ERRORS: DomainErrorMap = {
 	phase: 2,
-	codes: { not_found: (error) => new DeployNotFound(cause(error)) },
+	codes: { ...docker, not_found: (error) => new DeployNotFound(cause(error)) },
 }
 
-// Un 409 en el rollback es "no hay un succeeded anterior" (spec §5.2 regla 6). Se acepta
-// el código propio que se supone en el README y el `conflict` genérico del Kit.
-// TODO(Fase 2): sacar el `conflict` cuando el backend mande `no_previous_deploy`.
+// `409 no_previous_deploy`: no hay un succeeded anterior al actual (contrato §2.7).
 const ROLLBACK_ERRORS: DomainErrorMap = {
 	phase: 2,
-	codes: {
-		no_previous_deploy: (error) => new NoPreviousDeploy(cause(error)),
-		conflict: (error) => new NoPreviousDeploy(cause(error)),
-	},
+	codes: { ...docker, no_previous_deploy: (error) => new NoPreviousDeploy(cause(error)) },
 }
 
 /** Si la sesión se cayó: el 401 sale como `UnauthorizedError` (y el cliente ya mandó al login). */
@@ -94,6 +95,9 @@ function deployLogEvent(item: StreamMessage): DeployLogEvent | null {
 }
 
 function appLogEvent(item: StreamMessage): AppLogEvent | null {
+	if (item.type === APP_LOG_END_EVENT) {
+		return { kind: 'end', reason: item.data.trim() === 'timeout' ? 'timeout' : 'eof' }
+	}
 	if (item.type !== APP_LOG_EVENT) return null
 	let payload: unknown = null
 	try {
@@ -157,7 +161,10 @@ export const httpDeployRepository: DeployRepository = {
 					continue
 				}
 				const event = deployLogEvent(item)
-				if (event) yield event
+				if (!event) continue
+				yield event
+				// Después del status final el servidor cierra: no es un corte.
+				if (event.kind === 'status' && isTerminalStatus(event.status)) return
 			}
 		} catch (error) {
 			throw streamFailure(error, opened)
@@ -180,7 +187,10 @@ export const httpDeployRepository: DeployRepository = {
 					continue
 				}
 				const event = appLogEvent(item)
-				if (event) yield event
+				if (!event) continue
+				yield event
+				// Después de `end` el servidor cierra: no es un corte, no hay más que leer.
+				if (event.kind === 'end') return
 			}
 		} catch (error) {
 			const failure = streamFailure(error, opened)

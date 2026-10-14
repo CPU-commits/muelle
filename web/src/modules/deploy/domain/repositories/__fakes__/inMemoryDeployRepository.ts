@@ -1,4 +1,4 @@
-import { NotFoundError } from '@/shared/domain'
+import { NotFoundError, ValidationError } from '@/shared/domain'
 import type { AppLogEvent, AppLogsQuery } from '../../entities/appLogs'
 import type { AppStatus } from '../../entities/appStatus'
 import { type Deploy, type DeployAccepted, rollbackTarget } from '../../entities/deploy'
@@ -83,9 +83,17 @@ export class InMemoryDeployRepository implements DeployRepository {
 		const call = this.#reads.get(id) ?? 0
 		this.#reads.set(id, call + 1)
 		const snapshot = snapshots[Math.min(call, snapshots.length - 1)] as LogSnapshot
+		// Como el backend: un offset más allá del final es `422 offset`.
+		if (offset > snapshot.text.length)
+			throw new ValidationError('pasa el largo del log', 'offset')
 		const end = Math.min(snapshot.text.length, offset + this.pageSize)
 		const chunk = snapshot.text.slice(offset, end)
-		return { chunk, nextOffset: asLogOffset(offset + chunk.length), status: snapshot.status }
+		return {
+			chunk,
+			nextOffset: asLogOffset(offset + chunk.length),
+			status: snapshot.status,
+			supersededBy: null,
+		}
 	}
 
 	async *streamLog(

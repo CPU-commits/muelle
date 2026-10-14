@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
+	import { deployErrorMessage } from '../../components/labels/deployErrorMessage'
 	import {
 		Badge,
 		Button,
@@ -126,7 +127,7 @@
 	{:else if vm.loadError}
 		<ErrorState
 			title={m.deploy_summary_error_title()}
-			body={m.common_unavailable()}
+			body={deployErrorMessage(vm.loadError)}
 			retryLabel={m.common_retry()}
 			onRetry={vm.refresh}
 		/>

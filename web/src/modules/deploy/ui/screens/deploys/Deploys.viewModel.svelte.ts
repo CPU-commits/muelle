@@ -314,6 +314,10 @@ export class DeploysViewModel {
 					this.#queueChunk(event.text)
 				} else if (event.kind === 'polling') {
 					this.polling = true
+				} else if (event.kind === 'reset') {
+					// El backend no reconoció el offset: llega de nuevo desde el principio.
+					this.#dropPending()
+					this.log = EMPTY_LOG
 				} else if (event.status !== this.liveStatus) {
 					const changed = this.liveStatus !== null || event.status !== deploy.status
 					this.liveStatus = event.status

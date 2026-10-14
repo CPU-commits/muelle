@@ -119,6 +119,26 @@ describe('followDeployLog', () => {
 		])
 	})
 
+	it('si el polling no reconoce el offset (422), vuelve a leer desde el principio una vez', async () => {
+		// El SSE dio un `id` más allá de lo que tiene el log guardado.
+		repo.logStream = { events: [chunk('uno\n', 4), chunk('dos\n', 99)], failAfter: 2 }
+		repo.logs.set(ID, [{ text: 'uno\ndos\n', status: 'succeeded' }])
+
+		const events = await collect(
+			follow({ app: APP, id: ID, live: true }, new AbortController().signal),
+		)
+
+		expect(events).toEqual([
+			chunk('uno\n', 4),
+			chunk('dos\n', 99),
+			{ kind: 'polling' },
+			{ kind: 'reset' },
+			chunk('uno\ndos\n', 8),
+			{ kind: 'status', status: 'succeeded' },
+		])
+		expect(repo.readLogOffsets).toEqual([99, 0, 8])
+	})
+
 	it('un deploy terminado se lee por ?offset, sin abrir un stream', async () => {
 		repo.logs.set(ID, [{ text: 'todo el log\n', status: 'succeeded' }])
 

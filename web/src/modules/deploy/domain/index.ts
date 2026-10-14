@@ -3,25 +3,26 @@ export type {
 	AppLogFilter,
 	AppLogLine,
 	AppLogsQuery,
+	LogEndReason,
 	LogLevel,
 	ResumePoint,
 	LogStream,
 	LogTail,
 } from './entities/appLogs'
 export {
-	advanceResumePoint,
 	appendCapped,
 	DEFAULT_LOG_TAIL,
-	isRepeatedAfterResume,
 	LOG_TAILS,
 	lineKey,
 	logTasks,
+	makeResumeFilter,
 	MAX_LOG_TAIL,
 	matchesFilter,
 	parseAppLogText,
 	RECONNECT_BASE_MS,
 	RECONNECT_MAX_MS,
 	reconnectDelayMs,
+	ResumeTracker,
 	stripAnsi,
 } from './entities/appLogs'
 export type {
@@ -79,7 +80,12 @@ export {
 } from './entities/deployLog'
 export type { AppKind, DeployOverridesInput, DeployRequest } from './entities/deployRequest'
 export { buildDeployRequest, inferAppKind, overridableServices } from './entities/deployRequest'
-export { DeployNotFound, LogStreamFailed, NoPreviousDeploy } from './errors/deployErrors'
+export {
+	DeployNotFound,
+	DockerUnavailable,
+	LogStreamFailed,
+	NoPreviousDeploy,
+} from './errors/deployErrors'
 export type { DeployDeps, DeployRepository, Wait } from './repositories/deployRepository'
 export { realWait } from './repositories/deployRepository'
 export type { CreateDeploy, CreateDeployInput } from './use-cases/createDeploy'
