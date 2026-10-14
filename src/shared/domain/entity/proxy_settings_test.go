@@ -1,6 +1,10 @@
 package entity
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"log/slog"
 	"maps"
 	"reflect"
 	"slices"
@@ -136,13 +140,46 @@ func TestProxySettingsEnabled(t *testing.T) {
 	}
 }
 
-// El token de Cloudflare nunca sale en un log ni en un %v.
+// El token de Cloudflare nunca sale en un %v, en un log de slog (main usa el
+// JSONHandler, que serializa los structs con encoding/json e ignora String) ni
+// en un JSON, ni solo ni dentro de otro valor: admin e ingress se pasan
+// ProxySettings todo el tiempo (ProxySettingsChanged(old, next)).
 func TestProxySettingsDoesNotPrintToken(t *testing.T) {
+	const token = "cf-token-1234567890abcdef"
 	p := fullProxySettings()
-	for _, s := range []string{p.String(), p.GoString()} {
-		if strings.Contains(s, "cf-token") {
-			t.Fatalf("filtra el token: %s", s)
+	p.CloudflareToken = token
+	nested := struct {
+		Next ProxySettings
+		Old  *ProxySettings
+	}{p, &p}
+	var out []string
+	for _, v := range []any{p, &p, nested, &nested} {
+		out = append(out, fmt.Sprintf("%v", v), fmt.Sprintf("%+v", v), fmt.Sprintf("%#v", v), fmt.Sprint(v))
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
 		}
+		out = append(out, string(b))
+	}
+	var buf bytes.Buffer
+	for _, h := range []slog.Handler{slog.NewJSONHandler(&buf, nil), slog.NewTextHandler(&buf, nil)} {
+		slog.New(h).Info("ajustes", "next", p, "ptr", &p, "nested", nested, slog.Group("g", "p", p))
+	}
+	out = append(out, buf.String())
+	for _, o := range out {
+		if strings.Contains(o, token) {
+			t.Fatalf("filtra el token: %s", o)
+		}
+	}
+	// Se esconde solo el token, y solo si hay.
+	if s := p.String(); !strings.Contains(s, "203.0.113.7") || !strings.Contains(s, "***") {
+		t.Fatalf("String esconde solo el token: %s", s)
+	}
+	if !strings.Contains(buf.String(), "panel.tudominio.cl") {
+		t.Fatalf("el log no trae el resto de los ajustes: %s", buf.String())
+	}
+	if s := DefaultProxySettings().String(); strings.Contains(s, "***") {
+		t.Fatalf("sin token no hay nada que esconder: %s", s)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 )
@@ -67,7 +68,9 @@ var ProxySettingKeys = []string{
 // ProxySettings son los ajustes de los que dependen el proxy y el DNS, ya
 // decodificados: el contrato entre admin, que los guarda y valida, e ingress,
 // que los aplica (admin/domain/service.SettingsHook). Un string vacío es "sin
-// valor". El token va en claro: nunca se imprime (String y GoString lo ocultan).
+// valor". El token va en claro: String, GoString, LogValue y MarshalJSON lo
+// ocultan, así no sale en un %v, en un log de slog ni en un JSON, tampoco
+// dentro de otro valor (entity.Settings de admin).
 type ProxySettings struct {
 	CloudflareToken   string
 	PublicIP          string
@@ -188,15 +191,34 @@ func (p ProxySettings) ChangedKeys(old ProxySettings) []string {
 	return out
 }
 
+// redacted es p con el token como "***" (si hay).
+func (p ProxySettings) redacted() ProxySettings {
+	if p.CloudflareToken != "" {
+		p.CloudflareToken = "***"
+	}
+	return p
+}
+
+// plainProxySettings es ProxySettings sin métodos: String y MarshalJSON lo
+// usan para no volver a llamarse.
+type plainProxySettings ProxySettings
+
 // String oculta el token: un ProxySettings en un log nunca lo muestra.
 func (p ProxySettings) String() string {
-	q := p
-	if q.CloudflareToken != "" {
-		q.CloudflareToken = "***"
-	}
-	type plain ProxySettings // sin métodos: no vuelve a llamar a String
-	return fmt.Sprintf("%+v", plain(q))
+	return fmt.Sprintf("%+v", plainProxySettings(p.redacted()))
 }
 
 // GoString es String para %#v.
 func (p ProxySettings) GoString() string { return p.String() }
+
+// LogValue es String para slog: el JSONHandler serializaría el struct.
+func (p ProxySettings) LogValue() slog.Value { return slog.StringValue(p.String()) }
+
+// MarshalJSON es el struct con el token como "***". slog solo llama a
+// LogValue en el valor de primer nivel: un struct que lleva ProxySettings
+// adentro (entity.Settings de admin) lo serializa el JSONHandler con
+// encoding/json. Nada se guarda ni se responde así: se guarda con Encode, y
+// las respuestas van por los DTOs de admin.
+func (p ProxySettings) MarshalJSON() ([]byte, error) {
+	return json.Marshal(plainProxySettings(p.redacted()))
+}
