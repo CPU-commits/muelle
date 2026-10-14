@@ -2,7 +2,6 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { yaml } from '@codemirror/lang-yaml'
 import {
 	bracketMatching,
-	HighlightStyle,
 	indentOnInput,
 	indentUnit,
 	syntaxHighlighting,
@@ -25,66 +24,9 @@ import {
 	keymap,
 	lineNumbers,
 } from '@codemirror/view'
-import { tags } from '@lezer/highlight'
-import { editorTokens as t } from './styles.css'
+import { darkTheme, ERROR_LINE, yamlHighlight } from './editorTheme'
 
-// El editor está en un shadow root: su tema va en `EditorView.theme` y el resaltado en un
-// `HighlightStyle` con colores, los dos con las variables CSS del tema (que cruzan la
-// frontera del shadow root). CodeMirror los monta como hojas construidas, que la CSP
-// (`style-src 'self'`) permite.
-
-const ERROR_LINE = 'cm-muelle-error-line'
-
-const darkTheme = EditorView.theme(
-	{
-		'&': {
-			backgroundColor: t.background,
-			color: t.text,
-			fontSize: t.fontSize,
-		},
-		'&.cm-focused': { outline: 'none' },
-		'.cm-scroller': {
-			fontFamily: t.fontFamily,
-			lineHeight: '1.75',
-			minHeight: '320px',
-			maxHeight: '70vh',
-			overflow: 'auto',
-		},
-		'.cm-content': { padding: t.contentPadding, caretColor: t.text },
-		'.cm-line': { paddingInline: t.linePadding },
-		'.cm-gutters': { backgroundColor: t.background, border: 'none', color: t.gutter },
-		'.cm-lineNumbers .cm-gutterElement': {
-			minWidth: '32px',
-			padding: t.gutterPadding,
-			textAlign: 'right',
-		},
-		'.cm-activeLine': { backgroundColor: t.activeLine },
-		'.cm-activeLineGutter': { backgroundColor: 'transparent', color: t.activeGutter },
-		'.cm-cursor, .cm-dropCursor': { borderLeftColor: t.text },
-		'&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
-			{ backgroundColor: t.selection },
-		'.cm-matchingBracket, &.cm-focused .cm-matchingBracket': {
-			backgroundColor: t.matchingBracket,
-			outline: `1px solid ${t.matchingBracketOutline}`,
-		},
-		[`.${ERROR_LINE}`]: { backgroundColor: t.errorLine },
-	},
-	{ dark: true },
-)
-
-const yamlHighlight = HighlightStyle.define([
-	{ tag: tags.propertyName, color: t.key },
-	{ tag: [tags.content, tags.attributeValue], color: t.value },
-	{ tag: [tags.string, tags.special(tags.string)], color: t.string },
-	{ tag: tags.lineComment, color: t.comment, fontStyle: 'italic' },
-	{
-		tag: [tags.separator, tags.punctuation, tags.squareBracket, tags.brace, tags.meta],
-		color: t.punctuation,
-	},
-	{ tag: [tags.labelName, tags.typeName, tags.keyword], color: t.special },
-])
-
-/** Marca las líneas con errores de sintaxis (1 = la primera). */
+/** Marca las líneas con errores (1 = la primera). */
 export const setErrorLines = StateEffect.define<readonly number[]>()
 
 const errorLines = StateField.define<DecorationSet>({
