@@ -873,6 +873,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | `POST …/deploys` | — | La respuesta suma `status: "queued"` y el header `Location` | Compatible |
 | `chunk` del log | Puede cortar una línea | Siempre líneas completas | Más simple; el manejo del panel sigue sirviendo |
 | Log por polling | — | Suma `superseded_by` | Para la Action |
+| Log por polling: `offset` más allá del final | No es error: `chunk: ""` y `next_offset` = el final | `422 invalid` con `offset: …` (también en el SSE, antes de abrir) | El log solo crece, así que ese offset es un error del cliente. El panel no lo ve: solo manda los `next_offset` que recibió |
 | SSE del deploy | `status` al conectar | Solo si no terminó. El `status` final va siempre después de la última línea | Si no, el panel cerraría antes de leer el log de un deploy que terminó justo |
 | SSE de logs | — | Suma el evento `end`, y `follow=0` | El panel ignora eventos desconocidos |
 | SSE de logs: `since` | Al reconectar, en vez de `tail`: RFC 3339 con ms, inclusivo, hasta las últimas 5000; `422` con `since: …` | Igual. Si vienen `since` y `tail`, manda `since`; `time` va truncado al milisegundo | Sin `since`, cada reconexión repetiría las últimas líneas |
