@@ -28,7 +28,7 @@ El panel (`web/`, Fase 4) ya está hecho contra una versión supuesta de este co
 
 Las peticiones con cookie que modifican algo exigen un `Origin` permitido; si no, `403 bad_origin`. Los tokens no lo necesitan. Hay dos permitidos (`cmd/http`, hecho):
 - `MUELLE_PANEL_ORIGIN`;
-- el origen en que muelle-caddy sirve el panel según los ajustes: `https://<panel_domain>`, con `:<proxy_https_port>` si no es 443 (`ProxySettings.PanelOrigin`, que da `admin.Module.PanelOrigin`). Así, cambiar los puertos del proxy (§4.1) no deja fuera del panel. Solo se consulta cuando el `Origin` no es `MUELLE_PANEL_ORIGIN`.
+- el origen en que muelle-caddy sirve el panel según los ajustes: `https://<panel_domain>`, con `:<proxy_https_port>` si no es 443 (`ProxySettings.PanelOrigin`, que da `admin.Module.PanelOrigin`). Así, cambiar los puertos del proxy (`PATCH /settings`, §4.1) no deja fuera del panel. Solo se consulta cuando el `Origin` no es `MUELLE_PANEL_ORIGIN`.
 
 ### 0.2 Códigos de error comunes
 
@@ -155,7 +155,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
 | `shared/infra/container/container.go` | La fase cuyos `Deps` cambian | Solo las líneas de su módulo |
 | `main.go` | Fase 5 | El subcomando `install` |
 | `go.mod` / `go.sum` | Fase 2 (compose-go) y la que necesite otra | Agregar dependencias; al integrar, el conflicto se resuelve con `go mod tidy` |
-| `0002_deploy.sql` / `0003_ingress.sql` | Fase 2 / Fase 3 | §6, sin tocar las columnas congeladas |
+| `0002_deploy.sql` / `0003_ingress.sql` | Fase 2 / Fase 3 | Lo de "Migraciones reservadas" (§6), sin tocar las columnas congeladas |
 | README, "Notas para las fases siguientes" | Cada fase, en su bloque | Tachar lo que cumplió y agregar lo que deja |
 | Los documentos de diseño y este contrato | Nadie, salvo para corregir un error | Un cambio de contrato se acuerda antes, no en una rama |
 
@@ -727,7 +727,7 @@ Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `public_ip
 | Una lista de `panel_allowed_cidrs` que deja fuera `client_ip` | `409 would_lock_out`, salvo que venga `"confirm_lockout": true` |
 
 - Todo se guarda en una transacción. Después, si cambió algo del proxy, se llama a `ProxySettingsChanged`. El `PATCH` responde cuando el hook vuelve, y eso es antes de recrear muelle-caddy (§3.5).
-- **Cambiar `proxy_https_port` mueve el panel** a `https://<panel_domain>[:<puerto>]`. Ese origen se acepta en `Origin` aunque `MUELLE_PANEL_ORIGIN` siga con el puerto viejo (§0.1). Pero los links de las invitaciones se arman con `MUELLE_PANEL_ORIGIN`, así que conviene actualizarlo después (§5.2).
+- **Cambiar `proxy_https_port` mueve el panel** a `https://<panel_domain>[:<puerto>]`. Ese origen se acepta en `Origin` aunque `MUELLE_PANEL_ORIGIN` siga con el puerto viejo (§0.1). Pero los links de las invitaciones se arman con `MUELLE_PANEL_ORIGIN`, así que conviene actualizarlo después (la configuración de install, §5.2).
 - Un error de DNS al cambiar la IP pública nunca hace fallar el `PATCH` (§9).
 - **Auditoría:** `settings.update` con las claves y sus valores. El token solo aparece como `"set"` o `"removed"`.
 
@@ -782,7 +782,7 @@ install despliega el servicio con estas variables. `settings.Load` las valida en
 docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl muelle_muelle
 ```
 
-La Fase 5 puede sumarlo a un subcomando (`muelle settings panel-origin`), como `reset-panel-ips` (§4.1).
+La Fase 5 puede sumarlo a un subcomando (`muelle settings panel-origin`), como `reset-panel-ips` ("Recuperar el acceso", §4.1).
 
 **Fijas:**
 - `MUELLE_LISTEN=:8080`
