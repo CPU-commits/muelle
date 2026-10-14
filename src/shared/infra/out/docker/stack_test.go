@@ -12,7 +12,7 @@ import (
 
 // fakeCLI escribe un "docker" de mentira que guarda en dir lo que recibe:
 // los argumentos, su entorno, los permisos y el config.json de DOCKER_CONFIG,
-// y el stdin. Sale con el código que diga dir/exit (0 si no existe) y, si
+// el directorio de trabajo (y cuántos archivos tiene), y el stdin. Sale con el código que diga dir/exit (0 si no existe) y, si
 // existe dir/sleep, se queda esperando.
 func fakeCLI(t *testing.T) (cli, dir string) {
 	t.Helper()
@@ -26,6 +26,8 @@ printf '%s' "$DOCKER_CONFIG" > "$d/config_path"
 stat -c %a "$DOCKER_CONFIG" > "$d/config_perm"
 stat -c %a "$DOCKER_CONFIG/config.json" > "$d/config_json_perm"
 cat "$DOCKER_CONFIG/config.json" > "$d/config.json"
+pwd > "$d/cwd"
+ls -A | wc -l > "$d/cwd_entries"
 cat > "$d/stdin"
 if [ -f "$d/sleep" ]; then sleep 30; fi
 echo "Creating service auditfy_staging_api_api"
@@ -99,6 +101,24 @@ func TestDeployStack(t *testing.T) {
 	}
 	if !strings.Contains(env, "DOCKER_HOST=unix:///run/fake-docker.sock") {
 		t.Fatalf("el CLI debe usar el mismo daemon que el SDK:\n%s", env)
+	}
+	// El CLI resuelve las rutas relativas del compose (file:, env_file) desde
+	// su directorio de trabajo: uno vacío y propio, nunca el de muelle ni el
+	// DOCKER_CONFIG con las credenciales. Se borra al terminar.
+	cwd := strings.TrimSpace(read(t, filepath.Join(dir, "cwd")))
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	configDir := read(t, filepath.Join(dir, "config_path"))
+	if cwd == wd || cwd == configDir || strings.HasPrefix(cwd, configDir+"/") {
+		t.Fatalf("directorio de trabajo del CLI: %s (muelle: %s, DOCKER_CONFIG: %s)", cwd, wd, configDir)
+	}
+	if n := strings.TrimSpace(read(t, filepath.Join(dir, "cwd_entries"))); n != "0" {
+		t.Fatalf("el directorio de trabajo del CLI tiene %s archivos", n)
+	}
+	if _, err := os.Stat(cwd); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("el directorio de trabajo temporal sigue ahí: %v", err)
 	}
 	// La salida tiene stdout y stderr, para el log del deploy.
 	if !strings.Contains(out, "Creating service") || !strings.Contains(out, "aviso en stderr") {

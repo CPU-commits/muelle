@@ -50,12 +50,24 @@ func (c *Client) RemoveStack(ctx context.Context, name string) (string, error) {
 // ~/.docker del usuario ni deja credenciales en disco. El entorno es solo
 // PATH, HOME y las variables DOCKER_* de conexión: el CLI interpola ${VAR}
 // del compose con su entorno, y el de muelle no tiene nada que hacer ahí.
+//
+// El CLI corre en otro directorio temporal, vacío, que tampoco contiene el
+// DOCKER_CONFIG: con "-c -" resuelve desde ahí las rutas relativas del
+// compose (file: de secrets y configs, env_file), así que una ruta relativa
+// no llega a los archivos de muelle ni a las credenciales. Es una defensa
+// extra: el render rechaza esas claves (spec §6.3), y una ruta absoluta o
+// con ".." no se frena con esto.
 func (c *Client) runCLI(ctx context.Context, auths []RegistryAuth, stdin io.Reader, args ...string) (string, error) {
 	dir, err := os.MkdirTemp(c.tempDir, "muelle-docker-config-") // MkdirTemp crea con 0700
 	if err != nil {
 		return "", fmt.Errorf("docker: creando el DOCKER_CONFIG temporal: %w", err)
 	}
 	defer os.RemoveAll(dir)
+	work, err := os.MkdirTemp(c.tempDir, "muelle-docker-work-")
+	if err != nil {
+		return "", fmt.Errorf("docker: creando el directorio de trabajo temporal: %w", err)
+	}
+	defer os.RemoveAll(work)
 	cfg, err := dockerConfig(auths)
 	if err != nil {
 		return "", fmt.Errorf("docker: armando config.json: %w", err)
@@ -65,6 +77,7 @@ func (c *Client) runCLI(ctx context.Context, auths []RegistryAuth, stdin io.Read
 	}
 
 	cmd := exec.CommandContext(ctx, c.cli, args...)
+	cmd.Dir = work
 	cmd.Env = c.cliEnv(dir)
 	cmd.Stdin = stdin
 	out := &limitedBuffer{max: maxCommandOutput}
