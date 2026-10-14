@@ -89,6 +89,10 @@ curl -b cookies -H "Origin: $O" -H 'Content-Type: application/json' \
 
 La contraseña tiene al menos 12 caracteres. Los tokens de API (`Authorization: Bearer mk_…`) no necesitan `Origin`.
 
+### Docker
+
+Crear y borrar un stage crea y borra su red overlay, y borrar una app hace `docker stack rm` (con el CLI `docker` en el `PATH`). Para eso, el Docker local tiene que ser manager de un Swarm (`docker swarm init`); si no, esas peticiones responden `503 docker_unavailable` y no cambian nada. El resto de la API anda sin Docker. Sin un Swarm, esos caminos se prueban con los tests, que usan el Docker en memoria (`dockertest`, que `container.WithDocker` inyecta).
+
 ## Solo detrás de Caddy (o de otro proxy)
 
 **muelle nunca debe quedar expuesto directo.** Para limitar los logins por IP usa la IP del cliente, y confía en el header `X-Real-IP` cuando la conexión viene de loopback o de una red privada (RFC 1918, ULA), que es por donde llega Caddy (spec §8). Si un cliente puede conectarse a muelle sin pasar por el proxy desde una de esas redes, escribe su propio `X-Real-IP` y se salta el límite por IP.
