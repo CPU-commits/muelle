@@ -435,3 +435,43 @@ func TestApplyStartupSettingsLateInitIsIgnored(t *testing.T) {
 		t.Fatalf("eventos: %d", n)
 	}
 }
+
+// El origen en que muelle-caddy sirve el panel sigue a los ajustes: install
+// con --https-port 8443 (spec §16 paso 2) y después 443 en el panel (paso 5).
+func TestGetPanelOrigin(t *testing.T) {
+	e := newProxyEnv(t)
+	ctx := context.Background()
+	get := NewGetPanelOrigin(e.repo)
+	origin := func() string {
+		t.Helper()
+		o, err := get.Execute(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	if o := origin(); o != "" {
+		t.Fatalf("sin dominio del panel: %q", o)
+	}
+	apply := NewApplyStartupSettings(e.repo, e.cipher, e.rec, e.db)
+	init := dto.InitialSettings{ProxyHTTPPort: 8080, ProxyHTTPSPort: 8443}
+	if err := apply.Execute(ctx, dto.StartupSettings{PanelDomain: "panel.tudominio.cl", Init: init}); err != nil {
+		t.Fatal(err)
+	}
+	if o := origin(); o != "https://panel.tudominio.cl:8443" {
+		t.Fatalf("después de install: %q", o)
+	}
+	if _, err := e.do(t, dto.PatchSettingsInput{ProxyHTTPPort: ptr(80), ProxyHTTPSPort: ptr(443)}); err != nil {
+		t.Fatal(err)
+	}
+	if o := origin(); o != "https://panel.tudominio.cl" {
+		t.Fatalf("después de cambiar los puertos: %q", o)
+	}
+	// Un valor guardado que no se entiende es un error, no un origen inventado.
+	if err := e.repo.Set(ctx, entity.SettingProxyHTTPSPort, []byte("x"), false); err != nil {
+		t.Fatal(err)
+	}
+	if o, err := get.Execute(ctx); err == nil || o != "" {
+		t.Fatalf("puerto inválido: %q %v", o, err)
+	}
+}

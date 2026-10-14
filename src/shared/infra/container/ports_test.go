@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"slices"
@@ -137,6 +138,42 @@ func TestContractProxySettings(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ingress lee:\n%+v\nesperaba\n%+v", got, want)
 	}
+}
+
+// Cambiar los puertos del proxy (spec §16 paso 5) no deja fuera del panel:
+// muelle-caddy pasa a servirlo en https://panel.test, y ese Origin pasa
+// aunque MUELLE_PANEL_ORIGIN siga con :8443. Un puerto que no es el de los
+// ajustes no pasa.
+func TestContractPanelOriginFollowsProxyPorts(t *testing.T) {
+	const before, after = "https://panel.test:8443", "https://panel.test"
+	st := testSettings(t)
+	st.PanelOrigin = before
+	st.Init.ProxyHTTPPort, st.Init.ProxyHTTPSPort = 8080, 8443
+	c, err := New(context.Background(), st, testLogger(t), WithDocker(dockertest.New()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	e := api{t: t, c: c}
+	token, _, err := c.Identity.EnsureSetupInvite(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := e.do("POST", "/api/v1/auth/setup", map[string]string{"token": token, "username": "admin", "password": testPassword}, httptestutil.WithOrigin(before))
+	httptestutil.Expect(t, w, http.StatusCreated)
+	s := httptestutil.WithSession(httptestutil.SessionFrom(t, w))
+	expect(t, "el origen nuevo antes del cambio", e.do("PATCH", "/api/v1/settings", map[string]any{}, s, httptestutil.WithOrigin(after)), http.StatusForbidden, "bad_origin")
+
+	w = e.do("PATCH", "/api/v1/settings", map[string]any{"proxy_http_port": 80, "proxy_https_port": 443}, s, httptestutil.WithOrigin(before))
+	httptestutil.Expect(t, w, http.StatusOK)
+
+	for _, o := range []string{after, before} {
+		httptestutil.Expect(t, e.do("POST", "/api/v1/projects", map[string]string{"slug": "p" + fmt.Sprint(len(o)), "name": "P"}, s, httptestutil.WithOrigin(o)), http.StatusCreated)
+	}
+	expect(t, "otro puerto", e.do("PATCH", "/api/v1/settings", map[string]any{}, s, httptestutil.WithOrigin("https://panel.test:9443")), http.StatusForbidden, "bad_origin")
+	// El login, que no tiene sesión, también pasa desde el origen nuevo.
+	w = e.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": testPassword}, httptestutil.WithOrigin(after))
+	httptestutil.Expect(t, w, http.StatusOK)
 }
 
 // deploy lee las apps que guarda catalog y marca el deploy; catalog lo ve en

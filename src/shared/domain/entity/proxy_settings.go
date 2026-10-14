@@ -101,6 +101,21 @@ func (p ProxySettings) Enabled(def string) bool {
 	return p.PanelDomain != "" && p.CaddyImageOr(def) != ""
 }
 
+// PanelOrigin es el origen en que muelle-caddy sirve el panel con estos
+// ajustes: https://<panel_domain>, con :<proxy_https_port> si no es 443. ""
+// sin dominio del panel. Puede no ser MUELLE_PANEL_ORIGIN: después de cambiar
+// los puertos del proxy (spec §16), el panel queda acá, y cmd/http acepta
+// los dos orígenes.
+func (p ProxySettings) PanelOrigin() string {
+	if p.PanelDomain == "" {
+		return ""
+	}
+	if p.HTTPSPort == 443 {
+		return "https://" + p.PanelDomain
+	}
+	return "https://" + p.PanelDomain + ":" + strconv.Itoa(p.HTTPSPort)
+}
+
 // DecodeProxySettings arma los ajustes con los valores guardados (clave →
 // valor en texto, como los tiene la tabla settings) y el token ya descifrado.
 // Una clave que falta, o vacía, toma su valor por defecto. Un valor que no se

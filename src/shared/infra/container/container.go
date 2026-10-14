@@ -187,6 +187,7 @@ func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docke
 		SecureCookies: s.SecureCookies,
 		Auth:          c.Identity.Authenticator(),
 		Logger:        log,
+		ProxyOrigin:   c.Admin.PanelOrigin,
 	})
 	k := c.Server.Kit()
 	c.Identity.RegisterRoutes(k)

@@ -145,3 +145,20 @@ func TestProxySettingsDoesNotPrintToken(t *testing.T) {
 		}
 	}
 }
+
+// PanelOrigin es el origen en que muelle-caddy sirve el panel con estos
+// ajustes: el dominio del panel en el puerto HTTPS del proxy.
+func TestProxySettingsPanelOrigin(t *testing.T) {
+	p := DefaultProxySettings()
+	if got := p.PanelOrigin(); got != "" {
+		t.Fatalf("sin dominio del panel: %q", got)
+	}
+	p.PanelDomain = "panel.tudominio.cl"
+	if got := p.PanelOrigin(); got != "https://panel.tudominio.cl" {
+		t.Fatalf("puerto 443: %q", got)
+	}
+	p.HTTPSPort = 8443
+	if got := p.PanelOrigin(); got != "https://panel.tudominio.cl:8443" {
+		t.Fatalf("puerto 8443: %q", got)
+	}
+}

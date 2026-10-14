@@ -253,3 +253,41 @@ func TestNewServerRequiresConfig(t *testing.T) {
 		}()
 	}
 }
+
+// Después de cambiar los puertos del proxy (spec §16), muelle-caddy sirve el
+// panel en otro origen que MUELLE_PANEL_ORIGIN: ese también pasa, y solo ese.
+// Sin dominio del panel (ProxyOrigin da ""), solo pasa PanelOrigin.
+func TestOriginCheckProxyOrigin(t *testing.T) {
+	proxy := "https://panel.test:8443"
+	calls := 0
+	s := NewServer(Config{
+		PanelOrigin: testOrigin,
+		Auth:        fakeAuth{},
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ProxyOrigin: func(context.Context) string { calls++; return proxy },
+	})
+	s.Kit().HandlePublic("POST /api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
+		utils.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	})
+	for _, o := range []string{testOrigin, proxy} {
+		if w := do(s, "POST", "/api/v1/ping", o); w.Code != http.StatusOK {
+			t.Fatalf("Origin %s: %d %s", o, w.Code, w.Body.String())
+		}
+	}
+	for _, o := range []string{"", "null", "https://panel.test:9443", "http://panel.test:8443", proxy + "/"} {
+		if w := do(s, "POST", "/api/v1/ping", o); w.Code != http.StatusForbidden || errorCode(t, w) != "bad_origin" {
+			t.Fatalf("Origin %q: %d %s", o, w.Code, w.Body.String())
+		}
+	}
+	// PanelOrigin no consulta los ajustes, ni una petición sin Origin.
+	calls = 0
+	do(s, "POST", "/api/v1/ping", testOrigin)
+	do(s, "POST", "/api/v1/ping", "")
+	if calls != 0 {
+		t.Fatalf("ProxyOrigin se llamó %d veces", calls)
+	}
+	proxy = ""
+	if w := do(s, "POST", "/api/v1/ping", ""); w.Code != http.StatusForbidden {
+		t.Fatalf("sin origen del proxy y sin Origin: %d", w.Code)
+	}
+}

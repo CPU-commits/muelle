@@ -3,6 +3,7 @@
 package http
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -17,12 +18,20 @@ type Config struct {
 	SecureCookies bool
 	Auth          utils.Authenticator
 	Logger        *slog.Logger
+	// ProxyOrigin, opcional, es el origen en que muelle-caddy sirve el panel
+	// según los ajustes (entity.ProxySettings.PanelOrigin), o "". Se acepta
+	// además de PanelOrigin: después de cambiar los puertos del proxy (spec
+	// §16) el panel queda en otro puerto, y sin esto ninguna escritura con
+	// cookie pasaría, ni el login, hasta actualizar MUELLE_PANEL_ORIGIN. Se
+	// consulta solo cuando el Origin no es PanelOrigin.
+	ProxyOrigin func(ctx context.Context) string
 }
 
 type Server struct {
-	mux    *http.ServeMux
-	kit    *utils.Kit
-	origin string
+	mux         *http.ServeMux
+	kit         *utils.Kit
+	origin      string
+	proxyOrigin func(ctx context.Context) string
 }
 
 // NewServer arma el mux y el Kit, y registra los errores comunes:
@@ -53,14 +62,15 @@ func NewServer(c Config) *Server {
 	k.RegisterError(entity.ErrDockerUnavailable, http.StatusServiceUnavailable, "docker_unavailable", "Docker no responde; reintenta en unos segundos")
 	k.RegisterError(entity.ErrNotImplemented, http.StatusNotImplemented, "not_implemented", "todavía no está implementado en esta versión de muelle")
 	k.RegisterError(entity.ErrCloudflareUnavailable, http.StatusBadGateway, "cloudflare_unavailable", "Cloudflare no responde; reintenta en unos minutos")
-	return &Server{mux: mux, kit: k, origin: c.PanelOrigin}
+	return &Server{mux: mux, kit: k, origin: c.PanelOrigin, proxyOrigin: c.ProxyOrigin}
 }
 
 // Kit es lo que reciben los módulos en RegisterRoutes.
 func (s *Server) Kit() *utils.Kit { return s.kit }
 
 // ServeHTTP pone X-Content-Type-Options: nosniff y, en /api/, Cache-Control: no-store;
-// rechaza con 403 bad_origin las peticiones que modifican algo, sin Bearer y con un Origin distinto de PanelOrigin.
+// rechaza con 403 bad_origin las peticiones que modifican algo, sin Bearer y
+// con un Origin que no es PanelOrigin ni el de ProxyOrigin.
 // Una petición que no coincide con ninguna ruta responde en JSON, en vez del
 // texto plano del ServeMux: 405 method_not_allowed (con el header Allow) si la
 // ruta existe con otro método, y 404 no_route si no. no_route es distinto de
@@ -99,9 +109,12 @@ func (s *Server) notMatched(w http.ResponseWriter, r *http.Request, h http.Handl
 }
 
 // originAllowed protege contra CSRF: toda petición que modifica algo y no
-// trae un token Bearer tiene que venir del origen exacto del panel. Un
-// navegador no puede agregar Authorization a una petición de otro origen sin
-// CORS, y muelle no lo habilita.
+// trae un token Bearer tiene que venir del origen exacto del panel
+// (PanelOrigin, o el de ProxyOrigin: los dos son https://<panel_domain>, en
+// el puerto de MUELLE_PANEL_ORIGIN o en el de los ajustes, y en ese host
+// solo muelle-caddy sirve el panel). Un navegador no puede agregar
+// Authorization a una petición de otro origen sin CORS, y muelle no lo
+// habilita.
 func (s *Server) originAllowed(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -110,8 +123,17 @@ func (s *Server) originAllowed(r *http.Request) bool {
 	if _, ok := utils.BearerToken(r); ok {
 		return true
 	}
-	// Con PanelOrigin vacío (mal configurado) no pasa ninguna.
-	return s.origin != "" && r.Header.Get("Origin") == s.origin
+	// Sin Origin no pasa ninguna, aunque PanelOrigin o ProxyOrigin sean "".
+	origin := r.Header.Get("Origin")
+	switch {
+	case origin == "":
+		return false
+	case origin == s.origin:
+		return true
+	case s.proxyOrigin == nil:
+		return false
+	}
+	return origin == s.proxyOrigin(r.Context())
 }
 
 // statusRecorder es un http.ResponseWriter que guarda el status y los headers

@@ -43,10 +43,12 @@ type Deps struct {
 }
 
 type Module struct {
-	handler *inhttp.Handler
-	jobs    []cron.Job
-	verify  *usecases.VerifyMasterKey
-	startup *usecases.ApplyStartupSettings
+	handler     *inhttp.Handler
+	jobs        []cron.Job
+	verify      *usecases.VerifyMasterKey
+	startup     *usecases.ApplyStartupSettings
+	panelOrigin *usecases.GetPanelOrigin
+	log         *slog.Logger
 }
 
 func New(d Deps) *Module {
@@ -78,10 +80,12 @@ func New(d Deps) *Module {
 	backup := usecases.NewBackup(backups, d.Clock)
 
 	return &Module{
-		handler: inhttp.NewHandler(getSettings, patchSettings, listAudit),
-		jobs:    incron.Jobs(purge, backup, d.Log),
-		verify:  usecases.NewVerifyMasterKey(settings, d.Cipher, d.DB),
-		startup: usecases.NewApplyStartupSettings(settings, d.Cipher, d.Audit, d.DB),
+		handler:     inhttp.NewHandler(getSettings, patchSettings, listAudit),
+		jobs:        incron.Jobs(purge, backup, d.Log),
+		verify:      usecases.NewVerifyMasterKey(settings, d.Cipher, d.DB),
+		startup:     usecases.NewApplyStartupSettings(settings, d.Cipher, d.Audit, d.DB),
+		panelOrigin: usecases.NewGetPanelOrigin(settings),
+		log:         d.Log,
 	}
 }
 
@@ -104,4 +108,19 @@ func (m *Module) VerifyMasterKey(ctx context.Context) error { return m.verify.Ex
 // init_applied), guarda la configuración inicial de install (MUELLE_INIT_*).
 func (m *Module) ApplyStartupSettings(ctx context.Context, panelDomain string, init InitialSettings) error {
 	return m.startup.Execute(ctx, dto.StartupSettings{PanelDomain: panelDomain, Init: init})
+}
+
+// PanelOrigin es el origen en que muelle-caddy sirve el panel según los
+// ajustes: https://<panel_domain>, con :<proxy_https_port> si no es 443. ""
+// sin dominio del panel, o si no se pudo leer (queda en el log). El
+// contenedor lo pasa a cmd/http (Config.ProxyOrigin), que lo acepta como
+// Origin además de MUELLE_PANEL_ORIGIN: así cambiar los puertos del proxy no
+// deja fuera del panel (spec §16).
+func (m *Module) PanelOrigin(ctx context.Context) string {
+	o, err := m.panelOrigin.Execute(ctx)
+	if err != nil {
+		m.log.Warn("admin: leyendo el origen del panel de los ajustes", "err", err)
+		return ""
+	}
+	return o
 }
