@@ -393,7 +393,10 @@ El estado real en Swarm de los servicios de la app (filtrados por `naming.AppLab
 
 El panel lee los valores de cada tarea (suma el CPU y promedia la RAM de las que se midieron, para compararla con `memory_limit_bytes`, que es por tarea). Las sumas del servicio son para otros clientes.
 
-El panel lo pide cada 5 s mientras la pestaña está visible. El backend puede guardar la respuesta en caché hasta 2 s por app.
+**Caché.** El panel lo pide cada 5 s mientras la pestaña está visible, y la página de proyectos lo pide una vez por fila. Medir es caro (`ContainerStats` tarda cerca de 1 s por tarea), así que:
+- las medidas (`cpu_percent` y `memory_bytes` de cada tarea) se guardan 5 s por app, como supuso el panel. Varias pestañas, o varios clientes, comparten la misma medición;
+- el resto (servicios, réplicas, tareas, `health`) se puede guardar hasta 2 s por app, para que un deploy en curso no se vea atrasado;
+- una tarea que no estaba en la medición guardada sale con las medidas en null hasta la próxima.
 
 **Errores:** `404 not_found` si la app no existe; `503 docker_unavailable`.
 
@@ -880,6 +883,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | SSE, los dos | — | La credencial se revisa cada 60 s; a lo más 8 por principal (`429`) y 1 h por stream | El panel ya trata un stream que se corta |
 | Enmascarado | — | También cada línea de un secreto de varias líneas; nada por debajo de 8 bytes | Una clave PEM no se veía; un `1` tapaba texto ajeno |
 | `GET …/status` | `cpu_percent` y `memory_bytes` por tarea | Por tarea, como lo lee el panel (null fuera del nodo local), y además su suma por servicio. Suma `image` y `update_state` | Compatible |
+| `GET …/status`: caché | Las medidas, al menos 5 s | Las medidas, 5 s por app; el resto, hasta 2 s | Compatible. El estado de un deploy en curso no se atrasa 5 s |
 | `GET …/deploys` | Los últimos 20 | Hasta 22: los 20 más nuevos, más el actual y su anterior si son más viejos | La retención nunca borra la versión que corre ni el destino del rollback |
 | Rollback sin anterior | `409 no_previous_deploy` (o `conflict`) | `409 no_previous_deploy` | Igual |
 | Rutas de un dominio | Bajo la app | Bajo la app | Igual |
