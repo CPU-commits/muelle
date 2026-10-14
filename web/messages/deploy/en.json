@@ -52,9 +52,7 @@
 				"input history",
 				"local historyPlural = history: plural"
 			],
-			"selectors": [
-				"historyPlural"
-			],
+			"selectors": ["historyPlural"],
 			"match": {
 				"historyPlural=one": "{running} running · 1 past",
 				"historyPlural=*": "{running} running · {history} past"
@@ -121,13 +119,8 @@
 	"deploy_logs_lines": "Log lines",
 	"deploy_logs_new_lines": [
 		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
 			"match": {
 				"countPlural=one": "1 new line while paused",
 				"countPlural=*": "{count} new lines while paused"
@@ -153,14 +146,8 @@
 	"deploy_memory_with_limit": "MB each · limit {limit}",
 	"deploy_usage_sampled": [
 		{
-			"declarations": [
-				"input sampled",
-				"input total",
-				"local totalPlural = total: plural"
-			],
-			"selectors": [
-				"totalPlural"
-			],
+			"declarations": ["input sampled", "input total", "local totalPlural = total: plural"],
+			"selectors": ["totalPlural"],
 			"match": {
 				"totalPlural=one": "{sampled} of 1 replica measured (only those on muelle’s node)",
 				"totalPlural=*": "{sampled} of {total} replicas measured (only those on muelle’s node)"
@@ -177,5 +164,8 @@
 	"deploy_logs_ended_body": "There are no more logs to follow. If you deploy it again, reconnect.",
 	"deploy_logs_ended_empty": "No lines arrived.",
 	"deploy_logs_restart": "Connect again",
-	"deploy_error_docker": "Docker is not responding on the muelle server (or the node is not a Swarm manager)."
+	"deploy_error_docker": "Docker is not responding on the muelle server (or the node is not a Swarm manager).",
+	"deploy_dialog_reason_both": "Send one image for the app or one per service, not both.",
+	"deploy_dialog_reason_compose": "This is a compose app: images go per service.",
+	"deploy_dialog_reason_unknown_service": "The service {service} no longer exists in the app configuration."
 }

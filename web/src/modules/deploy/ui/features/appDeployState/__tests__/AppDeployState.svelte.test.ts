@@ -116,6 +116,15 @@ describe('AppDeployState (las columnas de Proyectos para F2)', () => {
 		expect(vm.image).toBeNull()
 	})
 
+	it('sin historial (falló o no hay un exitoso), la imagen sale de lo que corre en Swarm', async () => {
+		mocks.listDeploys.mockRejectedValue(new UnavailableError('caído'))
+		const { vm } = await mountViewModel(() => new AppDeployState(() => APP))
+
+		await vi.waitFor(() => expect(vm.tone).toBe('ok'))
+		expect(vm.image).toBe('ghcr.io/auditfy/api:sha-3f9c2e1')
+		expect(vm.imageShort).toBe('api:sha-3f9c2e1')
+	})
+
 	it('con enabled en false no pide nada y dice "—"; al prenderse carga', async () => {
 		let enabled = $state(false)
 		const { vm } = await mountViewModel(

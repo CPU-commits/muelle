@@ -24,6 +24,7 @@ import {
 	type DeployLogEvent,
 	DeployNotFound,
 	DockerUnavailable,
+	ImageRejected,
 	LogStreamFailed,
 	NoPreviousDeploy,
 } from '../domain'
@@ -539,4 +540,28 @@ describe('contrato de la Fase 2', () => {
 		expect((error as ApiError).status).toBe(422)
 		expect((error as ApiError).message).toBe('service: es obligatorio')
 	})
+
+	it.each([
+		['image', 'manda image o images, no los dos', null, 'both'],
+		['image', 'una app compose recibe images, por servicio', null, 'compose'],
+		['images.worker', 'el servicio no existe en la app', 'worker', 'unknown_service'],
+		['images.api', 'no es una referencia de imagen válida', 'api', 'invalid'],
+		['images.api', 'algo que el panel no conoce', 'api', 'invalid'],
+	] as const)(
+		'un 422 de %s ("%s") es ImageRejected con su motivo',
+		async (field, reason, service, kind) => {
+			server.use(
+				http.post(api(`${APP_PATH}/deploys`), () =>
+					apiError(422, 'invalid', `${field}: ${reason}`),
+				),
+			)
+			const result = deployUseCases.createDeploy({
+				app: APP,
+				services: ['api'],
+				overrides: { api: 'ghcr.io/x/api:v2' },
+			})
+			await expect(result).rejects.toBeInstanceOf(ImageRejected)
+			await expect(result).rejects.toMatchObject({ service, reason: kind })
+		},
+	)
 })

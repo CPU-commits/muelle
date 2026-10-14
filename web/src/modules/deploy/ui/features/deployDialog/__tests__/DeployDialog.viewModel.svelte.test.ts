@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
-import { UnavailableError, ValidationError } from '@/shared/domain'
-import { asDeployId } from '../../../../domain'
+import { UnavailableError } from '@/shared/domain'
+import { asDeployId, ImageRejected } from '../../../../domain'
 import { APP } from '../../../../domain/repositories/__fakes__/deployFixtures'
 import { mountViewModel } from '../../../__tests__/mountViewModel'
 import { type DeployDialogProps, DeployDialogViewModel } from '../DeployDialog.viewModel.svelte.ts'
@@ -93,17 +93,46 @@ describe('DeployDialogViewModel', () => {
 		expect(vm.errors.api).toBeUndefined()
 	})
 
-	it('un 422 del backend (images.<servicio>) va al campo de ese servicio', async () => {
-		mocks.createDeploy.mockRejectedValue(new ValidationError('no existe', 'images.runner'))
-		const { vm } = await mountViewModel(
-			() => new DeployDialogViewModel(() => props({ services: ['gateway', 'runner'] })),
-		)
-		vm.setOverride('runner', 'ghcr.io/x/runner:v2')
+	it.each([
+		['invalid', m.deploy_dialog_invalid_image()],
+		['unknown_service', m.deploy_dialog_reason_unknown_service({ service: 'runner' })],
+	] as const)(
+		'un 422 de images.<servicio> (%s) va al campo de ese servicio, con su texto',
+		async (reason, text) => {
+			mocks.createDeploy.mockRejectedValue(new ImageRejected('motivo', 'runner', reason))
+			const { vm } = await mountViewModel(
+				() => new DeployDialogViewModel(() => props({ services: ['gateway', 'runner'] })),
+			)
+			vm.setOverride('runner', 'ghcr.io/x/runner:v2')
+
+			await vm.submit()
+
+			expect(vm.errors.runner).toBe(text)
+			expect(vm.formError).toBeNull()
+		},
+	)
+
+	it('un 422 de image (compose, o image con images) va al campo único con su texto', async () => {
+		mocks.createDeploy.mockRejectedValueOnce(new ImageRejected('motivo', null, 'compose'))
+		const { vm } = await mountViewModel(() => new DeployDialogViewModel(() => props()))
+		vm.setOverride('api', 'ghcr.io/x/api:v2')
+		await vm.submit()
+		expect(vm.errors.api).toBe(m.deploy_dialog_reason_compose())
+
+		mocks.createDeploy.mockRejectedValueOnce(new ImageRejected('motivo', null, 'both'))
+		vm.setOverride('api', 'ghcr.io/x/api:v3')
+		await vm.submit()
+		expect(vm.errors.api).toBe(m.deploy_dialog_reason_both())
+	})
+
+	it('un servicio que el diálogo no muestra va al banner', async () => {
+		mocks.createDeploy.mockRejectedValue(new ImageRejected('motivo', 'otro', 'unknown_service'))
+		const { vm } = await mountViewModel(() => new DeployDialogViewModel(() => props()))
+		vm.setOverride('api', 'ghcr.io/x/api:v2')
 
 		await vm.submit()
 
-		expect(vm.errors.runner).toBe(m.deploy_dialog_invalid_image())
-		expect(vm.formError).toBeNull()
+		expect(vm.formError).toBe(m.deploy_dialog_reason_unknown_service({ service: 'otro' }))
 	})
 
 	it('otro error va al banner del diálogo', async () => {

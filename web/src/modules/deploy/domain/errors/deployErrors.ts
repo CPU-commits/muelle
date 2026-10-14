@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError, UnavailableError } from '@/shared/domain'
+import { ConflictError, NotFoundError, UnavailableError, ValidationError } from '@/shared/domain'
 
 /** El deploy pedido no existe (o salió de los últimos 20 que se guardan). */
 export class DeployNotFound extends NotFoundError {
@@ -36,5 +36,33 @@ export class LogStreamFailed extends UnavailableError {
 		super(opened ? 'Se cortó el stream de logs' : 'No se pudo abrir el stream de logs', options)
 		this.name = 'LogStreamFailed'
 		this.opened = opened
+	}
+}
+
+/**
+ * Por qué el backend rechazó una imagen del deploy (el `422` de `image` o
+ * `images.<servicio>`, contrato §2.2):
+ * - `both`: vinieron `image` e `images` juntos;
+ * - `compose`: una app compose recibe `images`, por servicio;
+ * - `unknown_service`: el servicio no existe en la app (según la configuración actual);
+ * - `invalid`: la ref no pasa `validate.ImageRef`, o un motivo que el panel no conoce.
+ */
+export type ImageRejectionReason = 'both' | 'compose' | 'unknown_service' | 'invalid'
+
+export class ImageRejected extends ValidationError {
+	/** El servicio del campo (`images.<servicio>`); null si fue `image`. */
+	readonly service: string | null
+	readonly reason: ImageRejectionReason
+
+	constructor(
+		message: string,
+		service: string | null,
+		reason: ImageRejectionReason,
+		options?: ErrorOptions,
+	) {
+		super(message, service === null ? 'image' : `images.${service}`, options)
+		this.name = 'ImageRejected'
+		this.service = service
+		this.reason = reason
 	}
 }

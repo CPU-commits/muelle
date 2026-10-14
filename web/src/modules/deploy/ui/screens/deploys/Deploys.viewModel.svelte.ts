@@ -91,18 +91,31 @@ export class DeploysViewModel {
 	readonly selected: Deploy | null
 	// Lo único que reinicia el seguimiento del log: cambiar de deploy (no su estado).
 	readonly #selectedKey: DeployId | null
+	/** El `?deploy=` de la URL: cambia sin desmontar la pantalla (otro link a la misma ruta). */
+	readonly #linkedId: DeployId | null
 
 	constructor(props: () => DeploysProps) {
 		this.#props = props
-		const linkedId = parseDeployId(props().deployParam)
-		this.selectedId = linkedId
+		this.#linkedId = $derived(parseDeployId(this.#props().deployParam))
+		this.selectedId = untrack(() => this.#linkedId)
 		this.deploys = createQuery(() => liveDeploysQuery(this.ref))
 		this.status = createQuery(() => appStatusQuery(this.ref))
 		this.linked = createQuery(() =>
-			deployQuery(this.ref, linkedId, {
-				enabled: this.deploys.isSuccess && !this.#inHistory(linkedId),
+			deployQuery(this.ref, this.#linkedId, {
+				enabled: this.deploys.isSuccess && !this.#inHistory(this.#linkedId),
 			}),
 		)
+
+		// `?deploy=141` → `?deploy=142` en la misma ruta: abre el nuevo.
+		$effect(() => {
+			const id = this.#linkedId
+			if (id === null) return
+			untrack(() => {
+				if (id === this.selectedId) return
+				this.selectedId = id
+				this.follow = true
+			})
+		})
 
 		this.selected = $derived.by(() => {
 			const list = this.deploys.data ?? []
@@ -174,9 +187,7 @@ export class DeploysViewModel {
 
 	/** El `?deploy=` apunta a uno que ya no existe: se avisa y se muestra el más reciente. */
 	get linkedMissing(): DeployId | null {
-		return this.linked.error instanceof DeployNotFound
-			? parseDeployId(this.#props().deployParam)
-			: null
+		return this.linked.error instanceof DeployNotFound ? this.#linkedId : null
 	}
 
 	/** El estado a mostrar del elegido: el del stream si es más nuevo que el historial. */

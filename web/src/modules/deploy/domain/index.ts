@@ -83,9 +83,11 @@ export { buildDeployRequest, inferAppKind, overridableServices } from './entitie
 export {
 	DeployNotFound,
 	DockerUnavailable,
+	ImageRejected,
 	LogStreamFailed,
 	NoPreviousDeploy,
 } from './errors/deployErrors'
+export type { ImageRejectionReason } from './errors/deployErrors'
 export type { DeployDeps, DeployRepository, Wait } from './repositories/deployRepository'
 export { realWait } from './repositories/deployRepository'
 export type { CreateDeploy, CreateDeployInput } from './use-cases/createDeploy'

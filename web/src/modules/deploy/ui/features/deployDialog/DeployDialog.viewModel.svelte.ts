@@ -1,12 +1,12 @@
 import { createMutation, useQueryClient } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
-import { ValidationError } from '@/shared/domain'
 import { createDeployMutation } from '../../../data'
 import {
 	type AppKind,
 	type AppRef,
 	type DeployId,
+	ImageRejected,
 	isValidImageOverride,
 	overridableServices,
 } from '../../../domain'
@@ -22,6 +22,20 @@ export interface DeployDialogProps {
 	readonly currentImages: Readonly<Record<string, string>>
 	readonly onDeployed: (id: DeployId) => void
 	readonly onClose: () => void
+}
+
+/** El texto de cada motivo por el que el backend rechazó una imagen. */
+function rejectionMessage(error: ImageRejected, service: string): string {
+	switch (error.reason) {
+		case 'both':
+			return m.deploy_dialog_reason_both()
+		case 'compose':
+			return m.deploy_dialog_reason_compose()
+		case 'unknown_service':
+			return m.deploy_dialog_reason_unknown_service({ service })
+		case 'invalid':
+			return m.deploy_dialog_invalid_image()
+	}
 }
 
 // "Desplegar" (App-Resumen.dc.html): un campo de imagen opcional por servicio. Vacío
@@ -97,14 +111,16 @@ export class DeployDialogViewModel {
 	}
 
 	#showError(error: unknown): void {
-		if (error instanceof ValidationError && error.field) {
+		if (error instanceof ImageRejected) {
 			// El backend dice `image` (formulario) o `images.<servicio>` (compose).
-			const field = error.field.replace(/^images\./, '')
-			const service = field === 'image' ? this.fields[0] : field
+			const service = error.service ?? this.fields[0]
+			const message = rejectionMessage(error, service ?? '')
 			if (service && this.fields.includes(service)) {
-				this.errors = { ...this.errors, [service]: m.deploy_dialog_invalid_image() }
-				return
+				this.errors = { ...this.errors, [service]: message }
+			} else {
+				this.formError = message
 			}
+			return
 		}
 		this.formError = deployErrorMessage(error)
 	}

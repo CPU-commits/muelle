@@ -4,7 +4,7 @@ import {
 	toDomainError,
 	withDomainErrors,
 } from '@/shared/data/http/domainErrors'
-import { UnauthorizedError } from '@/shared/domain'
+import { UnauthorizedError, ValidationError } from '@/shared/domain'
 import {
 	type AppLogEvent,
 	type AppRef,
@@ -13,6 +13,8 @@ import {
 	DeployNotFound,
 	type DeployRepository,
 	DockerUnavailable,
+	ImageRejected,
+	type ImageRejectionReason,
 	isDeployStatus,
 	isTerminalStatus,
 	LogStreamFailed,
@@ -57,6 +59,23 @@ const ONE_DEPLOY_ERRORS: DomainErrorMap = {
 const ROLLBACK_ERRORS: DomainErrorMap = {
 	phase: 2,
 	codes: { ...docker, no_previous_deploy: (error) => new NoPreviousDeploy(cause(error)) },
+}
+
+// Los motivos del `422` de una imagen (contrato §2.2). El backend no les da código propio:
+// se reconocen por el texto, y lo que no se reconoce es "ref inválida".
+const IMAGE_REASONS: readonly [RegExp, ImageRejectionReason][] = [
+	[/no los dos/i, 'both'],
+	[/compose|por servicio/i, 'compose'],
+	[/servicio no existe|no existe en la app/i, 'unknown_service'],
+]
+
+/** Un 422 en `image` o `images.<servicio>` sale como `ImageRejected`, con el motivo. */
+function imageRejection(error: unknown): unknown {
+	if (!(error instanceof ValidationError) || !error.field) return error
+	const service = error.field === 'image' ? null : error.field.replace(/^images\./, '')
+	if (service !== null && !error.field.startsWith('images.')) return error
+	const reason = IMAGE_REASONS.find(([pattern]) => pattern.test(error.message))?.[1] ?? 'invalid'
+	return new ImageRejected(error.message, service, reason, { cause: error })
 }
 
 /** Si la sesión se cayó: el 401 sale como `UnauthorizedError` (y el cliente ya mandó al login). */
@@ -131,14 +150,19 @@ export const httpDeployRepository: DeployRepository = {
 			ONE_DEPLOY_ERRORS,
 		),
 
-	create: (app, request) =>
-		withDomainErrors(
-			async () =>
-				deployAcceptedFromDto(
-					await deployHttpDataSource.create(app, createDeployPayload(request)),
-				),
-			DEPLOY_ERRORS,
-		),
+	create: async (app, request) => {
+		try {
+			return await withDomainErrors(
+				async () =>
+					deployAcceptedFromDto(
+						await deployHttpDataSource.create(app, createDeployPayload(request)),
+					),
+				DEPLOY_ERRORS,
+			)
+		} catch (error) {
+			throw imageRejection(error)
+		}
+	},
 
 	rollback: (app) =>
 		withDomainErrors(

@@ -268,4 +268,14 @@ describe('DeploysViewModel', () => {
 			expect(vm.log.lines.map((line) => line.text)).toEqual(['uno', 'dos']),
 		)
 	})
+
+	it('otro ?deploy= en la misma ruta (141 → 142) abre ese deploy', async () => {
+		mocks.listDeploys.mockResolvedValue([...HISTORY, makeDeploy(141)])
+		const props = $state({ ...PROPS, deployParam: '141' })
+		const { vm } = await mountViewModel(() => new DeploysViewModel(() => props))
+		await vi.waitFor(() => expect(vm.selected?.id).toBe(141))
+
+		props.deployParam = '142'
+		await vi.waitFor(() => expect(vm.selected?.id).toBe(142))
+	})
 })
