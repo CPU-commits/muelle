@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-svelte'
+import { aliveAfterGc } from '@/shared/ui/components/__tests__/memory'
 import { appOwner, makeGetEnv, makePatchEnv } from '../../../../domain'
 import { InMemoryEnvRepository } from '../../../../domain/repositories/__fakes__/inMemoryEnvRepository'
 import ImportPanelHarness from './ImportPanelHarness.svelte'
@@ -21,20 +22,11 @@ vi.mock('@/modules/secrets/container', () => ({
 describe('EnvImportPanel no retiene lo pegado', () => {
 	const gc = (globalThis as { gc?: () => void }).gc
 
-	/**
-	 * Fuerza el GC hasta que `ref` quede vacía (o se acabe el tiempo). Cada intento es una
-	 * tarea nueva y el GC va antes del `deref`: una WeakRef leída mantiene vivo su objeto
-	 * hasta el final de la tarea. Con toda la suite corriendo, algún cuadro o timer de la
-	 * página puede tardar en soltar su referencia: por eso se reintenta, no se espera fijo.
-	 */
+	// El GC sincrónico revisa la pila de forma conservadora y a veces deja vivo un nodo que
+	// nadie referencia: con toda la suite corriendo, el test fallaba de a ratos. aliveAfterGc
+	// (shared) corre GC completos asíncronos y reintenta; una fuga real sobrevive a todos.
 	async function expectCollected(ref: WeakRef<object>): Promise<void> {
-		await vi.waitFor(
-			() => {
-				gc?.()
-				expect(ref.deref()).toBeUndefined()
-			},
-			{ timeout: 5000, interval: 50 },
-		)
+		expect(await aliveAfterGc([ref], 10)).toBe(0)
 	}
 
 	beforeEach(() => {
