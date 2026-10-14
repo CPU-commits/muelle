@@ -701,7 +701,7 @@ install despliega el servicio con estas variables. `settings.Load` las valida en
 
 ### 5.3 El stack de muelle
 
-install lo despliega con `DeployStack`. No pasa por el render de apps: puede montar `docker.sock`, que las apps no pueden.
+install lo despliega con `DeployStack`. No pasa por el render de apps: puede montar `docker.sock` y `muelle_master_key`, que las apps no pueden (la lista de §6.3 del diseño: sin bind mounts, sin `driver_opts`, sin `secrets:` ni `configs:`).
 
 ```yaml
 services:

@@ -269,18 +269,40 @@ Para cada servicio del compose resultante:
 | `deploy.update_config` | `parallelism: 1`, `order: start-first`, `failure_action: rollback`, `monitor: 30s` | Sí, si lo define |
 | `deploy.rollback_config` | `parallelism: 1`, `order: start-first` | Sí, si lo define |
 | Servicios con volúmenes | `order: stop-first` en update y rollback (dos instancias escribiendo el mismo volumen lo corrompen) y la restricción `node.id == <storage_node_id>` | Sí, si define su propia restricción de nodo |
-| Etiquetas | `muelle.project`, `muelle.stage`, `muelle.app`, `muelle.deploy` | Se agregan |
+| Etiquetas | `muelle.project`, `muelle.stage`, `muelle.app`, `muelle.deploy` | Se agregan. Una etiqueta `muelle.*` del usuario es un error de render (§6.3) |
 | Imagen | `ref@sha256:…` resuelta | — |
 
 `storage_node_id` toma por defecto el `manager_node_id` en el primer deploy de una app con volúmenes. Los volúmenes nombrados quedan como `<stack>_<nombre>`, con el driver local.
 
 ### 6.3 Restricciones validadas (son errores de render)
 
-- `ports:` publicados: no soportado en la v1.
-- `build:`: no soportado; las imágenes vienen de un registry.
-- Bind mounts a rutas del host: no soportados en la v1, solo volúmenes nombrados.
-- `container_name`, `network_mode`, servicios con `privileged` y secciones `networks:` propias: rechazados.
-- El destino de un dominio tiene que existir en el compose y su puerto tiene que ser un entero válido.
+muelle tiene `docker.sock` (es root en el host) y la clave maestra. Una app nunca puede montar el socket (contrato §5.3), salir de su contenedor ni leer archivos de muelle. Son errores de render, y también `422` en `compose_yaml` al guardar (la parte pura va en un paquete de `shared/domain`, que usan catalog y deploy).
+
+**Lista de permitidos.** El render arma el compose final solo con las claves que conoce. Cualquier otra, en un servicio o en el primer nivel, es un error, salvo las extensiones `x-*`. Así, una clave nueva de la especificación de compose no pasa sin revisarla: `use_api_socket` monta el socket de Docker, y `models`, `provider` o `gpus` no tienen sentido acá.
+
+- **Primer nivel:** `services`, `volumes` (ver abajo) y `x-*`. `version` se acepta y se descarta. `name` no: el nombre del proyecto lo fija el render.
+- **Servicio:** `image`, `command`, `entrypoint`, `environment`, `healthcheck`, `deploy`, `labels`, `logging`, `volumes`, `tmpfs`, `user`, `working_dir`, `stop_grace_period`, `stop_signal`, `read_only`, `init`, `ulimits`, `cap_drop`, `hostname`, `domainname`, `extra_hosts`, `dns`, `dns_search`, `dns_opt`, `expose`, `tty`, `stdin_open`, `platform` y `x-*`. `depends_on` y `restart` se aceptan y se descartan: Swarm los ignora, y así no se rompe un compose que ya existe.
+- **Dentro de `deploy`:** `mode`, `replicas`, `placement`, `resources` (`cpus` y `memory` en `limits` y `reservations`), `restart_policy`, `update_config`, `rollback_config`, `endpoint_mode` y `labels`.
+
+**Rechazados, y por qué** (la lista de permitidos ya los deja fuera; se nombran para que el mensaje lo explique y para que haya un test por cada uno):
+
+- **Publicar o construir:** `ports:` (no soportado en la v1) y `build:` (las imágenes vienen de un registry).
+- **Montar el host:**
+  - en `volumes:` de un servicio, todo lo que no sea `type: volume` sobre un volumen del compose, o `type: tmpfs`: los bind mounts (`/ruta:/x`, `./x:/x`, `type: bind`), `npipe`, `cluster` e `image`;
+  - en `volumes:` de primer nivel, `driver`, `driver_opts`, `external` y `name` (solo queda `labels`). Un volumen con `driver_opts: {type: none, o: bind, device: /var/run}` monta una ruta del host con el driver local, y le da a la app `docker.sock`. `external` o `name` llegan a volúmenes de otro stack o de muelle (`muelle_data`). Los volúmenes quedan como `<stack>_<nombre>` con el driver local (§6.2);
+  - `devices`, `device_cgroup_rules` y `volumes_from`.
+- **Escalar privilegios o salir del aislamiento:** `privileged`, `cap_add`, `security_opt`, `sysctls`, `pid`, `ipc`, `uts`, `userns_mode`, `cgroup`, `cgroup_parent`, `runtime`, `isolation` y `credential_spec`.
+- **Leer archivos de muelle:** compose-go y `docker stack deploy` leen archivos del sistema de archivos **de muelle**, no del de la app.
+  - `secrets:` y `configs:`, de primer nivel y de servicio, no se soportan en la v1: las apps reciben sus secretos como variables (§5.2 regla 3). Con `file:`, `docker stack deploy` leería `/run/secrets/muelle_master_key` o `/data/muelle.db` y los montaría en la app. Con `external: true` o `name:`, la app montaría `muelle_master_key` o `muelle_init_cloudflare_token`.
+  - `env_file`, `label_file`, `extends` e `include`, que hacen que compose-go lea archivos.
+- **Redes y nombres:** `container_name`, `network_mode`, `links`, `external_links` y `networks:` propias, de primer nivel o de servicio. El render pone la red del stage (§6.2).
+- **Logging:** solo los drivers `json-file`, `local` y `none`. Los demás (`syslog`, `gelf`, `fluentd`…) los corre el daemon en la red del host, y su dirección podría apuntar a un servicio local del host.
+- **Etiquetas `muelle.*`:** las inyecta el render (§6.2), y deploy, ingress y el estado de las apps filtran por ellas. Una del usuario con ese prefijo se rechaza en `labels` y en `deploy.labels` del servicio, y en las de un volumen. Si no, una app podría hacerse pasar por otra app, o por otro stage.
+- **Destinos de dominio:** el destino de un dominio tiene que existir en el compose, y su puerto tiene que ser un entero válido.
+
+**La interpolación** de `${VAR}` usa solo las variables resueltas de la app (`ResolveEnv`), nunca el entorno de muelle: en compose-go, `cli.WithEnv` con esas variables, sin `cli.WithOsEnv` ni `cli.WithDotEnv` (que leería un `.env`). Después, `docker stack deploy` vuelve a interpolar el compose final con el entorno de su proceso. Por eso, en el compose final todo `$` va como `$$`, venga del spec de formulario, del compose o del valor de una variable.
+
+**Defensa extra:** el CLI corre en un directorio temporal vacío (`runCLI`), así una ruta relativa que se le escape al render no resuelve dentro de los archivos de muelle. No reemplaza a la validación: una ruta absoluta, o con `..`, no se frena con eso.
 
 ## 7. Flujo de deploy
 
@@ -424,6 +446,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 - **Ids no reutilizables:** las tablas cuyos ids forman parte de la AAD (`stages`, `apps`, `users`) usan `AUTOINCREMENT`, para que un valor cifrado sacado de un backup no descifre en una fila nueva con el mismo id.
 - **Respaldo de muelle:** a diario, `VACUUM INTO /data/backups/muelle-<fecha>.db`, guardando los últimos 7.
 - **Redes:** ver §3.2. Cada stage está aislado en su red; solo Caddy toca varias. La admin API de Caddy solo es accesible por el socket unix.
+- **Apps:** nunca montan `docker.sock`, ni una ruta del host, ni los secretos o los archivos de muelle. El render solo acepta las claves de compose que conoce (§6.3).
 
 ## 13. Manejo de errores
 

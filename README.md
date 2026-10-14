@@ -120,8 +120,8 @@ Hallazgos de la revisión de código que las próximas fases deben respetar.
 - Escapar `$` como `$$` en todo string que venga del spec de formulario (`command`, `healthcheck.command`, imagen, mounts, valores de env).
 - Generar el healthcheck `http` en forma exec (sin shell).
 - Fijar el nombre del proyecto compose explícitamente y usar variables de entorno solo para interpolación (las claves `COMPOSE_*` están reservadas).
-- Verificar que los nombres de `secrets:`/`configs:` de compose (`<stack>_<name>`) no pasen de 64 caracteres.
-- Rechazar volúmenes externos, o con `name:` explícito que apunte a `muelle_*`.
+- La lista de permitidos y de rechazos de §6.3: entre otras, `secrets:`/`configs:` (con `file:` o `external` montarían la clave maestra en la app), volúmenes con `driver`/`driver_opts`/`external`/`name` (un `driver_opts` con `o: bind` monta `docker.sock`), `env_file`/`extends`/`include` y etiquetas `muelle.*` propias. Un test por cada rechazo.
+- Interpolar solo con las variables de `ResolveEnv` (nunca `os.Environ()`), y escapar todo `$` como `$$` en el compose final, porque `docker stack deploy` vuelve a interpolar.
 - Comprobar que el tamaño del env mezclado stage+app cabe en el `ARG_MAX` de Linux.
 - `secrets.ResolveEnv` ya está conectado al deploy (puerto `EnvResolver`), igual que `docker stack rm` al borrar una app.
 - Reemplazar `validateCompose` por la validación real de compose-go, incluyendo nombres de servicio únicos por stage. La parte pura (parsear, las restricciones de §6.3, los nombres de los servicios) va en un paquete de `shared/domain`, para que catalog la use al guardar y deploy al renderizar sin importarse.
