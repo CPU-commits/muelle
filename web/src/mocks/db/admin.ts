@@ -3,13 +3,16 @@ import { identityDb } from './identity'
 import { loadPersisted, savePersisted } from './persist'
 
 // Settings, auditoría y registries del backend simulado. `require_2fa` NO vive acá: es
-// `authDb.state.require2fa`, el mismo que lee el login para pedir la 2FA. Lo de la Fase 3
-// (proxy, DNS, certificados, IPs permitidas) y la Fase 2 (registries) sigue el spec §5.1.
+// `authDb.state.require2fa`, el mismo que lee el login para pedir la 2FA. Lo de las Fases 2
+// y 3 sigue el contrato (docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md,
+// §2.10 y §4).
 
 export interface MockRegistry {
 	host: string
 	username: string
 	password: string
+	createdAt: string
+	updatedAt: string
 }
 
 export interface MockAuditEvent {
@@ -24,7 +27,8 @@ export interface MockAuditEvent {
 
 export interface AdminState {
 	cloudflareToken: string | null
-	cloudflareZones: number
+	/** Las zonas que veía el token al guardarlo (un valor guardado, no una consulta). */
+	cloudflareZones: number | null
 	publicIp: string
 	publicIpv6: string
 	acmeEmail: string
@@ -40,7 +44,8 @@ export interface AdminState {
 	nextAuditId: number
 }
 
-const STORAGE_KEY = 'admin'
+// Con versión: una pestaña con el estado de antes (registries sin fechas) empieza de cero.
+const STORAGE_KEY = 'admin-v2'
 const MINUTE_MS = 60_000
 
 /** Cuántos eventos trae la auditoría al empezar: más de una página, para ver "Cargar más". */
@@ -79,7 +84,7 @@ function seedAudit(): MockAuditEvent[] {
 
 function seed(): AdminState {
 	return {
-		cloudflareToken: 'cf-token-demo',
+		cloudflareToken: 'cf_token_demo_de_cuarenta_caracteres_xx',
 		cloudflareZones: 4,
 		publicIp: '203.0.113.24',
 		publicIpv6: '2001:db8::24',
@@ -89,7 +94,15 @@ function seed(): AdminState {
 		proxyHttpsPort: 443,
 		panelAllowedCidrs: [],
 		clientIp: '198.51.100.17',
-		registries: [{ host: 'ghcr.io', username: 'cpu-commits', password: 'ghp_demo' }],
+		registries: [
+			{
+				host: 'ghcr.io',
+				username: 'cpu-commits',
+				password: 'ghp_demo',
+				createdAt: '2026-10-01T12:00:00.000Z',
+				updatedAt: '2026-10-09T15:30:00.000Z',
+			},
+		],
 		audit: seedAudit(),
 		nextAuditId: MOCK_AUDIT_SEED_COUNT + 1,
 	}

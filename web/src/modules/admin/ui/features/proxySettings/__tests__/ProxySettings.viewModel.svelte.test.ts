@@ -5,7 +5,13 @@ import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { UnavailableError, ValidationError } from '@/shared/domain'
 import type { ProxySettingsViewModel } from '..'
-import { InvalidIpAddress, type ProxySettings, type Settings } from '../../../../domain'
+import { toast } from '@/shared/ui/stores'
+import {
+	CloudflareUnavailable,
+	InvalidIpAddress,
+	type ProxySettings,
+	type Settings,
+} from '../../../../domain'
 import ProxySettingsHarness from './ProxySettingsHarness.svelte'
 import { cacheHolds } from '../../../__tests__/cacheHolds'
 
@@ -14,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 	updateAcmeEmail: vi.fn(),
 	updateProxyPorts: vi.fn(),
 	replaceCloudflareToken: vi.fn(),
+	removeCloudflareToken: vi.fn(),
 }))
 
 vi.mock('@/modules/admin/container', () => ({
@@ -24,6 +31,7 @@ vi.mock('@/modules/admin/container', () => ({
 		updateAcmeEmail: mocks.updateAcmeEmail,
 		updateProxyPorts: mocks.updateProxyPorts,
 		replaceCloudflareToken: mocks.replaceCloudflareToken,
+		removeCloudflareToken: mocks.removeCloudflareToken,
 		listAudit: vi.fn(),
 		listRegistries: vi.fn(),
 		addRegistry: vi.fn(),
@@ -63,11 +71,15 @@ async function mountViewModel(proxy: ProxySettings = PROXY): Promise<ProxySettin
 describe('ProxySettingsViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		vi.restoreAllMocks()
 		mocks.updatePublicIp.mockResolvedValue(saved({ publicIpv4: '203.0.113.30' }))
 		mocks.updateAcmeEmail.mockResolvedValue(saved({}))
 		mocks.updateProxyPorts.mockResolvedValue(saved({ httpPort: 8080, httpsPort: 8443 }))
 		mocks.replaceCloudflareToken.mockResolvedValue(
 			saved({ cloudflare: { tokenSet: true, zones: 2 } }),
+		)
+		mocks.removeCloudflareToken.mockResolvedValue(
+			saved({ cloudflare: { tokenSet: false, zones: null } }),
 		)
 	})
 
@@ -199,5 +211,145 @@ describe('ProxySettingsViewModel', () => {
 		expect(vm.cloudflareOpen).toBe(true)
 		expect(vm.cloudflareToken).toBe('')
 		expect(await cacheHolds(client, 'cf-malo')).toBe(false)
+	})
+
+	it('vaciar la IPv4 o el email ACME los borra: se manda ""', async () => {
+		const vm = await mountViewModel()
+
+		vm.setField('ipv4', '')
+		expect(vm.isIpDirty).toBe(true)
+		await vm.saveIp()
+		vm.setField('acmeEmail', '  ')
+		expect(vm.isAcmeDirty).toBe(true)
+		await vm.saveAcme()
+
+		expect(mocks.updatePublicIp).toHaveBeenCalledWith({ ipv4: '', ipv6: '' })
+		expect(mocks.updateAcmeEmail).toHaveBeenCalledWith('  ')
+	})
+
+	it('quitar el token pide confirmación y lo borra', async () => {
+		const success = vi.spyOn(toast, 'success')
+		const vm = await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: 4 } })
+
+		vm.askRemoveCloudflare()
+		expect(vm.confirmingRemoveCloudflare).toBe(true)
+		expect(mocks.removeCloudflareToken).not.toHaveBeenCalled()
+
+		await vm.removeCloudflare()
+
+		expect(mocks.removeCloudflareToken).toHaveBeenCalledOnce()
+		expect(vm.confirmingRemoveCloudflare).toBe(false)
+		expect(success).toHaveBeenCalledWith(m.admin_cf_removed())
+	})
+
+	it('si quitar el token falla, el error queda en la confirmación', async () => {
+		mocks.removeCloudflareToken.mockRejectedValueOnce(new UnavailableError('caído'))
+		const vm = await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: 4 } })
+
+		vm.askRemoveCloudflare()
+		await vm.removeCloudflare()
+
+		expect(vm.confirmingRemoveCloudflare).toBe(true)
+		expect(vm.removeCloudflareError).toBe(m.common_unavailable())
+		vm.cancelRemoveCloudflare()
+		expect(vm.confirmingRemoveCloudflare).toBe(false)
+		expect(vm.removeCloudflareError).toBeNull()
+	})
+
+	it('Cloudflare caído (502) no es un error del campo: un aviso en el modal para reintentar', async () => {
+		const failure = vi.spyOn(toast, 'error')
+		mocks.replaceCloudflareToken.mockRejectedValueOnce(new CloudflareUnavailable())
+		const vm = await mountViewModel()
+
+		vm.openCloudflare()
+		vm.setField('cloudflareToken', 'cf-cloudflare-caido')
+		await vm.saveCloudflare()
+
+		expect(vm.errors).toEqual({})
+		expect(vm.cloudflareError).toEqual({
+			title: m.admin_cf_unavailable_title(),
+			body: m.admin_cf_unavailable_body(),
+		})
+		expect(vm.cloudflareOpen).toBe(true)
+		expect(failure).not.toHaveBeenCalled()
+		// El token tampoco se queda: se pega otra vez para reintentar.
+		expect(vm.cloudflareToken).toBe('')
+		expect(await cacheHolds(client, 'cf-cloudflare-caido')).toBe(false)
+
+		// Reintentar limpia el aviso; cerrar y volver a abrir, también.
+		vm.setField('cloudflareToken', 'cf-otra-vez')
+		await vm.saveCloudflare()
+		expect(vm.cloudflareError).toBeNull()
+		expect(vm.cloudflareOpen).toBe(false)
+	})
+
+	it('cualquier otro error del modal del token también queda adentro', async () => {
+		mocks.replaceCloudflareToken.mockRejectedValueOnce(new UnavailableError('sin red'))
+		const vm = await mountViewModel()
+
+		vm.openCloudflare()
+		vm.setField('cloudflareToken', 'cf-x')
+		await vm.saveCloudflare()
+
+		expect(vm.cloudflareError).toEqual({ title: m.common_unavailable(), body: null })
+		vm.closeCloudflare()
+		vm.openCloudflare()
+		expect(vm.cloudflareError).toBeNull()
+	})
+
+	it('mientras se aplican los puertos (hasta 2 min) la confirmación dice que está aplicando', async () => {
+		let finish: (settings: Settings) => void = () => {}
+		mocks.updateProxyPorts.mockReturnValueOnce(
+			new Promise<Settings>((resolve) => (finish = resolve)),
+		)
+		const vm = await mountViewModel()
+		vm.setField('httpPort', '8080')
+		vm.askSavePorts()
+
+		const saving = vm.savePorts()
+		await expect.poll(() => vm.isSavingPorts).toBe(true)
+		expect(vm.confirmingPorts).toBe(true)
+		// Ni cancelar ni cerrar la cortan: el backend ya está aplicando.
+		vm.cancelPorts()
+		expect(vm.confirmingPorts).toBe(true)
+
+		finish(saved({ httpPort: 8080 }))
+		await saving
+		await expect.poll(() => vm.isSavingPorts).toBe(false)
+		expect(vm.confirmingPorts).toBe(false)
+	})
+
+	it('si cambió el puerto HTTPS, avisa a dónde se muda el panel', async () => {
+		const vm = await mountViewModel()
+		vm.setField('httpsPort', '8443')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpsPort: 8443 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		expect(vm.movedTo).toBe('https://panel.tudominio.cl:8443')
+
+		// Volver al 443 deja el origen sin puerto.
+		const back = await mountViewModel({ ...PROXY, httpsPort: 8443 })
+		back.setField('httpsPort', '443')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpsPort: 443 }))
+		back.askSavePorts()
+		await back.savePorts()
+		expect(back.movedTo).toBe('https://panel.tudominio.cl')
+	})
+
+	it('si solo cambió el HTTP, o no hay dominio del panel, no hay mudanza', async () => {
+		const vm = await mountViewModel()
+		vm.setField('httpPort', '8080')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+		expect(vm.movedTo).toBeNull()
+
+		const local = await mountViewModel({ ...PROXY, panelDomain: '' })
+		local.setField('httpsPort', '8443')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ panelDomain: '', httpsPort: 8443 }))
+		local.askSavePorts()
+		await local.savePorts()
+		expect(local.movedTo).toBeNull()
 	})
 })

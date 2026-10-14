@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { RegistryHost } from '../../../domain'
-import { auditEventDtoSchema, settingsDtoSchema } from '../../dtos/adminDto'
+import { auditEventDtoSchema, registryDtoSchema, settingsDtoSchema } from '../../dtos/adminDto'
 import {
 	auditEventFromDto,
 	newRegistryPayload,
 	registryCredentialsPayload,
+	registryFromDto,
 	settingsFromDto,
 	settingsPatchPayload,
 } from '../adminMapper'
@@ -59,6 +60,7 @@ describe('adminMapper', () => {
 				httpsPort: 8443,
 				panelAllowedCidrs: ['10.0.0.0/8'],
 				cloudflareToken: 'cf',
+				confirmLockout: true,
 			}),
 		).toEqual({
 			public_ip: '203.0.113.24',
@@ -68,8 +70,11 @@ describe('adminMapper', () => {
 			proxy_https_port: 8443,
 			panel_allowed_cidrs: ['10.0.0.0/8'],
 			cloudflare_token: 'cf',
+			confirm_lockout: true,
 		})
 		expect(settingsPatchPayload({})).toEqual({})
+		// Quitar el token es mandar "".
+		expect(settingsPatchPayload({ cloudflareToken: '' })).toEqual({ cloudflare_token: '' })
 	})
 
 	it('un evento de auditoría pierde los details en el borde', () => {
@@ -101,6 +106,31 @@ describe('adminMapper', () => {
 		expect(actor('user', 1)).toEqual({ kind: 'user', id: 1 })
 		expect(actor('system', null)).toEqual({ kind: 'system' })
 		expect(actor('cron', null)).toEqual({ kind: 'other', type: 'cron' })
+	})
+
+	it('client_ip es siempre un string (contrato §4): ya no admite null', () => {
+		expect(settingsDtoSchema.safeParse({ ...PHASE_3, client_ip: null }).success).toBe(false)
+		expect(settingsFromDto(settingsDtoSchema.parse(PHASE_3)).panelAccess?.clientIp).toBe(
+			'198.51.100.17',
+		)
+	})
+
+	it('un registry trae sus fechas', () => {
+		expect(
+			registryFromDto(
+				registryDtoSchema.parse({
+					host: 'ghcr.io',
+					username: 'bot',
+					created_at: '2026-10-01T12:00:00.000Z',
+					updated_at: '2026-10-10T19:36:53.77Z',
+				}),
+			),
+		).toEqual({
+			host: 'ghcr.io',
+			username: 'bot',
+			createdAt: new Date('2026-10-01T12:00:00.000Z'),
+			updatedAt: new Date('2026-10-10T19:36:53.770Z'),
+		})
 	})
 
 	it('arma los cuerpos de registries', () => {

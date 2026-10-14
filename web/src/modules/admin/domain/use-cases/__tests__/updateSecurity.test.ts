@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { InvalidCidr, makeUpdateSecurity, TotpRequiredFirst } from '../..'
+import { InvalidCidr, makeUpdateSecurity, TotpRequiredFirst, WouldLockOut } from '../..'
 import { InMemorySettingsRepository } from '../../repositories/__fakes__/inMemoryAdminRepository'
 
 describe('updateSecurity', () => {
@@ -33,6 +33,21 @@ describe('updateSecurity', () => {
 		await expect(
 			makeUpdateSecurity({ settings })({ require2fa: false }),
 		).resolves.toMatchObject({ require2fa: false })
+	})
+
+	it('una lista que deja fuera la IP de la sesión es WouldLockOut, salvo confirmándola', async () => {
+		const settings = new InMemorySettingsRepository()
+		const update = makeUpdateSecurity({ settings })
+
+		await expect(update({ allowedCidrs: '10.0.0.0/8' })).rejects.toBeInstanceOf(WouldLockOut)
+		expect(settings.settings.panelAccess?.allowedCidrs).toEqual([])
+
+		await update({ allowedCidrs: '10.0.0.0/8', confirmLockout: true })
+		expect(settings.patches.at(-1)).toEqual({
+			panelAllowedCidrs: ['10.0.0.0/8'],
+			confirmLockout: true,
+		})
+		expect(settings.settings.panelAccess?.allowedCidrs).toEqual(['10.0.0.0/8'])
 	})
 
 	it('una IP mal escrita no sale del panel', async () => {

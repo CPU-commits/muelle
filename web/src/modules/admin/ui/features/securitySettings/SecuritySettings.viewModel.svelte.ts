@@ -11,6 +11,7 @@ import {
 	type Settings,
 	TotpRequiredFirst,
 	type UpdateSecurityInput,
+	WouldLockOut,
 } from '../../../domain'
 import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
 
@@ -22,7 +23,10 @@ export class SecuritySettingsViewModel {
 	cidrsError = $state<string | null>(null)
 	/** El backend respondió `totp_required_first`: hay que configurar el 2FA propio antes. */
 	totpRequiredFirst = $state(false)
-	/** La lista nueva dejaría afuera la IP de esta sesión: se pide confirmación. */
+	/**
+	 * El backend respondió `would_lock_out`: la lista nueva deja fuera la IP con que ve esta
+	 * sesión. Se pide confirmación y se reenvía con `confirmLockout`.
+	 */
 	confirmingLockout = $state(false)
 	/** Por qué no se pudo guardar desde la confirmación; se muestra adentro. */
 	lockoutError = $state<string | null>(null)
@@ -58,45 +62,33 @@ export class SecuritySettingsViewModel {
 		return this.#update.isPending
 	}
 
-	get clientIp(): string | null {
-		return this.panelAccess?.clientIp ?? null
+	/** La IP con que muelle ve esta sesión; `''` si no la informa (Fase 1). */
+	get clientIp(): string {
+		return this.panelAccess?.clientIp ?? ''
 	}
 
-	/** Si con lo escrito la IP de esta sesión todavía entra; null si no se conoce. */
+	/**
+	 * Si con lo escrito la IP de esta sesión todavía entra; null si no se conoce. Es solo un
+	 * aviso: quien decide si la lista deja fuera a la sesión es el backend (`would_lock_out`).
+	 */
 	get clientIpAllowed(): boolean | null {
 		const ip = this.clientIp
-		return ip === null ? null : cidrListAllows(this.cidrs, ip)
+		return ip === '' ? null : cidrListAllows(this.cidrs, ip)
 	}
 
 	get clientIpHint(): string | null {
 		const ip = this.clientIp
-		if (ip === null || this.cidrs.trim() === '') return null
+		if (ip === '' || this.cidrs.trim() === '') return null
 		return this.clientIpAllowed
 			? m.admin_security_client_ip_in({ ip })
 			: m.admin_security_client_ip_out({ ip })
 	}
 
-	/**
-	 * Por qué guardar la lista nueva podría dejar afuera a esta sesión: `out` si se sabe su
-	 * IP y no está incluida, `unknown` si el backend no la informó. Vaciar la lista abre el
-	 * panel a todos, así que eso nunca es un riesgo.
-	 */
-	get lockoutRisk(): 'out' | 'unknown' | null {
-		if (!this.areCidrsDirty || this.cidrs.trim() === '') return null
-		if (this.clientIp === null) return 'unknown'
-		return this.clientIpAllowed ? null : 'out'
-	}
-
-	get lockoutTitle(): string {
-		return this.lockoutRisk === 'unknown'
-			? m.admin_security_lockout_unknown_title()
-			: m.admin_security_lockout_title()
-	}
-
 	get lockoutBody(): string {
-		return this.lockoutRisk === 'unknown'
-			? m.admin_security_lockout_unknown_body()
-			: m.admin_security_lockout_body({ ip: this.clientIp ?? '' })
+		const ip = this.clientIp
+		return ip === ''
+			? m.admin_security_lockout_body_no_ip()
+			: m.admin_security_lockout_body({ ip })
 	}
 
 	setRequire2fa = (value: boolean): void => {
@@ -118,20 +110,21 @@ export class SecuritySettingsViewModel {
 				this.#fail(error)
 				return
 			}
-			if (this.lockoutRisk !== null) {
-				this.lockoutError = null
-				this.confirmingLockout = true
-				return
-			}
 		}
-		const error = await this.#submit()
+		const error = await this.#submit(false)
+		if (error instanceof WouldLockOut) {
+			// No se guardó nada (tampoco el 2FA): confirmar reenvía todo junto.
+			this.lockoutError = null
+			this.confirmingLockout = true
+			return
+		}
 		if (error !== null) this.#fail(error)
 	}
 
 	confirmLockout = async (): Promise<void> => {
 		if (this.#update.isPending) return
 		this.lockoutError = null
-		const error = await this.#submit()
+		const error = await this.#submit(true)
 		if (error === null) {
 			this.confirmingLockout = false
 			return
@@ -156,10 +149,11 @@ export class SecuritySettingsViewModel {
 	}
 
 	/** Guarda lo que cambió; devuelve el error si falló (o null). */
-	async #submit(): Promise<unknown> {
+	async #submit(confirmLockout: boolean): Promise<unknown> {
 		const input: UpdateSecurityInput = {
 			...(this.is2faDirty ? { require2fa: this.require2fa } : {}),
 			...(this.areCidrsDirty ? { allowedCidrs: this.cidrs } : {}),
+			...(confirmLockout ? { confirmLockout: true } : {}),
 		}
 		try {
 			this.#load(await this.#update.mutateAsync(input))

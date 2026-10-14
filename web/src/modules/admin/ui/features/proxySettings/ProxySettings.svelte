@@ -1,6 +1,17 @@
 <script lang="ts">
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
-	import { Button, Card, ConfirmDialog, Field, Input, Modal, Mono, StatusDot } from '@/shared/ui'
+	import {
+		Banner,
+		Button,
+		Card,
+		ConfirmDialog,
+		Field,
+		Input,
+		LinkButton,
+		Modal,
+		Mono,
+		StatusDot,
+	} from '@/shared/ui'
 	import type { ProxySettings } from '../../../domain'
 	import { ProxySettingsViewModel } from './ProxySettings.viewModel.svelte.ts'
 	import {
@@ -47,6 +58,11 @@
 			{/if}
 		</div>
 		{#snippet footer()}
+			{#if vm.proxy.cloudflare.tokenSet}
+				<Button variant="ghost" size="sm" onclick={vm.askRemoveCloudflare}>
+					{m.admin_cf_remove()}
+				</Button>
+			{/if}
 			<Button variant="secondary" size="sm" onclick={vm.openCloudflare}>
 				{vm.proxy.cloudflare.tokenSet ? m.admin_cf_replace() : m.admin_cf_add()}
 			</Button>
@@ -67,7 +83,11 @@
 				void vm.saveIp()
 			}}
 		>
-			<Field label={m.admin_ip_v4()} error={vm.errors.ipv4 ?? null}>
+			<Field
+				label={m.admin_ip_v4()}
+				hint={m.admin_ip_v4_hint()}
+				error={vm.errors.ipv4 ?? null}
+			>
 				{#snippet children(a11y)}
 					<Input
 						{...a11y}
@@ -120,7 +140,7 @@
 				void vm.saveAcme()
 			}}
 		>
-			<Field label={m.admin_cert_email()} error={vm.errors.acmeEmail ?? null}>
+			<Field label={m.admin_cert_email()} optional error={vm.errors.acmeEmail ?? null}>
 				{#snippet children(a11y)}
 					<Input
 						{...a11y}
@@ -150,6 +170,20 @@
 	</Card>
 
 	<Card title={m.admin_ports_title()} description={m.admin_ports_description()}>
+		{#if vm.movedTo}
+			{@const origin = vm.movedTo}
+			<Banner
+				tone="info"
+				title={m.admin_ports_moved_title({ origin })}
+				body={m.admin_ports_moved_body()}
+			>
+				{#snippet action()}
+					<LinkButton href={origin} variant="secondary" size="sm">
+						{m.admin_ports_moved_action()}
+					</LinkButton>
+				{/snippet}
+			</Banner>
+		{/if}
 		<form
 			id={portsForm}
 			class={portFields}
@@ -209,6 +243,13 @@
 	description={m.admin_cf_modal_description()}
 	onClose={vm.closeCloudflare}
 >
+	{#if vm.cloudflareError}
+		<Banner
+			tone="error"
+			title={vm.cloudflareError.title}
+			{...vm.cloudflareError.body ? { body: vm.cloudflareError.body } : {}}
+		/>
+	{/if}
 	<form
 		id={cloudflareForm}
 		novalidate
@@ -217,7 +258,11 @@
 			void vm.saveCloudflare()
 		}}
 	>
-		<Field label={m.admin_cf_token()} error={vm.errors.cloudflareToken ?? null}>
+		<Field
+			label={m.admin_cf_token()}
+			hint={m.admin_cf_token_hint()}
+			error={vm.errors.cloudflareToken ?? null}
+		>
 			{#snippet children(a11y)}
 				<Input
 					{...a11y}
@@ -257,4 +302,21 @@
 	error={vm.portsError}
 	onConfirm={vm.savePorts}
 	onCancel={vm.cancelPorts}
+>
+	{#if vm.isSavingPorts}
+		<Banner tone="info" title={m.admin_ports_applying()} body={m.admin_ports_applying_body()} />
+	{/if}
+</ConfirmDialog>
+
+<ConfirmDialog
+	open={vm.confirmingRemoveCloudflare}
+	tone="danger"
+	title={m.admin_cf_remove_title()}
+	body={m.admin_cf_remove_body()}
+	confirmLabel={m.admin_cf_remove()}
+	cancelLabel={m.common_cancel()}
+	loading={vm.isRemovingCloudflare}
+	error={vm.removeCloudflareError}
+	onConfirm={vm.removeCloudflare}
+	onCancel={vm.cancelRemoveCloudflare}
 />

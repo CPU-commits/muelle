@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError, ValidationError } from '@/shared/domain'
+import { ConflictError, NotFoundError, UnavailableError, ValidationError } from '@/shared/domain'
 
 // Los `error.code` de admin que el panel distingue (mapper_errors.go) y los errores de
 // validación que el dominio detecta antes de mandar nada. Los mensajes son para logs: la
@@ -12,6 +12,28 @@ export class TotpRequiredFirst extends ConflictError {
 	constructor(options?: ErrorOptions) {
 		super('Configura tu propio 2FA antes de exigirlo a todos', options)
 		this.name = 'TotpRequiredFirst'
+	}
+}
+
+/**
+ * `would_lock_out`: la lista de IPs permitidas deja fuera la IP con que muelle ve esta
+ * sesión. Se guarda igual mandando `confirm_lockout: true` (contrato §4.1).
+ */
+export class WouldLockOut extends ConflictError {
+	constructor(options?: ErrorOptions) {
+		super('Con esa lista, tu IP actual no podría abrir el panel', options)
+		this.name = 'WouldLockOut'
+	}
+}
+
+/**
+ * `cloudflare_unavailable` (502): Cloudflare no respondió al verificar el token. No es un
+ * problema del token: se puede reintentar.
+ */
+export class CloudflareUnavailable extends UnavailableError {
+	constructor(options?: ErrorOptions) {
+		super('Cloudflare no respondió', { ...options, reason: 'server' })
+		this.name = 'CloudflareUnavailable'
 	}
 }
 
@@ -85,9 +107,46 @@ export class InvalidAcmeEmail extends ValidationError {
 	}
 }
 
+/**
+ * Por qué un host no es canónico: el backend no lo normaliza (contrato §2.10), así que el
+ * panel explica qué sobra.
+ */
+export type RegistryHostProblem = 'empty' | 'scheme' | 'path' | 'format'
+
 export class InvalidRegistryHost extends ValidationError {
-	constructor() {
-		super('Un host como ghcr.io o registry.example.com:5000', 'host')
+	readonly problem: RegistryHostProblem
+
+	constructor(problem: RegistryHostProblem) {
+		super(`Host de registry inválido (${problem})`, 'host')
 		this.name = 'InvalidRegistryHost'
+		this.problem = problem
+	}
+}
+
+/** Qué límite del backend no cumple un usuario o una contraseña de registry (§2.10). */
+export type RegistryCredentialProblem = 'too_long' | 'control' | 'newline'
+
+export class InvalidRegistryCredential extends ValidationError {
+	override readonly field: 'username' | 'password'
+	readonly problem: RegistryCredentialProblem
+
+	constructor(field: 'username' | 'password', problem: RegistryCredentialProblem) {
+		super(`Credencial de registry inválida (${field}: ${problem})`, field)
+		this.name = 'InvalidRegistryCredential'
+		this.field = field
+		this.problem = problem
+	}
+}
+
+export type CloudflareTokenProblem = 'length' | 'spaces'
+
+/** Un token sin la forma de un token de Cloudflare: de 20 a 512 caracteres, sin espacios. */
+export class InvalidCloudflareToken extends ValidationError {
+	readonly problem: CloudflareTokenProblem
+
+	constructor(problem: CloudflareTokenProblem) {
+		super(`Token de Cloudflare inválido (${problem})`, 'cloudflareToken')
+		this.name = 'InvalidCloudflareToken'
+		this.problem = problem
 	}
 }

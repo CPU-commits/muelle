@@ -82,3 +82,83 @@ test('la URL de una invitación no se pierde con Escape, ni con varios seguidos'
 
 	expect(errors).toEqual([])
 })
+
+test('una lista de IPs que te deja fuera pide confirmar, y confirmada se guarda', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await login(page)
+	await page.goto('/ajustes')
+
+	// El mock ve al navegador como 198.51.100.17.
+	const security = page.getByRole('region', { name: 'Seguridad', exact: true })
+	const cidrs = security.getByLabel('IPs permitidas para el panel')
+	await cidrs.fill('10.0.0.0/8')
+	await expect(security.getByText(/198\.51\.100\.17, no queda incluida/)).toBeVisible()
+	await security.getByRole('button', { name: 'Guardar' }).click()
+
+	// Lo decide el backend (409 would_lock_out): cancelar no guarda nada.
+	const dialog = page.getByRole('dialog', { name: 'Te quedarías fuera del panel' })
+	await expect(dialog).toBeVisible()
+	await expect(dialog.getByText(/desde 198\.51\.100\.17/)).toBeVisible()
+	await dialog.getByRole('button', { name: 'Cancelar' }).click()
+	await expect(dialog).toHaveCount(0)
+	await expect(cidrs).toHaveValue('10.0.0.0/8')
+
+	await security.getByRole('button', { name: 'Guardar' }).click()
+	await dialog.getByRole('button', { name: 'Guardar igual' }).click()
+	await expect(dialog).toHaveCount(0)
+	await expect(page.getByText('Seguridad guardada')).toBeVisible()
+	await expect(security.getByRole('button', { name: 'Guardar' })).toBeDisabled()
+
+	// Quedó guardado: sobrevive a recargar (el mock vive en sessionStorage).
+	await page.reload()
+	await expect(
+		page
+			.getByRole('region', { name: 'Seguridad', exact: true })
+			.getByLabel('IPs permitidas para el panel'),
+	).toHaveValue('10.0.0.0/8')
+
+	expect(errors).toEqual([])
+})
+
+test('cambiar los puertos espera a que se apliquen, diciendo que está aplicando', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await login(page)
+	await page.goto('/ajustes')
+
+	const ports = page.getByRole('region', { name: 'Puertos del proxy' })
+	await ports.getByLabel('HTTP', { exact: true }).fill('8080')
+	await ports.getByRole('button', { name: 'Guardar' }).click()
+
+	const dialog = page.getByRole('dialog', { name: '¿Cambiar los puertos?' })
+	await dialog.getByRole('button', { name: 'Cambiar puertos' }).click()
+	// El mock tarda un poco en "aplicar", como el backend (que puede tardar hasta 2 min).
+	await expect(dialog.getByText('Aplicando los puertos…')).toBeVisible()
+	await expect(dialog).toHaveCount(0)
+	await expect(page.getByText('Puertos guardados')).toBeVisible()
+	await expect(ports.getByLabel('HTTP', { exact: true })).toHaveValue('8080')
+
+	expect(errors).toEqual([])
+})
+
+test('el token de Cloudflare se puede quitar', async ({ page }) => {
+	const errors = watchErrors(page)
+	await login(page)
+	await page.goto('/ajustes')
+
+	const cloudflare = page.getByRole('region', { name: 'Cloudflare' })
+	await expect(cloudflare.getByText('Token configurado')).toBeVisible()
+	await cloudflare.getByRole('button', { name: 'Quitar token' }).click()
+	const dialog = page.getByRole('dialog', { name: '¿Quitar el token de Cloudflare?' })
+	await dialog.getByRole('button', { name: 'Quitar token' }).click()
+
+	await expect(dialog).toHaveCount(0)
+	await expect(cloudflare.getByText('Sin token', { exact: true })).toBeVisible()
+	await expect(cloudflare.getByRole('button', { name: 'Quitar token' })).toHaveCount(0)
+	await expect(cloudflare.getByRole('button', { name: 'Configurar token' })).toBeVisible()
+
+	expect(errors).toEqual([])
+})

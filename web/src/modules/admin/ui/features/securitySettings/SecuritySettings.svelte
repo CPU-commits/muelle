@@ -108,7 +108,8 @@
 
 <ConfirmDialog
 	open={vm.confirmingLockout}
-	title={vm.lockoutTitle}
+	tone="danger"
+	title={m.admin_security_lockout_title()}
 	body={vm.lockoutBody}
 	confirmLabel={m.admin_security_lockout_confirm()}
 	cancelLabel={m.common_cancel()}

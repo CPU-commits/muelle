@@ -3,13 +3,13 @@ import type { Settings } from '../entities/settings'
 import { InvalidAcmeEmail } from '../errors/adminErrors'
 import type { SettingsDeps } from '../repositories/adminRepositories'
 
-/** A dónde avisa Let's Encrypt si un certificado tiene problemas. */
+/** A dónde avisa Let's Encrypt si un certificado tiene problemas; `''` lo borra. */
 export type UpdateAcmeEmail = (email: string) => Promise<Settings>
 
 export function makeUpdateAcmeEmail({ settings }: SettingsDeps): UpdateAcmeEmail {
 	return async (email) => {
 		const value = email.trim().toLowerCase()
-		if (!isEmail(value)) throw new InvalidAcmeEmail()
+		if (value !== '' && !isEmail(value)) throw new InvalidAcmeEmail()
 		return settings.patch({ acmeEmail: value })
 	}
 }
