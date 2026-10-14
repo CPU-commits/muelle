@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte'
 	import type { Attachment } from 'svelte/attachments'
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import { toast } from '@/shared/ui/stores'
@@ -42,6 +43,9 @@
 		}
 	}
 	let timer: ReturnType<typeof setTimeout> | undefined
+	// Un timer pendiente (1,6 s; 3,2 s si falló) retiene este componente, y con él el
+	// <dialog> que lo contiene y el token que mostraba: se corta al desmontar.
+	onDestroy(() => clearTimeout(timer))
 
 	function show(next: 'copied' | 'failed'): void {
 		result = next

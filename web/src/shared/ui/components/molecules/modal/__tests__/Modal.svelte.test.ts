@@ -2,6 +2,7 @@ import { tick } from 'svelte'
 import { describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-svelte'
+import { aliveAfterGc } from '../../../__tests__/memory'
 import ModalHarness from './ModalHarness.svelte'
 
 const dialog = () => document.querySelector('dialog') as HTMLDialogElement | null
@@ -255,22 +256,10 @@ describe('Modal dismissible (por defecto)', () => {
 })
 
 // Un modal cerrado no tiene que quedar vivo en memoria: el de la URL de una invitación o
-// un token nuevo lleva un secreto, y lo escrito en sus campos también. vitest lanza
-// Chromium con --expose-gc (vite.config.ts) para forzar el GC.
+// un token nuevo lleva un secreto, y lo escrito en sus campos también. El GC lo fuerza
+// `aliveAfterGc` (Chromium corre con --expose-gc, ver vite.config.ts).
 describe('Modal no retiene lo que mostró', () => {
-	const gc = (globalThis as { gc?: () => void }).gc
-	const nextTask = () => new Promise((done) => setTimeout(done, 0))
-
-	async function collect(): Promise<void> {
-		// Las WeakRef recién leídas viven hasta el final de la tarea: el GC va en otra.
-		for (let i = 0; i < 3; i++) {
-			await nextTask()
-			gc?.()
-		}
-	}
-
 	it('abrir y cerrar varias veces no deja ningún <dialog> ni su contenido vivo', async () => {
-		expect(gc, 'falta --expose-gc en el Chromium de vitest').toBeTypeOf('function')
 		const screen = await render(ModalHarness)
 		const refs: WeakRef<Element>[] = []
 
@@ -286,8 +275,7 @@ describe('Modal no retiene lo que mostró', () => {
 		// Svelte guarda el último evento delegado (el clic en "cerrar", con su target) hasta el
 		// próximo: un clic cualquiera en la página lo suelta, como pasa al seguir usándola.
 		await userEvent.click(screen.getByRole('heading', { name: 'Variables' }))
-		await collect()
 
-		expect(refs.filter((ref) => ref.deref() !== undefined)).toHaveLength(0)
+		expect(await aliveAfterGc(refs)).toBe(0)
 	})
 })

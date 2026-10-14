@@ -115,10 +115,14 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
   harness cuando hace falta un contexto (ver `molecules/menu/__tests__/`). Un harness que
   mide posiciones importa `@/shared/ui/themes/global.css` (sin el `box-sizing` global las
   medidas no son las del panel).
-- Memoria: el Chromium de vitest corre con `--expose-gc`, así que un test puede guardar
-  `WeakRef`s, forzar `globalThis.gc()` en otra tarea y ver qué quedó vivo (ver "no retiene
-  lo que mostró" en `molecules/modal/__tests__/Modal.svelte.test.ts`). Para lo que muestra un
-  secreto (una URL de invitación, un token), que un componente cerrado no deje referencias.
+- Memoria: el Chromium de vitest corre con `--expose-gc`. Para lo que muestra un secreto (una
+  URL de invitación, un token), un test guarda `WeakRef`s de lo que se cerró y pide
+  `expect(await aliveAfterGc(refs)).toBe(0)` (`shared/ui/components/__tests__/memory.ts`:
+  GC mayor asincrónico, con reintentos acotados). Ver "no retiene lo que mostró" en
+  `Modal.svelte.test.ts` y "no deja vivo el `<dialog>`" en `CopyButton.svelte.test.ts`. Dos
+  cosas retienen y no son del componente: el último evento que Svelte delegó (un clic en otra
+  parte de la página lo suelta) y un `expect.element(…)` que encontró el elemento (usar
+  `expect.poll` sobre el texto).
 
 ## Antes de decir que terminaste
 
