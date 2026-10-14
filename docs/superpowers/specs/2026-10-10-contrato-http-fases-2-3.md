@@ -65,6 +65,11 @@ Los streams (`…/log/stream` y `…/logs`) son `text/event-stream`:
   - Cuando el cliente se va (`r.Context()`), el stream termina.
   - También termina con el `ctx` de `Module.Run`, que se cancela con la señal de apagado. Si no, `srv.Shutdown` esperaría los 8 s completos.
 - **Errores antes de abrir:** un error antes del primer byte se responde como siempre (JSON con status). Después, solo se puede cerrar el stream.
+- **La credencial se revisa mientras dura:** cada 60 s (cada 4 heartbeats), el handler vuelve a validar la credencial con que se abrió, la cookie o el Bearer, con su alcance. Si ya no vale (la sesión se cerró o venció, el token se revocó o venció, o ya no alcanza a ese proyecto), cierra el stream sin mandar nada más. Para eso `utils.Kit` suma `Revalidate(r, access) error` (Fase 2), que repite las comprobaciones de `Handle` sin escribir la respuesta.
+- **Límites:**
+  - A lo más 4 streams abiertos a la vez por principal (la misma sesión o el mismo token), sumando los de deploys y los de logs. Cada uno tiene un stream de Docker abierto. El quinto recibe `429 rate_limited`, antes de abrir.
+  - Un stream dura a lo más 1 h. El de logs termina con `end` (`data: timeout`); el de un deploy cierra sin el `status` final, y el cliente sigue por polling o reconecta con `Last-Event-ID`.
+  - El panel ya trata así un stream que se corta: deja de leer y decide (polling, reconectar, o preguntar por la sesión).
 
 ## 1. Quién es dueño de qué
 
@@ -140,7 +145,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
 
 | Lugar | Quién lo toca | Qué puede hacer |
 |---|---|---|
-| `src/internal/deploy` / `ingress` / `cmd/install` (nuevo) | Fase 2 / Fase 3 / Fase 5 | Todo: es suyo |
+| `src/internal/deploy`, `src/internal/ingress` y el paquete nuevo de install | Fase 2, Fase 3 y Fase 5 | Todo: es suyo |
 | `shared/domain/compose` (nuevo) | Fase 2 | La parte pura del compose (parsear, la lista de §6.3 del diseño, los nombres de los servicios) |
 | `catalog/domain/entity.ValidateCompose` y sus llamadas | Fase 2 | Cambiar la validación por la de `shared/domain/compose`. Nada más de catalog |
 | `shared/domain/entity` | Fase 3 | Agregar las constantes `panel_cf_*` (§3.6) |
@@ -266,11 +271,17 @@ El polling de la API (la GitHub Action, §14) y el respaldo del panel cuando el 
 
 **El log:**
 - Es un texto con una línea por evento: `<RFC 3339 con ms> <texto>\n`.
-- Ya viene enmascarado: cada valor de una variable `secret` de la app o del stage es `***` (los de `ResolveEnv`, del más largo al más corto).
+- Ya viene enmascarado, con las reglas de abajo.
 - Solo crece: los offsets son bytes desde el principio y nunca se mueven.
 - Una línea larga se corta a 8 KiB con `…`.
 - **Tope de 256 KB:** al llegar, se agrega una vez `… (log truncado: se superaron los 256 KB)` y se descartan las líneas siguientes. Se reservan 4 KiB para las líneas de cierre (el resultado, el error), que siempre se escriben.
 - Cada línea se guarda en la base **antes** de transmitirse por SSE: lo que se vio por el stream ya está en `?offset`.
+
+**El enmascarado** (el mismo en el SSE del deploy, §2.6, y en los logs de las apps, §2.9):
+- Cada valor secreto de `ResolveEnv`, de la app y del stage, se reemplaza por `***`, del más largo al más corto.
+- **Un valor de varias líneas** (una clave PEM) se enmascara entero y, además, línea por línea: el log se procesa por línea, así que el valor entero casi nunca aparece en una. Cada línea del valor, sin los espacios de los bordes, cuenta como otro valor a enmascarar.
+- **Un valor, o una línea de un valor, de menos de 8 bytes no se enmascara.** `1`, `true` o `3000` taparían texto que no tiene nada que ver, y la GitHub Action guarda todo como secreto por defecto (`env-secret`, §14 del diseño). El panel puede advertirlo al guardar un secreto así.
+- La línea se enmascara antes de cortarla a 8 KiB (§2.5) o a 16 KiB (§2.9), así un corte no deja la mitad de un secreto a la vista.
 
 **La respuesta:**
 - `chunk` va desde `offset`, hasta 64 KiB y siempre en líneas completas. Puede ser `""`.
@@ -412,7 +423,7 @@ data: eof
   - `task` es `<servicio>.<slot>`, o `<servicio>.<primeros 7 del id de la tarea>` en un servicio global.
   - `stream` es `stdout` o `stderr`.
   - `line` va sin el `\n` final, cortada a 16 KiB.
-- **Enmascarado:** como el log del deploy, con los valores secretos de la app y del stage. Es una defensa extra: las apps a veces imprimen su configuración.
+- **Enmascarado:** como el log del deploy (§2.5), con los valores secretos de la app y del stage. Es una defensa extra: las apps a veces imprimen su configuración.
 - **`end`:** se termina el log (el servicio se borró, o no había `follow`). El servidor cierra después.
 
 **Errores antes de abrir:** `404`, `422` y `503 docker_unavailable`.
@@ -430,6 +441,8 @@ Son las credenciales de los registries privados, una por host, con la tabla `reg
 - `docker.io` para Docker Hub.
 
 Se valida en su forma canónica, sin normalizar: minúsculas, etiquetas `[a-z0-9-]` separadas por `.`, `:puerto` opcional, sin esquema, ruta ni `/` final. Va url-encoded en la ruta. El panel lo normaliza antes de mandarlo.
+
+**Los alias de Docker Hub** (`index.docker.io`, `registry-1.docker.io` y `registry.hub.docker.com`) tienen la forma canónica, pero una imagen de Docker Hub siempre da `docker.io` en `reference.Domain` (`index.docker.io/x` también), así que una credencial con ese host nunca se usaría, y los pulls irían anónimos sin aviso. Se rechazan con `422`: `host: para Docker Hub usa docker.io`. El panel puede convertirlos a `docker.io` al normalizar.
 
 | Endpoint | Cuerpo | Respuesta | Errores |
 |---|---|---|---|
@@ -537,7 +550,7 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
 - `hostname`: `validate.Hostname`. Tampoco puede ser `panel_domain` ("es el dominio del panel").
 - `target_service`: un slug de hasta 16 caracteres. En una app de formulario, tiene que ser el slug de la app. En una app compose, en la v1 no se verifica al guardar: lo verifica el render (§6.3), y el deploy falla con el dominio y el servicio en el mensaje.
 - `target_port`: de 1 a 65535.
-- En un `PATCH`, `proxied` sobre un dominio sin `cf_record_id`: "muelle no maneja el registro DNS de este dominio".
+- En un `PATCH`, `proxied` sobre un dominio sin `cf_record_id`: `proxied: muelle no maneja el registro DNS de este dominio` (con el campo adelante, como todo `422`, §0.2).
 - El `hostname` no se edita: mandarlo en el `PATCH` es `400 invalid_json`.
 
 **Comportamiento:**
@@ -808,12 +821,14 @@ networks:
 ### 5.4 Pasos de install que dependen de este contrato
 
 - **Puertos ocupados (§3.3 paso 2):** install corre dentro de un contenedor, así que no puede probar el puerto con `net.Listen`.
-  - Crea un contenedor temporal (`muelle-install-probe`, con la imagen de muelle y el comando `help`) que publica los puertos elegidos, y lo arranca.
+  - Crea un contenedor temporal (`muelle-install-probe`, con el comando `help`) que publica los mismos puertos que muelle-caddy: `--http-port`/tcp, `--https-port`/tcp y `--https-port`/udp (HTTP/3), y lo arranca.
+  - Su imagen es `naming.MuelleImageFor(version)`, la de la versión de install. Quien corre install pudo usar otro tag (`:latest`, o ninguno), así que esa imagen puede no estar en el nodo: si `InspectImage` da `ErrNotFound`, se baja con `PullImage`. Un binario sin versión publicada (`dev`) no instala.
   - `docker.ErrPortInUse` es "ocupado": se aborta con la sugerencia de `--http-port`/`--https-port`.
   - El contenedor temporal se borra siempre.
 - **Clave maestra:** `crypto.GenerateKey()`, que se guarda con `CreateSecret(naming.MasterKeySecret, …)` y se imprime **una sola vez**. Si el secreto ya existe (`ErrConflict`), install no lo pisa: aborta, o sigue si es una reinstalación explícita.
 - **El link de setup (§3.3 paso 8):**
-  - install sigue los logs del servicio (`ServiceLogs` con `Follow`) hasta la línea JSON con `"event":"setup_url"` y lee su `url`. La escribe `logSetupURL` en `main.go`; el mensaje puede cambiar, `event` y `url` no.
+  - install busca la línea JSON con `"event":"setup_url"` y lee su `url`. La escribe `logSetupURL` en `main.go`; el mensaje puede cambiar, `event` y `url` no.
+  - **Solo vale la de la tarea que corre ahora.** Cada arranque sin usuarios invalida el link anterior (`EnsureSetupInvite`). Si la primera tarea se reinició, los logs del servicio traen varias líneas `setup_url`, y solo la última sirve. Por eso install lee los de la tarea actual (`ListTasks` del servicio: la de `desired_state: running`, la más nueva) con `TaskLogs` y `Follow`. Si esa tarea cambia durante el plazo, vuelve a buscar la actual y su línea.
   - El plazo es de 2 min.
   - Si muelle ya tiene usuarios, esa línea no sale e install lo dice.
 - **Actualizar:** `docker service update --image ghcr.io/cpu-commits/muelle:<v> muelle_muelle`.
@@ -821,7 +836,8 @@ networks:
   - Con `caddy_image` fijo, Caddy no cambia.
 - **Imágenes:**
   - `Dockerfile` en la raíz: el binario estático (sin CGO), el CLI de `docker` para `stack deploy` y el usuario root (necesita `docker.sock`).
-  - `deploy/caddy/Dockerfile`: `xcaddy` con `github.com/caddy-dns/cloudflare`, en versiones fijas.
+  - Un `/tmp` escribible (`os.TempDir()`): `DeployStack` crea ahí el `DOCKER_CONFIG` temporal y el directorio de trabajo del CLI. Una imagen `scratch` o distroless no lo trae: se crea en el `Dockerfile` con permisos `1777`.
+  - `deploy/caddy/Dockerfile`: `xcaddy` con `github.com/caddy-dns/cloudflare`, en versiones fijas. No necesita un CMD ni un archivo de configuración propios: el comando y el entorno los pone ingress (§3.4).
 - **Cookie:** considerar `__Host-muelle_session` con cookies `Secure` (README, notas de la Fase 5).
 
 ## 6. Migraciones reservadas
@@ -848,6 +864,8 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Log por polling | — | Suma `superseded_by` | Para la Action |
 | SSE del deploy | `status` al conectar | Solo si no terminó. El `status` final va siempre después de la última línea | Si no, el panel cerraría antes de leer el log de un deploy que terminó justo |
 | SSE de logs | — | Suma el evento `end`, y `follow=0` | El panel ignora eventos desconocidos |
+| SSE, los dos | — | La credencial se revisa cada 60 s; a lo más 4 por principal (`429`) y 1 h por stream | El panel ya trata un stream que se corta |
+| Enmascarado | — | También cada línea de un secreto de varias líneas; nada por debajo de 8 bytes | Una clave PEM no se veía; un `1` tapaba texto ajeno |
 | `GET …/status` | `cpu_percent` y `memory_bytes` por tarea | Por tarea, como lo lee el panel (null fuera del nodo local), y además su suma por servicio. Suma `image` y `update_state` | Compatible |
 | `GET …/deploys` | Los últimos 20 | Hasta 22: los 20 más nuevos, más el actual y su anterior si son más viejos | La retención nunca borra la versión que corre ni el destino del rollback |
 | Rollback sin anterior | `409 no_previous_deploy` (o `conflict`) | `409 no_previous_deploy` | Igual |
@@ -868,6 +886,6 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | `Origin` después de cambiar los puertos | — | Pasa también `https://<panel_domain>[:<proxy_https_port>]` | Si no, todo el panel, el login incluido, quedaría en `403 bad_origin` hasta actualizar `MUELLE_PANEL_ORIGIN` |
 | Settings: `client_ip` | String o null | Siempre string | Compatible |
 | Registries: `PATCH` | `{username, password}` | Los dos obligatorios: reemplaza | Igual al payload del panel |
-| Registries: host | Normalizado por el panel | El backend exige la forma canónica y no normaliza; Docker Hub es `docker.io` | |
+| Registries: host | Normalizado por el panel | El backend exige la forma canónica y no normaliza; Docker Hub es `docker.io`, y sus alias (`index.docker.io`…) son `422` | Una credencial con un alias nunca se usaría |
 | Registries: respuesta | `{host, username}` | Suma `created_at` y `updated_at` | Compatible |
 | Auditoría: `actor_name` | Lo pide en `GET /audit` | Sigue pendiente (README, revisión final de la Fase 1); no es de este contrato | |

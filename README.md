@@ -128,6 +128,9 @@ Hallazgos de la revisión de código que las próximas fases deben respetar.
 
 **Fase 2, worker de deploy**
 - Las goroutines nunca deben usar el ctx de una transacción después de que `InTx` retorna; derivar de un ctx externo (`context.WithoutCancel`).
+- La retención guarda siempre el deploy actual y el destino del rollback, además de los 20 más nuevos (contrato §2.3).
+- Enmascarar también cada línea de un secreto de varias líneas, y nada de menos de 8 bytes (contrato §2.5).
+- Los SSE revisan la credencial cada 60 s y tienen límites por principal y de duración (contrato §0.3).
 
 **Fase 3**
 - Crear un stage ya crea la red overlay y conecta Caddy (etapa de contratos).
@@ -139,6 +142,7 @@ Hallazgos de la revisión de código que las próximas fases deben respetar.
 
 **Fase 5 / install**
 - Considerar el prefijo `__Host-` en el nombre de la cookie de sesión cuando las cookies son Secure.
+- La imagen de muelle necesita un `/tmp` escribible; la prueba de puertos incluye 443/udp y usa `MuelleImageFor(version)`, bajándola si falta; el link de setup se lee de la tarea actual (contrato §5.4).
 
 **Pendiente de la revisión final de la Fase 1**
 - Pedir de nuevo la contraseña (o el código TOTP actual) para cambiar el TOTP propio y para desactivar `require_2fa`: hoy alcanza con la sesión.
