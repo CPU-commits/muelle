@@ -31,14 +31,23 @@ describe('ipAddress', () => {
 		expect(isIpv6('::ffff:999.0.2.1')).toBe(false)
 	})
 
-	it('la IPv4 pública es obligatoria y la IPv6 opcional', () => {
+	it('las IP públicas: vacía la borra; si no, una IP de su versión', () => {
 		expect(parsePublicIpv4(' 203.0.113.24 ')).toBe('203.0.113.24')
-		expect(() => parsePublicIpv4('')).toThrow(InvalidIpAddress)
+		expect(parsePublicIpv4('  ')).toBe('')
 		expect(() => parsePublicIpv4('2001:db8::1')).toThrow(InvalidIpAddress)
 		expect(parsePublicIpv6('')).toBe('')
 		expect(parsePublicIpv6('2001:DB8::24')).toBe('2001:db8::24')
 		expect(() => parsePublicIpv6('203.0.113.24')).toThrow(
 			expect.objectContaining({ name: 'InvalidIpAddress', field: 'ipv6' }),
 		)
+	})
+
+	it('la IPv6 sale en su forma canónica (RFC 5952), que es la que acepta el backend', () => {
+		expect(parsePublicIpv6('2001:0DB8:0000:0000:0000:0000:0000:0024')).toBe('2001:db8::24')
+		expect(parsePublicIpv6('2001:db8:0:0:1:0:0:1')).toBe('2001:db8::1:0:0:1')
+		expect(parsePublicIpv6('2001:db8:0:1:1:1:1:1')).toBe('2001:db8:0:1:1:1:1:1')
+		expect(parsePublicIpv6('0:0:0:0:0:0:0:1')).toBe('::1')
+		expect(parsePublicIpv6('fe80:0:0:0:0:0:0:0')).toBe('fe80::')
+		expect(parsePublicIpv6('::ffff:c000:201')).toBe('::ffff:192.0.2.1')
 	})
 })

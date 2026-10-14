@@ -1,7 +1,14 @@
 import type { ApiError } from '@/shared/data/http/errors'
 import { type DomainErrorMap, withDomainErrors } from '@/shared/data/http/domainErrors'
 import type { AuditRepository, RegistryRepository, SettingsRepository } from '../../domain'
-import { REGISTRIES_PHASE, RegistryExists, RegistryNotFound, TotpRequiredFirst } from '../../domain'
+import {
+	CloudflareUnavailable,
+	REGISTRIES_PHASE,
+	RegistryExists,
+	RegistryNotFound,
+	TotpRequiredFirst,
+	WouldLockOut,
+} from '../../domain'
 import { adminHttpDataSource } from '../datasources/adminHttpDataSource'
 import {
 	auditEventFromDto,
@@ -14,9 +21,14 @@ import {
 
 const cause = (error: ApiError) => ({ cause: error })
 
-// `totp_required_first` (mapper_errors.go) y los 422 de los campos de la Fase 3.
+// `totp_required_first` (mapper_errors.go), `would_lock_out` y `cloudflare_unavailable`
+// (contrato §4.1), y los 422 de los campos de la Fase 3.
 const SETTINGS_ERRORS: DomainErrorMap = {
-	codes: { totp_required_first: (error) => new TotpRequiredFirst(cause(error)) },
+	codes: {
+		totp_required_first: (error) => new TotpRequiredFirst(cause(error)),
+		would_lock_out: (error) => new WouldLockOut(cause(error)),
+		cloudflare_unavailable: (error) => new CloudflareUnavailable(cause(error)),
+	},
 	fields: {
 		public_ip: 'ipv4',
 		public_ipv6: 'ipv6',

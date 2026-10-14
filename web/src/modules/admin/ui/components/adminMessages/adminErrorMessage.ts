@@ -2,24 +2,54 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { describeError } from '@/shared/ui'
 import { ValidationError } from '@/shared/domain'
 import {
+	CLOUDFLARE_TOKEN_MAX_LENGTH,
+	CLOUDFLARE_TOKEN_MIN_LENGTH,
+	CloudflareUnavailable,
 	InvalidAcmeEmail,
 	InvalidCidr,
+	InvalidCloudflareToken,
 	InvalidIpAddress,
 	InvalidPort,
+	InvalidRegistryCredential,
 	InvalidRegistryHost,
+	REGISTRY_PASSWORD_MAX_BYTES,
+	REGISTRY_USERNAME_MAX_LENGTH,
+	type RegistryHostProblem,
 	RegistryExists,
 	RegistryNotFound,
 	RequiredField,
 	TotpRequiredFirst,
+	WouldLockOut,
 } from '../../../domain'
 
 // La pantalla elige el mensaje por la CLASE del error de dominio, nunca por un status.
 export function adminErrorMessage(error: unknown): string {
 	if (error instanceof TotpRequiredFirst) return m.admin_security_totp_first()
+	if (error instanceof WouldLockOut) return m.admin_security_lockout_title()
+	// Antes que lo común: un `UnavailableError` cualquiera diría "muelle respondió con un error".
+	if (error instanceof CloudflareUnavailable) return m.admin_cf_unavailable_title()
 	if (error instanceof RegistryExists) return m.admin_error_registry_exists()
 	if (error instanceof RegistryNotFound) return m.admin_error_registry_not_found()
 	// Lo común (sin red, fase pendiente, MUELLE_PANEL_ORIGIN mal, demasiados intentos…).
 	return describeError(error)
+}
+
+const REGISTRY_HOST_MESSAGES: Record<RegistryHostProblem, () => string> = {
+	empty: () => m.common_required(),
+	scheme: () => m.admin_error_registry_host_scheme(),
+	path: () => m.admin_error_registry_host_path(),
+	format: () => m.admin_error_registry_host_format(),
+}
+
+function registryCredentialMessage(error: InvalidRegistryCredential): string {
+	if (error.field === 'username') {
+		return error.problem === 'too_long'
+			? m.admin_error_registry_username_long({ max: REGISTRY_USERNAME_MAX_LENGTH })
+			: m.admin_error_registry_username_control()
+	}
+	return error.problem === 'too_long'
+		? m.admin_error_registry_password_long({ max: REGISTRY_PASSWORD_MAX_BYTES })
+		: m.admin_error_registry_password_newline()
 }
 
 export interface FieldError {
@@ -50,7 +80,20 @@ export function adminFieldError(error: unknown): FieldError | null {
 		return { field: 'acmeEmail', message: m.admin_error_email() }
 	}
 	if (error instanceof InvalidRegistryHost) {
-		return { field: 'host', message: m.admin_error_registry_host() }
+		return { field: 'host', message: REGISTRY_HOST_MESSAGES[error.problem]() }
+	}
+	if (error instanceof InvalidRegistryCredential) {
+		return { field: error.field, message: registryCredentialMessage(error) }
+	}
+	if (error instanceof InvalidCloudflareToken) {
+		const message =
+			error.problem === 'spaces'
+				? m.admin_error_cf_token_spaces()
+				: m.admin_error_cf_token_length({
+						min: CLOUDFLARE_TOKEN_MIN_LENGTH,
+						max: CLOUDFLARE_TOKEN_MAX_LENGTH,
+					})
+		return { field: 'cloudflareToken', message }
 	}
 	if (error instanceof RegistryExists) {
 		return { field: 'host', message: m.admin_error_registry_exists() }

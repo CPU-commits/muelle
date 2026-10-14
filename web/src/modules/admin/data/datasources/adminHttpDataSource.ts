@@ -16,6 +16,13 @@ import {
 const auditSchema = z.array(auditEventDtoSchema)
 const registriesSchema = z.array(registryDtoSchema)
 
+/**
+ * El `PATCH /settings` responde cuando el backend aplicó el cambio del proxy (DNS, la
+ * configuración de Caddy, agendar su recreación), con su propio plazo de 2 min (contrato
+ * §3.5): esperar 150 s y no los 30 s de siempre.
+ */
+export const SETTINGS_PATCH_TIMEOUT_MS = 150_000
+
 function withSignal(signal: AbortSignal | undefined) {
 	return signal ? { signal } : {}
 }
@@ -27,7 +34,10 @@ export const adminHttpDataSource = {
 	},
 
 	async patchSettings(body: SettingsPatchPayload): Promise<SettingsDto> {
-		const payload = await http.patch<unknown>('/settings', { body })
+		const payload = await http.patch<unknown>('/settings', {
+			body,
+			timeoutMs: SETTINGS_PATCH_TIMEOUT_MS,
+		})
 		return parseOrThrow(settingsDtoSchema, payload, 'admin.settings.patch')
 	},
 
@@ -39,7 +49,8 @@ export const adminHttpDataSource = {
 		return parseOrThrow(auditSchema, payload, 'admin.audit')
 	},
 
-	// Fase 2: `/registries` (spec §10). Hasta entonces responde 404.
+	// Fase 2: `/registries` (contrato §2.10), con el host url-encoded en la ruta. Hasta
+	// entonces responde 404 `no_route`.
 
 	async listRegistries(signal?: AbortSignal): Promise<RegistryDto[]> {
 		const payload = await http.get<unknown>('/registries', withSignal(signal))

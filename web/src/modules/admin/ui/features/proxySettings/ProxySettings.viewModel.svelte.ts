@@ -2,12 +2,18 @@ import { createMutation, useQueryClient } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import {
+	removeCloudflareTokenMutation,
 	replaceCloudflareTokenMutation,
 	updateAcmeEmailMutation,
 	updateProxyPortsMutation,
 	updatePublicIpMutation,
 } from '../../../data'
-import { parseProxyPorts, type ProxySettings, type Settings } from '../../../domain'
+import {
+	CloudflareUnavailable,
+	parseProxyPorts,
+	type ProxySettings,
+	type Settings,
+} from '../../../domain'
 import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
 
 /** Los campos de las cuatro tarjetas, con el nombre que usan los errores del dominio. */
@@ -34,6 +40,22 @@ function isProxyField(field: string): field is ProxyField {
 	return PROXY_FIELDS.includes(field)
 }
 
+/** Un aviso adentro del modal del token: título y, si hace falta, qué hacer. */
+export interface CloudflareNotice {
+	readonly title: string
+	readonly body: string | null
+}
+
+/** `https://<panel_domain>[:<puerto>]`: dónde sirve muelle-caddy el panel (contrato §3.5). */
+function panelOrigin(proxy: ProxySettings): string {
+	const port = proxy.httpsPort === 443 ? '' : `:${String(proxy.httpsPort)}`
+	return `https://${proxy.panelDomain}${port}`
+}
+
+function currentOrigin(): string {
+	return typeof location === 'undefined' ? '' : location.origin
+}
+
 // "Proxy y DNS" de Ajustes (Fase 3): Cloudflare, IP pública, certificados y puertos. Cada
 // tarjeta guarda lo suyo por separado; su botón se activa cuando algo cambió.
 export class ProxySettingsViewModel {
@@ -44,7 +66,17 @@ export class ProxySettingsViewModel {
 	httpsPort = $state('')
 	cloudflareToken = $state('')
 	cloudflareOpen = $state(false)
+	/** Por qué no se guardó el token, si no es un problema del campo (Cloudflare caído). */
+	cloudflareError = $state.raw<CloudflareNotice | null>(null)
+	confirmingRemoveCloudflare = $state(false)
+	/** Por qué no se pudo quitar el token; se muestra adentro de la confirmación. */
+	removeCloudflareError = $state<string | null>(null)
 	confirmingPorts = $state(false)
+	/**
+	 * A dónde se mudó el panel después de cambiar el puerto HTTPS: el origen actual deja de
+	 * responder cuando se recrea muelle-caddy. null si sigue donde está.
+	 */
+	movedTo = $state<string | null>(null)
 	/** Por qué no se pudieron cambiar los puertos; se muestra adentro de la confirmación. */
 	portsError = $state<string | null>(null)
 	errors = $state<FieldErrors>({})
@@ -55,6 +87,7 @@ export class ProxySettingsViewModel {
 	readonly #acme = createMutation(() => updateAcmeEmailMutation(this.#client))
 	readonly #ports = createMutation(() => updateProxyPortsMutation(this.#client))
 	readonly #cloudflare = createMutation(() => replaceCloudflareTokenMutation(this.#client))
+	readonly #removeCloudflare = createMutation(() => removeCloudflareTokenMutation(this.#client))
 
 	constructor(proxy: () => ProxySettings) {
 		this.#proxy = proxy
@@ -109,6 +142,10 @@ export class ProxySettingsViewModel {
 		return this.#cloudflare.isPending
 	}
 
+	get isRemovingCloudflare(): boolean {
+		return this.#removeCloudflare.isPending
+	}
+
 	setField = (field: ProxyField, value: string): void => {
 		this[field] = value
 		this.#clearError(field)
@@ -151,15 +188,23 @@ export class ProxySettingsViewModel {
 		this.portsError = null
 	}
 
+	/**
+	 * El `PATCH` vuelve cuando el backend aplicó el cambio (hasta 2 min, contrato §3.5);
+	 * mientras, la confirmación queda abierta diciendo que está aplicando.
+	 */
 	savePorts = async (): Promise<void> => {
 		if (this.#ports.isPending) return
 		this.portsError = null
+		const before = this.proxy.httpsPort
 		try {
 			const settings = await this.#ports.mutateAsync({
 				http: this.httpPort,
 				https: this.httpsPort,
 			})
-			if (settings.proxy) this.#loadPorts(settings.proxy)
+			if (settings.proxy) {
+				this.#loadPorts(settings.proxy)
+				this.movedTo = this.#movedTo(settings.proxy, before)
+			}
 			toast.success(m.admin_ports_saved())
 			this.confirmingPorts = false
 		} catch (error) {
@@ -176,6 +221,7 @@ export class ProxySettingsViewModel {
 
 	openCloudflare = (): void => {
 		this.cloudflareToken = ''
+		this.cloudflareError = null
 		this.#clearError('cloudflareToken')
 		this.cloudflareOpen = true
 	}
@@ -184,6 +230,7 @@ export class ProxySettingsViewModel {
 		if (this.#cloudflare.isPending) return
 		this.cloudflareOpen = false
 		this.cloudflareToken = ''
+		this.cloudflareError = null
 	}
 
 	saveCloudflare = async (): Promise<void> => {
@@ -191,15 +238,48 @@ export class ProxySettingsViewModel {
 		const token = this.cloudflareToken
 		// El token no se queda en ningún lado: ni en el campo ni en el cache de mutaciones.
 		this.cloudflareToken = ''
+		this.cloudflareError = null
 		try {
-			const saved = await this.#save(
-				() => this.#cloudflare.mutateAsync(token),
-				m.admin_cf_saved(),
-				() => {},
-			)
-			if (saved) this.cloudflareOpen = false
+			await this.#cloudflare.mutateAsync(token)
+			toast.success(m.admin_cf_saved())
+			this.cloudflareOpen = false
+		} catch (error) {
+			const fieldError = adminFieldError(error)
+			if (fieldError?.field === 'cloudflareToken') {
+				// La forma, o Cloudflare lo rechazó (o no ve zonas): es el token.
+				this.errors = { ...this.errors, cloudflareToken: fieldError.message }
+				return
+			}
+			// Cloudflare caído no es culpa del token: se pega otra vez y se reintenta.
+			this.cloudflareError =
+				error instanceof CloudflareUnavailable
+					? { title: m.admin_cf_unavailable_title(), body: m.admin_cf_unavailable_body() }
+					: { title: adminErrorMessage(error), body: null }
 		} finally {
 			this.#cloudflare.reset()
+		}
+	}
+
+	askRemoveCloudflare = (): void => {
+		this.removeCloudflareError = null
+		this.confirmingRemoveCloudflare = true
+	}
+
+	cancelRemoveCloudflare = (): void => {
+		if (this.#removeCloudflare.isPending) return
+		this.confirmingRemoveCloudflare = false
+		this.removeCloudflareError = null
+	}
+
+	removeCloudflare = async (): Promise<void> => {
+		if (this.#removeCloudflare.isPending) return
+		this.removeCloudflareError = null
+		try {
+			await this.#removeCloudflare.mutateAsync()
+			toast.success(m.admin_cf_removed())
+			this.confirmingRemoveCloudflare = false
+		} catch (error) {
+			this.removeCloudflareError = adminErrorMessage(error)
 		}
 	}
 
@@ -211,16 +291,20 @@ export class ProxySettingsViewModel {
 		run: () => Promise<Settings>,
 		success: string,
 		apply: (proxy: ProxySettings) => void,
-	): Promise<boolean> {
+	): Promise<void> {
 		try {
 			const settings = await run()
 			if (settings.proxy) apply(settings.proxy)
 			toast.success(success)
-			return true
 		} catch (error) {
 			this.#fail(error)
-			return false
 		}
+	}
+
+	#movedTo(proxy: ProxySettings, httpsBefore: number): string | null {
+		if (proxy.httpsPort === httpsBefore || proxy.panelDomain === '') return null
+		const origin = panelOrigin(proxy)
+		return origin === currentOrigin() ? null : origin
 	}
 
 	#clearError(field: ProxyField): void {

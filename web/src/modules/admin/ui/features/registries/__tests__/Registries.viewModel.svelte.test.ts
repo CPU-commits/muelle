@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
+import { formatDateTime, formatRelative } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
 import { UnavailableError } from '@/shared/domain'
 import type { RegistriesViewModel } from '..'
@@ -25,6 +26,7 @@ vi.mock('@/modules/admin/container', () => ({
 		updateAcmeEmail: vi.fn(),
 		updateProxyPorts: vi.fn(),
 		replaceCloudflareToken: vi.fn(),
+		removeCloudflareToken: vi.fn(),
 		listAudit: vi.fn(),
 		listRegistries: mocks.listRegistries,
 		addRegistry: mocks.addRegistry,
@@ -34,6 +36,13 @@ vi.mock('@/modules/admin/container', () => ({
 }))
 
 let client: QueryClient
+
+const CREATED = new Date('2026-10-01T12:00:00.000Z')
+const UPDATED = new Date('2026-10-09T15:30:00.000Z')
+
+function registry(host: string, username: string) {
+	return { host, username, createdAt: CREATED, updatedAt: UPDATED }
+}
 
 async function mountViewModel(): Promise<RegistriesViewModel> {
 	client = createQueryClient({ retry: false })
@@ -48,9 +57,9 @@ describe('RegistriesViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.restoreAllMocks()
-		mocks.listRegistries.mockResolvedValue([{ host: 'ghcr.io', username: 'cpu-commits' }])
-		mocks.addRegistry.mockResolvedValue({ host: 'quay.io', username: 'bot' })
-		mocks.updateRegistry.mockResolvedValue({ host: 'ghcr.io', username: 'bot' })
+		mocks.listRegistries.mockResolvedValue([registry('ghcr.io', 'cpu-commits')])
+		mocks.addRegistry.mockResolvedValue(registry('quay.io', 'bot'))
+		mocks.updateRegistry.mockResolvedValue(registry('ghcr.io', 'bot'))
 		mocks.removeRegistry.mockResolvedValue(undefined)
 	})
 
@@ -115,7 +124,7 @@ describe('RegistriesViewModel', () => {
 
 		await vm.submit()
 
-		expect(vm.errors).toEqual({ host: m.admin_error_registry_host() })
+		expect(vm.errors).toEqual({ host: m.admin_error_registry_host_path() })
 		expect(mocks.addRegistry).not.toHaveBeenCalled()
 		expect(vm.password).toBe('clave-escrita')
 
@@ -124,6 +133,49 @@ describe('RegistriesViewModel', () => {
 		await vm.submit()
 		expect(vm.errors).toEqual({ username: m.common_required() })
 		expect(vm.password).toBe('clave-escrita')
+	})
+
+	it('el host dice qué sobra: el esquema, la ruta, o que no es un host', async () => {
+		const vm = await mountViewModel()
+		vm.openAdd()
+		vm.setField('username', 'bot')
+		vm.setField('password', 'x')
+		const errorFor = async (host: string) => {
+			vm.setField('host', host)
+			await vm.submit()
+			return vm.errors.host
+		}
+
+		expect(await errorFor('https://ghcr.io')).toBe(m.admin_error_registry_host_scheme())
+		expect(await errorFor('ghcr.io/')).toBe(m.admin_error_registry_host_path())
+		expect(await errorFor('mi registry')).toBe(m.admin_error_registry_host_format())
+		expect(await errorFor('')).toBe(m.common_required())
+		expect(mocks.addRegistry).not.toHaveBeenCalled()
+	})
+
+	it('el usuario y la contraseña se validan con los límites del backend', async () => {
+		const vm = await mountViewModel()
+		vm.openAdd()
+		vm.setField('host', 'quay.io')
+		vm.setField('username', 'a'.repeat(256))
+		vm.setField('password', 'x')
+
+		await vm.submit()
+
+		expect(vm.errors).toEqual({ username: m.admin_error_registry_username_long({ max: 255 }) })
+		expect(mocks.addRegistry).not.toHaveBeenCalled()
+		expect(vm.password).toBe('x')
+	})
+
+	it('cada fila dice cuándo se cambiaron sus credenciales', async () => {
+		const vm = await mountViewModel()
+		const [first] = vm.registries
+		if (!first) throw new Error('falta el registry')
+
+		expect(vm.updatedLabel(first)).toBe(
+			m.admin_registries_updated({ when: formatRelative(UPDATED) }),
+		)
+		expect(vm.updatedTitle(first)).toBe(formatDateTime(UPDATED))
 	})
 
 	it('un host repetido (lo dice el backend) va al campo host', async () => {

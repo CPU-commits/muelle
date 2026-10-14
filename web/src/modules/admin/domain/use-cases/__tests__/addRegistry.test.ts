@@ -7,7 +7,10 @@ import {
 	makeUpdateRegistry,
 	RegistryExists,
 } from '../..'
-import { InMemoryRegistryRepository } from '../../repositories/__fakes__/inMemoryAdminRepository'
+import {
+	fakeRegistry,
+	InMemoryRegistryRepository,
+} from '../../repositories/__fakes__/inMemoryAdminRepository'
 
 describe('registries', () => {
 	it('agrega, cambia las credenciales y borra; la contraseña no vuelve', async () => {
@@ -15,25 +18,25 @@ describe('registries', () => {
 		const deps = { registries }
 
 		await makeAddRegistry(deps)({
-			host: 'https://ghcr.io/',
+			host: 'index.docker.io',
 			username: 'cpu-commits',
 			password: 'ghp_x',
 		})
-		await makeUpdateRegistry(deps)({ host: 'ghcr.io', username: 'bot', password: 'ghp_y' })
+		await makeUpdateRegistry(deps)({ host: 'docker.io', username: 'bot', password: 'ghp_y' })
 
-		await expect(makeListRegistries(deps)()).resolves.toEqual([
-			{ host: 'ghcr.io', username: 'bot' },
-		])
+		// El alias de Docker Hub se guardó como docker.io; la contraseña no vuelve.
+		const [registry] = await makeListRegistries(deps)()
+		expect(registry).toMatchObject({ host: 'docker.io', username: 'bot' })
+		expect(registry).not.toHaveProperty('password')
+		expect(registry?.updatedAt).toBeInstanceOf(Date)
 		expect(registries.registries[0]?.password).toBe('ghp_y')
 
-		await makeRemoveRegistry(deps)('ghcr.io')
+		await makeRemoveRegistry(deps)('docker.io')
 		await expect(makeListRegistries(deps)()).resolves.toEqual([])
 	})
 
 	it('valida el host antes de mandarlo y propaga un host repetido', async () => {
-		const registries = new InMemoryRegistryRepository([
-			{ host: 'ghcr.io', username: 'a', password: 'b' },
-		])
+		const registries = new InMemoryRegistryRepository([fakeRegistry({ host: 'ghcr.io' })])
 		const add = makeAddRegistry({ registries })
 
 		await expect(

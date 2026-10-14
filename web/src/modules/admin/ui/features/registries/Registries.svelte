@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import {
+		Banner,
 		Button,
 		ComingSoon,
 		ConfirmDialog,
@@ -17,7 +18,7 @@
 	} from '@/shared/ui'
 	import { SectionHeading } from '../../components/sectionHeading'
 	import { RegistriesViewModel } from './Registries.viewModel.svelte.ts'
-	import { form as formClass, hostCell, section, userCell } from './styles.css'
+	import { dateCell, form as formClass, hostCell, section, userCell } from './styles.css'
 
 	// La sección "Registries" de Ajustes (`Ajustes.dc.html`). `id` es el ancla de la nav.
 	let { id }: { id?: string } = $props()
@@ -59,6 +60,13 @@
 				<ListRow>
 					<span class={hostCell}><Mono>{registry.host}</Mono></span>
 					<span class={userCell}>{registry.username}</span>
+					<time
+						class={dateCell}
+						datetime={registry.updatedAt.toISOString()}
+						title={vm.updatedTitle(registry)}
+					>
+						{vm.updatedLabel(registry)}
+					</time>
 					<Menu
 						label={m.admin_registries_options({ host: registry.host })}
 						items={vm.menuFor(registry)}
@@ -131,6 +139,11 @@
 				/>
 			{/snippet}
 		</Field>
+		<Banner
+			tone="info"
+			title={m.admin_registry_scope_title()}
+			body={m.admin_registry_scope_body()}
+		/>
 	</form>
 	{#snippet footer()}
 		<Button variant="secondary" size="sm" disabled={vm.isSaving} onclick={vm.closeDialog}>

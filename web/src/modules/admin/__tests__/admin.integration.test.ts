@@ -9,10 +9,12 @@ import { pendingPhase, UnavailableError, ValidationError } from '@/shared/domain
 import { adminUseCases } from '../container'
 import {
 	AUDIT_PAGE_SIZE,
+	CloudflareUnavailable,
 	InvalidCidr,
 	RegistryExists,
 	RegistryNotFound,
 	TotpRequiredFirst,
+	WouldLockOut,
 } from '../domain'
 
 // Recorre el módulo entero contra el backend simulado (src/mocks/handlers/admin.ts). Los
@@ -92,6 +94,48 @@ describe('settings', () => {
 		expect(sent).toEqual({ require_2fa: true })
 	})
 
+	it('una lista que deja fuera la IP de la sesión es WouldLockOut; con confirmLockout se guarda', async () => {
+		// El mock ve al navegador como 198.51.100.17.
+		await expect(
+			adminUseCases.updateSecurity({ allowedCidrs: '10.0.0.0/8' }),
+		).rejects.toBeInstanceOf(WouldLockOut)
+		expect(adminDb.state.panelAllowedCidrs).toEqual([])
+
+		await expect(
+			adminUseCases.updateSecurity({ allowedCidrs: '10.0.0.0/8', confirmLockout: true }),
+		).resolves.toMatchObject({ panelAccess: { allowedCidrs: ['10.0.0.0/8'] } })
+		// confirm_lockout no es un ajuste: no queda en la auditoría.
+		expect(adminDb.state.audit.at(-1)?.details).toEqual({
+			panel_allowed_cidrs: ['10.0.0.0/8'],
+		})
+	})
+
+	it('confirm_lockout solo va cuando se confirma', async () => {
+		const sent: unknown[] = []
+		server.use(
+			http.patch(api('/settings'), async ({ request }) => {
+				sent.push(await request.json())
+				return apiError(409, 'would_lock_out', 'te quedarías fuera')
+			}),
+		)
+
+		await adminUseCases.updateSecurity({ allowedCidrs: '10.0.0.0/8' }).catch(() => null)
+		await adminUseCases
+			.updateSecurity({ allowedCidrs: '10.0.0.0/8', confirmLockout: true })
+			.catch(() => null)
+
+		expect(sent).toEqual([
+			{ panel_allowed_cidrs: ['10.0.0.0/8'] },
+			{ panel_allowed_cidrs: ['10.0.0.0/8'], confirm_lockout: true },
+		])
+	})
+
+	it('client_ip siempre es un string', async () => {
+		const settings = await adminUseCases.getSettings()
+
+		expect(settings.panelAccess?.clientIp).toBe('198.51.100.17')
+	})
+
 	it('guarda las IPs permitidas, validadas antes de mandarlas', async () => {
 		await expect(
 			adminUseCases.updateSecurity({ allowedCidrs: '198.51.100.0/24\n203.0.113.7\n' }),
@@ -129,13 +173,68 @@ describe('settings', () => {
 		})
 	})
 
-	it('el token de Cloudflare se guarda pero nunca vuelve ni va a la auditoría', async () => {
-		const settings = await adminUseCases.replaceCloudflareToken('cf-secreto-nuevo')
+	it('"" borra la IP pública, la IPv6 y el email ACME', async () => {
+		await adminUseCases.updatePublicIp({ ipv4: '', ipv6: '' })
+		const settings = await adminUseCases.updateAcmeEmail('')
 
-		expect(settings.proxy?.cloudflare.tokenSet).toBe(true)
-		expect(JSON.stringify(settings)).not.toContain('cf-secreto-nuevo')
-		expect(JSON.stringify(adminDb.state.audit)).not.toContain('cf-secreto-nuevo')
-		expect(adminDb.state.audit.at(-1)).toMatchObject({ action: 'settings.update' })
+		expect(settings.proxy).toMatchObject({ publicIpv4: '', publicIpv6: '', acmeEmail: '' })
+	})
+
+	it('la IPv6 va en su forma canónica (el backend no la normaliza)', async () => {
+		const settings = await adminUseCases.updatePublicIp({
+			ipv4: '203.0.113.24',
+			ipv6: '2001:DB8:0:0:0:0:0:24',
+		})
+
+		expect(settings.proxy?.publicIpv6).toBe('2001:db8::24')
+		expect(adminDb.state.publicIpv6).toBe('2001:db8::24')
+	})
+
+	it('el token de Cloudflare se guarda con sus zonas, pero nunca vuelve', async () => {
+		const token = 'cf_secreto_nuevo_de_cuarenta_caracteres'
+		const settings = await adminUseCases.replaceCloudflareToken(token)
+
+		expect(settings.proxy?.cloudflare).toEqual({ tokenSet: true, zones: 3 })
+		expect(JSON.stringify(settings)).not.toContain(token)
+		// En la auditoría queda que se guardó uno, no cuál.
+		expect(JSON.stringify(adminDb.state.audit)).not.toContain(token)
+		expect(adminDb.state.audit.at(-1)).toMatchObject({
+			action: 'settings.update',
+			details: { cloudflare_token: 'set' },
+		})
+	})
+
+	it('quitar el token borra también las zonas', async () => {
+		const settings = await adminUseCases.removeCloudflareToken()
+
+		expect(settings.proxy?.cloudflare).toEqual({ tokenSet: false, zones: null })
+		expect(adminDb.state.cloudflareToken).toBeNull()
+		expect(adminDb.state.audit.at(-1)?.details).toEqual({ cloudflare_token: 'removed' })
+	})
+
+	it('un token que Cloudflare rechaza, o que no ve zonas, es un error del campo', async () => {
+		for (const token of [
+			'cf_token_rechazado_por_cloudflare_xx',
+			'cf_token_sinzonas_visibles_en_la_cuenta',
+		]) {
+			const error = await adminUseCases
+				.replaceCloudflareToken(token)
+				.catch((caught: unknown) => caught)
+
+			expect(error).toBeInstanceOf(ValidationError)
+			expect((error as ValidationError).field).toBe('cloudflareToken')
+		}
+		expect(adminDb.state.cloudflareToken).toBe('cf_token_demo_de_cuarenta_caracteres_xx')
+	})
+
+	it('si Cloudflare no responde es CloudflareUnavailable (se reintenta), no un error del campo', async () => {
+		const error = await adminUseCases
+			.replaceCloudflareToken('cf_token_con_cloudflare_caido_xxxxxx')
+			.catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(CloudflareUnavailable)
+		expect(error).toBeInstanceOf(UnavailableError)
+		expect(pendingPhase(error)).toBeNull()
 	})
 })
 
@@ -183,13 +282,86 @@ describe('registries (Fase 2)', () => {
 		})
 		await adminUseCases.updateRegistry({ host: 'ghcr.io', username: 'otro', password: 'y' })
 
-		await expect(adminUseCases.listRegistries()).resolves.toEqual([
+		const list = await adminUseCases.listRegistries()
+		expect(list.map(({ host, username }) => ({ host, username }))).toEqual([
 			{ host: 'ghcr.io', username: 'otro' },
 			{ host: 'registry.example.com:5000', username: 'bot' },
 		])
+		// Cambiar las credenciales mueve updated_at, no created_at.
+		const [ghcr] = list
+		expect(ghcr?.createdAt).toEqual(new Date('2026-10-01T12:00:00.000Z'))
+		expect(ghcr?.updatedAt.getTime()).toBeGreaterThan(ghcr?.createdAt.getTime() ?? 0)
 
 		await adminUseCases.removeRegistry('ghcr.io')
 		await expect(adminUseCases.listRegistries()).resolves.toHaveLength(1)
+	})
+
+	it('vienen ordenados por host, con sus fechas', async () => {
+		await adminUseCases.addRegistry({ host: 'docker.io', username: 'bot', password: 'x' })
+
+		const list = await adminUseCases.listRegistries()
+
+		expect(list.map((registry) => registry.host)).toEqual(['docker.io', 'ghcr.io'])
+		expect(list[0]?.createdAt).toBeInstanceOf(Date)
+	})
+
+	it('el host se manda canónico: un alias de Docker Hub se guarda como docker.io', async () => {
+		const registry = await adminUseCases.addRegistry({
+			host: 'Index.Docker.IO',
+			username: 'bot',
+			password: 'x',
+		})
+
+		expect(registry.host).toBe('docker.io')
+		expect(adminDb.state.registries.map((r) => r.host)).toContain('docker.io')
+	})
+
+	it('el backend rechaza un alias de Docker Hub en el campo host', async () => {
+		const response = await fetch(api('/registries'), {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ host: 'index.docker.io', username: 'a', password: 'b' }),
+		})
+
+		expect(response.status).toBe(422)
+		expect(await response.json()).toMatchObject({
+			error: { message: 'host: para Docker Hub usa docker.io' },
+		})
+	})
+
+	it('cambiar las credenciales manda usuario y contraseña, los dos', async () => {
+		let sent: unknown
+		server.use(
+			http.patch(api('/registries/:host'), async ({ request }) => {
+				sent = await request.json()
+				return HttpResponse.json({
+					host: 'ghcr.io',
+					username: 'otro',
+					created_at: '2026-10-01T12:00:00.000Z',
+					updated_at: '2026-10-14T12:00:00.000Z',
+				})
+			}),
+		)
+
+		await adminUseCases.updateRegistry({ host: 'ghcr.io', username: 'otro', password: 'y' })
+
+		expect(sent).toEqual({ username: 'otro', password: 'y' })
+	})
+
+	it('el mock exige los dos campos en el PATCH, como el backend', async () => {
+		const response = await fetch(api('/registries/ghcr.io'), {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ username: 'otro' }),
+		})
+
+		expect(response.status).toBe(422)
+	})
+
+	it('cambiar las credenciales de un registry que ya no está es RegistryNotFound', async () => {
+		await expect(
+			adminUseCases.updateRegistry({ host: 'quay.io', username: 'a', password: 'b' }),
+		).rejects.toBeInstanceOf(RegistryNotFound)
 	})
 
 	it('un host repetido es RegistryExists', async () => {

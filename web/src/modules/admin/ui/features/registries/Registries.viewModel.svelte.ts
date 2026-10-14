@@ -1,6 +1,6 @@
 import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import type { MenuEntry } from '@/shared/ui'
+import { formatDateTime, formatRelative, type MenuEntry } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
 import { pendingPhase, type RoadmapPhase, UnavailableError } from '@/shared/domain'
 import {
@@ -84,6 +84,13 @@ export class RegistriesViewModel {
 		if (dialog?.mode === 'edit') return m.admin_registry_form_edit_title({ host: dialog.host })
 		return m.admin_registry_form_add_title()
 	}
+
+	/** "Actualizado hace 3 días": cuándo se cambiaron por última vez las credenciales. */
+	updatedLabel = (registry: Registry): string =>
+		m.admin_registries_updated({ when: formatRelative(registry.updatedAt) })
+
+	/** La fecha y hora exactas, para el `title`. */
+	updatedTitle = (registry: Registry): string => formatDateTime(registry.updatedAt)
 
 	menuFor = (registry: Registry): MenuEntry[] => [
 		{

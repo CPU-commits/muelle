@@ -22,6 +22,13 @@ export const userCell = style({
 	overflowWrap: 'anywhere',
 })
 
+export const dateCell = style({
+	flex: '0 0 auto',
+	fontSize: theme.typography.fontSize[13],
+	color: theme.colors.text.tertiary,
+	whiteSpace: 'nowrap',
+})
+
 export const form = style({
 	display: 'flex',
 	flexDirection: 'column',

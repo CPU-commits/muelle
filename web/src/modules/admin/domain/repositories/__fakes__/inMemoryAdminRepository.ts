@@ -12,7 +12,13 @@ import type {
 	SettingsPatch,
 	SettingsRepository,
 } from '../..'
-import { RegistryExists, TotpRequiredFirst } from '../..'
+import {
+	cidrListAllows,
+	RegistryExists,
+	RegistryNotFound,
+	TotpRequiredFirst,
+	WouldLockOut,
+} from '../..'
 
 export function fakeProxySettings(overrides: Partial<ProxySettings> = {}): ProxySettings {
 	return {
@@ -64,6 +70,16 @@ export class InMemorySettingsRepository implements SettingsRepository {
 			return Promise.reject(new TotpRequiredFirst())
 		}
 		const { proxy, panelAccess } = this.settings
+		const nextCidrs = patch.panelAllowedCidrs
+		if (
+			nextCidrs !== undefined &&
+			panelAccess &&
+			!patch.confirmLockout &&
+			!cidrListAllows(nextCidrs.join('\n'), panelAccess.clientIp)
+		) {
+			return Promise.reject(new WouldLockOut())
+		}
+		const removingToken = patch.cloudflareToken === ''
 		this.settings = {
 			require2fa: patch.require2fa ?? this.settings.require2fa,
 			proxy: proxy && {
@@ -73,9 +89,10 @@ export class InMemorySettingsRepository implements SettingsRepository {
 				acmeEmail: patch.acmeEmail ?? proxy.acmeEmail,
 				httpPort: patch.httpPort ?? proxy.httpPort,
 				httpsPort: patch.httpsPort ?? proxy.httpsPort,
-				cloudflare:
-					patch.cloudflareToken !== undefined
-						? { tokenSet: true, zones: proxy.cloudflare.zones }
+				cloudflare: removingToken
+					? { tokenSet: false, zones: null }
+					: patch.cloudflareToken !== undefined
+						? { tokenSet: true, zones: 3 }
 						: proxy.cloudflare,
 			},
 			panelAccess: panelAccess && {
@@ -120,16 +137,36 @@ export class InMemoryAuditRepository implements AuditRepository {
 	}
 }
 
+/** Un registry como lo devuelve el backend: la contraseña nunca vuelve. */
+function withoutPassword({ host, username, createdAt, updatedAt }: StoredRegistry): Registry {
+	return { host, username, createdAt, updatedAt }
+}
+
+type StoredRegistry = Registry & { password: string }
+
+/** Un registry de prueba, con sus fechas. */
+export function fakeRegistry(overrides: Partial<StoredRegistry> = {}): StoredRegistry {
+	const at = new Date('2026-10-01T12:00:00.000Z')
+	return {
+		host: 'ghcr.io',
+		username: 'bot',
+		password: 'x',
+		createdAt: at,
+		updatedAt: at,
+		...overrides,
+	}
+}
+
 export class InMemoryRegistryRepository implements RegistryRepository {
-	registries: (Registry & { password: string })[]
+	registries: StoredRegistry[]
 	readonly calls = { create: 0, update: 0 }
 
-	constructor(registries: (Registry & { password: string })[] = []) {
+	constructor(registries: StoredRegistry[] = []) {
 		this.registries = registries
 	}
 
 	list(): Promise<Registry[]> {
-		return Promise.resolve(this.registries.map(({ host, username }) => ({ host, username })))
+		return Promise.resolve(this.registries.map(withoutPassword))
 	}
 
 	create(registry: NewRegistry): Promise<Registry> {
@@ -137,16 +174,19 @@ export class InMemoryRegistryRepository implements RegistryRepository {
 		if (this.registries.some((r) => r.host === registry.host)) {
 			return Promise.reject(new RegistryExists())
 		}
-		this.registries = [...this.registries, { ...registry }]
-		return Promise.resolve({ host: registry.host, username: registry.username })
+		const now = new Date()
+		const created = { ...registry, createdAt: now, updatedAt: now }
+		this.registries = [...this.registries, created]
+		return Promise.resolve(withoutPassword(created))
 	}
 
 	update(host: string, credentials: RegistryCredentials): Promise<Registry> {
 		this.calls.update += 1
-		this.registries = this.registries.map((r) =>
-			r.host === host ? { host, ...credentials } : r,
-		)
-		return Promise.resolve({ host, username: credentials.username })
+		const current = this.registries.find((r) => r.host === host)
+		if (!current) return Promise.reject(new RegistryNotFound())
+		const updated = { ...current, ...credentials, updatedAt: new Date() }
+		this.registries = this.registries.map((r) => (r.host === host ? updated : r))
+		return Promise.resolve(withoutPassword(updated))
 	}
 
 	remove(host: string): Promise<void> {

@@ -42,7 +42,7 @@ function proxyFromDto(dto: SettingsDto): ProxySettings | null {
 
 function panelAccessFromDto(dto: SettingsDto): PanelAccess | null {
 	if (dto.panel_allowed_cidrs === undefined) return null
-	return { allowedCidrs: dto.panel_allowed_cidrs, clientIp: dto.client_ip ?? null }
+	return { allowedCidrs: dto.panel_allowed_cidrs, clientIp: dto.client_ip ?? '' }
 }
 
 export function settingsFromDto(dto: SettingsDto): Settings {
@@ -66,6 +66,7 @@ export function settingsPatchPayload(patch: SettingsPatch): SettingsPatchPayload
 			? { panel_allowed_cidrs: [...patch.panelAllowedCidrs] }
 			: {}),
 		...(patch.cloudflareToken !== undefined ? { cloudflare_token: patch.cloudflareToken } : {}),
+		...(patch.confirmLockout ? { confirm_lockout: true } : {}),
 	}
 }
 
@@ -93,7 +94,12 @@ export function auditEventFromDto(dto: AuditEventDto): AuditEvent {
 }
 
 export function registryFromDto(dto: RegistryDto): Registry {
-	return { host: dto.host, username: dto.username }
+	return {
+		host: dto.host,
+		username: dto.username,
+		createdAt: new Date(dto.created_at),
+		updatedAt: new Date(dto.updated_at),
+	}
 }
 
 export function newRegistryPayload(registry: NewRegistry): NewRegistryPayload {

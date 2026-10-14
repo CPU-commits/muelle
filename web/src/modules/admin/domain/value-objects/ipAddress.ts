@@ -68,17 +68,52 @@ export function isIpv6(raw: string): boolean {
 	return parseIp(raw)?.version === 6
 }
 
-/** La IPv4 pública, obligatoria. */
+const IPV4_MAPPED_PREFIX = 0xffffn << 32n
+
+/**
+ * Una IPv6 en su forma canónica (RFC 5952), la única que acepta el backend: en minúsculas,
+ * sin ceros a la izquierda, con `::` en la racha de ceros más larga (de al menos dos grupos;
+ * la primera si empatan) y las IPv4 mapeadas como `::ffff:a.b.c.d`.
+ */
+export function formatIpv6(value: bigint): string {
+	if (value >> 32n === IPV4_MAPPED_PREFIX >> 32n) {
+		const v4 = Number(value & 0xffffffffn)
+		return `::ffff:${[24, 16, 8, 0].map((shift) => (v4 >>> shift) & 0xff).join('.')}`
+	}
+	const groups = Array.from({ length: 8 }, (_, i) =>
+		Number((value >> BigInt((7 - i) * 16)) & 0xffffn),
+	)
+	let best = { start: -1, length: 0 }
+	for (let i = 0; i < 8; ) {
+		if (groups[i] !== 0) {
+			i += 1
+			continue
+		}
+		let end = i
+		while (end < 8 && groups[end] === 0) end += 1
+		if (end - i > best.length) best = { start: i, length: end - i }
+		i = end
+	}
+	const hex = groups.map((group) => group.toString(16))
+	if (best.length < 2) return hex.join(':')
+	const head = hex.slice(0, best.start).join(':')
+	const tail = hex.slice(best.start + best.length).join(':')
+	return `${head}::${tail}`
+}
+
+/** La IPv4 pública; `''` la borra (contrato §4.1). */
 export function parsePublicIpv4(raw: string): string {
 	const address = raw.trim()
+	if (address === '') return ''
 	if (!isIpv4(address)) throw new InvalidIpAddress(4, 'ipv4')
 	return address
 }
 
-/** La IPv6 pública es opcional: `''` la borra. */
+/** La IPv6 pública, en su forma canónica; `''` la borra. */
 export function parsePublicIpv6(raw: string): string {
-	const address = raw.trim().toLowerCase()
+	const address = raw.trim()
 	if (address === '') return ''
-	if (!isIpv6(address)) throw new InvalidIpAddress(6, 'ipv6')
-	return address
+	const ip = parseIp(address)
+	if (ip?.version !== 6) throw new InvalidIpAddress(6, 'ipv6')
+	return formatIpv6(ip.value)
 }

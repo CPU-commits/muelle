@@ -105,6 +105,10 @@ export function replaceCloudflareTokenMutation(client: QueryClient) {
 	}
 }
 
+export function removeCloudflareTokenMutation(client: QueryClient) {
+	return settingsMutation(client, () => adminUseCases.removeCloudflareToken())
+}
+
 function registryMutation<TInput, TResult>(
 	client: QueryClient,
 	run: (input: TInput) => Promise<TResult>,

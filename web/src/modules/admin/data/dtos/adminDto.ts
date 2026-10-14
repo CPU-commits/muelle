@@ -25,8 +25,8 @@ export const settingsDtoSchema = z.object({
 	proxy_http_port: z.number().int().optional(),
 	proxy_https_port: z.number().int().optional(),
 	panel_allowed_cidrs: z.array(z.string()).optional(),
-	/** La IP con la que el backend ve la petición (no es un ajuste: no se manda en el PATCH). */
-	client_ip: z.string().nullable().optional(),
+	/** La IP con la que el backend ve la petición: siempre un string (no es un ajuste). */
+	client_ip: z.string().optional(),
 })
 
 /**
@@ -42,10 +42,12 @@ export const auditEventDtoSchema = z.object({
 	at: timestamp,
 })
 
-/** Un elemento de `GET /registries` (Fase 2). La contraseña no vuelve nunca. */
+/** Un elemento de `GET /registries` (Fase 2, contrato §2.10). La contraseña no vuelve nunca. */
 export const registryDtoSchema = z.object({
 	host: z.string().min(1),
 	username: z.string(),
+	created_at: timestamp,
+	updated_at: timestamp,
 })
 
 export type SettingsDto = z.infer<typeof settingsDtoSchema>
@@ -61,7 +63,10 @@ export interface SettingsPatchPayload {
 	proxy_http_port?: number
 	proxy_https_port?: number
 	panel_allowed_cidrs?: string[]
+	/** `""` quita el token y las zonas. */
 	cloudflare_token?: string
+	/** Guardar una lista que deja fuera esta sesión (si no, `409 would_lock_out`). */
+	confirm_lockout?: boolean
 }
 
 /** Cuerpo de `POST /registries`. */

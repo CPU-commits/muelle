@@ -4,6 +4,7 @@ export {
 	auditQuery,
 	refreshAuditOnWrites,
 	registriesQuery,
+	removeCloudflareTokenMutation,
 	removeRegistryMutation,
 	replaceCloudflareTokenMutation,
 	settingsQuery,

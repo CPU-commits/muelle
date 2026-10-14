@@ -4,6 +4,8 @@ import type { RegistryHost } from '../value-objects/registryHost'
 export interface Registry {
 	readonly host: string
 	readonly username: string
+	readonly createdAt: Date
+	readonly updatedAt: Date
 }
 
 export interface NewRegistry {

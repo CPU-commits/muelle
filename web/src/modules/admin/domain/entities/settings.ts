@@ -31,8 +31,8 @@ export interface ProxySettings {
 export interface PanelAccess {
 	/** Vacía: el panel se abre desde cualquier IP. */
 	readonly allowedCidrs: readonly string[]
-	/** La IP con la que el backend ve esta sesión, para avisar antes de dejarla afuera. */
-	readonly clientIp: string | null
+	/** La IP con la que el backend ve esta sesión (`''` si no la informó). */
+	readonly clientIp: string
 }
 
 export interface Settings {
@@ -55,5 +55,8 @@ export interface SettingsPatch {
 	readonly httpPort?: number
 	readonly httpsPort?: number
 	readonly panelAllowedCidrs?: readonly string[]
+	/** `''` quita el token (y las zonas que veía). */
 	readonly cloudflareToken?: string
+	/** Guardar una lista de IPs que deja fuera esta sesión (si no, `WouldLockOut`). */
+	readonly confirmLockout?: boolean
 }

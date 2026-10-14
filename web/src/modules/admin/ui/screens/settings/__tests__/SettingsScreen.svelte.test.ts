@@ -23,6 +23,7 @@ vi.mock('@/modules/admin/container', () => ({
 		updateAcmeEmail: vi.fn(),
 		updateProxyPorts: vi.fn(),
 		replaceCloudflareToken: vi.fn(),
+		removeCloudflareToken: vi.fn(),
 		listAudit: mocks.listAudit,
 		listRegistries: mocks.listRegistries,
 		addRegistry: vi.fn(),
@@ -108,12 +109,17 @@ describe('SettingsScreen', () => {
 
 	it('con las Fases 2 y 3, las secciones se muestran en vez del aviso', async () => {
 		mocks.getSettings.mockResolvedValue(PHASE_3)
-		mocks.listRegistries.mockResolvedValue([{ host: 'ghcr.io', username: 'cpu-commits' }])
+		const at = new Date('2026-10-09T15:30:00.000Z')
+		mocks.listRegistries.mockResolvedValue([
+			{ host: 'ghcr.io', username: 'cpu-commits', createdAt: at, updatedAt: at },
+		])
 
 		const screen = await render(SettingsView, { client: client() })
 
 		await expect.element(screen.getByRole('heading', { name: 'Cloudflare' })).toBeVisible()
 		await expect.element(screen.getByText('4 zonas visibles · cifrado')).toBeVisible()
+		await expect.element(screen.getByRole('button', { name: 'Quitar token' })).toBeVisible()
+		await expect.element(screen.getByText(/^Actualizado /)).toBeVisible()
 		await expect.element(screen.getByLabelText('IPs permitidas para el panel')).toBeVisible()
 		await expect.element(screen.getByText('ghcr.io')).toBeVisible()
 		await expect.element(screen.getByText(/llega con la Fase/)).not.toBeInTheDocument()
