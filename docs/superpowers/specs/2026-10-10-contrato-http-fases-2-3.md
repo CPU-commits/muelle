@@ -887,15 +887,15 @@ networks:
 5. La imagen: `InspectImage` y, si da `ErrNotFound`, `PullImage`.
 6. La prueba de puertos (abajo).
 7. `InitSwarm(--advertise-addr)` solo si el Swarm está `inactive`. Su id de nodo (o el de `Info.NodeID`) va en la restricción `node.id` de §5.3.
-8. La red, los secretos y el stack. Si `DeployStack` falla, install borra lo que creó en esta corrida (los secretos y la red, no el Swarm) y no imprime la clave.
+8. La red, los secretos y el stack. Si `DeployStack` falla, install borra lo que creó en esta corrida (el stack, si el CLI alcanzó a crear el servicio, los secretos y la red; no el Swarm) y no imprime la clave. Lo que no pudo borrar lo nombra en stderr, con el comando para borrarlo.
 9. La clave maestra, impresa una sola vez, y después el link de setup.
 
 **Salida:** la clave maestra y el link de setup (o el aviso de que muelle ya tiene usuarios) van a stdout; el avance y los avisos, a stderr. Así `docker run … install > install.txt` guarda solo lo que hay que conservar. Código 0 si terminó con el link (o con usuarios), 1 si algo falló (también el plazo del link), 2 si un flag no sirve. Ctrl-C cancela; lo que se crea en esta corrida antes de que `DeployStack` funcione se borra igual, como si `DeployStack` fallara.
 
-**Una instalación anterior:**
+**Una instalación anterior** (con el Swarm `inactive` no hay servicios ni secretos, y solo se mira el volumen):
 - Si el servicio `muelle_muelle` existe, aborta siempre: muelle ya está instalado, y se actualiza con `docker service update --image` (abajo).
 - Sin `--reinstall`, si existe el secreto `muelle_master_key` o el volumen `muelle_data`, aborta: una clave nueva no descifraría esa base (`clave maestra incorrecta`). El mensaje ofrece `--reinstall` o borrar el secreto y el volumen (se pierden los datos).
-- Con `--reinstall` (para volver a desplegar después de un `docker stack rm muelle`), el secreto `muelle_master_key` tiene que existir: se reusa y no se imprime ninguna clave. Si viene `--cloudflare-token` y el secreto del token existe, se borra y se crea de nuevo; si no viene, el secreto que quedó no se toca y el stack no lo monta. Si el volumen `muelle_data` existe, install avisa que los ajustes de install no se aplican sobre una base que ya arrancó (§5.2).
+- Con `--reinstall` (para volver a desplegar después de un `docker stack rm muelle`), el secreto `muelle_master_key` tiene que existir: se reusa y no se imprime ninguna clave. Si viene `--cloudflare-token` y el secreto del token existe, se borra y se crea de nuevo (también sin `--reinstall`: el que quedó de una corrida cortada); si no viene, el secreto que quedó no se toca y el stack no lo monta. Si el volumen `muelle_data` existe, install avisa que los ajustes de install no se aplican sobre una base que ya arrancó (§5.2).
 
 **Puertos ocupados (§3.3 paso 3 del diseño):** install corre dentro de un contenedor, así que no puede probar el puerto con `net.Listen`.
 - Crea el contenedor temporal `muelle-install-probe`, con el comando `help`, que publica los mismos puertos que muelle-caddy: `--http-port`/tcp, `--https-port`/tcp y `--https-port`/udp (HTTP/3), y lo arranca. Uno que quedó de una corrida cortada se borra antes.
