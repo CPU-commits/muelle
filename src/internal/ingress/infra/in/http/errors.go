@@ -1,6 +1,6 @@
-// Package http tiene los endpoints REST de ingress. En la Fase 3 llegan los
-// dominios (…/apps/{a}/domains) y el estado del proxy (GET /api/v1/proxy); por
-// ahora solo registra los errores del módulo.
+// Package http tiene los endpoints REST de ingress (contrato §3): el estado
+// del proxy (GET /api/v1/proxy) y, después, los dominios
+// (…/apps/{a}/domains). Todos solo con sesión.
 package http
 
 import (

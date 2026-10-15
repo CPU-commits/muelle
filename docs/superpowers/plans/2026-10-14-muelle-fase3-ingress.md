@@ -1371,7 +1371,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): el job proxy asegura redes y muelle-caddy, borra huérfanas y reenvía la configuración`
 
-- [ ] **Step 5: `GET /api/v1/proxy`.**
+- [x] **Step 5: `GET /api/v1/proxy`.**
 
   **Tests primero** (`infra/in/http/proxy_test.go`, con `httptestutil` y los casos de uso armados en el test: `GetProxyStatus` con sqlite, el `ProxySettingsReader`, un `caddy.Runtime` sobre `dockertest.Fake` y un `ProxyState`). No usan un `ingress.Module`: el paquete `ingress` importa este, y su test no puede importarlo de vuelta (ciclo). El camino completo, del job a `GET /proxy`, lo prueba `TestModuleProxyStatusAfterJob` (Step 6).
   - `TestProxyStatusInitial`: con `Enabled` y sin contenedor, `200`:
@@ -1406,6 +1406,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `usecases/proxy_status.go`: `GetProxyStatus.Execute(ctx)`. Lee los ajustes; si está `disabled`, no consulta Docker; si no, `runtime.Status`.
   - `infra/in/http/handler.go`: `type UseCases struct{ ProxyStatus *usecases.GetProxyStatus }` y `func Register(k *utils.Kit, uc UseCases)`, que llama a `RegisterErrors` y registra `k.Handle("GET /api/v1/proxy", utils.AccessSession, h.proxy)`.
   - `module.go`: `RegisterRoutes` llama a `inhttp.Register`.
+  - Hecho así: el cambio de `module.go` pasó al Step 6, junto con el resto del cableado (el `caddy.Runtime` que necesita `GetProxyStatus` se arma ahí) y con `TestModuleRoutes`, que hasta ese commit todavía espera `no_route`. `synced_at` sale en UTC y cortado a ms (`TestProxyStatusSynced` lo prueba con una hora de otra zona y nanosegundos).
 
   **Commit:** `feat(ingress): GET /api/v1/proxy con el estado del proxy (contrato §3.3)`
 
