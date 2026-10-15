@@ -1137,7 +1137,7 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   ```
   Agrega `install` al `usage` de `main.go`.
 
-- [ ] **Step 9: Verificar lo unitario y commitear** antes de la integración, en el orden de los steps (cada commit compila: `Run` usa `waitSetup` y `detectPublicIP`):
+- [x] **Step 9: Verificar lo unitario y commitear** antes de la integración, en el orden de los steps (cada commit compila: `Run` usa `waitSetup` y `detectPublicIP`; antes del de `Run` va `feat(install): la credencial de las imágenes privadas, de los flags o del config.json de Docker`, con `registry.go`):
   - `feat(naming): los nombres de install, con el prefijo de los tests`
   - `test(dockertest): PutNetwork deja una red tal cual, con sus subredes`
   - `feat(install): flags y validación de muelle install`
