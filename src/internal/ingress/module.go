@@ -3,9 +3,9 @@
 // certificados (§3.1, §8 y §9 del spec). module.go es el único lugar que
 // conoce todas sus piezas.
 //
-// Esqueleto de la etapa de contratos: la red de cada stage ya funciona (la
-// usan catalog y deploy); lo demás devuelve entity.ErrNotImplemented o no
-// hace nada, como dice cada método, y las rutas todavía no existen (404
+// Ya funcionan la red de cada stage (la usan catalog y deploy) y SyncRoutes,
+// que manda la configuración a muelle-caddy por su admin API. Lo demás no
+// hace nada todavía, como dice cada método, y las rutas no existen (404
 // no_route). El contrato está en
 // docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md.
 package ingress
@@ -19,11 +19,14 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/ingress/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/ingress/app/usecases"
 	inhttp "github.com/CPU-commits/muelle/src/internal/ingress/infra/in/http"
+	reposqlite "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
+	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy"
 	"github.com/CPU-commits/muelle/src/package/audit"
 	"github.com/CPU-commits/muelle/src/package/cipher"
 	"github.com/CPU-commits/muelle/src/package/clock"
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
+	"github.com/CPU-commits/muelle/src/shared/domain/naming"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
 )
@@ -46,6 +49,8 @@ type Deps struct {
 type Module struct {
 	ensureNetwork *usecases.EnsureStageNetwork
 	removeNetwork *usecases.RemoveStageNetwork
+	state         *usecases.ProxyState
+	syncer        *usecases.Syncer
 	log           *slog.Logger
 }
 
@@ -68,9 +73,18 @@ func New(d Deps) *Module {
 	}
 	o := d.Options.withDefaults()
 	nets := outservice.NewDockerNetworks(d.Docker)
+	settings := outservice.NewProxySettingsReader(d.DB, d.Cipher)
+	catalog := outservice.NewCatalogReader(d.DB)
+	domains := reposqlite.NewDomains(d.DB)
+	state := usecases.NewProxyState()
+	// onFail: los reintentos con backoff llegan con el ciclo de vida de muelle-caddy.
+	syncer := usecases.NewSyncer(settings, domains, catalog, caddy.NewAdmin(o.CaddyAdminDial), state, d.Clock,
+		naming.CaddyImageFor(d.Version), o.InternalCA, func() {}, d.Log)
 	return &Module{
 		ensureNetwork: usecases.NewEnsureStageNetwork(nets, o.CaddyContainer, d.Log),
 		removeNetwork: usecases.NewRemoveStageNetwork(nets, o.CaddyContainer, d.Log),
+		state:         state,
+		syncer:        syncer,
 		log:           d.Log,
 	}
 }
@@ -112,10 +126,13 @@ func (m *Module) RemoveStageNetwork(ctx context.Context, project, stage string) 
 }
 
 // SyncRoutes regenera la configuración completa de Caddy desde la base y la
-// envía (§8). La llama deploy después de cada deploy (§7 paso 7): un error
-// nunca hace fallar el deploy (queda como advertencia en su log, e ingress
-// reintenta por su cuenta). Fase 3; el esqueleto devuelve entity.ErrNotImplemented.
-func (m *Module) SyncRoutes(ctx context.Context) error { return entity.ErrNotImplemented }
+// envía por la admin API (§8), de a una. La llama deploy después de cada
+// deploy (§7 paso 7). Con el proxy deshabilitado (desarrollo, contrato §3.4)
+// devuelve nil sin mandar nada. Si Caddy no la acepta o no responde, devuelve
+// un error sin el token, que deploy registra como advertencia: nunca hace
+// fallar el deploy, el fallo queda en GET /api/v1/proxy e ingress reintenta
+// por su cuenta.
+func (m *Module) SyncRoutes(ctx context.Context) error { return m.syncer.Sync(ctx, false) }
 
 // CheckCloudflareToken verifica un token nuevo antes de que admin lo guarde
 // (PATCH /settings) y devuelve cuántas zonas ve. Fase 3: un token que

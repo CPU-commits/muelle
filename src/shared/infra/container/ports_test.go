@@ -13,7 +13,9 @@ import (
 
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
 	deployout "github.com/CPU-commits/muelle/src/internal/deploy/infra/out/service"
+	"github.com/CPU-commits/muelle/src/internal/ingress"
 	ingressout "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
+	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/cloudflare/cftest"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/domain/naming"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
@@ -102,11 +104,17 @@ func TestContractAppWithDomains(t *testing.T) {
 }
 
 // Lo que admin guarda por PATCH /settings (y al arrancar, panel_domain) es lo
-// que lee ingress: entity.ProxySettings, con el token cifrado.
+// que lee ingress: entity.ProxySettings, con el token cifrado. El token va a
+// un Cloudflare falso (WithIngress), que lo conoce y le muestra una zona:
+// cuando ingress lo verifique (CheckCloudflareToken), nunca llega a la API real.
 func TestContractProxySettings(t *testing.T) {
 	st := testSettings(t)
 	st.Init.ACMEEmail = "inicial@correo.cl"
-	c, err := New(context.Background(), st, testLogger(t), WithDocker(dockertest.New()))
+	cf := cftest.New(t)
+	cf.AddToken("cf-token-1234567890abcdef")
+	cf.AddZone("z1", "otra.cl")
+	c, err := New(context.Background(), st, testLogger(t), WithDocker(dockertest.New()),
+		WithIngress(ingress.Options{CloudflareURL: cf.URL()}))
 	if err != nil {
 		t.Fatal(err)
 	}

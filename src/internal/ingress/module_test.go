@@ -15,6 +15,7 @@ import (
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy/caddytest"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/cloudflare/cftest"
+	"github.com/CPU-commits/muelle/src/internal/ingress/ingresstest"
 	"github.com/CPU-commits/muelle/src/package/clock"
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/domain/naming"
@@ -115,14 +116,42 @@ func TestModuleStageNetworkCustomName(t *testing.T) {
 	}
 }
 
-// Lo que todavía es de la Fase 3: SyncRoutes avisa con ErrNotImplemented (el
-// deploy lo trata como una advertencia); lo que llama admin no rompe la Fase 1.
+// SyncRoutes (deploy, §7 paso 7): en desarrollo no hace nada; con el proxy
+// habilitado manda la configuración, y si Caddy no la acepta devuelve el
+// error que deploy registra como advertencia.
+func TestModuleSyncRoutes(t *testing.T) {
+	tm := newTestModule(t)
+	ctx := context.Background()
+	if err := tm.SyncRoutes(ctx); err != nil {
+		t.Fatalf("sin ajustes (desarrollo): %v", err)
+	}
+	if n := len(tm.caddy.Loads()); n != 0 {
+		t.Fatalf("en desarrollo no se manda nada: %d", n)
+	}
+
+	p := entity.DefaultProxySettings()
+	p.PanelDomain = "panel.auditfy.cl"
+	ingresstest.SetProxySettings(t, tm.db, tm.cipher, p)
+	if err := tm.SyncRoutes(ctx); err != nil {
+		t.Fatalf("habilitado: %v", err)
+	}
+	if n := len(tm.caddy.Loads()); n != 1 {
+		t.Fatalf("loads: %d", n)
+	}
+	if got := tm.caddy.Forced(); got[0] {
+		t.Fatal("SyncRoutes no fuerza la recarga")
+	}
+
+	tm.caddy.Reject("loading config: no")
+	if err := tm.SyncRoutes(ctx); err == nil || !strings.Contains(err.Error(), "loading config: no") {
+		t.Fatalf("rechazado: %v", err)
+	}
+}
+
+// Lo que todavía es de la Fase 3: lo que llama admin no rompe la Fase 1.
 func TestModuleStubs(t *testing.T) {
 	m := newTestModule(t)
 	ctx := context.Background()
-	if err := m.SyncRoutes(ctx); !errors.Is(err, entity.ErrNotImplemented) {
-		t.Fatalf("SyncRoutes: %v", err)
-	}
 	zones, err := m.CheckCloudflareToken(ctx, "cf-token")
 	if err != nil || zones != nil {
 		t.Fatalf("CheckCloudflareToken: %v %v (sin verificar: zonas desconocidas)", zones, err)

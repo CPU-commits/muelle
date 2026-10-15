@@ -968,7 +968,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): Syncer manda la configuración de a una, con el estado del proxy`
 
-- [ ] **Step 5: `Options`, el nombre de muelle-caddy en las redes de stage y `Module.SyncRoutes`.**
+- [x] **Step 5: `Options`, el nombre de muelle-caddy en las redes de stage y `Module.SyncRoutes`.**
 
   Va antes del test de integración del Step 6: hasta acá, `EnsureStageNetwork` conecta el `muelle-caddy` fijo (`naming.CaddyContainer`), y el test conectaría un `muelle-caddy` real si existiera.
 
@@ -982,6 +982,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - `TestRemoveStageNetworkUsesContainerName`: desconecta ese.
   - `module_test.go`:
     - `newTestModule` recibe `Options` (o un `func(*Options)`) y **siempre** pone `CloudflareURL` en un `cftest.New(t)` nuevo, que devuelve para que el test lo siembre. Ningún test del módulo puede llegar a la API real cuando T5 cablee los hooks.
+      - Hecho así: `newTestModule(t, opts ...func(*Options)) *testModule`. `testModule` embebe el `*Module` y trae `docker` (`dockertest.Fake`), `cf` (`cftest`), `caddy` (`caddytest`), `db` y `cipher`. Pone `CloudflareURL` y también `CaddyAdminDial` (el `caddytest`) **después** de `opts`, así ningún test del módulo llega a la API real de Cloudflare ni a un socket de Caddy. `Version` es `v0.1.0`: con `panel_domain`, el proxy está habilitado.
     - `TestModuleStageNetworkCustomName`: con `Options.CaddyContainer "it3-x"`, `EnsureStageNetwork` y `RemoveStageNetwork` conectan y desconectan `it3-x`, y **ninguna** entrada de `Calls()` del fake nombra `naming.CaddyContainer` (`muelle-caddy`).
     - Cambiar `TestModuleStubs` → `TestModuleSyncRoutes`:
       - con los ajustes vacíos (desarrollo), `SyncRoutes` devuelve `nil` y no llama a la admin API;
