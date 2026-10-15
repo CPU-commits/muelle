@@ -909,7 +909,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit** (dos): `test(ingress): admin API de Caddy falsa (caddytest)` y `feat(ingress): cliente de la admin API de Caddy por el socket, con los errores sin el token`
 
-- [ ] **Step 4: `ProxyState` y `Syncer`.**
+- [x] **Step 4: `ProxyState` y `Syncer`.**
 
   **Tests primero** (`usecases/proxy_state_test.go`, `sync_test.go`). Para `Syncer`, con sqlite real, `ingresstest`, el repositorio, el catalog reader, `caddytest` y `caddy.NewAdmin(fake.Dial)`:
   - `TestProxyStateInitial`: `Snapshot(true)` da `out_of_sync` con `NotSyncedYet` ("muelle todavía no le mandó la configuración a Caddy"), `syncedAt nil`, y `Synced() == false`.
@@ -931,6 +931,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `TestSyncRecovers`: después de un rechazo, `Accept` y `Sync` dan `synced` y el error se limpia.
   - `TestSyncPlaceholder`: con `acme_email` `a{x}@b.cl`, `Sync` devuelve un error con `ErrPlaceholderInSettings`, `Loads()` queda vacío y el estado da `out_of_sync` con el mensaje de abajo.
   - `TestSyncForce`: `Sync(ctx, true)` llega con `Forced() == [true]`.
+  - `TestSyncUnreachable` (`SetDown`) y `TestSyncInternalError` (un puerto ilegible en `settings`): el mensaje de cada uno, abajo, y `onFail` una vez.
   - `TestSyncSerialized`:
     - 20 goroutines `Sync` con `Delay(5 ms)` dan `MaxInFlight() == 1`;
     - el último `Load` tiene los dominios de la base en ese momento (agrega un dominio antes de la última tanda).
