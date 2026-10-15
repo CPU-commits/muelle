@@ -677,9 +677,9 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
   - Versiones fijadas: `actions/checkout` v7.0.1, `docker/setup-buildx-action` v4.4.1, `docker/login-action` v4.6.0 y `docker/build-push-action` v7.4.0 (los cuatro tags son livianos: el SHA es el commit). `actions/setup-go` no hace falta en este archivo.
   - `actionlint` no está en la máquina: el YAML se revisó con el parser de Ruby, y el script del paso `versión y tags` se corrió en bash con eventos simulados (tag final, `-rc.1`, tags que no sirven y `workflow_dispatch`).
 
-- [ ] **Step 8: README**, sección **"Imágenes"** (después de "Tests"): qué trae cada imagen, que se publican con el mismo tag `vX.Y.Z` (`:latest` solo muelle, solo versiones finales), cómo construirlas en local desde la raíz con `web/` presente (`docker build --build-arg VERSION=… .` y `docker build deploy/caddy`), y que hasta integrar el panel (`fase-4-panel`) el contexto se arma con su `web/` aparte.
+- [x] **Step 8: README**, sección **"Imágenes"** (después de "Tests"): qué trae cada imagen, que se publican con el mismo tag `vX.Y.Z` (`:latest` solo muelle, solo versiones finales), cómo construirlas en local desde la raíz con `web/` presente (`docker build --build-arg VERSION=… .` y `docker build deploy/caddy`), y que hasta integrar el panel (`fase-4-panel`) el contexto se arma con su `web/` aparte.
 
-- [ ] **Step 9: Verificar y commits.** Las cuatro verificaciones de Go. Commits:
+- [x] **Step 9: Verificar y commits.** Las cuatro verificaciones de Go. Commits:
   - `build: imagen de muelle con el panel embebido, el binario estático y el CLI de docker`
   - `build: imagen de muelle-caddy con xcaddy y el DNS de Cloudflare, en versiones fijas`
   - `ci: workflow de release que publica las dos imágenes en los tags vX.Y.Z`

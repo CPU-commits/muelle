@@ -21,7 +21,8 @@ Todavía no despliega nada.
 ## Estructura (spec §4.1)
 
 ```
-main.go             subcomandos serve y genkey
+main.go             subcomandos serve, genkey y version
+Dockerfile          la imagen de muelle (ver "Imágenes"); deploy/caddy/, la de muelle-caddy
 src/
 ├── cmd/http/       ServeMux, middleware y errores → HTTP
 ├── cmd/cron/       ejecuta las tareas periódicas de los módulos
@@ -132,6 +133,38 @@ go test -race ./...
 ```
 
 Los tests de `src/shared/infra/container` arman muelle completo con los cuatro módulos (matriz de permisos de los tokens, contratos entre módulos, fechas). La prueba de punta a punta con el binario real y `curl` (spec §15) por ahora es manual: los pasos de "Primer usuario" de arriba, más los endpoints de la fase.
+
+## Imágenes
+
+Dos imágenes, solo para `linux/amd64` (contrato §5.4):
+
+| Imagen | Qué trae |
+|---|---|
+| `ghcr.io/cpu-commits/muelle` | El binario estático (sin CGO) con el panel embebido y su versión (`muelle version`), el CLI de `docker` 29.9.0 para `docker stack deploy` y `ca-certificates`, sobre Alpine (que trae el `/tmp` y el `cat` que usa muelle). Corre como root, porque usa `docker.sock`. `ENTRYPOINT ["muelle"]` y `CMD ["serve"]`, sin `EXPOSE`: el puerto de muelle nunca se publica |
+| `ghcr.io/cpu-commits/muelle-caddy` | Caddy 2.11.7 con el módulo de DNS de Cloudflare (`dns.providers.cloudflare`, compilado con `xcaddy`). No trae configuración: ingress la arranca con `caddy run --resume` y la admin API en un socket |
+
+- **Versiones fijas:** las imágenes base, el frontend de BuildKit (la línea `# syntax`) y el módulo de Cloudflare van con versión exacta y, las imágenes, con su digest.
+- **Publicación:** `.github/workflows/release.yml` las construye y las sube a GHCR al empujar un tag `vX.Y.Z[-sufijo]`, después de los mismos tests de CI. Las dos llevan el mismo tag, que es también la versión del binario. `:latest` existe solo para muelle y solo para las versiones finales (sin `-sufijo`). Con `workflow_dispatch` (Actions → Release → Run workflow) construye sin subir, para probar los `Dockerfile`.
+- **Paquetes privados:** las dos son privadas. Para bajarlas hace falta `docker login ghcr.io` con un token de GitHub con permiso `read:packages`.
+
+Para construirlas en local, desde la raíz del repo:
+
+```bash
+docker build --build-arg VERSION=v0.1.0 -t ghcr.io/cpu-commits/muelle:v0.1.0 .
+docker build --build-arg VERSION=v0.1.0 -t ghcr.io/cpu-commits/muelle-caddy:v0.1.0 deploy/caddy
+docker run --rm ghcr.io/cpu-commits/muelle:v0.1.0 version            # v0.1.0
+```
+
+La imagen de muelle construye el panel desde `web/` (Node 24 y pnpm 11.1.2, dentro de la imagen) y compila con `-tags panel`. La etapa del panel construye con `VITE_USE_MOCKS=0`, y el build de la imagen falla si al panel le falta el `200.html` o la CSP, o si trae el service worker de MSW. El `.dockerignore` es una lista de permitidos: al contexto solo entran `go.mod`, `go.sum`, `main.go`, `src/` y `web/`, sin tests, claves, bases, `.env`, `node_modules` ni builds.
+
+Mientras el panel siga en su rama (`fase-4-panel`), `web/` no está en esta, y el contexto se arma aparte, con el árbol de trabajo más el `web/` de esa rama:
+
+```bash
+CTX=$(mktemp -d)
+git ls-files -co --exclude-standard -z | tar --null -T - -cf - | tar -x -C "$CTX"
+git archive fase-4-panel web | tar -x -C "$CTX"
+docker build --build-arg VERSION=v0.0.0-dev -t muelle:dev "$CTX"
+```
 
 ## Convenciones
 
