@@ -265,10 +265,10 @@ func (e *itEnv) waitNetwork(name string) {
 func (e *itEnv) startAdminBridge() {
 	e.t.Helper()
 	e.createAndStart(docker.ContainerSpec{
-		Name:  e.name("admin"),
-		Image: itSocatImage,
-		Cmd:   []string{"TCP-LISTEN:" + strconv.Itoa(e.ports.Admin) + ",fork,reuseaddr", "UNIX-CONNECT:" + naming.CaddyAdminSocket},
-		Ports: []docker.PortBinding{{HostIP: "127.0.0.1", HostPort: e.ports.Admin, ContainerPort: e.ports.Admin}},
+		Name:   e.name("admin"),
+		Image:  itSocatImage,
+		Cmd:    []string{"TCP-LISTEN:" + strconv.Itoa(e.ports.Admin) + ",fork,reuseaddr", "UNIX-CONNECT:" + naming.CaddyAdminSocket},
+		Ports:  []docker.PortBinding{{HostIP: "127.0.0.1", HostPort: e.ports.Admin, ContainerPort: e.ports.Admin}},
 		Mounts: []docker.Mount{{Volume: e.opts.CaddyAdminVolume, Target: naming.CaddyAdminDir}},
 	})
 }

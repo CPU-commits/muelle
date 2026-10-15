@@ -29,8 +29,8 @@ func loadConfig(token string) service.ProxyConfig {
 }
 
 type received struct {
-	method, path, contentType, cacheControl, host string
-	body                                         []byte
+	method, path, contentType, cacheControl string
+	body                                    []byte
 }
 
 // unixServer es un http.Server en un socket unix, como la admin API de
@@ -57,7 +57,7 @@ func TestLoadOverUnixSocket(t *testing.T) {
 	got := make(chan received, 1)
 	dial := unixServer(t, func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		got <- received{r.Method, r.URL.Path, r.Header.Get("Content-Type"), r.Header.Get("Cache-Control"), r.Host, b}
+		got <- received{r.Method, r.URL.Path, r.Header.Get("Content-Type"), r.Header.Get("Cache-Control"), b}
 	})
 	cfg := loadConfig(testToken)
 	if err := NewAdmin(dial).Load(context.Background(), cfg, false); err != nil {
