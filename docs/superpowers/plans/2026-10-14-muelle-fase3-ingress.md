@@ -334,7 +334,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
 
   **Commit:** `feat(sqlite): 0003 garantiza que el AAAA va con el A, los registros con su zona y el TLS de Cloudflare con zona`
 
-- [ ] **Step 2: Las claves del panel en `shared/domain/entity`.**
+- [x] **Step 2: Las claves del panel en `shared/domain/entity`.**
 
   **Test primero** (`panel_dns_test.go`): `TestPanelDNSKeys`.
   - Las tres constantes valen `panel_cf_zone_id`, `panel_cf_record_id` y `panel_cf_record_id_aaaa`.
