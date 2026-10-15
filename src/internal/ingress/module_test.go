@@ -15,6 +15,7 @@ import (
 
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy/caddytest"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/cloudflare/cftest"
 	"github.com/CPU-commits/muelle/src/internal/ingress/ingresstest"
@@ -150,15 +151,64 @@ func TestModuleSyncRoutes(t *testing.T) {
 	}
 }
 
-// Lo que todavía es de la Fase 3: lo que llama admin no rompe la Fase 1.
-func TestModuleStubs(t *testing.T) {
-	m := newTestModule(t)
+// CheckCloudflareToken (admin, contrato §3.5) va al Cloudflare de Options:
+// cuenta las zonas de un token que conoce, y rechaza uno que no.
+func TestModuleCheckCloudflareToken(t *testing.T) {
+	tm := newTestModule(t)
+	tm.cf.AddToken("cf-token-1234567890abcdef")
+	tm.cf.AddZone("z1", "tudominio.cl")
 	ctx := context.Background()
-	zones, err := m.CheckCloudflareToken(ctx, "cf-token")
-	if err != nil || zones != nil {
-		t.Fatalf("CheckCloudflareToken: %v %v (sin verificar: zonas desconocidas)", zones, err)
+	zones, err := tm.CheckCloudflareToken(ctx, "cf-token-1234567890abcdef")
+	if err != nil || zones == nil || *zones != 1 {
+		t.Fatalf("CheckCloudflareToken: %v %v", zones, err)
 	}
-	m.ProxySettingsChanged(ctx, entity.DefaultProxySettings(), entity.DefaultProxySettings())
+	if _, err := tm.CheckCloudflareToken(ctx, "cf-token-desconocido-12345"); err == nil {
+		t.Fatal("un token que Cloudflare no conoce se rechaza")
+	}
+	if n := len(tm.cf.Calls()); n != 4 {
+		t.Fatalf("llamadas a Cloudflare: %v", tm.cf.Calls())
+	}
+}
+
+// ProxySettingsChanged (admin, contrato §3.5) está cableado: un cambio de
+// puertos deja GET /api/v1/proxy en recreating (la recreación la hace Run,
+// que acá no corre), y uno de acme_email manda la configuración enseguida.
+func TestModuleProxySettingsChanged(t *testing.T) {
+	tm := newTestModule(t)
+	tm.enableProxy(t)
+	ctx := context.Background()
+	if err := tm.Jobs()[0].Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	change := func(mod func(*entity.ProxySettings)) {
+		t.Helper()
+		old, err := outservice.NewProxySettingsReader(tm.db, tm.cipher).ProxySettings(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next := old
+		mod(&next)
+		ingresstest.SetProxySettings(t, tm.db, tm.cipher, next)
+		tm.ProxySettingsChanged(ctx, old, next)
+	}
+
+	loads := len(tm.caddy.Loads())
+	change(func(p *entity.ProxySettings) { p.ACMEEmail = "nuevo@correo.cl" })
+	if got := tm.caddy.Loads(); len(got) != loads+1 || !bytes.Contains(got[len(got)-1], []byte("nuevo@correo.cl")) {
+		t.Fatalf("loads %d → %d", loads, len(got))
+	}
+
+	change(func(p *entity.ProxySettings) { p.HTTPPort = 9080 })
+	c := httptestutil.New(t, httptestutil.FakeAuth{Sessions: map[string]entity.Principal{"s": {UserID: 1, Username: "felipe"}}},
+		tm.RegisterRoutes)
+	w := c.Do("GET", "/api/v1/proxy", nil, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusOK)
+	if got := httptestutil.Decode[map[string]any](t, w); got["status"] != "recreating" {
+		t.Fatalf("GET /proxy: %v", got)
+	}
+	if n := len(tm.caddy.Loads()); n != loads+1 {
+		t.Fatalf("con los puertos no manda nada antes de recrear: %d", n)
+	}
 }
 
 // El job "proxy" cada 5 min (cron.Run lo corre también al arrancar) y

@@ -1999,7 +1999,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): los registros que maneja muelle siguen a la IP pública`
 
-- [ ] **Step 4: `ProxySettingsChanged`.**
+- [x] **Step 4: `ProxySettingsChanged`.**
 
   **Antes de cablear:** `TestContractProxySettings` ya usa un `cftest` con su token y una zona, y `newTestModule` ya pasa `Options.CloudflareURL` (los dos desde T2 Step 5). Confírmalo con `git grep -n 'CloudflareURL\|WithIngress' -- '*_test.go'`. Si falta alguno, agrégalo en este mismo commit: si no, el `go test -race ./...` de antes del commit llamaría a la API real.
 
@@ -2033,7 +2033,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   ```
   En `module.go`, `CheckCloudflareToken` y `ProxySettingsChanged` llaman a estos casos de uso, y sus comentarios dejan de decir "esqueleto". `TestModuleStubs` desaparece: sus partes quedaron en tests propios.
 
-  En `module_test.go`, `TestModuleProxySettingsChanged`: con `newTestModule`, un cambio de puertos deja `GET /api/v1/proxy` en `recreating`, y uno de `acme_email` manda un `Load`. Prueba el cableado; las reglas ya están en `settings_changed_test.go`.
+  En `module_test.go`, `TestModuleProxySettingsChanged`: con `newTestModule`, un cambio de puertos deja `GET /api/v1/proxy` en `recreating`, y uno de `acme_email` manda un `Load`. Prueba el cableado; las reglas ya están en `settings_changed_test.go`. `TestModuleCheckCloudflareToken` prueba el cableado del otro hook (al `cftest` de `Options`).
 
   **Commit:** `feat(ingress): ProxySettingsChanged aplica los ajustes y agenda la recreación (contrato §3.5)`
 

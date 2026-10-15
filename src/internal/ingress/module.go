@@ -3,12 +3,12 @@
 // certificados (§3.1, §8 y §9 del spec). module.go es el único lugar que
 // conoce todas sus piezas.
 //
-// Ya funcionan la red de cada stage (la usan catalog y deploy), SyncRoutes,
-// que manda la configuración a muelle-caddy por su admin API, el ciclo de
-// vida de muelle-caddy (el job "proxy", los reintentos y la recreación),
-// GET /api/v1/proxy, los dominios con su DNS en Cloudflare (…/domains) y la
-// verificación de los certificados. Los hooks de admin no hacen nada
-// todavía, como dice cada método. El contrato está en
+// Tiene la red de cada stage (la usan catalog y deploy), SyncRoutes, que
+// manda la configuración a muelle-caddy por su admin API, el ciclo de vida
+// de muelle-caddy (el job "proxy", los reintentos y la recreación), GET
+// /api/v1/proxy, los dominios con su DNS en Cloudflare (…/domains), el
+// registro DNS del panel, la verificación de los certificados y los hooks de
+// admin (el token de Cloudflare y los ajustes del proxy). El contrato está en
 // docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md.
 package ingress
 
@@ -63,10 +63,11 @@ type Module struct {
 	recreator     *usecases.Recreator
 	ops           *usecases.Ops
 	panelDNS      *usecases.EnsurePanelDNS
+	checkToken    *usecases.CheckCloudflareToken
+	settingsHook  *usecases.ProxySettingsChanged
 	certs         *usecases.CertChecker
 	jobs          []cron.Job
 	httpUC        inhttp.UseCases
-	log           *slog.Logger
 }
 
 // New arma el módulo. DB, Cipher, Docker y Audit (los dominios auditan cada
@@ -100,7 +101,7 @@ func New(d Deps) *Module {
 		DataVolume: o.CaddyDataVolume, ConfigVolume: o.CaddyConfigVolume, AdminVolume: o.CaddyAdminVolume,
 	}, d.Log)
 
-	m := &Module{state: usecases.NewProxyState(), log: d.Log}
+	m := &Module{state: usecases.NewProxyState()}
 	// Un Sync que falla despierta al Retrier, que reintenta con backoff.
 	m.syncer = usecases.NewSyncer(settings, domains, catalog, caddy.NewAdmin(o.CaddyAdminDial), m.state, d.Clock,
 		defImage, o.InternalCA, func() { m.retrier.Kick() }, d.Log)
@@ -125,6 +126,9 @@ func New(d Deps) *Module {
 		Certs: m.certs, Ops: m.ops, Clock: d.Clock, Audit: d.Audit, Log: d.Log,
 		DomainOp: o.Timing.DomainOp, DomainRetry: o.Timing.DomainRetry,
 	}
+	m.checkToken = usecases.NewCheckCloudflareToken(dns)
+	m.settingsHook = usecases.NewProxySettingsChanged(m.recreator, usecases.NewUpdateManagedRecords(dd), m.panelDNS, m.syncer,
+		o.Timing.Hook, d.Log)
 	m.httpUC = inhttp.UseCases{
 		ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage),
 		ListDomains: usecases.NewListDomains(dd), CreateDomain: usecases.NewCreateDomain(dd),
@@ -193,13 +197,14 @@ func (m *Module) RemoveStageNetwork(ctx context.Context, project, stage string) 
 func (m *Module) SyncRoutes(ctx context.Context) error { return m.syncer.Sync(ctx, false) }
 
 // CheckCloudflareToken verifica un token nuevo antes de que admin lo guarde
-// (PATCH /settings) y devuelve cuántas zonas ve. Fase 3: un token que
-// Cloudflare rechaza, o que no ve ninguna zona, devuelve un *validate.Error en
-// "cloudflare_token" (422); si Cloudflare no responde, un error que envuelve
-// entity.ErrCloudflareUnavailable (502). El esqueleto no verifica: devuelve
-// (nil, nil) y el token se guarda con las zonas desconocidas.
+// (PATCH /settings, contrato §3.5) y devuelve cuántas zonas ve, con un plazo
+// de 30 s sobre el ctx de la petición. Un token que Cloudflare rechaza (y que
+// tampoco lista zonas), o que no puede listar zonas o no ve ninguna, devuelve
+// un *validate.Error en "cloudflare_token" (422); si Cloudflare no responde,
+// un error que envuelve entity.ErrCloudflareUnavailable (502). Un token de
+// una cuenta, que /user/tokens/verify rechaza pero que lista zonas, se acepta.
 func (m *Module) CheckCloudflareToken(ctx context.Context, token string) (zones *int, err error) {
-	return nil, nil
+	return m.checkToken.Execute(ctx, token)
 }
 
 // ProxySettingsChanged aplica los ajustes nuevos después de que admin los
@@ -210,7 +215,8 @@ func (m *Module) CheckCloudflareToken(ctx context.Context, token string) (zones 
 // imagen, no recrea muelle-caddy acá: lo agenda en Run, 2 s después de volver,
 // porque la respuesta del PATCH sale por ese mismo contenedor (contrato
 // §3.5). No devuelve error: un fallo queda en el estado del proxy (GET
-// /api/v1/proxy) y en el de cada dominio. Fase 3; el esqueleto no hace nada.
+// /api/v1/proxy) y en el de cada dominio. Un token nuevo, o la IP pública,
+// también llevan el registro DNS del panel (§3.4).
 func (m *Module) ProxySettingsChanged(ctx context.Context, old, next entity.ProxySettings) {
-	m.log.Debug("ingress: los ajustes del proxy cambiaron; se aplican con la Fase 3", "claves", next.ChangedKeys(old))
+	m.settingsHook.Execute(ctx, old, next)
 }
