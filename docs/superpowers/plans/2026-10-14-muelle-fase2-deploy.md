@@ -743,6 +743,14 @@ go test -tags integration -run TestRenderGoldensAcceptedByDockerCLI -count=1 ./s
 
 ### Task T3: La base, los registries y la API de los deploys (sin el worker)
 
+> **Cambio de requisito del dueño (2026-10-15): las imágenes de muelle son privadas.** Install (Fase 5) le pasa a muelle una credencial de registry para `ghcr.io` en un secreto de Swarm, y esta tarea la guarda. Detalles:
+> - **Settings:** `src/settings` gana `InitRegistryFile`, leído de `MUELLE_INIT_REGISTRY_FILE`. Edita lo mínimo y copia cómo se valida `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE`.
+> - **El archivo:** es un JSON `{"host","username","password"}` con decoding estricto. Se valida con `ValidateHost`, `ValidateUsername` y `ValidatePassword`.
+> - **Al arrancar:** después de migrar, una vez, si no hay ningún registry para ese host, se crea cifrado como en `Create`. La auditoría es `registry.create`, con target `registry:<host>` y actor el sistema (`install`). Si ya existe uno, no se toca: manda lo que se editó en el panel.
+> - **Errores:** un archivo ilegible o inválido hace lo mismo que un archivo de token inválido, y el mensaje nunca incluye la contraseña.
+> - **Tests:** el registry se crea una sola vez; uno existente no se pisa; con un JSON inválido el mensaje no tiene la contraseña.
+> - **Contrato:** anota en tu §2.10 que install puede sembrar un registry con `MUELLE_INIT_REGISTRY_FILE` (la Fase 5 lo documenta en §5.2), y súmalo a `contract_changes`.
+
 La migración, los repositorios, el ocultamiento en los tipos de Docker, el CRUD de registries y los endpoints que encolan y leen deploys. Al terminar, `POST …/deploys` deja deploys `queued` que todavía nadie corre (el worker es T4): es un estado intermedio de la rama, con todo verde.
 
 **Files:**
