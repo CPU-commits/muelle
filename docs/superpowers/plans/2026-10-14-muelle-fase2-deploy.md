@@ -1245,7 +1245,7 @@ for i in $(seq 60); do docker ps -a --format "{{.Label \"com.docker.stack.namesp
 docker network ls --format "{{.Name}}" | grep "^it2" | xargs -r docker network rm
 docker volume ls --format "{{.Name}}" | grep "^it2" | xargs -r docker volume rm'
 ```
-- [ ] **Step 7: Verificar y commits:**
+- [x] **Step 7: Verificar y commits:**
   1. `feat(deploy): puertos y adaptadores de Docker para el deploy (imágenes, stacks y Swarm)`
   2. `feat(deploy): los pasos de un deploy (§7): imágenes, render, red, stack deploy, convergencia y cierre`
   3. `feat(deploy): cola por app con un worker y la reconciliación al arrancar (contrato §1.2)`
@@ -1253,6 +1253,23 @@ docker volume ls --format "{{.Name}}" | grep "^it2" | xargs -r docker volume rm'
   5. `test(deploy): integración con Swarm real (prefijo it2)`
 
 **Integración en T4:** el comando de arriba (solo `./src/internal/deploy/`).
+
+**Notas de la implementación de T4** (lo que T5 tiene que saber, y en qué se apartó del plan):
+- **El `Hub` del módulo** se crea en `deploy.New` y lo comparten `usecases.Deps` (encolar), `RunDeploy` y su `LogWriter`, y `RemoveApp`. `Module` todavía no lo guarda: T5 lo suma a `Module` para los streams (tiene que ser **ese** `Hub`). Avisan: `Claim` (queued → running), cada línea del `LogWriter`, el cierre (después del commit), `FailQueued` de `RemoveApp` y del despachador, y `SupersedeQueued` (T3).
+- **`RunDeploy`** es un struct con campos exportados (`Gate` lo fija `NewDispatcher`). `Execute` y `Resume` devuelven `nil` si cerraron; `ctx.Err()` si el apagado lo dejó running; otro error es interno (intentan cerrar failed con "error interno de muelle"). Una línea que no se pudo escribir no cambia el resultado: se devuelve al final.
+- **La retención la aplica el despachador** después de cada cierre (también los de `Resume`), no `RunDeploy`. El despachador registra en `slog` `deploy cerrado` (con `app`, `deploy`, `status` y el `error` guardado) y `deploy: error interno` (sin el texto del error).
+- **`Timing` del módulo:** `deploy.New` usa `DefaultTiming()` (poll 2 s, margen 5 s). Los contratos de T5 con el contenedor completo no lo pueden acortar: un servicio **nuevo** o **cambiado** (con `UpdateStatus` de este deploy) converge en el primer poll, pero uno que no cambió espera el margen de 5 s. El simulador mínimo de T5 conviene que deje `UpdateStatus` completed cuando cambia la imagen (el rollback la cambia).
+- **`Wake` antes de `Run`** solo anota la app (los tests HTTP sin `Run` dejan los deploys queued, como antes). `Run` se llama una sola vez por módulo; un "reinicio" en un test es un módulo nuevo sobre la misma base.
+- **`RemoveApp`:** `NewRemoveApp(apps, deploys, stacks, workers, hub, clock)`, con `usecases.Workers` (`Block`, `Unblock`, `Stop`; lo implementa el `Dispatcher`, cuyo plazo de `Stop` es el campo `stopTimeout`). Una app que no está en la base: solo el `stack rm`. Si `Stop` venció y el worker cierra después, el despachador vuelve a arrancar uno para la app si no está bloqueada (el queued que quedó corre).
+- **Desvíos del plan:**
+  - la tarea fallida del log (Step 3, paso 6): la que nombra Swarm en el `Message`, o la más nueva **de este deploy**. Con Swarm real, una tarea que no pasa el healthcheck termina `complete` sin `Err`, y una `rejected` de antes del deploy (un "Pool overlaps" transitorio de la red overlay) salía como "la última tarea fallida". Commit propio (`fix(deploy): …`) con `TestRunDeployFailedTaskOfThisDeploy`, y la precisión en el contrato §2.11;
+  - `service.Verdict` suma `Pending` (los que no convergieron, por nombre corto): el timeout dice el estado de cada uno;
+  - el paso 3 falla por no poder leer el nodo del manager solo si el deploy lo necesita (volúmenes y sin `storage_node_id`); si no, es la advertencia;
+  - `ResolveEnv` que falla: `failed` "no se pudieron leer las variables de la app" (en `Execute` y en `Resume`); un `Credentials` que falla, `failed` con el host;
+  - el simulador (`swarmsim_test.go`) suma `Fail` (el CLI falla con ese error), `FailedState`/`TaskInMessage` (la tarea de un healthcheck) y `age` (atrasa la creación de los servicios para que el deploy siguiente no los tome por suyos); un servicio que borró un `stack rm` se vuelve a crear;
+  - los tests de `RemoveApp` y del despachador van en `usecases` (con el simulador); a nivel HTTP, `TestRemoveAppBlocksDeploysHTTP` y `TestWorkerBusyIsConflict` (en `deploys_http_test.go`), y `TestRun` y `TestManagerNodeStored` en `module_test.go`;
+  - la limpieza de los tests de integración espera a que la red overlay ya no esté (el nodo la lista un momento después de borrarla).
+- **Integración:** `newItEnv(t)` (proyecto it2 + 4 hex, su limpieza), `formApp`/`composeApp`, `start()` (el módulo con `localDigests` e `itIngress`, corriendo), `deploy`, `wait`/`waitOK`, `log`, `service`. T5 los reusa para `TestIntegrationStatusAndLogs`.
 
 ---
 

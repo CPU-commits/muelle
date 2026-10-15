@@ -116,7 +116,7 @@ func New(d Deps) *Module {
 		dispatcher:   dispatcher,
 		storeManager: usecases.NewStoreManagerNode(dk, settings, d.Log),
 		removeApp:    usecases.NewRemoveApp(apps, deploys, stacks, dispatcher, hub, d.Clock),
-		seed:         usecases.NewSeedInitRegistry(d.DB, outservice.NewDeploySettings(d.DB), regs, d.Clock, d.Audit),
+		seed:         usecases.NewSeedInitRegistry(d.DB, settings, regs, d.Clock, d.Audit),
 		initRegistry: d.InitRegistry,
 		uc: dephttp.UseCases{
 			ListRegistries: usecases.NewListRegistries(regs),
