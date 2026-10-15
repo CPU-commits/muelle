@@ -13,6 +13,12 @@ type UseCases struct {
 	CreateRegistry *usecases.CreateRegistry
 	UpdateRegistry *usecases.UpdateRegistry
 	DeleteRegistry *usecases.DeleteRegistry
+
+	CreateDeploy *usecases.CreateDeploy
+	Rollback     *usecases.Rollback
+	ListDeploys  *usecases.ListDeploys
+	GetDeploy    *usecases.GetDeploy
+	ReadLog      *usecases.ReadLog
 }
 
 type Handler struct {
@@ -29,4 +35,11 @@ func Register(k *utils.Kit, uc UseCases) {
 	k.Handle("POST /api/v1/registries", utils.AccessSession, h.createRegistry)
 	k.Handle("PATCH /api/v1/registries/{host}", utils.AccessSession, h.updateRegistry)
 	k.Handle("DELETE /api/v1/registries/{host}", utils.AccessSession, h.deleteRegistry)
+
+	const app = "/api/v1/projects/{p}/stages/{s}/apps/{a}"
+	k.Handle("POST "+app+"/deploys", utils.AccessToken, h.createDeploy)
+	k.Handle("GET "+app+"/deploys", utils.AccessToken, h.listDeploys)
+	k.Handle("GET "+app+"/deploys/{id}", utils.AccessToken, h.getDeploy)
+	k.Handle("GET "+app+"/deploys/{id}/log", utils.AccessToken, h.readLog)
+	k.Handle("POST "+app+"/rollback", utils.AccessToken, h.rollback)
 }

@@ -928,7 +928,7 @@ type Queue interface {
 ```
 
   En `errors.go`: `ErrNoPreviousDeploy`, `ErrAppRemoving` y `ErrOffsetBeyond` (lo devuelve `ReadLog`; el caso de uso lo traduce a `validate.Errorf("offset", "pasa el largo del log")`), más los de T2. `module.go` usa, hasta T4, una `Queue` que siempre acepta y no hace nada al despertar.
-- [ ] **Step 6: Casos de uso (tests primero, con repositorios reales, `clock.NewManual` y la auditoría en una base de prueba).**
+- [x] **Step 6: Casos de uso (tests primero, con repositorios reales, `clock.NewManual` y la auditoría en una base de prueba).**
   - `CreateDeploy.Execute(ctx, dto.CreateDeploy{Project, Stage, App, Image *string, Images map[string]string}) (dto.Queued, error)`:
     1. `Apps.Get` (404);
     2. `!Queue.Accepting` → `ErrAppRemoving`;
@@ -943,7 +943,7 @@ type Queue interface {
   - `ListDeploys`, `GetDeploy`, `ReadLog` (64 KiB).
   - Registries: `List`, `Create`, `Update`, `Delete`, con auditoría `registry.create|update|delete`, target `registry:<host>`, details `{"username": …}` en create y update (nunca la contraseña).
   - Tests: `TestCreateDeployValidation` (tabla con los mensajes exactos), `TestCreateDeploySupersedes` (además, un `Hub.Wait(<id del viejo>)` tomado antes del `POST` se cierra, y el del nuevo no), `TestCreateDeployActor` (sesión y token), `TestCreateDeployAudit`, `TestCreateDeployRejectedWhileRemoving`, `TestRollback` (0 y 1 succeeded → 409; con 2 → las imágenes del anterior), `TestRegistryAuditNoPassword`.
-- [ ] **Step 7: HTTP (tests primero, `httptestutil` con `FakeAuth` con una sesión y dos tokens: uno del proyecto y uno de otro proyecto).** Rutas, todas `AccessToken` salvo las de registries:
+- [x] **Step 7: HTTP (tests primero, `httptestutil` con `FakeAuth` con una sesión y dos tokens: uno del proyecto y uno de otro proyecto).** Rutas, todas `AccessToken` salvo las de registries:
 
 | Ruta | Handler |
 |---|---|

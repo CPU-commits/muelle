@@ -74,6 +74,15 @@ func New(d Deps) *Module {
 		d.Log = slog.Default()
 	}
 	regs := depsqlite.NewRegistryRepository(d.DB, d.Cipher)
+	ud := usecases.Deps{
+		Tx:      d.DB,
+		Apps:    outservice.NewCatalogApps(d.DB),
+		Deploys: depsqlite.NewDeployRepository(d.DB),
+		Queue:   noQueue{},
+		Hub:     usecases.NewHub(),
+		Clock:   d.Clock,
+		Audit:   d.Audit,
+	}
 	return &Module{
 		removeApp: usecases.NewRemoveApp(outservice.NewDockerStacks(d.Docker)),
 		uc: dephttp.UseCases{
@@ -81,15 +90,28 @@ func New(d Deps) *Module {
 			CreateRegistry: usecases.NewCreateRegistry(d.DB, regs, d.Clock, d.Audit),
 			UpdateRegistry: usecases.NewUpdateRegistry(d.DB, regs, d.Clock, d.Audit),
 			DeleteRegistry: usecases.NewDeleteRegistry(d.DB, regs, d.Audit),
+
+			CreateDeploy: usecases.NewCreateDeploy(ud),
+			Rollback:     usecases.NewRollback(ud),
+			ListDeploys:  usecases.NewListDeploys(ud),
+			GetDeploy:    usecases.NewGetDeploy(ud),
+			ReadLog:      usecases.NewReadLog(ud),
 		},
 		log: d.Log,
 	}
 }
 
+// noQueue es la cola hasta que llegue el worker (T4 del plan de la Fase 2):
+// acepta todos los deploys y no corre ninguno, así que quedan queued.
+type noQueue struct{}
+
+func (noQueue) Wake(appID int64)           {}
+func (noQueue) Accepting(appID int64) bool { return true }
+
 // RegisterRoutes registra los errores y las rutas del módulo (contrato §2):
-// /api/v1/registries (AccessSession). Faltan POST/GET …/apps/{a}/deploys, GET
-// …/deploys/{id}, …/log y …/log/stream, POST …/apps/{a}/rollback, GET
-// …/apps/{a}/status y …/logs (AccessToken).
+// POST/GET …/apps/{a}/deploys, GET …/deploys/{id} y …/log, POST
+// …/apps/{a}/rollback (AccessToken) y /api/v1/registries (AccessSession).
+// Faltan …/log/stream, GET …/apps/{a}/status y …/logs (AccessToken).
 func (m *Module) RegisterRoutes(k *utils.Kit) { dephttp.Register(k, m.uc) }
 
 // Jobs son las tareas periódicas. Fase 2: ninguna obligatoria (la retención de
