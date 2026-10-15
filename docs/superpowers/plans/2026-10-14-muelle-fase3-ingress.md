@@ -1640,7 +1640,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): el DNS de un dominio en Cloudflare (zona, registros propios y ajenos)`
 
-- [ ] **Step 4: `CertChecker` y su `Run`.**
+- [x] **Step 4: `CertChecker` y su `Run`.**
 
   Va antes de los casos de uso: crear, adoptar y reintentar llaman a `ScheduleFirst` y a `checkLocked`. No depende de ellos.
 
@@ -1649,7 +1649,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `TestCheckUnreachable`: con `ErrCaddyUnreachable`, nada cambia.
   - `TestCheckAppliesRule`: un `pending` con la sonda válida queda `active` en la base.
   - `TestCheckSkipsChangedMeanwhile`: el dominio cambia entre la sonda y la aplicación (un probe falso que bloquea en un canal, y un `repo.Update` con otro `UpdatedAt` mientras tanto, como haría un `PATCH`) → el resultado de la sonda no se aplica.
-  - `TestCheckLockedRetry`: `checkLocked` dentro de un `Ops.Do`, sobre un `error` + `certificate` con la sonda inválida, lo deja `pending` y manda un `Load` con `Forced() == true`.
+  - `TestCheckLockedRetry`: `checkLocked` dentro de un `Ops.Do`, sobre un `error` + `certificate` con la sonda inválida, lo deja `pending` y devuelve `repush == true`; sobre un `pending` con la sonda inválida, no cambia nada y `repush == false`. (Al implementar: `checkLocked` no llama a `Sync`, porque D6 lo pone fuera del lock; el `Load` con `Forced() == true` lo manda `retry` después del `Ops.Do`, y lo prueba `retry_domain_test.go`.)
   - `TestCheckAll`: el filtro de cada hora mira `pending`, `active` y `error` + `certificate`, y no mira `error` + `cloudflare` (la sonda no recibe ese host).
   - `TestCertRun`:
     - con `Timing{FirstCheck: 10ms, PendingEvery: 30ms}`, `ScheduleFirst(host)` dispara una sonda de ese host cerca de los 10 ms;
@@ -1658,19 +1658,22 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Implementar:**
   ```go
-  type CertChecker struct { /* probe; repo; state; ops; clock; syncer; first chan string (64); firstDelay, every; log */ }
+  type CertChecker struct { /* probe; repo; state; ops; clock; first chan string (64); firstDelay, every, opLimit; log */ }
   // ScheduleFirst agenda la verificación de los 30 s (D10). No bloquea: si la cola está llena, la cubre el barrido.
   func (c *CertChecker) ScheduleFirst(hostname string)
   // Check sondea fuera del lock y aplica ApplyCert dentro, solo si el UpdatedAt
   // no cambió entretanto.
   func (c *CertChecker) Check(ctx context.Context, hostname string) error
   // checkLocked es para retry, que ya tiene el lock: sondea y aplica con retry
-  // = true, y si un certificate vuelve a pending, Sync(force).
-  func (c *CertChecker) checkLocked(opCtx, dbCtx context.Context, d *entity.Domain) error
+  // = true. repush: un certificate volvió a pending, y retry, ya fuera del
+  // lock (D6), hace Sync(force).
+  func (c *CertChecker) checkLocked(opCtx, dbCtx context.Context, d *entity.Domain) (repush bool, err error)
   func (c *CertChecker) CheckAll(ctx context.Context, include func(entity.Domain) bool) error
   func (c *CertChecker) Run(ctx context.Context) // las ScheduleFirst y el ticker de los pending, con un WaitGroup que espera
   ```
-  `infra/in/cron/jobs.go` suma `{Name: "certificados", Every: time.Hour}`, con `CheckAll(eligibleHourly)`.
+  `infra/in/cron/jobs.go` suma `{Name: "certificados", Every: time.Hour}`, con `CheckAll(EligibleHourly)`: `Jobs(proxy, certs)`.
+
+  Como `Jobs` cambia de firma, este paso ya cablea en `module.go` el `TLSProbe`, `Ops`, el `CertChecker`, el job y `wg.Go(certs.Run)`, con `TestModuleJobs` y la línea de `TestNew` (`container_test.go`). El Step 7 suma los casos de uso.
 
   **Commit:** `feat(ingress): verificación de certificados a los 30 s, cada minuto los pending y cada hora`
 

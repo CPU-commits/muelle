@@ -160,12 +160,18 @@ func TestModuleStubs(t *testing.T) {
 	m.ProxySettingsChanged(ctx, entity.DefaultProxySettings(), entity.DefaultProxySettings())
 }
 
-// T3: el job "proxy" cada 5 min (cron.Run lo corre también al arrancar).
+// El job "proxy" cada 5 min (cron.Run lo corre también al arrancar) y
+// "certificados" cada hora.
 func TestModuleJobs(t *testing.T) {
 	m := newTestModule(t)
 	jobs := m.Jobs()
-	if len(jobs) != 1 || jobs[0].Name != "proxy" || jobs[0].Every != 5*time.Minute {
+	if len(jobs) != 2 || jobs[0].Name != "proxy" || jobs[0].Every != 5*time.Minute ||
+		jobs[1].Name != "certificados" || jobs[1].Every != time.Hour {
 		t.Fatalf("Jobs: %+v", jobs)
+	}
+	// Sin el proxy synced no se sabe nada: el job no sondea ni falla.
+	if err := jobs[1].Run(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

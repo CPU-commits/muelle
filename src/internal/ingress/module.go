@@ -59,6 +59,8 @@ type Module struct {
 	proxyJob      *usecases.ProxyJob
 	retrier       *usecases.Retrier
 	recreator     *usecases.Recreator
+	ops           *usecases.Ops
+	certs         *usecases.CertChecker
 	jobs          []cron.Job
 	httpUC        inhttp.UseCases
 	log           *slog.Logger
@@ -106,7 +108,11 @@ func New(d Deps) *Module {
 	m.proxyJob = usecases.NewProxyJob(settings, catalog, m.ensureNetwork, m.caddy, m.orphans, m.syncer, m.state, defImage,
 		o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	m.recreator = usecases.NewRecreator(m.caddy, m.syncer, m.state, o.Timing.RecreateDelay, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
-	m.jobs = incron.Jobs(m.proxyJob.Run)
+	m.ops = &usecases.Ops{}
+	probe := outservice.TLSProbe{Addr: o.CaddyTLSAddr, Roots: o.TLSRoots, Timeout: outservice.DefaultProbeTimeout}
+	m.certs = usecases.NewCertChecker(probe, domains, m.state, m.ops, d.Clock, o.Timing.FirstCheck, o.Timing.PendingEvery,
+		o.Timing.DomainOp, d.Log)
+	m.jobs = incron.Jobs(m.proxyJob.Run, func(ctx context.Context) error { return m.certs.CheckAll(ctx, usecases.EligibleHourly) })
 	m.httpUC = inhttp.UseCases{ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage)}
 	return m
 }
@@ -120,19 +126,20 @@ func (m *Module) RegisterRoutes(k *utils.Kit) { inhttp.Register(k, m.httpUC) }
 // Jobs son las tareas periódicas: "proxy" cada 5 min (cron.Run lo corre
 // también al arrancar: asegura muelle-caddy y las redes de todos los
 // stages, borra las redes de stage huérfanas y reenvía la configuración,
-// §3.1 y §7 "Reconciliación al arrancar"). Fase 3: "certificados" cada hora
-// (§8).
+// §3.1 y §7 "Reconciliación al arrancar") y "certificados" cada hora, que
+// verifica los dominios pending, active y error + certificate (§8).
 func (m *Module) Jobs() []cron.Job { return m.jobs }
 
 // Run corre lo que ingress necesita en segundo plano hasta que ctx se cancela,
 // y vuelve cuando terminó: los reintentos con backoff (1 s, 2 s… 60 s) de una
-// configuración que Caddy no aceptó y la recreación de muelle-caddy que
-// agenda ProxySettingsChanged. Fase 3: la verificación de un dominio 30 s
-// después de crearlo (§8).
+// configuración que Caddy no aceptó, la recreación de muelle-caddy que
+// agenda ProxySettingsChanged, la verificación de un dominio 30 s después de
+// crearlo, adoptarlo o reintentarlo, y la de los pending cada minuto (§8).
 func (m *Module) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Go(func() { m.retrier.Run(ctx) })
 	wg.Go(func() { m.recreator.Run(ctx) })
+	wg.Go(func() { m.certs.Run(ctx) })
 	wg.Wait()
 }
 
