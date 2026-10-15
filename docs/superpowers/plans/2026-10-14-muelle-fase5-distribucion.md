@@ -326,7 +326,7 @@ Un paquete que sirve el build de SvelteKit (`web/build`, en `fase-4-panel`) con 
 
   Run: `go test -race ./src/cmd/http/panel/` → PASS.
 
-- [ ] **Step 4: Montarlo en `cmd/http`.** Test primero, `src/cmd/http/panel_mount_test.go` (`package http`), con un `Server` propio que tiene `Config.Panel` = un stub que responde `200 panel` y guarda cada ruta que recibe, más `GET /fuera-de-api` y `GET /api/v1/ping` registradas:
+- [x] **Step 4: Montarlo en `cmd/http`.** Test primero, `src/cmd/http/panel_mount_test.go` (`package http`), con un `Server` propio que tiene `Config.Panel` = un stub que responde `200 panel` y guarda cada ruta que recibe, más `GET /fuera-de-api` y `GET /api/v1/ping` registradas:
   - `TestPanelMount`:
     - `GET /x/y`, `GET /`, `GET /apix`, `GET /API/v1` → el stub (y vio esa ruta);
     - `GET /api`, `/api/`, `/api/v1/nada`, `/api/v2`, `/x/../api/v1/nada` → `404 no_route` en JSON, sin llamar al stub;
@@ -351,7 +351,7 @@ Un paquete que sirve el build de SvelteKit (`web/build`, en `fase-4-panel`) con 
   ```
   con `isAPIPath(p)`: `c := path.Clean(p); c == "/api" || strings.HasPrefix(c, "/api/")`. Actualiza el comentario de `ServeHTTP` (una línea: fuera de `/api`, el panel).
 
-- [ ] **Step 5: Conectarlo en el contenedor.** Test primero, `src/shared/infra/container/panel_dist_test.go`, con `//go:build !panel` en la primera línea: con `-tags panel` y un build en su lugar (el flujo "Con el panel" del README, o un revisor que corre los tests con el tag), `GET /` da `200` y el test no aplica. `TestPanelNotEmbedded` — con `newTestContainer(t)`, `GET /` por `c.Server.ServeHTTP` → `404`, `text/html`, cuerpo con `-tags panel`; `GET /api/v1/nada` → `404 no_route`.
+- [x] **Step 5: Conectarlo en el contenedor.** Test primero, `src/shared/infra/container/panel_dist_test.go`, con `//go:build !panel` en la primera línea: con `-tags panel` y un build en su lugar (el flujo "Con el panel" del README, o un revisor que corre los tests con el tag), `GET /` da `200` y el test no aplica. `TestPanelNotEmbedded` — con `newTestContainer(t)`, `GET /` por `c.Server.ServeHTTP` → `404`, `text/html`, cuerpo con `-tags panel`; `GET /api/v1/nada` → `404 no_route`.
 
   Después, en `container.go`, el panel se lee **al principio de `New`**, justo después de `loadCipher` y antes de `docker.New`, `MkdirAll` y `sqlite.Open`: un embed roto (sin `csp-header.txt`) termina sin haber escrito nada en `DataDir`, igual que una clave que falta.
   ```go
