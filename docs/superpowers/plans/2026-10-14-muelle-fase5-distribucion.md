@@ -379,7 +379,7 @@ Un paquete que sirve el build de SvelteKit (`web/build`, en `fase-4-panel`) con 
     (T1 amplió el `go test` del borrador, que era solo `./src/cmd/http/panel/`, a los mismos paquetes del Step 7: así CI prueba también el contenedor con el panel embebido.)
   - `README.md`, en "Desarrollo local", una subsección **"Con el panel"**: sin `-tags panel` las rutas del panel responden la página de "no trae el panel"; para probarlo, construir `web/` (`pnpm install && pnpm build` en la carpeta del panel), copiar `web/build/.` a `src/cmd/http/panel/build/` y `go run -tags panel . serve`; o `pnpm dev` en `web/`, que proxea `/api` a un `muelle serve` local (web/README.md).
 
-- [ ] **Step 7: Verificar.** Las cuatro verificaciones de las convenciones, y además el tag con el mismo build de prueba que CI (bórralo al final; está ignorado, pero no lo dejes):
+- [x] **Step 7: Verificar.** Las cuatro verificaciones de las convenciones, y además el tag con el mismo build de prueba que CI (bórralo al final; está ignorado, pero no lo dejes):
   ```bash
   cd /home/felipe/Escritorio/dev/muelle/.claude/worktrees/fase-5-dist
   bash -c 'B=src/cmd/http/panel/build; mkdir -p $B/_app/immutable &&
@@ -389,7 +389,7 @@ Un paquete que sirve el build de SvelteKit (`web/build`, en `fase-4-panel`) con 
   ```
   Expected: todo PASS (con el tag, `panel_dist_test.go` no entra y el resto del contenedor pasa con el panel de prueba); `git status` no muestra `src/cmd/http/panel/build/`.
 
-- [ ] **Step 8: Commits** (uno por pieza):
+- [x] **Step 8: Commits** (uno por pieza):
   - `feat(panel): servir el build del panel embebido con su CSP, el 200.html de respaldo y la caché por tipo de archivo`
   - `feat(http): montar el panel en toda ruta fuera de /api, después del 405 del mux`
   - `ci: compilar y probar con -tags panel sobre un build de prueba`
