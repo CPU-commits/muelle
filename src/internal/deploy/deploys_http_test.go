@@ -245,7 +245,9 @@ func TestLogPolling(t *testing.T) {
 	for _, q := range []string{"?offset=-1", "?offset=abc", "?offset=", "?offset=1.5", "?offset=+3", "?offset=99999999999999999999"} {
 		expectError(t, h.c.Do("GET", logPath+q, nil, session()), 422, "invalid", "offset: tiene que ser un entero ≥ 0")
 	}
-	expectError(t, h.c.Do("GET", logPath+fmt.Sprintf("?offset=%d", len(l1+l2)+1), nil, session()), 422, "invalid", "offset: pasa el largo del log")
+	for _, offset := range []string{fmt.Sprint(len(l1+l2) + 1), "9223372036854775807"} {
+		expectError(t, h.c.Do("GET", logPath+"?offset="+offset, nil, session()), 422, "invalid", "offset: pasa el largo del log")
+	}
 	// El 404 gana al 422.
 	expectError(t, h.c.Do("GET", apiPath+"/deploys/99999/log?offset=abc", nil, session()), 404, "not_found", "")
 
