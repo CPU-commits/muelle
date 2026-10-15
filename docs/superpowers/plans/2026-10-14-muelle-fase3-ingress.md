@@ -310,7 +310,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
 - Create: `src/internal/ingress/infra/out/service/cloudflare/cftest/server.go` + `server_test.go`
 - Create: `src/internal/ingress/ingresstest/ingresstest.go`
 
-- [ ] **Step 1: Migración 0003 — los invariantes (D19).**
+- [x] **Step 1: Migración 0003 — los invariantes (D19).**
 
   **Tests primero** (`TestDomainsSchema`):
   - `insertDomain` suma la columna `cf_zone_id` (un parámetro más, `nil` en las filas `http`). La fila `cloudflare` del test pasa a tener `"z1"`.

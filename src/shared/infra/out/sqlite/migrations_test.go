@@ -134,32 +134,42 @@ func TestRegistriesSchema(t *testing.T) {
 	}
 }
 
-const insertDomain = `INSERT INTO domains (app_id, hostname, target_service, target_port, proxied, tls_mode, status, last_error_code, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`
+const insertDomain = `INSERT INTO domains (app_id, hostname, target_service, target_port, proxied, tls_mode, cf_zone_id, status, last_error_code, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`
 
 func TestDomainsSchema(t *testing.T) {
 	d := newTestDB(t)
 	app := seedApp(t, d)
 
-	mustExec(t, d, insertDomain, app, "api.auditfy.cl", "api", 3000, 1, "cloudflare", "pending", nil)
-	mustExec(t, d, insertDomain, app, "www.auditfy.cl", "api", 3000, 0, "http", "error", "record_exists")
-	err := mustFail(t, d, "hostname repetido", insertDomain, app, "api.auditfy.cl", "api", 3000, 0, "http", "pending", nil)
+	mustExec(t, d, insertDomain, app, "api.auditfy.cl", "api", 3000, 1, "cloudflare", "z1", "pending", nil)
+	mustExec(t, d, insertDomain, app, "www.auditfy.cl", "api", 3000, 0, "http", nil, "error", "record_exists")
+	err := mustFail(t, d, "hostname repetido", insertDomain, app, "api.auditfy.cl", "api", 3000, 0, "http", nil, "pending", nil)
 	if !IsUnique(err) {
 		t.Errorf("hostname repetido: IsUnique=false (%v)", err)
 	}
 
-	mustFail(t, d, "puerto 0", insertDomain, app, "a.auditfy.cl", "api", 0, 0, "http", "pending", nil)
-	mustFail(t, d, "puerto 65536", insertDomain, app, "a.auditfy.cl", "api", 65536, 0, "http", "pending", nil)
-	mustFail(t, d, "tls_mode desconocido", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "acme", "pending", nil)
-	mustFail(t, d, "status desconocido", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "ok", nil)
-	mustFail(t, d, "proxied no booleano", insertDomain, app, "a.auditfy.cl", "api", 80, 2, "http", "pending", nil)
-	mustFail(t, d, "last_error_code desconocido", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "error", "boom")
+	mustFail(t, d, "puerto 0", insertDomain, app, "a.auditfy.cl", "api", 0, 0, "http", nil, "pending", nil)
+	mustFail(t, d, "puerto 65536", insertDomain, app, "a.auditfy.cl", "api", 65536, 0, "http", nil, "pending", nil)
+	mustFail(t, d, "tls_mode desconocido", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "acme", nil, "pending", nil)
+	mustFail(t, d, "status desconocido", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", nil, "ok", nil)
+	mustFail(t, d, "proxied no booleano", insertDomain, app, "a.auditfy.cl", "api", 80, 2, "http", nil, "pending", nil)
+	mustFail(t, d, "last_error_code desconocido", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", nil, "error", "boom")
 	// status error va siempre con su last_error_code (los del panel), y al revés.
-	mustFail(t, d, "error sin last_error_code", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "error", nil)
-	mustFail(t, d, "last_error_code sin status error", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", "active", "cloudflare")
+	mustFail(t, d, "error sin last_error_code", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", nil, "error", nil)
+	mustFail(t, d, "last_error_code sin status error", insertDomain, app, "a.auditfy.cl", "api", 80, 0, "http", nil, "active", "cloudflare")
 	for _, code := range []string{"record_exists", "cloudflare", "certificate"} {
-		mustExec(t, d, insertDomain, app, code+".auditfy.cl", "api", 80, 0, "http", "error", code)
+		mustExec(t, d, insertDomain, app, code+".auditfy.cl", "api", 80, 0, "http", nil, "error", code)
 	}
+
+	// Los invariantes del DNS (contrato §3.1): el TLS por Cloudflare necesita
+	// la zona, un registro siempre está en una zona, y muelle maneja el AAAA
+	// solo si maneja el A.
+	mustFail(t, d, "tls_mode cloudflare sin zona", insertDomain, app, "tls.auditfy.cl", "api", 80, 0, "cloudflare", nil, "pending", nil)
+	const insertRecords = `INSERT INTO domains (app_id, hostname, target_service, target_port, tls_mode, cf_zone_id, cf_record_id, cf_record_id_aaaa, created_at, updated_at)
+	VALUES (?, ?, 'api', 80, ?, ?, ?, ?, 0, 0)`
+	mustFail(t, d, "cf_record_id sin zona", insertRecords, app, "zona.auditfy.cl", "http", nil, "r1", nil)
+	mustFail(t, d, "cf_record_id_aaaa sin cf_record_id", insertRecords, app, "aaaa.auditfy.cl", "cloudflare", "z1", nil, "r6")
+	mustExec(t, d, insertRecords, app, "full.auditfy.cl", "cloudflare", "z1", "r1", "r6")
 
 	// Una app con dominios no se borra: primero se borran sus dominios, que
 	// limpian sus registros de Cloudflare (§9).
