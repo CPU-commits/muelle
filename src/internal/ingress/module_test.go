@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -312,5 +313,73 @@ func TestModuleRoutes(t *testing.T) {
 	}
 	if !slices.Contains(f.Calls(), "InspectNetwork auditfy_staging") {
 		t.Fatal("debió inspeccionar la red")
+	}
+}
+
+// New exige Audit: los dominios auditan cada cambio (contrato §3.2).
+func TestModuleRequiresAudit(t *testing.T) {
+	db := sqlitetest.New(t)
+	c, err := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "Audit") {
+			t.Fatalf("debía hacer panic por Audit: %v", r)
+		}
+	}()
+	New(Deps{DB: db, Cipher: c, Docker: dockertest.New()})
+}
+
+// Los dominios por HTTP con el módulo armado: Cloudflare (cftest) y Caddy
+// (caddytest) falsos, y Docker caído, que los dominios no usan.
+func TestModuleDomainsFlow(t *testing.T) {
+	tm := newTestModule(t)
+	tm.cf.AddToken("cf-token-1234567890abcdef")
+	tm.cf.AddZone("z1", "tudominio.cl")
+	p := entity.DefaultProxySettings()
+	p.PanelDomain, p.CloudflareToken, p.PublicIP = "panel.tudominio.cl", "cf-token-1234567890abcdef", "203.0.113.24"
+	ingresstest.SetProxySettings(t, tm.db, tm.cipher, p)
+	ingresstest.App(t, tm.db, "auditfy", "staging", "api", "service")
+	tm.docker.SetUnavailable(true)
+	c := httptestutil.New(t, httptestutil.FakeAuth{Sessions: map[string]entity.Principal{"s": {UserID: 1, Username: "felipe"}}},
+		tm.RegisterRoutes)
+	const app = "/api/v1/projects/auditfy/stages/staging/apps/api/domains"
+
+	w := c.Do("POST", app, map[string]any{"hostname": "api.tudominio.cl", "target_service": "api", "target_port": 3000}, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusCreated)
+	if got := httptestutil.Decode[map[string]any](t, w); got["tls_mode"] != "cloudflare" || got["cf_record_id"] == nil {
+		t.Fatalf("POST: %v", got)
+	}
+	recs := tm.cf.Records("z1")
+	if len(recs) != 1 || recs[0].Name != "api.tudominio.cl" || recs[0].Proxied {
+		t.Fatalf("registros: %+v", recs)
+	}
+	if !bytes.Contains(tm.caddy.Loads()[len(tm.caddy.Loads())-1], []byte(`"api.tudominio.cl"`)) {
+		t.Fatal("el Load no trae el dominio")
+	}
+
+	w = c.Do("GET", app, nil, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusOK)
+	if got := httptestutil.Decode[[]map[string]any](t, w); len(got) != 1 {
+		t.Fatalf("GET: %v", got)
+	}
+
+	w = c.Do("PATCH", app+"/api.tudominio.cl", map[string]any{"proxied": true}, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusOK)
+	if recs := tm.cf.Records("z1"); !recs[0].Proxied {
+		t.Fatalf("PATCH: %+v", recs)
+	}
+
+	w = c.Do("DELETE", app+"/api.tudominio.cl", nil, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusNoContent)
+	if recs := tm.cf.Records("z1"); len(recs) != 0 {
+		t.Fatalf("DELETE: %+v", recs)
+	}
+
+	ctx := context.Background()
+	var n int
+	if err := tm.db.Conn(ctx).QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE action LIKE 'domain.%'`).Scan(&n); err != nil || n != 3 {
+		t.Fatalf("auditoría: %d %v", n, err)
 	}
 }

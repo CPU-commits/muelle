@@ -1851,16 +1851,18 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): los endpoints de dominios del contrato §3.2`
 
-- [ ] **Step 7: Cableado.**
+- [x] **Step 7: Cableado.**
 
   **Tests primero:**
   - `module_test.go`:
     - `TestModuleRoutes`: `…/domains` ya no es `no_route`;
     - `TestModuleJobs`: `"proxy"` y `"certificados"`;
-    - `TestModuleDomainsFlow`: `POST`, `GET`, `PATCH` y `DELETE` por HTTP con `cftest` (`Options.CloudflareURL`) y `caddytest`.
+    - `TestModuleDomainsFlow`: `POST`, `GET`, `PATCH` y `DELETE` por HTTP con `cftest` (`Options.CloudflareURL`) y `caddytest`, con Docker caído (los dominios no lo usan), y tres eventos `domain.*` de auditoría.
   - `container_test.go`, la línea de `TestNew`: `"sesiones vencidas, retención de auditoría, backup diario, proxy, certificados"`.
 
-  **Implementar** `module.go`:
+  - Sumado al implementar: `TestModuleRequiresAudit`, y `itEnv.module()` (integración) pasa un `sqlite.NewAuditRecorder`.
+
+  **Implementar** `module.go` (el `CertChecker` llegó en el Step 4 y los casos de uso en el Step 6):
   - `New` exige `Audit`;
   - arma `cloudflare.New(o.CloudflareURL)`, `TLSProbe{Addr: o.CaddyTLSAddr, Roots: o.TLSRoots, Timeout: 5 s}`, `Ops`, `CertChecker` y los casos de uso;
   - `Run` suma `wg.Go(certs.Run)`.

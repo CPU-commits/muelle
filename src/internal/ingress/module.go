@@ -68,8 +68,8 @@ type Module struct {
 	log           *slog.Logger
 }
 
-// New arma el módulo. DB, Cipher y Docker son obligatorios; Clock, Log y
-// Options, opcionales.
+// New arma el módulo. DB, Cipher, Docker y Audit (los dominios auditan cada
+// cambio) son obligatorios; Clock, Log y Options, opcionales.
 func New(d Deps) *Module {
 	switch {
 	case d.DB == nil:
@@ -78,6 +78,8 @@ func New(d Deps) *Module {
 		panic("ingress.New: falta Deps.Cipher")
 	case d.Docker == nil:
 		panic("ingress.New: falta Deps.Docker")
+	case d.Audit == nil:
+		panic("ingress.New: falta Deps.Audit")
 	}
 	if d.Clock == nil {
 		d.Clock = clock.System{}

@@ -167,7 +167,9 @@ func (e *itEnv) logger() *slog.Logger {
 
 // module arma ingress con la base, el Docker real y opts.
 func (e *itEnv) module() *Module {
-	return New(Deps{DB: e.db, Cipher: e.cipher, Clock: e.clock, Log: e.logger(), Docker: e.docker, Options: e.opts})
+	log := e.logger()
+	return New(Deps{DB: e.db, Cipher: e.cipher, Clock: e.clock, Audit: sqlite.NewAuditRecorder(e.db, e.clock, log), Log: log,
+		Docker: e.docker, Options: e.opts})
 }
 
 // cleanup borra todo lo del test: los contenedores, las redes con uno de los
