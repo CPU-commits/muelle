@@ -789,7 +789,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): BuildProxyConfig, la configuración del proxy como datos`
 
-- [ ] **Step 2: El JSON de Caddy (golden).**
+- [x] **Step 2: El JSON de Caddy (golden).**
 
   **Tests primero** (`caddy/config_test.go`). Usa `testdata/<caso>.golden.json`, indentado con dos espacios (`encoding/json.Indent` sobre la salida de `Render`) y regenerable con `go test ./… -run Golden -update`. Los casos:
   - `panel_only`: sin token, sin CIDRs y con email.
@@ -805,7 +805,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   Y además:
   - `TestRenderInvariants`, sobre todos los casos:
     - `admin.listen == naming.CaddyAdminListen`;
-    - el único placeholder es `{http.vars.client_ip}`: con la regexp `\{[^}]*\}`, todo match es exactamente ese, así no queda ningún atajo del Caddyfile (`{client_ip}`, `{host}`, `{remote_host}`…);
+    - el único placeholder es `{http.vars.client_ip}`: con la regexp `\{[^}]*\}` sobre cada texto del JSON decodificado (claves y valores; sobre los bytes crudos casaría las llaves de los objetos), todo match es exactamente ese, así no queda ningún atajo del Caddyfile (`{client_ip}`, `{host}`, `{remote_host}`…);
     - el token aparece exactamente una vez por política `cloudflare`, dentro de `api_token`;
     - cada ruta de primer nivel es `terminal`;
     - `trusted_proxies.ranges == CloudflareRanges` y `trusted_proxies_strict == 1`.
