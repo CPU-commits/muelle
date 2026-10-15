@@ -1805,7 +1805,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit** (dos): `feat(ingress): crear, listar, editar y borrar dominios con su DNS y su ruta` y `feat(ingress): adoptar y reintentar un dominio`
 
-- [ ] **Step 6: HTTP de los dominios.**
+- [x] **Step 6: HTTP de los dominios.**
 
   **Tests primero** (`infra/in/http/domains_test.go`, con `httptestutil.New` y el `Register` real con los casos de uso armados como en el Step 5). Comparan las claves y los tipos del JSON con el contrato §3.1: `httptestutil.Decode[map[string]any]`, el conjunto exacto de claves, y `null` donde corresponde.
   - `GET {app}/domains`: `200 []` sin dominios, ordenados.
@@ -1847,6 +1847,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `errors.go` suma:
     - `k.RegisterError(service.ErrNothingToAdopt, 409, "nothing_to_adopt", "No hay un registro que adoptar")`;
     - `k.RegisterError(service.ErrHostnameTaken, 409, "conflict", "Ese hostname ya está en uso en muelle")`.
+  - Al implementar: con las rutas registradas, `TestModuleRoutes` llamaba a un caso de uso nil (panic). Este commit ya arma los casos de uso en `module.go` (`DomainDeps` con `cloudflare.New(o.CloudflareURL)`) y cambia `TestModuleRoutes`: `…/domains` da `404 not_found` sin la app y `200 []` con ella. El Step 7 suma lo demás.
 
   **Commit:** `feat(ingress): los endpoints de dominios del contrato §3.2`
 

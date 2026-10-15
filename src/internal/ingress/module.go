@@ -5,9 +5,10 @@
 //
 // Ya funcionan la red de cada stage (la usan catalog y deploy), SyncRoutes,
 // que manda la configuración a muelle-caddy por su admin API, el ciclo de
-// vida de muelle-caddy (el job "proxy", los reintentos y la recreación) y
-// GET /api/v1/proxy. Lo demás no hace nada todavía, como dice cada método, y
-// las rutas de los dominios no existen (404 no_route). El contrato está en
+// vida de muelle-caddy (el job "proxy", los reintentos y la recreación),
+// GET /api/v1/proxy, los dominios con su DNS en Cloudflare (…/domains) y la
+// verificación de los certificados. Los hooks de admin no hacen nada
+// todavía, como dice cada método. El contrato está en
 // docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md.
 package ingress
 
@@ -25,6 +26,7 @@ import (
 	reposqlite "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy"
+	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/cloudflare"
 	"github.com/CPU-commits/muelle/src/package/audit"
 	"github.com/CPU-commits/muelle/src/package/cipher"
 	"github.com/CPU-commits/muelle/src/package/clock"
@@ -113,12 +115,22 @@ func New(d Deps) *Module {
 	m.certs = usecases.NewCertChecker(probe, domains, m.state, m.ops, d.Clock, o.Timing.FirstCheck, o.Timing.PendingEvery,
 		o.Timing.DomainOp, d.Log)
 	m.jobs = incron.Jobs(m.proxyJob.Run, func(ctx context.Context) error { return m.certs.CheckAll(ctx, usecases.EligibleHourly) })
-	m.httpUC = inhttp.UseCases{ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage)}
+	dd := usecases.DomainDeps{
+		Repo: domains, Catalog: catalog, Settings: settings, DNS: cloudflare.New(o.CloudflareURL), Syncer: m.syncer,
+		Certs: m.certs, Ops: m.ops, Clock: d.Clock, Audit: d.Audit, Log: d.Log,
+		DomainOp: o.Timing.DomainOp, DomainRetry: o.Timing.DomainRetry,
+	}
+	m.httpUC = inhttp.UseCases{
+		ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage),
+		ListDomains: usecases.NewListDomains(dd), CreateDomain: usecases.NewCreateDomain(dd),
+		UpdateDomain: usecases.NewUpdateDomain(dd), DeleteDomain: usecases.NewDeleteDomain(dd),
+		AdoptDomain: usecases.NewAdoptDomain(dd), RetryDomain: usecases.NewRetryDomain(dd),
+	}
 	return m
 }
 
 // RegisterRoutes registra los errores y las rutas del módulo, todas solo con
-// sesión: GET /api/v1/proxy. Fase 3: los dominios (GET/POST
+// sesión (contrato §3): GET /api/v1/proxy y los dominios (GET/POST
 // …/apps/{a}/domains, PATCH/DELETE …/domains/{hostname}, POST …/adopt y
 // …/retry).
 func (m *Module) RegisterRoutes(k *utils.Kit) { inhttp.Register(k, m.httpUC) }

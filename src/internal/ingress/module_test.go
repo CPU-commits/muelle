@@ -275,9 +275,8 @@ func TestModuleRecreatesWithCustomName(t *testing.T) {
 	}
 }
 
-// GET /api/v1/proxy ya existe; los dominios todavía no (404 no_route): así
-// el panel muestra "Llega con la Fase 3". El error de una red ajena ya se
-// responde 409.
+// GET /api/v1/proxy y los dominios existen (los dominios ya no son 404
+// no_route). El error de una red ajena se responde 409.
 func TestModuleRoutes(t *testing.T) {
 	tm := newTestModule(t)
 	m, f := tm.Module, tm.docker
@@ -288,7 +287,12 @@ func TestModuleRoutes(t *testing.T) {
 			m.RegisterRoutes(k)
 		})
 	w := c.Do("GET", "/api/v1/projects/auditfy/stages/staging/apps/api/domains", nil, httptestutil.WithSession("s"))
-	if w.Code != http.StatusNotFound || !bytes.Contains(w.Body.Bytes(), []byte(`"no_route"`)) {
+	if w.Code != http.StatusNotFound || !bytes.Contains(w.Body.Bytes(), []byte(`"not_found"`)) {
+		t.Errorf("GET …/domains de una app que no existe: %d %s", w.Code, w.Body)
+	}
+	ingresstest.App(t, tm.db, "auditfy", "staging", "api", "service")
+	w = c.Do("GET", "/api/v1/projects/auditfy/stages/staging/apps/api/domains", nil, httptestutil.WithSession("s"))
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != "[]" {
 		t.Errorf("GET …/domains: %d %s", w.Code, w.Body)
 	}
 	w = c.Do("GET", "/api/v1/proxy", nil, httptestutil.WithSession("s"))
