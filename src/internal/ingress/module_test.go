@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
@@ -157,16 +158,120 @@ func TestModuleStubs(t *testing.T) {
 		t.Fatalf("CheckCloudflareToken: %v %v (sin verificar: zonas desconocidas)", zones, err)
 	}
 	m.ProxySettingsChanged(ctx, entity.DefaultProxySettings(), entity.DefaultProxySettings())
-	if jobs := m.Jobs(); len(jobs) != 0 {
-		t.Fatalf("Jobs: %v", jobs)
-	}
-	done := make(chan struct{})
-	go func() { m.Run(ctx); close(done) }()
-	<-done // el esqueleto no tiene nada que correr
 }
 
-// Mientras la Fase 3 no está, sus rutas no existen (404 no_route): así el
-// panel muestra "Llega con la Fase 3". El error de una red ajena ya se responde 409.
+// T3: el job "proxy" cada 5 min (cron.Run lo corre también al arrancar).
+func TestModuleJobs(t *testing.T) {
+	m := newTestModule(t)
+	jobs := m.Jobs()
+	if len(jobs) != 1 || jobs[0].Name != "proxy" || jobs[0].Every != 5*time.Minute {
+		t.Fatalf("Jobs: %+v", jobs)
+	}
+}
+
+// enableProxy deja el proxy habilitado: panel_domain, con la imagen de
+// Caddy de la versión (v0.1.0) y los puertos 8080 y 8443.
+func (tm *testModule) enableProxy(t *testing.T) {
+	t.Helper()
+	p := entity.DefaultProxySettings()
+	p.PanelDomain = "panel.auditfy.cl"
+	p.HTTPPort, p.HTTPSPort = 8080, 8443
+	ingresstest.SetProxySettings(t, tm.db, tm.cipher, p)
+}
+
+// runModule corre m.Run hasta el final del test, y al final cancela y espera
+// a que vuelva.
+func runModule(t *testing.T, m *Module) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); m.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("Run no volvió al cancelar el ctx")
+		}
+	})
+}
+
+func eventually(t *testing.T, what string, check func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !check() {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: no pasó en 2 s", what)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// Run lleva los reintentos de /load (el onFail del Syncer despierta al
+// Retrier) y la recreación agendada, y vuelve al cancelar.
+func TestModuleRun(t *testing.T) {
+	tm := newTestModule(t, func(o *Options) {
+		o.Timing = Timing{RetryMin: time.Millisecond, RetryMax: 4 * time.Millisecond, RecreateDelay: time.Millisecond}
+	})
+	tm.enableProxy(t)
+	runModule(t, tm.Module)
+	ctx := context.Background()
+
+	tm.caddy.Reject("todavía no")
+	if err := tm.SyncRoutes(ctx); err == nil {
+		t.Fatal("debió fallar")
+	}
+	tm.caddy.Accept()
+	eventually(t, "el Retrier reintenta hasta synced", tm.state.Synced)
+
+	tm.scheduleRecreate()
+	eventually(t, "el Recreator crea muelle-caddy", func() bool {
+		c, err := tm.docker.InspectContainer(ctx, naming.CaddyContainer)
+		return err == nil && c.Running && !tm.state.Recreating()
+	})
+}
+
+// Después del job, GET /api/v1/proxy dice synced con la imagen que corre.
+func TestModuleProxyStatusAfterJob(t *testing.T) {
+	tm := newTestModule(t)
+	tm.enableProxy(t)
+	if err := tm.Jobs()[0].Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c := httptestutil.New(t, httptestutil.FakeAuth{Sessions: map[string]entity.Principal{"s": {UserID: 1, Username: "felipe"}}},
+		tm.RegisterRoutes)
+	w := c.Do("GET", "/api/v1/proxy", nil, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusOK)
+	got := httptestutil.Decode[map[string]any](t, w)
+	caddy, _ := got["caddy"].(map[string]any)
+	if got["status"] != "synced" || caddy["image"] != naming.CaddyImageFor("v0.1.0") || caddy["running"] != true || caddy["http_port"] != 8080.0 {
+		t.Fatalf("GET /proxy: %v", got)
+	}
+}
+
+// Con un nombre propio de muelle-caddy (los tests de integración), el job
+// crea ese contenedor y nunca nombra muelle-caddy.
+func TestModuleRecreatesWithCustomName(t *testing.T) {
+	tm := newTestModule(t, func(o *Options) { o.CaddyContainer = "it3-x" })
+	tm.enableProxy(t)
+	ingresstest.Stage(t, tm.db, "auditfy", "staging")
+	ctx := context.Background()
+	if err := tm.Jobs()[0].Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := tm.docker.InspectContainer(ctx, "it3-x"); err != nil || !c.Running || !slices.Contains(c.Networks, "auditfy_staging") {
+		t.Fatalf("it3-x: %+v %v", c, err)
+	}
+	for _, c := range tm.docker.Calls() {
+		if slices.Contains(strings.Fields(c), naming.CaddyContainer) {
+			t.Errorf("la llamada %q nombra %s", c, naming.CaddyContainer)
+		}
+	}
+}
+
+// GET /api/v1/proxy ya existe; los dominios todavía no (404 no_route): así
+// el panel muestra "Llega con la Fase 3". El error de una red ajena ya se
+// responde 409.
 func TestModuleRoutes(t *testing.T) {
 	tm := newTestModule(t)
 	m, f := tm.Module, tm.docker
@@ -176,11 +281,13 @@ func TestModuleRoutes(t *testing.T) {
 			kit = k
 			m.RegisterRoutes(k)
 		})
-	for _, path := range []string{"/api/v1/projects/auditfy/stages/staging/apps/api/domains", "/api/v1/proxy"} {
-		w := c.Do("GET", path, nil, httptestutil.WithSession("s"))
-		if w.Code != http.StatusNotFound || !bytes.Contains(w.Body.Bytes(), []byte(`"no_route"`)) {
-			t.Errorf("GET %s: %d %s", path, w.Code, w.Body)
-		}
+	w := c.Do("GET", "/api/v1/projects/auditfy/stages/staging/apps/api/domains", nil, httptestutil.WithSession("s"))
+	if w.Code != http.StatusNotFound || !bytes.Contains(w.Body.Bytes(), []byte(`"no_route"`)) {
+		t.Errorf("GET …/domains: %d %s", w.Code, w.Body)
+	}
+	w = c.Do("GET", "/api/v1/proxy", nil, httptestutil.WithSession("s"))
+	if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte(`"disabled"`)) {
+		t.Errorf("GET /api/v1/proxy: %d %s", w.Code, w.Body)
 	}
 
 	ctx := context.Background()
@@ -189,7 +296,7 @@ func TestModuleRoutes(t *testing.T) {
 	}
 	err := m.EnsureStageNetwork(ctx, "auditfy", "staging")
 	kit.Handle("POST /api/v1/x", utils.AccessSession, func(w http.ResponseWriter, r *http.Request) { kit.Fail(w, r, err) })
-	w := c.Do("POST", "/api/v1/x", nil, httptestutil.WithSession("s"))
+	w = c.Do("POST", "/api/v1/x", nil, httptestutil.WithSession("s"))
 	if w.Code != http.StatusConflict || !bytes.Contains(w.Body.Bytes(), []byte(`"network_conflict"`)) {
 		t.Fatalf("red ajena: %d %s", w.Code, w.Body)
 	}

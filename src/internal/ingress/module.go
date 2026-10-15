@@ -3,21 +3,24 @@
 // certificados (§3.1, §8 y §9 del spec). module.go es el único lugar que
 // conoce todas sus piezas.
 //
-// Ya funcionan la red de cada stage (la usan catalog y deploy) y SyncRoutes,
-// que manda la configuración a muelle-caddy por su admin API. Lo demás no
-// hace nada todavía, como dice cada método, y las rutas no existen (404
-// no_route). El contrato está en
+// Ya funcionan la red de cada stage (la usan catalog y deploy), SyncRoutes,
+// que manda la configuración a muelle-caddy por su admin API, el ciclo de
+// vida de muelle-caddy (el job "proxy", los reintentos y la recreación) y
+// GET /api/v1/proxy. Lo demás no hace nada todavía, como dice cada método, y
+// las rutas de los dominios no existen (404 no_route). El contrato está en
 // docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md.
 package ingress
 
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/CPU-commits/muelle/src/cmd/cron"
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
 	"github.com/CPU-commits/muelle/src/internal/ingress/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/ingress/app/usecases"
+	incron "github.com/CPU-commits/muelle/src/internal/ingress/infra/in/cron"
 	inhttp "github.com/CPU-commits/muelle/src/internal/ingress/infra/in/http"
 	reposqlite "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
@@ -51,6 +54,13 @@ type Module struct {
 	removeNetwork *usecases.RemoveStageNetwork
 	state         *usecases.ProxyState
 	syncer        *usecases.Syncer
+	caddy         *usecases.EnsureCaddy
+	orphans       *usecases.RemoveOrphanNetworks
+	proxyJob      *usecases.ProxyJob
+	retrier       *usecases.Retrier
+	recreator     *usecases.Recreator
+	jobs          []cron.Job
+	httpUC        inhttp.UseCases
 	log           *slog.Logger
 }
 
@@ -72,40 +82,62 @@ func New(d Deps) *Module {
 		d.Log = slog.Default()
 	}
 	o := d.Options.withDefaults()
+	defImage := naming.CaddyImageFor(d.Version)
 	nets := outservice.NewDockerNetworks(d.Docker)
 	settings := outservice.NewProxySettingsReader(d.DB, d.Cipher)
 	catalog := outservice.NewCatalogReader(d.DB)
+	registries := outservice.NewRegistriesReader(d.DB, d.Cipher)
 	domains := reposqlite.NewDomains(d.DB)
-	state := usecases.NewProxyState()
-	// onFail: los reintentos con backoff llegan con el ciclo de vida de muelle-caddy.
-	syncer := usecases.NewSyncer(settings, domains, catalog, caddy.NewAdmin(o.CaddyAdminDial), state, d.Clock,
-		naming.CaddyImageFor(d.Version), o.InternalCA, func() {}, d.Log)
-	return &Module{
-		ensureNetwork: usecases.NewEnsureStageNetwork(nets, o.CaddyContainer, d.Log),
-		removeNetwork: usecases.NewRemoveStageNetwork(nets, o.CaddyContainer, d.Log),
-		state:         state,
-		syncer:        syncer,
-		log:           d.Log,
-	}
+	runtime := caddy.NewRuntime(d.Docker, caddy.Names{
+		Container: o.CaddyContainer, PanelNetwork: o.PanelNetwork,
+		DataVolume: o.CaddyDataVolume, ConfigVolume: o.CaddyConfigVolume, AdminVolume: o.CaddyAdminVolume,
+	}, d.Log)
+
+	m := &Module{state: usecases.NewProxyState(), log: d.Log}
+	// Un Sync que falla despierta al Retrier, que reintenta con backoff.
+	m.syncer = usecases.NewSyncer(settings, domains, catalog, caddy.NewAdmin(o.CaddyAdminDial), m.state, d.Clock,
+		defImage, o.InternalCA, func() { m.retrier.Kick() }, d.Log)
+	m.retrier = usecases.NewRetrier(func(ctx context.Context) error { return m.syncer.Sync(ctx, false) },
+		o.Timing.RetryMin, o.Timing.RetryMax)
+	m.ensureNetwork = usecases.NewEnsureStageNetwork(nets, o.CaddyContainer, d.Log)
+	m.removeNetwork = usecases.NewRemoveStageNetwork(nets, o.CaddyContainer, d.Log)
+	m.caddy = usecases.NewEnsureCaddy(runtime, settings, catalog, registries, m.state, defImage, d.Log)
+	m.orphans = usecases.NewRemoveOrphanNetworks(nets, catalog, o.CaddyContainer, o.NetworkPrefix, d.Log)
+	m.proxyJob = usecases.NewProxyJob(settings, catalog, m.ensureNetwork, m.caddy, m.orphans, m.syncer, m.state, defImage, d.Log)
+	m.recreator = usecases.NewRecreator(m.caddy, m.syncer, m.state, o.Timing.RecreateDelay, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
+	m.jobs = incron.Jobs(m.proxyJob.Run)
+	m.httpUC = inhttp.UseCases{ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage)}
+	return m
 }
 
-// RegisterRoutes registra los errores del módulo. Fase 3: los dominios
-// (GET/POST …/apps/{a}/domains, PATCH/DELETE …/domains/{hostname}, POST
-// …/adopt y …/retry) y GET /api/v1/proxy, todos solo con sesión.
-func (m *Module) RegisterRoutes(k *utils.Kit) { inhttp.RegisterErrors(k) }
+// RegisterRoutes registra los errores y las rutas del módulo, todas solo con
+// sesión: GET /api/v1/proxy. Fase 3: los dominios (GET/POST
+// …/apps/{a}/domains, PATCH/DELETE …/domains/{hostname}, POST …/adopt y
+// …/retry).
+func (m *Module) RegisterRoutes(k *utils.Kit) { inhttp.Register(k, m.httpUC) }
 
-// Jobs son las tareas periódicas. Fase 3: "proxy" cada 5 min (cron.Run lo
-// corre también al arrancar: asegura muelle-caddy y las redes de todos los
+// Jobs son las tareas periódicas: "proxy" cada 5 min (cron.Run lo corre
+// también al arrancar: asegura muelle-caddy y las redes de todos los
 // stages, borra las redes de stage huérfanas y reenvía la configuración,
-// §3.1 y §7 "Reconciliación al arrancar") y "certificados" cada hora (§8).
-func (m *Module) Jobs() []cron.Job { return nil }
+// §3.1 y §7 "Reconciliación al arrancar"). Fase 3: "certificados" cada hora
+// (§8).
+func (m *Module) Jobs() []cron.Job { return m.jobs }
 
 // Run corre lo que ingress necesita en segundo plano hasta que ctx se cancela,
-// y vuelve cuando terminó. Fase 3: los reintentos con backoff (1 s, 2 s… 60 s)
-// de una configuración que Caddy no aceptó, la verificación de un dominio 30 s
-// después de crearlo (§8) y la recreación de muelle-caddy que agenda
-// ProxySettingsChanged. El esqueleto no tiene nada que correr.
-func (m *Module) Run(ctx context.Context) {}
+// y vuelve cuando terminó: los reintentos con backoff (1 s, 2 s… 60 s) de una
+// configuración que Caddy no aceptó y la recreación de muelle-caddy que
+// agenda ProxySettingsChanged. Fase 3: la verificación de un dominio 30 s
+// después de crearlo (§8).
+func (m *Module) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	wg.Go(func() { m.retrier.Run(ctx) })
+	wg.Go(func() { m.recreator.Run(ctx) })
+	wg.Wait()
+}
+
+// scheduleRecreate agenda la recreación de muelle-caddy (la corre Run). La
+// usan los tests; ProxySettingsChanged usa recreator.Hold.
+func (m *Module) scheduleRecreate() { m.recreator.Schedule() }
 
 // EnsureStageNetwork asegura la red overlay attachable del stage
 // (proyecto_stage, con las etiquetas de naming.StageLabels) y conecta

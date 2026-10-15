@@ -74,12 +74,12 @@ func TestNew(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.DataDir, "muelle.db")); err != nil {
 		t.Fatalf("la base no está en <DataDir>/muelle.db: %v", err)
 	}
-	// identity (sesiones vencidas) + admin (retención de auditoría y backup diario).
+	// identity (sesiones vencidas) + admin (retención de auditoría y backup diario) + ingress (proxy).
 	names := make([]string, 0, len(c.Jobs))
 	for _, j := range c.Jobs {
 		names = append(names, j.Name)
 	}
-	if got := strings.Join(names, ", "); got != "sesiones vencidas, retención de auditoría, backup diario" {
+	if got := strings.Join(names, ", "); got != "sesiones vencidas, retención de auditoría, backup diario, proxy" {
 		t.Fatalf("jobs=%s", got)
 	}
 

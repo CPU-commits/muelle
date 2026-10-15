@@ -1410,7 +1410,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): GET /api/v1/proxy con el estado del proxy (contrato §3.3)`
 
-- [ ] **Step 6: Cableado en el módulo.**
+- [x] **Step 6: Cableado en el módulo.**
 
   **Tests primero** (`module_test.go`):
   - `TestModuleJobs`: `m.Jobs()` tiene `"proxy"` cada 5 min.
@@ -1431,6 +1431,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `Jobs()` devuelve `m.jobs`.
   - `Run(ctx)` hace `wg.Go(retrier.Run)` y `wg.Go(recreator.Run)`, y después `wg.Wait()`.
   - Un método sin exportar `scheduleRecreate()` que llama a `recreator.Schedule()`; lo usa la integración (Step 7). T5 le pasa el `Recreator` a `ProxySettingsChanged`, que usa `Hold`.
+  - Hecho así: también `RegisterRoutes` → `inhttp.Register(k, m.httpUC)` (lo que el Step 5 dejaba en `module.go`). `TestModuleStubs` queda solo con `CheckCloudflareToken` y `ProxySettingsChanged`; `TestModuleRun` prueba el cableado de verdad: un `SyncRoutes` rechazado despierta al `Retrier` (el `onFail`) hasta `synced`, y `scheduleRecreate` hace que el `Recreator` cree muelle-caddy.
 
   **Commit:** `feat(ingress): el módulo corre el job proxy, los reintentos y la recreación`
 
