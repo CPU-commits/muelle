@@ -594,6 +594,7 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
   - Actualiza el contenido del registro existente a la IP pública y **conserva su `proxied`**, que se copia al dominio. Adoptar nunca cambia el modo de Cloudflare (§16); para cambiarlo, un `PATCH` después.
   - Un `CNAME` de ese nombre se convierte en un `A` a la IP pública, con el mismo `proxied`. Si hay más de un `A` o `CNAME` de ese nombre (o, con `public_ipv6`, más de un `AAAA`), no se toca ninguno: `error` con `cloudflare`, y el mensaje pide dejar uno solo.
   - Con `public_ipv6`, adopta también el `AAAA` que haya, con su `proxied` (o lo crea, con el del `A`). Sin `public_ipv6`, un `AAAA` ajeno no se toca ni pasa a manejarlo muelle.
+  - Si el único registro ajeno es un `AAAA` (ni `A` ni `CNAME`), muelle crea su `A` con el `proxied` de ese `AAAA`, que se copia al dominio. Con `public_ipv6`, después adopta el `AAAA`; sin `public_ipv6`, el `AAAA` no se toca, como en el punto anterior.
   - Si el registro ajeno ya no está, crea los suyos, como al crear el dominio.
   - Guarda `cf_record_id` y deja el dominio `pending`.
 - `retry`, sincrónico, con a lo más 20 s:
@@ -670,7 +671,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - **Comando y entorno:** los pone ingress, no la imagen. `Cmd` es `naming.CaddyCommand()` (`caddy run --resume`) y `Env` es `naming.CaddyEnv()` (`CADDY_ADMIN=unix//run/caddy-admin/admin.sock`, `XDG_CONFIG_HOME=/config` y `XDG_DATA_HOME=/data`).
     - Sin autosave (el primer arranque, o un volumen nuevo), Caddy arranca vacío con la admin API en el socket, y el job `"proxy"` le manda la configuración.
     - Con autosave, `--resume` retoma la última configuración que mandó muelle, que ya trae `admin.listen`: los sitios vuelven sin esperar a muelle.
-    - El CMD de una imagen de Caddy típica (`caddy run --config /etc/caddy/Caddyfile --adapter caddyfile`) deja la admin API en TCP (`localhost:2019`) y el socket nunca aparece. Por eso no se usa, y la imagen de la Fase 5 no necesita un CMD ni un archivo de configuración propios. Una `caddy_image` propia sirve si trae el módulo `dns.providers.cloudflare`.
+    - El CMD de una imagen de Caddy típica (`caddy run --config /etc/caddy/Caddyfile --adapter caddyfile`) deja la admin API en TCP (`localhost:2019`) y el socket nunca aparece. Por eso no se usa, y la imagen de la Fase 5 no necesita un CMD ni un archivo de configuración propios. Una `caddy_image` propia sirve si es Caddy 2.10 o más nuevo y trae el módulo `dns.providers.cloudflare`. Antes de la 2.10, la admin API por socket unix revisa el `Host` y rechaza el que manda muelle, así que todo `POST /load` falla (caddy#6832).
     - `XDG_*` dejan el autosave y los certificados en sus volúmenes aunque la imagen no defina esas variables. Si no, se perderían al recrear el contenedor, y se volverían a emitir los certificados.
   - **Puertos:** `proxy_http_port` → 80/tcp, y `proxy_https_port` → 443/tcp y 443/udp.
   - **Volúmenes:** `muelle_caddy_data:/data`, `muelle_caddy_config:/config` y `muelle_caddy_admin:/run/caddy-admin` (`naming.CaddyDataDir`, `CaddyConfigDir` y `CaddyAdminDir`).
@@ -679,6 +680,8 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - **Recrear es** bajar la imagen si falta, y recién entonces detenerlo (`StopContainer`, 10 s: Caddy cierra bien y suelta el socket), borrarlo y crear uno nuevo, **nunca rearrancar el mismo.** Si la imagen no baja, el contenedor anterior sigue sirviendo los sitios y el panel, y el error queda en `GET /proxy`. Docker 29 arranca sin puertos un contenedor cuyo arranque falló con `ErrPortInUse` (el fake lo imita). Uno detenido o caído también se recrea, en vez de arrancarlo.
   - **Puerto ocupado** (`docker.ErrPortInUse`): el contenedor anterior ya no existe. Se reintenta con los mismos ajustes en el job `"proxy"` y el error queda en `GET /proxy`. No se vuelve solo a los puertos viejos.
 - **Imagen:** `caddy_image` si está, o `naming.CaddyImageFor(version)`. Se baja con `PullImage` si `InspectImage` da `ErrNotFound`: con la credencial de `registries` de su host si hay una (§1.1), y si no, anónima.
+  - Las imágenes de muelle son privadas (decisión del dueño, 2026-10-15): install baja la primera y siembra el registry `ghcr.io`, y con ese registry se bajan las versiones nuevas.
+  - Si el registry no da acceso a la imagen, el `error` de `GET /proxy` dice qué hacer con el registry de ese host en Ajustes → Registries: agregarlo si no hay uno, o actualizar su credencial si la hay. La contraseña del registry nunca aparece en un mensaje, un log ni un JSON.
 - **TLS** (§8 del diseño), en `apps.tls.automation.policies`, una política por modo:
   - `cloudflare`: el emisor `acme` con `challenges.dns.provider` = `{"name": "cloudflare", "api_token": …}` y `resolvers: ["1.1.1.1:53", "1.0.0.1:53"]` (la propagación se mira en Cloudflare, no en el DNS del host). Un dominio con `tls_mode: cloudflare` va por `http` si ya no hay token.
   - `http`: el emisor `acme`, sin desafío DNS (Let's Encrypt, HTTP-01 o TLS-ALPN-01).
@@ -690,7 +693,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - `cloudflare` si hay token y `panel_domain` cae en una zona visible (`panel_cf_zone_id`, §3.6); si no, `http`.
   - El registro DNS del panel se crea solo si no existe, con `proxied: false`. Uno existente nunca se toca, y en la v1 no se adopta.
   - Sus ids se guardan en las claves reservadas de §3.6. Si cambia la IP pública, muelle actualiza solo el contenido de los suyos: nunca cambia su `proxied`, que se puede cambiar en Cloudflare.
-  - Antes de tocar un registro guardado, muelle lo lee: si ya no existe, o ya no es de `panel_domain` (cambió `MUELLE_PANEL_ORIGIN`), olvida su id y vuelve a crear uno solo si no hay otro.
+  - Antes de tocar un registro guardado, muelle lo lee: si ya no existe, ya no es de `panel_domain` (cambió `MUELLE_PANEL_ORIGIN`) o el token ya no lo puede leer (Cloudflare rechaza la lectura: un token de otra cuenta, o una zona que ya no ve), olvida su id sin borrarlo, y vuelve a crear uno solo si no hay otro. Si Cloudflare no responde, no olvida nada.
 
 ### 3.5 Los hooks de admin
 
