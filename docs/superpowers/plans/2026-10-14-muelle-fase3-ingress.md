@@ -1436,7 +1436,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): el módulo corre el job proxy, los reintentos y la recreación`
 
-- [ ] **Step 7: Integración — el ciclo de vida contra Docker real.**
+- [x] **Step 7: Integración — el ciclo de vida contra Docker real.**
 
   `TestIntegrationCaddyLifecycle` (ranura 2), con el módulo armado con `e.opts` y el cliente de Docker real:
   1. **Primera pasada:** arranca el puente, siembra el stage `s1` y la app `web` con su dominio, y arranca el backend.
@@ -1463,6 +1463,12 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   6. **Huérfana:** una red `it3<id>_viejo`, overlay attachable con las etiquetas `{project: "it3<id>", stage: "viejo"}`, sigue después del primer `job()` y no existe después del segundo.
 
   **Correr:** el comando de integración. Expected: PASS. Después, `docker ps -a --filter name=it3-` no muestra nada.
+
+  Hecho así:
+  - En el paso 1, `m.EnsureStageNetwork(…, "s1")` va antes de `startBackend` (el backend necesita la red), y una segunda pasada del job no recrea nada (el mismo id: lo que devuelve Docker coincide con lo que pidió muelle). La red nueva del paso 2 se conectó en caliente sin el problema de la subred que vio T2.
+  - **La primera corrida dejó una red que no se puede borrar:** el paso 5 encontró que Docker no suelta la conexión de Swarm de la red panel cuando el arranque de muelle-caddy falla por el puerto ocupado (D11). El arreglo, en el código (`b8a7fc3`): los puertos se prueban antes con `<CaddyContainer>-probe`, sin redes de Swarm. La limpieza de `itEnv` borra también ese contenedor. La red `it3febd_panel` de esa corrida sigue en el nodo (la tarea `attachment` solo se va reiniciando el daemon de Docker).
+  - `itEnv.caddy()` inspecciona el muelle-caddy del test, y `itEnv.proxyStatus(m, want)` es un check de `eventually` sobre el estado.
+  - Tres corridas seguidas pasan (~17 s), y después `docker ps -a`, `docker network ls` y `docker volume ls` con `it3` no muestran nada del test.
 
   **Commit:** `test(ingress): integración del ciclo de vida de muelle-caddy (redes en caliente, aislamiento entre stages, recreación, puerto ocupado, huérfanas)`
 
