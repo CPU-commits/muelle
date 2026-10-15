@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	"github.com/CPU-commits/muelle/src/internal/ingress/ingresstest"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
@@ -21,7 +22,7 @@ func newProxyJob(f *lifecycleFixture) *ProxyJob {
 	return NewProxyJob(f.settings, f.catalog,
 		NewEnsureStageNetwork(nets, testCaddyNames.Container, f.slog), f.ensure,
 		NewRemoveOrphanNetworks(nets, f.catalog, testCaddyNames.Container, "", f.slog),
-		f.syncer, f.state, defCaddyImage, f.slog)
+		f.syncer, f.state, defCaddyImage, time.Millisecond, 4*time.Millisecond, f.slog)
 }
 
 // En desarrollo no hace nada: ni Docker ni la admin API.
@@ -163,5 +164,38 @@ func TestProxyJobKeepsGoing(t *testing.T) {
 	}
 	if n := len(f.caddy.Loads()); n != 1 {
 		t.Fatalf("loads: %d", n)
+	}
+}
+
+// Si el job crea muelle-caddy (el primer arranque), espera a que su admin
+// API responda antes de dar el Sync por fallido: Caddy tarda un momento en
+// abrir el socket.
+func TestProxyJobWaitsForNewCaddy(t *testing.T) {
+	f := newLifecycleFixture(t)
+	f.enableCaddy(t, nil)
+	f.docker.SetImagePresent(defCaddyImage)
+	f.caddy.SetDown(true)
+	done := make(chan error, 1)
+	go func() { done <- newProxyJob(f).Run(context.Background()) }()
+	eventually(t, 2*time.Second, "crea muelle-caddy", func() bool { return f.count("StartContainer") == 1 })
+	time.Sleep(20 * time.Millisecond)
+	f.caddy.SetDown(false)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run no volvió")
+	}
+	if !f.state.Synced() {
+		t.Fatal("debería quedar synced")
+	}
+
+	// Sin recrear, un Caddy que no responde es un error enseguida (lo
+	// reintenta el Retrier).
+	f.caddy.SetDown(true)
+	if err := newProxyJob(f).Run(context.Background()); !errors.Is(err, service.ErrCaddyUnreachable) {
+		t.Fatalf("Run: %v", err)
 	}
 }

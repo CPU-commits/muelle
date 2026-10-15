@@ -2,17 +2,10 @@ package usecases
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync"
 	"time"
-
-	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
 )
-
-// recreateSyncWindow es cuánto se reintenta mandarle la configuración al
-// muelle-caddy recién creado mientras su admin API todavía no responde.
-const recreateSyncWindow = 30 * time.Second
 
 // Recreator recrea muelle-caddy cuando cambian los puertos o la imagen
 // (contrato §3.5): delay después del último Schedule (2 s), y nunca mientras
@@ -109,25 +102,17 @@ func (r *Recreator) Run(ctx context.Context) {
 	}
 }
 
-// recreate asegura muelle-caddy y le manda la configuración. Si lo creó de
-// nuevo, Caddy tarda un momento en abrir la admin API: reintenta el Sync con
-// backoff hasta recreateSyncWindow, así GET /proxy pasa de recreating a
-// synced sin un out_of_sync de paso. Los errores ya quedaron en el estado y
-// en el log.
+// recreate asegura muelle-caddy y le manda la configuración; si lo creó de
+// nuevo, espera a que su admin API responda (syncStarting). Los errores ya
+// quedaron en el estado y en el log.
 func (r *Recreator) recreate(ctx context.Context) {
 	recreated, err := r.caddy.Execute(ctx)
 	if err != nil {
 		r.log.Warn("ingress: la recreación de muelle-caddy falló", "error", err)
 	}
-	deadline := time.Now().Add(recreateSyncWindow)
-	for d := time.Duration(0); ; {
-		err := r.syncer.Sync(ctx, false)
-		if err == nil || !recreated || !errors.Is(err, service.ErrCaddyUnreachable) || time.Now().After(deadline) {
-			return
-		}
-		d = nextBackoff(d, r.lo, r.hi)
-		if !sleep(ctx, d) {
-			return
-		}
+	if recreated {
+		_ = syncStarting(ctx, r.syncer, r.lo, r.hi)
+		return
 	}
+	_ = r.syncer.Sync(ctx, false)
 }

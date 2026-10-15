@@ -88,6 +88,30 @@ func (s *Syncer) Sync(ctx context.Context, force bool) error {
 	return nil
 }
 
+// startingWindow es cuánto se reintenta mandarle la configuración a un
+// muelle-caddy recién creado mientras su admin API todavía no responde.
+const startingWindow = 30 * time.Second
+
+// syncStarting es Sync para un muelle-caddy recién creado: Caddy tarda un
+// momento en abrir el socket de la admin API, así que mientras Sync dé
+// ErrCaddyUnreachable reintenta con backoff (lo, 2·lo… hasta hi), hasta
+// startingWindow. Así el primer arranque, y la recreación (que mientras
+// tanto dice recreating), quedan synced sin un out_of_sync de paso.
+// Devuelve el último error.
+func syncStarting(ctx context.Context, s *Syncer, lo, hi time.Duration) error {
+	deadline := time.Now().Add(startingWindow)
+	for d := time.Duration(0); ; {
+		err := s.Sync(ctx, false)
+		if err == nil || !errors.Is(err, service.ErrCaddyUnreachable) || time.Now().After(deadline) {
+			return err
+		}
+		d = nextBackoff(d, lo, hi)
+		if !sleep(ctx, d) {
+			return err
+		}
+	}
+}
+
 // build lee lo demás de la base y arma la configuración.
 func (s *Syncer) build(ctx context.Context, p shared.ProxySettings) (service.ProxyConfig, error) {
 	dns, err := s.settings.PanelDNS(ctx)

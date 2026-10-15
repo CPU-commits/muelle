@@ -103,7 +103,8 @@ func New(d Deps) *Module {
 	m.removeNetwork = usecases.NewRemoveStageNetwork(nets, o.CaddyContainer, d.Log)
 	m.caddy = usecases.NewEnsureCaddy(runtime, settings, catalog, registries, m.state, defImage, d.Log)
 	m.orphans = usecases.NewRemoveOrphanNetworks(nets, catalog, o.CaddyContainer, o.NetworkPrefix, d.Log)
-	m.proxyJob = usecases.NewProxyJob(settings, catalog, m.ensureNetwork, m.caddy, m.orphans, m.syncer, m.state, defImage, d.Log)
+	m.proxyJob = usecases.NewProxyJob(settings, catalog, m.ensureNetwork, m.caddy, m.orphans, m.syncer, m.state, defImage,
+		o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	m.recreator = usecases.NewRecreator(m.caddy, m.syncer, m.state, o.Timing.RecreateDelay, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	m.jobs = incron.Jobs(m.proxyJob.Run)
 	m.httpUC = inhttp.UseCases{ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage)}

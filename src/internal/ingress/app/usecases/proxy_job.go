@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/ingress/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
@@ -22,15 +23,18 @@ type ProxyJob struct {
 	syncer   *Syncer
 	state    *ProxyState
 	defImage string
+	lo, hi   time.Duration
 	log      *slog.Logger
 }
 
 // NewProxyJob recibe la imagen de Caddy de esta versión (naming.CaddyImageFor),
-// que decide si el proxy está habilitado.
+// que decide si el proxy está habilitado, y el backoff con que espera a un
+// muelle-caddy recién creado (Timing.RetryMin y RetryMax).
 func NewProxyJob(settings service.Settings, catalog service.Catalog, networks *EnsureStageNetwork, caddy *EnsureCaddy,
-	orphans *RemoveOrphanNetworks, syncer *Syncer, state *ProxyState, defImage string, log *slog.Logger) *ProxyJob {
+	orphans *RemoveOrphanNetworks, syncer *Syncer, state *ProxyState, defImage string, retryMin, retryMax time.Duration,
+	log *slog.Logger) *ProxyJob {
 	return &ProxyJob{settings: settings, catalog: catalog, networks: networks, caddy: caddy, orphans: orphans,
-		syncer: syncer, state: state, defImage: defImage, log: log}
+		syncer: syncer, state: state, defImage: defImage, lo: retryMin, hi: retryMax, log: log}
 }
 
 // Run, en el orden de D12 del plan de la Fase 3:
@@ -39,7 +43,8 @@ func NewProxyJob(settings service.Settings, catalog service.Catalog, networks *E
 //  3. asegura muelle-caddy, salvo que haya una recreación agendada o frenada
 //     por un hook: esa la hace el Recreator, después de que el hook vuelve;
 //  4. borra las redes de stage huérfanas;
-//  5. le manda la configuración a Caddy.
+//  5. le manda la configuración a Caddy; si recién lo creó, espera a que su
+//     admin API responda (syncStarting).
 //
 // Un paso que falla no corta los que siguen: los errores se juntan
 // (errors.Join), y cada uno ya quedó en el log y, si es de Caddy, en el
@@ -57,16 +62,22 @@ func (j *ProxyJob) Run(ctx context.Context) error {
 	if err := j.ensureNetworks(ctx); err != nil {
 		errs = append(errs, err)
 	}
+	recreated := false
 	if j.state.Recreating() {
 		j.log.Debug("ingress: hay una recreación de muelle-caddy pendiente; el job no lo toca")
-	} else if _, err := j.caddy.Execute(ctx); err != nil {
+	} else if recreated, err = j.caddy.Execute(ctx); err != nil {
 		errs = append(errs, err)
 	}
 	if err := j.orphans.Execute(ctx); err != nil {
 		j.log.Warn("ingress: borrando las redes de stage huérfanas", "error", err)
 		errs = append(errs, err)
 	}
-	if err := j.syncer.Sync(ctx, false); err != nil {
+	if recreated {
+		err = syncStarting(ctx, j.syncer, j.lo, j.hi)
+	} else {
+		err = j.syncer.Sync(ctx, false)
+	}
+	if err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)

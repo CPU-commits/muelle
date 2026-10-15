@@ -1342,7 +1342,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   Hecho así, con lo que sumó la implementación:
   - `ProxyState.Generation()` es la generación que toma el `Recreator` antes de recrear (sin agendar otra, como haría `BeginRecreate`).
-  - **El `Recreator` espera al Caddy nuevo:** si `EnsureCaddy` lo creó de nuevo, el `Sync` que sigue reintenta con el backoff de `Timing` (`NewRecreator(…, delay, retryMin, retryMax, log)`) mientras dé `ErrCaddyUnreachable`, hasta 30 s. Un Caddy recién creado tarda un momento en abrir la admin API: sin eso, `GET /proxy` pasaba de `recreating` a `out_of_sync` ("se reintenta solo") y recién después a `synced`. Lo prueba `TestRecreatorWaitsForCaddy`.
+  - **El `Recreator` espera al Caddy nuevo:** si `EnsureCaddy` lo creó de nuevo, el `Sync` que sigue reintenta con el backoff de `Timing` (`NewRecreator(…, delay, retryMin, retryMax, log)`) mientras dé `ErrCaddyUnreachable`, hasta 30 s (`syncStarting`, en `sync.go`; el job `"proxy"` lo usa igual, ver el Step 4). Un Caddy recién creado tarda un momento en abrir la admin API: sin eso, `GET /proxy` pasaba de `recreating` a `out_of_sync` ("se reintenta solo") y recién después a `synced`. Lo prueba `TestRecreatorWaitsForCaddy`.
   - **El mensaje de la imagen que no baja** termina en "muelle-caddy sigue con la anterior" solo si el contenedor anterior corre (`runtime.Status`); si no (el primer arranque), "muelle-caddy no está corriendo" (`TestEnsureCaddyPullFailsFirstTime`). La causa es "el registry no dio acceso" (`ErrDenied`), "el registry no la encontró" (`ErrNotFound`) o el error de Docker, cortado a 300 caracteres.
   - El error de `Execute` y el log pasan por `hideSecret` con la contraseña del registry (Docker no la repite, pero por las dudas); un error leyendo la base no cambia el estado.
   - `RemoveOrphanNetworks` borra la huérfana la segunda pasada **seguida**: una que dejó de estar huérfana vuelve a contar desde cero (`TestOrphanNetworksConsecutive`), y una en uso queda anotada para la pasada siguiente (`TestOrphanNetworksInUse`).
@@ -1367,7 +1367,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `proxy_job.go`: `ProxyJob.Run(ctx) error`, en el orden de D12 (sin la parte de Cloudflare, que llega en T5). Junta los errores con `errors.Join`; cada uno ya quedó en el log.
   - `infra/in/cron/jobs.go`: `func Jobs(proxy func(ctx) error) []cron.Job`. T4 le suma `"certificados"`.
 
-  Hecho así: si la red de un stage falla con Docker caído, no prueba las demás (fallarían todas). `TestProxyJobRemovesOrphans` y `TestProxyJobKeepsGoing` (una red ajena con el nombre de un stage no corta el job: muelle-caddy y el `Sync` van igual) se sumaron a la lista.
+  Hecho así: si la red de un stage falla con Docker caído, no prueba las demás (fallarían todas). **Si el job creó muelle-caddy** (el primer arranque, o uno detenido), el `Sync` espera a que la admin API responda (`syncStarting`, con `NewProxyJob(…, defImage, retryMin, retryMax, log)`): si no, el primer `job()` de la integración (Step 7) fallaba con `ErrCaddyUnreachable` en vez de dar `nil`, y el primer arranque pasaba por `out_of_sync` hasta que el `Retrier` reintentaba (`TestProxyJobWaitsForNewCaddy`). `TestProxyJobRemovesOrphans` y `TestProxyJobKeepsGoing` (una red ajena con el nombre de un stage no corta el job: muelle-caddy y el `Sync` van igual) se sumaron a la lista.
 
   **Commit:** `feat(ingress): el job proxy asegura redes y muelle-caddy, borra huérfanas y reenvía la configuración`
 
