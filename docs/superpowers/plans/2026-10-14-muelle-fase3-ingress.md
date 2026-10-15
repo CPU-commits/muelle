@@ -1909,7 +1909,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 - Create: `src/shared/infra/container/ingress_test.go`
 - Modify: `README.md`, el contrato (§1.1, §1.2, §3 y §7 de ingress) y el diseño (§3.1, §3.2, §8 y §9), si hace falta
 
-- [ ] **Step 1: `CheckCloudflareToken`.**
+- [x] **Step 1: `CheckCloudflareToken`.**
 
   **Tests primero** (`usecases/token_test.go`, con `cftest`):
   - Un token válido con 120 zonas (3 páginas) da `*zones == 120`.
