@@ -146,10 +146,42 @@ Decididas en este plan (con la razón). Si una tarea encuentra que una no sirve,
 
 ## Preguntas para el dueño
 
+> **Respondida:** la 1 es NO, las imágenes son privadas. Ver "Cambio de requisito del dueño (2026-10-15)" justo abajo.
+
 Son de política, no técnicas. El plan sigue la recomendación; si el dueño decide otra cosa, cambia solo el README (T5) y, en la 2, el workflow.
 
 1. **¿Los paquetes de GHCR (`muelle` y `muelle-caddy`) son públicos?** Recomendación: sí. `docker run ghcr.io/cpu-commits/muelle install` no hace login, e ingress baja `muelle-caddy` sin credenciales salvo que haya un registry configurado para `ghcr.io` (contrato §3.4). GHCR crea los paquetes privados en el primer push, así que el README dice cómo cambiarlos a públicos una vez.
 2. **¿El tag mayor de la action (`v0`) se mueve a mano o lo mueve el workflow?** Recomendación: a mano (`git tag -f v0 vX.Y.Z && git push -f origin v0`, en el README). Moverlo desde el workflow le daría `contents: write` a un job que corre en cada tag; a mano, el dueño decide cuándo un release llega a los repos que usan `@v0`.
+
+### Cambio de requisito del dueño (2026-10-15): las imágenes son PRIVADAS
+
+El dueño decidió que `ghcr.io/cpu-commits/muelle` y `ghcr.io/cpu-commits/muelle-caddy` sean **siempre privadas**. Esto reemplaza la pregunta 1 de arriba y todo lo que en este plan diga "públicas", "anónimo" o "hacer públicos los paquetes". Quién hace qué:
+
+- **Install (T4) baja las imágenes con credenciales.** Las toma de una de dos fuentes, en este orden:
+  1. `--registry-user <usuario>` y `--registry-password-stdin`. La contraseña o el token se leen de stdin; nunca van en un flag ni en una variable de entorno. No se pueden juntar con `--cloudflare-token -`, que también lee stdin: si vienen los dos, error claro.
+  2. El `config.json` de Docker del host, montado en solo lectura con `-v ~/.docker/config.json:/root/.docker/config.json:ro`. Se lee `auths[<host>].auth` (base64 de `usuario:contraseña`) del host de la imagen (`reference.Domain`). Si para ese host hay `credsStore` o `credHelpers`, el helper no se puede correr dentro del contenedor: error que pide `--registry-user`/`--registry-password-stdin`.
+- **Sin credenciales, o con un `denied`/`unauthorized` al bajar,** el error explica exactamente qué hacer: "las imágenes de muelle son privadas: haz `docker login ghcr.io` con un token de GitHub con permiso `read:packages` y monta `~/.docker/config.json` (o usa `--registry-user` y `--registry-password-stdin`)".
+- **Paso 5:**
+  - `PullImage(ref, cred)` de la imagen de muelle **y** de la de Caddy (`--caddy-image`, o `naming.CaddyImageFor(version)`), las dos con la credencial de su host. Así ingress encuentra muelle-caddy en el nodo en el primer arranque, sin credenciales.
+  - Una imagen ya presente (`InspectImage` ok) no se baja.
+- **El stack:** `DeployStack` recibe la credencial en `StackDeploy.Registries`, el equivalente de `--with-registry-auth`, para que Swarm pueda bajar muelle cuando recrea la tarea.
+- **Que muelle la recuerde:**
+  - Install crea el secreto `muelle_init_registry` (con el prefijo en los tests), con el JSON `{"host":"ghcr.io","username":"…","password":"…"}`.
+  - El stack lo monta y agrega `MUELLE_INIT_REGISTRY_FILE=/run/secrets/muelle_init_registry`.
+  - En el primer arranque, deploy (Fase 2, T3) lo guarda como un registry si no hay uno para ese host. Con eso, ingress baja la Caddy de la versión siguiente al actualizar, y las apps pueden usar imágenes de `ghcr.io`.
+  - El nombre va como constante en un archivo nuevo de `naming` (p. ej. `install_registry.go`).
+  - Se trata igual que el secreto del token de Cloudflare: entra en la lista de deshacer del paso 8, `RemoveSecret` del que quedó antes de crearlo, y lo maneja `--reinstall`. Además, el README explica cómo quitarlo del servicio después del primer arranque, igual que el del token.
+- **Contrato §5.2 y §5.3:** agrega `MUELLE_INIT_REGISTRY_FILE`, el secreto `muelle_init_registry` y el formato del JSON, y anótalo en `contract_changes`.
+- **Tests:**
+  - unitarios con el fake: las credenciales de los flags y del `config.json` (con `credsStore` → error), el pull de las dos imágenes con su credencial, `StackDeploy.Registries`, el secreto y su deshacer, y que la contraseña no aparece en ninguna salida ni error;
+  - integración: un `registry:2` con `htpasswd` en `127.0.0.1:22500`, con nombre `it5-registry` (Docker acepta 127.0.0.0/8 sin TLS). Se sube `it5-muelle:test` ahí. Install con `--image 127.0.0.1:22500/it5-muelle:test` y credenciales funciona; sin credenciales falla con el mensaje de arriba. Hay que limpiar el registry y sus imágenes.
+- **README (T4 y T5):**
+  - **"Instalar":** primero `docker login ghcr.io` en el servidor, con un token de GitHub (classic) con solo `read:packages`. Después el `docker run` con el `config.json` montado, o con `--registry-user` y `--registry-password-stdin`.
+  - **"Actualizar":** `docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<v> muelle_muelle`. Muelle baja la Caddy nueva con el registry `ghcr.io` que guardó install.
+  - **Si el token vence:** actualízalo en Ajustes → Registries y vuelve a hacer `docker login` en el servidor.
+  - **"Publicar una versión":** los paquetes quedan privados; no hay que cambiar nada en GHCR.
+  - **Si el repo de muelle es privado,** los otros repos solo pueden usar la action si en el repo de muelle se habilita Settings → Actions → General → Access ("Accessible from repositories owned by the user").
+- **Release (T2):** sigue igual. `GITHUB_TOKEN` con `packages: write`, y el label `org.opencontainers.image.source` liga el paquete al repo. Ningún paso vuelve público un paquete.
 
 ## Mapa de archivos
 
@@ -814,6 +846,8 @@ El subcomando que vacía `panel_allowed_cidrs` desde dentro del contenedor y rei
 
 ### Task T4: `muelle install`
 
+> **Antes de empezar:** lee "Cambio de requisito del dueño (2026-10-15): las imágenes son PRIVADAS" (antes del Mapa de archivos). Es parte de esta tarea y cambia los pasos 5 y 8, los flags, el compose del stack, los tests y el README.
+
 El instalador de §5.4 del contrato: valida, revisa Docker y una instalación anterior, detecta la IP pública, baja la imagen, prueba los puertos, inicia el Swarm si hace falta, crea la red, los secretos y el stack, imprime la clave y espera el link de setup.
 
 **Lee antes, entero:** contrato §5.1–§5.4 (orden, instalación anterior, puertos, red, clave, link de setup, salida); diseño §3.3, §12 y §16. `main.go` (`logSetupURL`, y la línea de "muelle escuchando"). `dockertest/fake.go` (`OnDeployStack`, `PutStackService`, `SetTasks`, `AppendTaskLogs`, `BusyHostPort`, `SetInfo`, `SetImagePresent`, `CreateContainer`, `FailNext`). `FailNext` falla la **próxima** llamada a un método, sea cual sea su argumento: para fallar una llamada en particular (el segundo `CreateSecret`), el test envuelve el fake en un tipo propio de `install_test.go` que embebe `*dockertest.Fake` y reemplaza ese método (abajo).
@@ -1079,6 +1113,8 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
 ---
 
 ### Task T5: GitHub Action, CI y documentación final
+
+> **Antes de empezar:** lee "Cambio de requisito del dueño (2026-10-15): las imágenes son PRIVADAS". En "Publicar una versión" ya no se hacen públicos los paquetes, y el README de la action dice cómo usarla si el repo de muelle es privado.
 
 La composite action que reemplaza `sync-env` y `deploy` de los workflows actuales (diseño §14), sus tests, `shellcheck` en CI y el README de la action y de cómo publicar una versión.
 
