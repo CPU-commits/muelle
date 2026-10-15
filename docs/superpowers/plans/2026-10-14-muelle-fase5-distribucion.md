@@ -977,9 +977,9 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   func serviceEnv(in stackInput) map[string]string
   ```
 
-- [ ] **Step 5: La IP pública, tests primero** (`publicip_test.go`, con `httptest`):
+- [x] **Step 5: La IP pública, tests primero** (`publicip_test.go`, con `httptest`):
   - `TestDetectPublicIP`: un cuerpo `fl=1\nip=203.0.113.24\nts=1\n` → `203.0.113.24`.
-  - `TestDetectPublicIPRejects`: `ip=2001:db8::1` (IPv6) → error; sin línea `ip=` → error; un `500` → error; un servidor que no responde dentro del plazo (el test pasa un `ctx` de 100 ms) → error.
+  - `TestDetectPublicIPRejects`: `ip=2001:db8::1` (IPv6) → error; sin línea `ip=` → error; una IPv4 no canónica o basura → error; la línea `ip=` después de los 4 KiB → error (solo se leen las líneas enteras dentro del tope: una `ip=` cortada podría parecer otra IP); un `500` → error; un servidor que no responde dentro del plazo (el test pasa un `ctx` de 100 ms) → error.
   ```go
   const traceURL = "https://1.1.1.1/cdn-cgi/trace"
 
