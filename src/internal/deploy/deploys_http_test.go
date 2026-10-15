@@ -79,6 +79,8 @@ func TestCreateDeployHTTP(t *testing.T) {
 		{apiPath, `{"x":1}`, 400, "invalid_json", `JSON inválido: el campo "x" no existe`},
 		{apiPath, `[]`, 400, "invalid_json", ""},
 		{apiPath, `{"image":`, 400, "invalid_json", ""},
+		{apiPath, strings.Repeat(" ", 1<<20+1), 400, "invalid_json", "el cuerpo supera 1 MiB"},
+		{apiPath, `{"image":"` + strings.Repeat("a", 1<<20) + `"}`, 400, "invalid_json", "el cuerpo supera 1 MiB"},
 		{apiPath, `{"image":"ghcr.io/x/api:2","images":{}}`, 422, "invalid", "image: manda image o images, no los dos"},
 		{infraPath, `{"image":"ghcr.io/x/web:2"}`, 422, "invalid", "image: una app compose recibe images, por servicio"},
 		{apiPath, `{"image":"-mala"}`, 422, "invalid", "image: no es una referencia de imagen válida"},
@@ -278,7 +280,7 @@ func TestRollbackHTTP(t *testing.T) {
 			t.Fatalf("rollback: %s", w.Body)
 		}
 	}
-	for _, body := range []string{`{"x":1}`, `[]`, `null`} {
+	for _, body := range []string{`{"x":1}`, `[]`, `null`, strings.Repeat("\n", 1<<20+1)} {
 		expectError(t, h.c.Do("POST", apiPath+"/rollback", body, session()), 400, "invalid_json", "")
 	}
 }

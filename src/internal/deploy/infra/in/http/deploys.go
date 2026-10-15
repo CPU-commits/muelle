@@ -60,7 +60,8 @@ func readOptionalBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 		utils.WriteError(w, http.StatusBadRequest, "invalid_json", "JSON inválido: no se pudo leer el cuerpo")
 		return false
 	}
-	if len(bytes.Trim(b, " \t\r\n")) == 0 {
+	// Vacío o solo espacios, dentro del tope: sin cuerpo.
+	if len(b) <= utils.MaxBodyBytes && len(bytes.Trim(b, " \t\r\n")) == 0 {
 		return true
 	}
 	r.Body = io.NopCloser(bytes.NewReader(b))
