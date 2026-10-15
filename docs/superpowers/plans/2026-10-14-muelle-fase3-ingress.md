@@ -1886,7 +1886,11 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `test(ingress): integración de un dominio por la API, su ruta y la verificación del certificado`
 
-- [ ] **Step 9: Cierre de T4.** Las verificaciones de "Convenciones" pasan, y la integración también.
+- [x] **Step 9: Cierre de T4.** Las verificaciones de "Convenciones" pasan, y la integración también.
+  - Hecho: gofmt, `go vet ./...` (y con `-tags integration` en ingress), `go test -race -count=1 ./...` (53 paquetes), `go mod tidy -diff` y `go test -tags integration -race -count=1 -run Integration ./src/internal/ingress/...` (`TestIntegrationCaddyAcceptsConfig` ~9 s, `TestIntegrationCaddyLifecycle` ~24 s y `TestIntegrationDomainsAndCertificates` ~8 s). Después no queda nada con `it3` salvo la red `it3febd_panel` de T3 (la tarea `attachment` de Docker, D11).
+  - Para T5:
+    - `UpdateManagedRecords` puede usar `dnsOps.syncAAAA` (crea, actualiza o borra el `AAAA` propio, y no crea uno si hay un `AAAA` ajeno), `dnsOps.dropManaged` (D29) y `msgRecordGone`.
+    - El contrato §3.1 ("Cuándo no se sabe") puede precisar que un handshake que no termina en 5 s también es "no se sabe" (`TLSProbe`, Step 2), no un certificado inválido.
 
 ---
 
