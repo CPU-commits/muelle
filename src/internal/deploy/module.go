@@ -42,12 +42,21 @@ type Deps struct {
 	Env service.EnvResolver
 	// Ingress es la red del stage y las rutas de Caddy (ingress.Module).
 	Ingress service.Ingress
+	// InitRegistry es el registry inicial de install
+	// (MUELLE_INIT_REGISTRY_FILE). Opcional: nil es "no hay nada que sembrar".
+	InitRegistry *InitRegistry
 }
 
+// InitRegistry es la credencial de un registry que install le pasa a muelle
+// (contrato §2.10). Se imprime sin la contraseña.
+type InitRegistry = dto.InitRegistry
+
 type Module struct {
-	removeApp *usecases.RemoveApp
-	uc        dephttp.UseCases
-	log       *slog.Logger
+	removeApp    *usecases.RemoveApp
+	seed         *usecases.SeedInitRegistry
+	initRegistry *InitRegistry
+	uc           dephttp.UseCases
+	log          *slog.Logger
 }
 
 // New arma el módulo. DB, Cipher, Audit, Docker, Env e Ingress son
@@ -84,7 +93,9 @@ func New(d Deps) *Module {
 		Audit:   d.Audit,
 	}
 	return &Module{
-		removeApp: usecases.NewRemoveApp(outservice.NewDockerStacks(d.Docker)),
+		removeApp:    usecases.NewRemoveApp(outservice.NewDockerStacks(d.Docker)),
+		seed:         usecases.NewSeedInitRegistry(d.DB, outservice.NewDeploySettings(d.DB), regs, d.Clock, d.Audit),
+		initRegistry: d.InitRegistry,
 		uc: dephttp.UseCases{
 			ListRegistries: usecases.NewListRegistries(regs),
 			CreateRegistry: usecases.NewCreateRegistry(d.DB, regs, d.Clock, d.Audit),
@@ -113,6 +124,16 @@ func (noQueue) Accepting(appID int64) bool { return true }
 // …/apps/{a}/rollback (AccessToken) y /api/v1/registries (AccessSession).
 // Faltan …/log/stream, GET …/apps/{a}/status y …/logs (AccessToken).
 func (m *Module) RegisterRoutes(k *utils.Kit) { dephttp.Register(k, m.uc) }
+
+// SeedInitRegistry guarda Deps.InitRegistry como un registry solo en el
+// primer arranque de la base (contrato §1.2 y §2.10), con la marca
+// init_registry_applied, que guarda en ese arranque haya o no registry. El
+// contenedor lo llama en cada arranque, justo después de
+// admin.ApplyStartupSettings (y por eso de VerifyMasterKey: nunca cifra con
+// una clave que no se verificó). Un registry que el admin borró no vuelve.
+func (m *Module) SeedInitRegistry(ctx context.Context) error {
+	return m.seed.Execute(ctx, m.initRegistry)
+}
 
 // Jobs son las tareas periódicas. Fase 2: ninguna obligatoria (la retención de
 // los últimos 20 deploys por app se hace al cerrar cada deploy).

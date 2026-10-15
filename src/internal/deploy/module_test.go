@@ -106,3 +106,34 @@ func TestModuleRoutesAndStubs(t *testing.T) {
 	}
 	m.Run(context.Background()) // el esqueleto vuelve enseguida
 }
+
+// SeedInitRegistry guarda Deps.InitRegistry en el primer arranque, y nada en
+// los siguientes.
+func TestModuleSeedInitRegistry(t *testing.T) {
+	db := sqlitetest.New(t)
+	c, err := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	newModule := func(r *InitRegistry) *Module {
+		return New(Deps{DB: db, Cipher: c, Audit: sqlite.NewAuditRecorder(db, clock.System{}, log), Log: log,
+			Docker: dockertest.New(), Env: fakeEnv{}, Ingress: fakeIngress{}, InitRegistry: r})
+	}
+	ctx := context.Background()
+	if err := newModule(&InitRegistry{Host: "ghcr.io", Username: "bot", Password: "s3cr3t-pass"}).SeedInitRegistry(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := newModule(&InitRegistry{Host: "docker.io", Username: "otro", Password: "s3cr3t-pass"}).SeedInitRegistry(ctx); err != nil {
+		t.Fatal(err)
+	}
+	m := newModule(nil)
+	if err := m.SeedInitRegistry(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cl := httptestutil.New(t, httptestutil.FakeAuth{Sessions: map[string]entity.Principal{"s": {UserID: 1, Username: "felipe"}}}, m.RegisterRoutes)
+	w := cl.Do("GET", "/api/v1/registries", nil, httptestutil.WithSession("s"))
+	if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte(`"host":"ghcr.io"`)) || bytes.Contains(w.Body.Bytes(), []byte("docker.io")) {
+		t.Fatalf("GET /registries: %d %s", w.Code, w.Body)
+	}
+}

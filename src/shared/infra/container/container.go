@@ -157,9 +157,13 @@ func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docke
 		DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log, Docker: engine, Version: s.Version,
 	})
 	c.Secrets = secrets.New(secrets.Deps{DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log})
+	var initRegistry *deploy.InitRegistry
+	if r := s.Init.Registry; r != nil {
+		initRegistry = &deploy.InitRegistry{Host: r.Host, Username: r.Username, Password: r.Password}
+	}
 	c.Deploy = deploy.New(deploy.Deps{
 		DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log, Docker: engine,
-		Env: c.Secrets, Ingress: c.Ingress,
+		Env: c.Secrets, Ingress: c.Ingress, InitRegistry: initRegistry,
 	})
 	c.Catalog = catalog.New(catalog.Deps{
 		DB: db, Clock: clk, Audit: rec, Log: log, Networks: c.Ingress, Runtime: c.Deploy,
@@ -180,6 +184,11 @@ func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docke
 		CloudflareToken: i.CloudflareToken, CaddyImage: i.CaddyImage,
 	}); err != nil {
 		return nil, fmt.Errorf("container: guardando los ajustes de arranque: %w", err)
+	}
+	// Justo después de ApplyStartupSettings, y por eso después de
+	// VerifyMasterKey: nunca se cifra con una clave que no se verificó.
+	if err := c.Deploy.SeedInitRegistry(ctx); err != nil {
+		return nil, fmt.Errorf("container: guardando el registry inicial: %w", err)
 	}
 
 	c.Server = httpserver.NewServer(httpserver.Config{

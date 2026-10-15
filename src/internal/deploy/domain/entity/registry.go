@@ -25,6 +25,11 @@ type Registry struct {
 	UpdatedAt time.Time
 }
 
+// SettingInitRegistryApplied es la marca de que el registry inicial de install
+// ya se aplicó (clave de la tabla settings que solo usa deploy, contrato §1.1
+// y §2.10): se guarda en el primer arranque de la base, haya o no registry.
+const SettingInitRegistryApplied = "init_registry_applied"
+
 // PasswordAAD liga la contraseña cifrada a su fila (contrato §1.3, la lista
 // de shared/infra/out/crypto): registries:password:<id>.
 func PasswordAAD(id int64) string { return "registries:password:" + strconv.FormatInt(id, 10) }
