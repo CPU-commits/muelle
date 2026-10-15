@@ -54,7 +54,7 @@
 |---|---|
 | `docker` | `ServiceRestarter`, `(*Client).ForceUpdateService` |
 | `dockertest` | `(*Fake).ForceUpdateService`, `(*Fake).PutNetwork` |
-| `naming` | `LabelSwarmService`, `InstallProbeContainer`, `InstallNames`, `InstallNamesFor` |
+| `naming` | `LabelSwarmService`, `InstallProbeContainer`, `InstallNames`, `InstallNamesFor`, `InitRegistrySecret` |
 | `cmd/http` | `Config.Panel`, `isAPIPath` (y el paquete nuevo `cmd/http/panel`) |
 | `main` | `logListening` |
 
@@ -63,7 +63,7 @@
   ```bash
   cd /home/felipe/Escritorio/dev/muelle/.claude/worktrees/fase-5-dist
   for b in fase-2-deploy fase-3-ingress; do
-    git diff fase-23-base..$b -- src main.go | grep -nE '^\+.*\b(ServiceRestarter|ForceUpdateService|PutNetwork|PutContainerDist|LabelSwarmService|InstallProbeContainer|InstallNames|InstallNamesFor|isAPIPath|logListening)\b'
+    git diff fase-23-base..$b -- src main.go | grep -nE '^\+.*\b(ServiceRestarter|ForceUpdateService|PutNetwork|PutContainerDist|LabelSwarmService|InstallProbeContainer|InstallNames|InstallNamesFor|InitRegistrySecret|isAPIPath|logListening)\b'
   done                                                      # nada
   git grep -nE 'func \(f \*Fake\) PutContainer\(' -- src   # nada: PutContainer es de la Fase 2
   ```
@@ -231,6 +231,7 @@ src/
 └── shared/
     ├── domain/naming/
     │   ├── install.go                         (T3, T4) LabelSwarmService; InstallNames
+    │   ├── install_registry.go                (T4) InitRegistrySecret
     │   └── install_test.go                    (T4)
     └── infra/
         ├── container/
@@ -877,16 +878,16 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
 **Lee antes, entero:** contrato §5.1–§5.4 (orden, instalación anterior, puertos, red, clave, link de setup, salida); diseño §3.3, §12 y §16. `main.go` (`logSetupURL`, y la línea de "muelle escuchando"). `dockertest/fake.go` (`OnDeployStack`, `PutStackService`, `SetTasks`, `AppendTaskLogs`, `BusyHostPort`, `SetInfo`, `SetImagePresent`, `CreateContainer`, `FailNext`). `FailNext` falla la **próxima** llamada a un método, sea cual sea su argumento: para fallar una llamada en particular (el segundo `CreateSecret`), el test envuelve el fake en un tipo propio de `install_test.go` que embebe `*dockertest.Fake` y reemplaza ese método (abajo).
 
 **Files:**
-- Modify: `src/shared/domain/naming/install.go`; Create: `src/shared/domain/naming/install_test.go`
+- Modify: `src/shared/domain/naming/install.go`; Create: `src/shared/domain/naming/install_registry.go`, `install_test.go`
 - Modify: `src/shared/infra/out/docker/dockertest/fake_dist.go`, `fake_dist_test.go` (`PutNetwork`)
 - Create: `src/cmd/install/options.go`, `install.go`, `stack.go`, `setup.go`, `publicip.go`
 - Create: `src/cmd/install/options_test.go`, `install_test.go`, `stack_test.go`, `setup_test.go`, `publicip_test.go`, `testdata/stack.golden.json`, `testdata/stack_token.golden.json`
 - Create: `src/cmd/install/integration_test.go`
 - Modify: `main.go`, `main_test.go`, `README.md`
 
-- [ ] **Step 1: Los nombres** (`naming/install.go`), test primero (`install_test.go`):
-  - `TestInstallNamesForMuelle`: `InstallNamesFor(MuelleStack)` es exactamente `{MuelleStack, MuelleService, PanelNetwork, DataVolume, CaddyAdminVolume, MasterKeySecret, InitCloudflareTokenSecret, InstallProbeContainer, CaddyContainer}`.
-  - `TestInstallNamesForPrefix`: con `it5abc` → `it5abc`, `it5abc_muelle`, `it5abc_panel`, `it5abc_data`, `it5abc_caddy_admin`, `it5abc_master_key`, `it5abc_init_cloudflare_token`, `it5abc-install-probe`, `it5abc-caddy`.
+- [x] **Step 1: Los nombres** (`naming/install.go`, y `InitRegistrySecret = "muelle_init_registry"` en el archivo nuevo `naming/install_registry.go`), test primero (`install_test.go`):
+  - `TestInstallNamesForMuelle`: `InstallNamesFor(MuelleStack)` es exactamente `{MuelleStack, MuelleService, PanelNetwork, DataVolume, CaddyAdminVolume, MasterKeySecret, InitCloudflareTokenSecret, InitRegistrySecret, InstallProbeContainer, CaddyContainer}`.
+  - `TestInstallNamesForPrefix`: con `it5abc` → `it5abc`, `it5abc_muelle`, `it5abc_panel`, `it5abc_data`, `it5abc_caddy_admin`, `it5abc_master_key`, `it5abc_init_cloudflare_token`, `it5abc_init_registry`, `it5abc-install-probe`, `it5abc-caddy`.
   ```go
   // InstallProbeContainer es el contenedor temporal con que install prueba
   // los puertos del proxy (contrato §5.4); install lo borra siempre.
@@ -896,9 +897,9 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   // prefijo "muelle" son los fijos de este paquete; otro prefijo es solo
   // para los tests de integración (--name-prefix, contrato §5.1).
   type InstallNames struct {
-  	Stack, Service, PanelNetwork, DataVolume, CaddyAdminVolume string
-  	MasterKeySecret, InitCloudflareTokenSecret                 string
-  	ProbeContainer, CaddyContainer                             string
+  	Stack, Service, PanelNetwork, DataVolume, CaddyAdminVolume     string
+  	MasterKeySecret, InitCloudflareTokenSecret, InitRegistrySecret string
+  	ProbeContainer, CaddyContainer                                 string
   }
 
   func InstallNamesFor(prefix string) InstallNames
