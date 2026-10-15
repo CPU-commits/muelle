@@ -645,6 +645,16 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
 
   **Commit** (dos): `test(ingress): Cloudflare falso para los tests (cftest)` y `feat(ingress): cliente mínimo de Cloudflare (token, zonas y registros DNS)`
 
+  **Lo que sumó la implementación** (para las tareas que siguen):
+  - `cftest.URL()` termina en `cftest.BasePath` (`/client/v4`), como la API real, y `Calls()` lo quita.
+  - `cftest` imita los conflictos de Cloudflare en `POST` y `PATCH`: un `A`/`AAAA` no convive con un `CNAME` del mismo nombre, ni dos `CNAME` (`400`, código `81053`), y dos registros idénticos tampoco (`81058`). Varios `A` del mismo nombre sí. `PutRecord` no revisa nada.
+  - `SetDown` responde `503` con un cuerpo HTML, como un corte real.
+  - El cliente no sigue redirects (el token nunca va a otro host): un `3xx` es `ErrCloudflareUnavailable`.
+  - Un token vacío o que no es ASCII visible no se manda: es un `*DNSError` (`Status 400`) sin llamar a Cloudflare.
+  - Un mensaje de Cloudflare que trajera el token lo trae como `***`. Un `ctx` vencido también envuelve `context.DeadlineExceeded`.
+  - `Records` también pagina (`per_page=100`), y vuelve a filtrar por el nombre.
+  - Los errores llevan la operación adelante: `Cloudflare, listando las zonas: …`.
+
 - [x] **Step 8: `ingresstest`.** Helpers para los tests de varios paquetes de ingress (`testing.TB`, con `t.Fatal` ante cualquier error):
   ```go
   func Stage(t testing.TB, db *sqlite.DB, project, stage string)               // crea el proyecto y el stage si faltan (sin apps)
@@ -654,7 +664,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
   ```
   **Commit:** junto con el Step 5, o aparte: `test(ingress): ingresstest siembra apps, ajustes y registries`
 
-- [ ] **Step 9: Cierre de T1.** Las verificaciones de "Convenciones" pasan. No hay tests de integración en esta tarea.
+- [x] **Step 9: Cierre de T1.** Las verificaciones de "Convenciones" pasan. No hay tests de integración en esta tarea.
 
 ---
 
