@@ -16,6 +16,8 @@ Etapa de contratos de las Fases 2, 3 y 5:
 - los ajustes del proxy y el DNS en `/settings`;
 - las migraciones reservadas.
 
+Fase 5 (distribución): el panel embebido en el binario (`-tags panel`), las imágenes `ghcr.io/cpu-commits/muelle` y `muelle-caddy` con su workflow de release, `muelle install`, `muelle settings reset-panel-ips` y la GitHub Action de deploy (`action/`).
+
 Todavía no despliega nada.
 
 ## Estructura (spec §4.1)
@@ -23,8 +25,10 @@ Todavía no despliega nada.
 ```
 main.go             subcomandos serve, install, genkey, settings y version
 Dockerfile          la imagen de muelle (ver "Imágenes"); deploy/caddy/, la de muelle-caddy
+action/             la GitHub Action de deploy (ver "GitHub Action")
 src/
 ├── cmd/http/       ServeMux, middleware y errores → HTTP
+├── cmd/http/panel/ sirve el panel embebido (-tags panel; ver "Con el panel")
 ├── cmd/cron/       ejecuta las tareas periódicas de los módulos
 ├── cmd/install/     muelle install (ver "Instalar")
 ├── cmd/settingscli/ muelle settings reset-panel-ips (ver "Recuperar el acceso")
@@ -158,6 +162,60 @@ docker secret rm muelle_init_registry
 docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl muelle_muelle
 ```
 
+## GitHub Action
+
+`action/` es una composite action (diseño §14) que reemplaza los workflows `sync-env` y `deploy`: guarda las variables de la app, crea el deploy y sigue su log hasta el resultado. Es bash con `curl` y `jq`, que vienen en los runners de GitHub. Necesita la API de deploys (Fase 2): contra un muelle sin ella falla con `404 no_route`.
+
+```yaml
+deploy:
+  needs: migrate
+  runs-on: ubuntu-latest
+  environment: ${{ github.ref_name == 'master' && 'production' || 'staging' }}
+  steps:
+    - uses: CPU-commits/muelle/action@v0
+      with:
+        url: ${{ secrets.MUELLE_URL }}
+        token: ${{ secrets.MUELLE_TOKEN }}
+        app: auditfy/${{ github.ref_name == 'master' && 'production' || 'staging' }}/api
+        image: ghcr.io/aumi-app/backend-app:sha-${{ github.sha }}
+        env-json: ${{ toJson(secrets) }}
+        env-exclude: EXPORT_PASSPHRASE
+```
+
+| Entrada | Qué es |
+|---|---|
+| `url` | Obligatoria. El origen del panel, sin ruta: `https://panel.tudominio.cl` (con `:<puerto>` si no es 443). Solo `https://`, salvo `http://localhost` o `http://127.0.0.1`: el token nunca viaja en claro |
+| `token` | Obligatoria. Un token de API (`mk_…`) con alcance a la app (abajo) |
+| `app` | Obligatoria. `proyecto/stage/app` |
+| `image` | La imagen de una app de formulario. Sin `image` ni `images-json`, muelle redespliega las imágenes actuales (contrato §2.2) |
+| `images-json` | Las imágenes de una app compose: un objeto JSON `servicio → imagen`, solo con los servicios que cambian. No va junto con `image` |
+| `env-json` | Las variables de la app: un objeto JSON de strings; en la práctica `${{ toJson(secrets) }}` |
+| `env-exclude` | Claves de `env-json` que no se mandan, separadas por coma. Siempre se excluyen `GITHUB_TOKEN`, `MUELLE_URL` y `MUELLE_TOKEN`, sin distinguir mayúsculas (`toJson(secrets)` trae el token del runner como `github_token`) |
+| `env-secret` | `true` (por defecto) guarda las variables como secretas: el panel no vuelve a mostrar su valor y el log las enmascara. `false` las deja visibles |
+| `timeout` | Segundos de espera, contados desde que se creó el deploy (600) |
+
+**Salidas:** `deploy-id` y `status` (el estado final, o el último que vio si se pasó el timeout).
+
+**Qué hace:**
+1. Valida las entradas, antes de tocar muelle.
+2. Si viene `env-json`, `PUT …/apps/<app>/env`, que **reemplaza todas las variables de la app**: una que no viene se borra (las del stage no se tocan). Reintenta hasta 3 veces si muelle no responde o responde 5xx o 429.
+3. `POST …/deploys`, una sola vez, porque no es idempotente. Si muelle no responde, falla sin reintentar: el deploy puede haberse creado, revísalo en el panel.
+4. Imprime el log del deploy a medida que avanza y termina según el resultado:
+   - `succeeded`: el paso sigue;
+   - `failed`: un error con el motivo que dio muelle, y el paso falla;
+   - `superseded` (otro deploy más nuevo de la misma app lo reemplazó antes de que corriera): un aviso con el id del nuevo, y el paso sigue;
+   - el timeout: un error y el paso falla, pero **el deploy sigue en muelle**.
+
+Un error de muelle se muestra con su `code` y su `message` (`403 out_of_scope: …`).
+
+**Cuidados:**
+- **El tamaño de `env-json`:** llega al script como una variable de entorno del paso, y Linux no deja pasar una de más de 128 KiB (el paso no arrancaría). Con `toJson(secrets)` son todos los secretos del repo y del environment juntos.
+- **Un token por stage:** el alcance de un token es un proyecto, o un proyecto y un stage (`POST /tokens` con `project` y `stage`), y solo puede leer, cambiar variables, desplegar y hacer rollback ahí (diseño §10.1). Guarda el de cada stage en el secreto `MUELLE_TOKEN` de su environment de GitHub: así el job de staging no puede desplegar producción.
+- **Lo que imprime la app** no se lee como comandos del runner (`::error::`, `::add-mask::`…): el log va entre `::stop-commands::` y su cierre. Los secretos ya vienen enmascarados por muelle, y GitHub tapa además los `secrets.*`.
+- **El token** nunca va en la línea de comandos de un proceso del runner: `curl` lo lee de un archivo `0600` que se borra al terminar, y `jq` lee `env-json` del entorno.
+- **La versión:** `@v0` sigue al último release de la serie 0 (se mueve a mano, ver "Publicar una versión"); `@vX.Y.Z` queda fija.
+- **Si el repo de muelle es privado,** los repos que usan la action necesitan acceso: en el repo de muelle, Settings → Actions → General → Access, "Accessible from repositories owned by the user". Solo los repos privados del mismo dueño pueden usarla, y sus colaboradores externos ven los logs de la action.
+
 ## Desarrollo local
 
 La clave maestra descifra todos los secretos: el archivo tiene que quedar con permisos 0600 (el `umask 077` va en un subshell para no cambiar el de tu shell).
@@ -273,6 +331,8 @@ go vet ./...
 go test -race ./...
 ```
 
+Los tests de `action/` corren el `deploy.sh` de la GitHub Action con bash, `curl` y `jq` contra un muelle falso (se saltan si falta alguno); CI corre además `shellcheck action/deploy.sh`.
+
 Los tests de `src/shared/infra/container` arman muelle completo con los cuatro módulos (matriz de permisos de los tokens, contratos entre módulos, fechas). La prueba de punta a punta con el binario real y `curl` (spec §15) por ahora es manual: los pasos de "Primer usuario" de arriba, más los endpoints de la fase.
 
 ## Imágenes
@@ -306,6 +366,27 @@ git ls-files -co --exclude-standard -z | tar --null -T - -cf - | tar -x -C "$CTX
 git archive fase-4-panel web | tar -x -C "$CTX"
 docker build --build-arg VERSION=v0.0.0-dev -t muelle:dev "$CTX"
 ```
+
+## Publicar una versión
+
+Lo hace el dueño del repo, desde `main` con CI en verde:
+
+1. Crear y subir el tag (con sufijo, `v0.2.0-rc.1`, es una prerelease):
+
+   ```bash
+   git tag -a vX.Y.Z -m "muelle vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+2. `release.yml` corre los mismos tests que CI y después construye y sube `ghcr.io/cpu-commits/muelle:vX.Y.Z` y `ghcr.io/cpu-commits/muelle-caddy:vX.Y.Z`. `:latest` (solo muelle) se mueve solo con las versiones finales.
+3. Los paquetes quedan **privados**: no hay que cambiar nada en GHCR. El label `org.opencontainers.image.source` los liga al repo.
+4. Cuando quieras que el release llegue a los repos que usan la action con `@v0`, mueve el tag mayor (nunca a una prerelease):
+
+   ```bash
+   git tag -f v0 'vX.Y.Z^{}'          # el commit del release
+   git push -f origin v0
+   ```
+
+Para probar los `Dockerfile` sin publicar nada: Actions → Release → Run workflow (`workflow_dispatch`) construye las dos imágenes sin subirlas.
 
 ## Convenciones
 
@@ -346,8 +427,11 @@ Hallazgos de la revisión de código que las próximas fases deben respetar.
 - Docker 29 arranca sin puertos un contenedor cuyo arranque falló con `ErrPortInUse`: muelle-caddy se recrea, nunca se rearranca (`Container.PublishedPorts`).
 
 **Fase 5 / install**
-- Considerar el prefijo `__Host-` en el nombre de la cookie de sesión cuando las cookies son Secure.
-- La imagen de muelle necesita un `/tmp` escribible; la prueba de puertos incluye 443/udp y usa `MuelleImageFor(version)`, bajándola si falta; el link de setup se lee de la tarea actual (contrato §5.4).
+- ~~La imagen de muelle necesita un `/tmp` escribible; la prueba de puertos incluye 443/udp y usa `MuelleImageFor(version)`, bajándola si falta; el link de setup se lee de la tarea actual (contrato §5.4).~~ Hecho en la Fase 5.
+- Al integrar, considerar el prefijo `__Host-` en el nombre de la cookie de sesión cuando las cookies son Secure (los archivos de identity y `cmd/http/utils`).
+- El test de integración de install (`src/cmd/install/integration_test.go`) corre un muelle de verdad con `docker.sock` y una base nueva, y cuenta con que, con ingress `disabled` (`Enabled` falso, contrato §5.1), **ningún** módulo hace nada con Docker por su cuenta: ingress no crea `muelle-caddy` ni `muelle_panel` (la Fase 3 lo cumple: con `disabled` no hace nada), y ningún job de deploy toca redes, servicios ni stacks sin un deploy. Al integrar, una fase que agregue un job de arranque que limpie o recree recursos de Docker tiene que respetarlo. El test lo verifica sin mirar lo de las otras líneas: falla si aparecen `muelle-caddy` o `muelle_panel`, o si desaparece su red centinela `<prefijo>_sentinel` (con la forma de una red de stage huérfana: `naming.Network` y `naming.StageLabels` de un stage que no está en la base).
+- Con `--name-prefix` (solo para tests), muelle-caddy, que tiene nombres fijos, no comparte la red ni el socket con ese muelle.
+- Un `GET /healthz` (pendiente de la Fase 1, abajo) permitiría un healthcheck en el stack de muelle.
 
 **Pendiente de la revisión final de la Fase 1**
 - Pedir de nuevo la contraseña (o el código TOTP actual) para cambiar el TOTP propio y para desactivar `require_2fa`: hoy alcanza con la sesión.
