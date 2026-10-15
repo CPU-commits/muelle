@@ -374,8 +374,9 @@ Un paquete que sirve el build de SvelteKit (`web/build`, en `fase-4-panel`) con 
               printf '<!doctype html><title>muelle</title>\n' > src/cmd/http/panel/build/200.html
               printf "default-src 'self'; frame-ancestors 'none'\n" > src/cmd/http/panel/build/csp-header.txt
               go vet -tags panel ./...
-              go test -tags panel ./src/cmd/http/panel/
+              go test -race -tags panel ./src/cmd/http/... ./src/shared/infra/container/
     ```
+    (T1 amplió el `go test` del borrador, que era solo `./src/cmd/http/panel/`, a los mismos paquetes del Step 7: así CI prueba también el contenedor con el panel embebido.)
   - `README.md`, en "Desarrollo local", una subsección **"Con el panel"**: sin `-tags panel` las rutas del panel responden la página de "no trae el panel"; para probarlo, construir `web/` (`pnpm install && pnpm build` en la carpeta del panel), copiar `web/build/.` a `src/cmd/http/panel/build/` y `go run -tags panel . serve`; o `pnpm dev` en `web/`, que proxea `/api` a un `muelle serve` local (web/README.md).
 
 - [ ] **Step 7: Verificar.** Las cuatro verificaciones de las convenciones, y además el tag con el mismo build de prueba que CI (bórralo al final; está ignorado, pero no lo dejes):

@@ -26,3 +26,10 @@ jobs:
         run: go test -race ./...
       - name: build
         run: CGO_ENABLED=0 go build -o muelle .
+      - name: panel embebido (-tags panel, con un build de prueba)
+        run: |
+          mkdir -p src/cmd/http/panel/build/_app/immutable
+          printf '<!doctype html><title>muelle</title>\n' > src/cmd/http/panel/build/200.html
+          printf "default-src 'self'; frame-ancestors 'none'\n" > src/cmd/http/panel/build/csp-header.txt
+          go vet -tags panel ./...
+          go test -race -tags panel ./src/cmd/http/... ./src/shared/infra/container/
