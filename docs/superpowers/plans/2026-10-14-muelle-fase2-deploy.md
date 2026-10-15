@@ -1209,7 +1209,7 @@ func (d *Dispatcher) Wait()                                    // después de ca
   - `TestRemoveAppRaceWithCreate` (el orden que deja un stack huérfano sin la decisión 8): un `CreateDeploy` que pasó `Accepting` y todavía no insertó (el test lo parte en dos: primero `RemoveApp` completo, con su `Block`, `Stop`, `FailQueued` y `stack rm`; después el `InTx` del `Create` y el `Wake`) → el deploy termina `failed` "la app se borró" y `StackDeploys()` no tiene ningún deploy de esa app después del `RemoveStack` (`Calls()` lo muestra en orden).
   - `TestRemoveAppStopTimeout`: con un `Dispatcher` cuyo plazo de `Stop` el test acorta (un campo, 15 s por defecto) y un worker retenido donde el ctx no llega (`block` en `OnDeployStack`, Step 2) → `RemoveApp` devuelve `ErrWorkerBusy`, la app vuelve a aceptar deploys (`Accepting` true), `RemovedStacks()` está vacío y el `queued` de la app sigue `queued`. Al soltar `block`, el worker termina.
   - Los tests de `TestRemoveApp` y `TestRemoveAppDockerDown` existentes siguen pasando.
-- [ ] **Step 6: Integración con Swarm real** (`integration_test.go`, `//go:build integration`, paquete `deploy`):
+- [x] **Step 6: Integración con Swarm real** (`integration_test.go`, `//go:build integration`, paquete `deploy`):
   - **Helpers:**
     - `itClient(t)`: el cliente real, o `t.Skip` si no hay un Swarm activo con este nodo como manager;
     - `requireImage(t, ref)`: `t.Skip` si falta `nginx:alpine` o `alpine/socat:latest`, **o si no tiene `RepoDigests`** (una imagen construida o cargada con `docker load` no tiene digest de registry, y `localDigests` no tendría qué devolver);
