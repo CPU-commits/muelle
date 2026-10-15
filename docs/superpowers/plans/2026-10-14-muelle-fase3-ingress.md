@@ -1869,7 +1869,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): el módulo expone los dominios y verifica certificados`
 
-- [ ] **Step 8: Integración — dominio por la API, ruta y certificado.**
+- [x] **Step 8: Integración — dominio por la API, ruta y certificado.**
 
   `TestIntegrationDomainsAndCertificates` (ranura 3):
   1. Con el módulo, el puente, el stage `s1`, la app `web`, su backend, sin token y `job()` → `synced`, un `POST {app}/domains` por `httptestutil` de `web.it3<id>.test` → `web:8080` da `201`, `pending` y `tls_mode http`.
@@ -1878,6 +1878,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
      - `eventually`: `Valid`, `Issuer` empieza con "Caddy Local Authority" y `NotAfter` es futuro;
      - sin raíces, `Valid == false` con un `Problem`.
      La hoja interna dura 12 h: la regla de los 14 días ya está probada en el Step 1; acá se prueba la sonda contra Caddy real.
+     - Sumado al implementar: un segundo módulo con `opts.TLSRoots` = esas raíces, `SyncRoutes` (queda synced) y su job `"certificados"`: el `GET` muestra `cert_issuer` "Caddy Local Authority…" y `cert_expires_at`, y el dominio sigue `pending` (la hoja vence en menos de 14 días y el plazo de 10 min no venció). Prueba el cableado `CaddyTLSAddr`/`TLSRoots` → `TLSProbe` → `CertChecker` → la base.
   4. `DELETE` del dominio da `204`, y `eventually`: `get` ya no da `200 "hola web"`, es decir, `status != 200 || body != "hola web"` (o un error de conexión).
      - No alcanza con "no da `200`": Caddy responde `200` vacío a un host que no tiene ruta, y el certificado de ese SNI puede seguir en su caché un momento después del `/load`. Así, un `200` vacío también cuenta como "sin la ruta".
 

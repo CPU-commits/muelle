@@ -4,6 +4,8 @@ package ingress
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
+	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	"github.com/CPU-commits/muelle/src/internal/ingress/ingresstest"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/domain/naming"
@@ -223,4 +226,123 @@ func TestIntegrationCaddyLifecycle(t *testing.T) {
 	if _, err := e.docker.InspectNetwork(ctx, orphan); !errors.Is(err, docker.ErrNotFound) {
 		t.Fatalf("la segunda pasada la borra: %v", err)
 	}
+}
+
+// Un dominio por la API contra Caddy real (caddy:2-alpine, con la CA
+// interna): crearlo aplica la ruta sin deploy, la sonda TLS verifica el
+// certificado que sirve Caddy, el job "certificados" guarda lo que vio, y
+// borrarlo quita la ruta (contrato §3.1 y §3.2, spec §8 y §15).
+func TestIntegrationDomainsAndCertificates(t *testing.T) {
+	e := newITEnv(t, 3)
+	m := e.module()
+	ctx := context.Background()
+
+	// 1. El puente, el stage s1, la app web y su backend, sin token; el job
+	// crea it3-<id>-caddy y queda synced.
+	e.startAdminBridge()
+	ingresstest.Stage(t, e.db, e.project, "s1")
+	ingresstest.App(t, e.db, e.project, "s1", "web", "service")
+	e.settings(shared.DefaultProxySettings())
+	if err := m.EnsureStageNetwork(ctx, e.project, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	e.startBackend("s1", "web")
+	if err := m.Jobs()[0].Run(ctx); err != nil {
+		t.Fatalf("job proxy: %v", err)
+	}
+	e.eventually(30*time.Second, "synced", e.proxyStatus(m, "synced"))
+
+	client := httptestutil.New(t, httptestutil.FakeAuth{Sessions: map[string]shared.Principal{"s": {UserID: 1, Username: "felipe"}}},
+		m.RegisterRoutes)
+	domains := "/api/v1/projects/" + e.project + "/stages/s1/apps/web/domains"
+	web := e.host("web")
+	w := client.Do("POST", domains, map[string]any{"hostname": web, "target_service": "web", "target_port": 8080}, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusCreated)
+	if got := httptestutil.Decode[map[string]any](t, w); got["status"] != "pending" || got["tls_mode"] != "http" || got["cf_zone_id"] != nil {
+		t.Fatalf("POST: %v", got)
+	}
+
+	// 2. Crear aplica la ruta, sin deploy.
+	e.eventually(30*time.Second, "GET "+web, e.expectGet(web, "/", http.StatusOK, "hola web"))
+
+	// 3. La sonda contra Caddy real, con las raíces de su CA interna.
+	roots := e.internalRoots()
+	probe := outservice.TLSProbe{Addr: e.opts.CaddyTLSAddr, Roots: roots}
+	e.eventually(30*time.Second, "la sonda ve un certificado válido", func() (bool, error) {
+		o, err := probe.Probe(ctx, web)
+		if err != nil {
+			return false, err
+		}
+		if !o.Valid || !strings.HasPrefix(o.Issuer, "Caddy Local Authority") || !o.NotAfter.After(time.Now()) {
+			return false, fmt.Errorf("%+v", o)
+		}
+		return true, nil
+	})
+	if o, err := (outservice.TLSProbe{Addr: e.opts.CaddyTLSAddr, Roots: x509.NewCertPool()}).Probe(ctx, web); err != nil || o.Valid || o.Problem == "" {
+		t.Fatalf("sin las raíces: %+v %v", o, err)
+	}
+
+	// El job "certificados" de un módulo con esas raíces guarda el emisor y
+	// el vencimiento. La hoja interna dura 12 h (menos de 14 días): sigue
+	// pending, y la regla de los 14 días ya está probada sin Docker.
+	e.opts.TLSRoots = roots
+	m2 := e.module()
+	if err := m2.SyncRoutes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := m2.Jobs()[1].Run(ctx); err != nil {
+		t.Fatalf("job certificados: %v", err)
+	}
+	w = client.Do("GET", domains, nil, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusOK)
+	list := httptestutil.Decode[[]map[string]any](t, w)
+	if issuer, _ := list[0]["cert_issuer"].(string); len(list) != 1 || list[0]["status"] != "pending" ||
+		!strings.HasPrefix(issuer, "Caddy Local Authority") || list[0]["cert_expires_at"] == nil {
+		t.Fatalf("GET después del job: %v", list)
+	}
+
+	// 4. Borrarlo quita la ruta. Caddy responde 200 vacío a un host sin ruta,
+	// y el certificado puede seguir un momento en su caché: cuenta todo lo
+	// que no sea 200 "hola web".
+	w = client.Do("DELETE", domains+"/"+web, nil, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusNoContent)
+	e.eventually(30*time.Second, "sin la ruta de "+web, func() (bool, error) {
+		code, body, err := e.get(web, "/")
+		if err != nil || code != http.StatusOK || body != "hola web" {
+			return true, nil
+		}
+		return false, fmt.Errorf("GET %s: %d %q", web, code, body)
+	})
+}
+
+// internalRoots son las raíces de la CA interna de Caddy (GET /pki/ca/local
+// por el puente de la admin API).
+func (e *itEnv) internalRoots() *x509.CertPool {
+	e.t.Helper()
+	c := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			DialContext:       func(ctx context.Context, _, _ string) (net.Conn, error) { return e.opts.CaddyAdminDial(ctx) },
+			DisableKeepAlives: true,
+		},
+	}
+	var ca struct {
+		Root string `json:"root_certificate"`
+	}
+	e.eventually(30*time.Second, "GET /pki/ca/local", func() (bool, error) {
+		resp, err := c.Get("http://caddy/pki/ca/local")
+		if err != nil {
+			return false, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false, fmt.Errorf("respondió %d", resp.StatusCode)
+		}
+		return true, json.UnmarshalRead(resp.Body, &ca)
+	})
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM([]byte(ca.Root)) {
+		e.t.Fatalf("la raíz de la CA interna no es PEM: %q", ca.Root)
+	}
+	return pool
 }
