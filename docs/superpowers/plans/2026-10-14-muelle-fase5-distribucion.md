@@ -1122,8 +1122,8 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   - **Paso 9:** la clave (si se generó) en stdout, después `waitSetup`, después el link (o el aviso de usuarios). Los textos van como constantes del paquete; la clave y el link en su propia línea, con cuatro espacios adelante, para copiarlos fácil.
   - **Avance y avisos:** una línea por paso en stderr (`Docker 29.6.1, Swarm activo (nodo …)`, `IP pública: … (detectada)`, `puertos 80 y 443 libres`, `red muelle_panel creada`…); los avisos empiezan con `aviso: `.
 
-- [ ] **Step 8: `main.go`.** Tests en `main_test.go`:
-  - `TestRunInstallUsage`: `{"install", "--nope"}` → 2, stderr con `install.Usage`; `{"install", "-h"}` → 0, stdout con `install.Usage`; `{"install"}` → 2 (falta `--panel-domain`).
+- [x] **Step 8: `main.go`.** Tests en `main_test.go`:
+  - `TestRunInstallUsage` (con un `DOCKER_HOST` que no existe): `{"install", "--nope"}` → 2, stderr con `install.Usage`; `{"install", "-h"}` y `--help` → 0, stdout con `install.Usage`; `{"install"}` → 2 (falta `--panel-domain`); un `--email` que no sirve → 2 y lo nombra.
   - `TestLogListening`: `logListening(log, "[::]:8080")` escribe una línea `INFO` con `"event":"listening"` y `"addr":"[::]:8080"`.
 
   Implementación: `case "install"`: `install.ParseArgs(extra, os.Stdin)` (`flag.ErrHelp` → uso a stdout y 0; otro error → `muelle install: <err>` + uso a stderr y 2), `signal.NotifyContext`, `docker.New(docker.Options{})` (y `Close`), `install.Run(ctx, o, install.Config{Version: version, Docker: cli, Stdout: stdout, Stderr: stderr})`; un error → `muelle install: <err>` en stderr y 1. En `serve`, la línea de "muelle escuchando" pasa a `logListening(log, ln.Addr().String())`:

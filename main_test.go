@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CPU-commits/muelle/src/cmd/install"
 	"github.com/CPU-commits/muelle/src/cmd/settingscli"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
 )
@@ -251,5 +252,48 @@ func TestRunSettingsOutsideContainer(t *testing.T) {
 	}
 	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
 		t.Errorf("no se debió crear DataDir: %v", err)
+	}
+}
+
+// muelle install muestra su propio uso: a stdout con -h, y a stderr (código
+// 2) con un flag que no existe o sin los obligatorios. Ninguno toca Docker.
+func TestRunInstallUsage(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "sin-docker.sock"))
+	for _, tc := range []struct {
+		args []string
+		code int
+		want string // además del uso
+	}{
+		{[]string{"install", "--nope"}, 2, "muelle install: "},
+		{[]string{"install"}, 2, "--panel-domain"},
+		{[]string{"install", "--panel-domain", "panel.example.com", "--email", "x"}, 2, "--email"},
+		{[]string{"install", "-h"}, 0, ""},
+		{[]string{"install", "--help"}, 0, ""},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(tc.args, &stdout, &stderr); code != tc.code {
+			t.Errorf("%q: código %d, esperaba %d", tc.args, code, tc.code)
+		}
+		out, other := &stderr, &stdout
+		if tc.code == 0 {
+			out, other = &stdout, &stderr
+		}
+		if !strings.Contains(out.String(), install.Usage) || !strings.Contains(out.String(), tc.want) {
+			t.Errorf("%q: salida=%q", tc.args, out.String())
+		}
+		if other.Len() != 0 {
+			t.Errorf("%q: salida inesperada: %q", tc.args, other.String())
+		}
+	}
+}
+
+// La línea de "muelle escuchando" lleva event=listening: install la espera
+// después del setup_url (contrato §5.4).
+func TestLogListening(t *testing.T) {
+	var out bytes.Buffer
+	logListening(slog.New(slog.NewJSONHandler(&out, nil)), "[::]:8080")
+	m := lastLogLine(t, out.String())
+	if m["level"] != "INFO" || m["event"] != "listening" || m["addr"] != "[::]:8080" {
+		t.Fatalf("log=%v", m)
 	}
 }
