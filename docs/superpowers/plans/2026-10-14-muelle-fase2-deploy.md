@@ -176,7 +176,7 @@ Un paquete puro que parsea un compose con compose-go, aplica la lista de permiti
 - Create: `src/shared/domain/compose/{compose,reject,interpolate,marshal,services}_test.go`, `integration_test.go`, `testdata/kitchen-sink.yaml`
 - Modify: `src/internal/catalog/domain/entity/app.go`, `entity_test.go`
 - Create: `src/internal/catalog/app/usecases/service_names.go`
-- Modify: `src/internal/catalog/app/usecases/app.go`, `usecases_test.go`, `src/internal/catalog/app/dto/dto.go`, `src/internal/catalog/module_test.go`
+- Modify: `src/internal/catalog/app/usecases/app.go`, `usecases_test.go`, `src/internal/catalog/app/dto/dto.go`, `src/internal/catalog/module_test.go`, y el fixture de `src/internal/catalog/infra/out/repository/sqlite/repository_test.go` (`NewComposeApp` con `services: {}`, que ya no es un compose válido)
 
 - [x] **Step 1: La dependencia**
 
@@ -446,7 +446,7 @@ git add go.mod go.sum src/shared/domain/compose
 git commit -m "feat(compose): paquete compartido que valida un compose con compose-go (§6.3) sin leer archivos y arma el compose final" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 11: Catalog valida con el paquete (tests primero)**
+- [x] **Step 11: Catalog valida con el paquete (tests primero)**
   - `entity_test.go`: los fixtures `"a: 1"`, `"b: 2"` pasan a composes válidos (`"services:\n  web:\n    image: nginx\n"`…). Nuevo `TestValidateComposeSharedRules`: con `ports` → `wantInvalid(t, err, "compose_yaml")`; vacío y de 256 KiB + 1 → los mismos mensajes de antes.
   - `usecases_test.go`: los fixtures de compose pasan a válidos. El caso existente de una app de formulario con el slug de otra de formulario sigue esperando `ErrConflict` (409, del índice único), no un 422. Nuevo `TestServiceNamesUniquePerStage`:
     - una app compose con `web` y otra compose del mismo stage con `web` → 422 en `compose_yaml`, y el mensaje nombra el servicio y la app dueña;
@@ -456,8 +456,8 @@ git commit -m "feat(compose): paquete compartido que valida un compose con compo
     - editar el compose de una app sin cambiar sus nombres → OK (no choca consigo misma);
     - los mismos nombres en otro stage → OK.
   - `module_test.go`: `POST` de una app compose con `ports` → 422 `invalid` con un mensaje que empieza con `compose_yaml: `; los casos que mandaban `"a: 1"` pasan a un compose válido.
-- [ ] **Step 12: Implementar.**
-  - `entity.ValidateCompose(yaml)` delega en `compose.Validate` (que ya revisa vacío y tamaño, con los mismos mensajes). `MaxComposeBytes` queda como `compose.MaxBytes`.
+- [x] **Step 12: Implementar.**
+  - `entity.ValidateCompose(yaml) ([]string, error)` delega en `compose.Validate` (que ya revisa vacío y tamaño, con los mismos mensajes) y devuelve los nombres de los servicios, que usan los casos de uso. `MaxComposeBytes` queda como `compose.MaxBytes`.
   - `service_names.go`:
 
 ```go
@@ -477,7 +477,7 @@ func checkServiceNames(owned map[string]string, names []string, field string) er
     - **compose:** los nombres de `compose.Validate` (campo `compose_yaml`) contra `stageServices(…, withForms = true)`: los slugs de las de formulario y los servicios de las otras compose.
   - `UpdateApp` con `compose_yaml`: dentro del `InTx`, con `except = app.ID` y `withForms = true`.
   - Mensajes: `el servicio "web" ya existe en la app "front" del stage: los servicios de un stage comparten la red` (`compose_yaml`) y, para `slug`, `"web" ya es un servicio de la app compose "front" del stage`.
-- [ ] **Step 13: Verificar y commit:** `feat(catalog): valida el compose al guardar con shared/domain/compose y los nombres de servicio únicos por stage`.
+- [x] **Step 13: Verificar y commit:** `feat(catalog): valida el compose al guardar con shared/domain/compose y los nombres de servicio únicos por stage`.
 - [ ] **Step 14: `services` en la respuesta (contrato §2.12; test primero).** En `module_test.go`, `TestAppServices`: `GET` de una app de formulario con `port: 3000` → `services: [{"name": "<slug>", "ports": [3000]}]`; de una compose con `web` (`expose: ["80"]`) y `worker` (sin `expose`) → `[{"name":"web","ports":[80]},{"name":"worker","ports":[]}]`; `GET …/apps` trae `services` en cada una; nunca `null`. Implementar en `dto.AppFrom`: `ServiceOutput{Name, Ports}` (`json:"name"`, `json:"ports"`), el puerto de un formulario sale de decodificar `{"port": N}` del spec guardado. Commit: `feat(catalog): los servicios de cada app y sus puertos en la respuesta (contrato §2.12)`.
 
 **Integración en T1:** `go test -tags integration -run TestMarshalAcceptedByDockerCLI ./src/shared/domain/compose/` (solo `docker stack config`, sin efectos).

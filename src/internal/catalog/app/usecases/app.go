@@ -33,12 +33,17 @@ type CreateApp struct{ d Deps }
 func NewCreateApp(d Deps) *CreateApp { return &CreateApp{d} }
 
 // Execute crea una app. Las de formulario guardan el spec normalizado; las
-// compose solo se validan como no vacías y de hasta 256 KiB.
+// compose se validan con las reglas de §6.3 del diseño. Ningún nombre de
+// servicio se repite en el stage (§5.2 regla 2): el de una app de formulario
+// es su slug, que no puede ser un servicio de una compose; los de una compose
+// no pueden ser de otra app. Un slug que ya usa otra app de formulario sigue
+// siendo ErrConflict, del índice único.
 func (uc *CreateApp) Execute(ctx context.Context, in dto.CreateAppInput) (dto.AppOutput, error) {
 	if err := validate.AppSlug(in.Slug); err != nil {
 		return dto.AppOutput{}, err
 	}
 	var spec vo.AppSpec
+	var services []string // los de la compose
 	switch entity.Kind(in.Kind) {
 	case entity.KindService:
 		if in.ComposeYAML != nil {
@@ -54,6 +59,10 @@ func (uc *CreateApp) Execute(ctx context.Context, in dto.CreateAppInput) (dto.Ap
 		}
 		if in.ComposeYAML == nil {
 			return dto.AppOutput{}, validate.Errorf("compose_yaml", "es obligatorio")
+		}
+		var err error
+		if services, err = entity.ValidateCompose(*in.ComposeYAML); err != nil {
+			return dto.AppOutput{}, err
 		}
 	default:
 		return dto.AppOutput{}, validate.Errorf("kind", "debe ser service o compose")
@@ -74,8 +83,24 @@ func (uc *CreateApp) Execute(ctx context.Context, in dto.CreateAppInput) (dto.Ap
 		if err != nil {
 			return err
 		}
+		// Las de formulario solo chocan con los servicios de las compose (con
+		// otra de formulario es el 409 del índice único); las compose, con
+		// todos.
+		kind := entity.Kind(in.Kind)
+		owned, err := stageServices(ctx, uc.d.Apps, stage.ID, 0, kind == entity.KindCompose)
+		if err != nil {
+			return err
+		}
+		if kind == entity.KindService {
+			err = checkServiceNames(owned, []string{in.Slug}, "slug")
+		} else {
+			err = checkServiceNames(owned, services, "compose_yaml")
+		}
+		if err != nil {
+			return err
+		}
 		now := uc.d.Clock.Now()
-		if entity.Kind(in.Kind) == entity.KindService {
+		if kind == entity.KindService {
 			app, err = entity.NewServiceApp(stage, in.Slug, spec, timeout, now)
 		} else {
 			app, err = entity.NewComposeApp(stage, in.Slug, *in.ComposeYAML, timeout, now)
@@ -135,6 +160,7 @@ func NewUpdateApp(d Deps) *UpdateApp { return &UpdateApp{d} }
 func (uc *UpdateApp) Execute(ctx context.Context, in dto.UpdateAppInput) (dto.AppOutput, error) {
 	var fields []string
 	var spec *vo.AppSpec
+	var services []string // los del compose nuevo
 	if hasJSON(in.Spec) {
 		parsed, err := vo.ParseAppSpec(in.Spec)
 		if err != nil {
@@ -144,7 +170,8 @@ func (uc *UpdateApp) Execute(ctx context.Context, in dto.UpdateAppInput) (dto.Ap
 		fields = append(fields, "spec")
 	}
 	if in.ComposeYAML != nil {
-		if err := entity.ValidateCompose(*in.ComposeYAML); err != nil {
+		var err error
+		if services, err = entity.ValidateCompose(*in.ComposeYAML); err != nil {
 			return dto.AppOutput{}, err
 		}
 		fields = append(fields, "compose_yaml")
@@ -174,6 +201,15 @@ func (uc *UpdateApp) Execute(ctx context.Context, in dto.UpdateAppInput) (dto.Ap
 		if in.ComposeYAML != nil {
 			if err := app.ChangeCompose(*in.ComposeYAML, now); err != nil {
 				return kindMismatch(err)
+			}
+			// Sus propios servicios no cuentan (except): editar sin cambiar
+			// los nombres no choca consigo misma.
+			owned, err := stageServices(ctx, uc.d.Apps, app.StageID, app.ID, true)
+			if err != nil {
+				return err
+			}
+			if err := checkServiceNames(owned, services, "compose_yaml"); err != nil {
+				return err
 			}
 		}
 		if in.DeployTimeoutS != nil {
