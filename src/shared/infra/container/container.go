@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/CPU-commits/muelle/src/cmd/cron"
 	httpserver "github.com/CPU-commits/muelle/src/cmd/http"
+	"github.com/CPU-commits/muelle/src/cmd/http/panel"
 	"github.com/CPU-commits/muelle/src/internal/admin"
 	"github.com/CPU-commits/muelle/src/internal/catalog"
 	"github.com/CPU-commits/muelle/src/internal/deploy"
@@ -79,10 +81,11 @@ func WithDocker(e docker.Engine) Option { return func(o *options) { o.docker = e
 // con el Authenticator de identity y registra las rutas de todos los módulos.
 // Nada de esto llama a Docker: lo que corre en segundo plano arranca con Run.
 //
-// Sin PanelOrigin o DataDir devuelve un error sin tocar nada. La clave se lee
-// antes de tocar DataDir, así una clave que falta no deja una base vacía; si
-// falta o no sirve, el error nombra MUELLE_MASTER_KEY_FILE y `muelle genkey`.
-// Si algo falla, cierra lo que alcanzó a abrir.
+// Sin PanelOrigin o DataDir devuelve un error sin tocar nada. La clave y el
+// panel embebido se leen antes de tocar DataDir, así una clave que falta (o
+// un panel roto) no deja una base vacía; si la clave falta o no sirve, el
+// error nombra MUELLE_MASTER_KEY_FILE y `muelle genkey`. Si algo falla,
+// cierra lo que alcanzó a abrir.
 func New(ctx context.Context, s settings.Settings, log *slog.Logger, opts ...Option) (*Container, error) {
 	// Sin estos valores un módulo haría panic (identity y admin los exigen).
 	switch {
@@ -102,6 +105,12 @@ func New(ctx context.Context, s settings.Settings, log *slog.Logger, opts ...Opt
 	if err != nil {
 		return nil, err
 	}
+	// El panel se lee antes de tocar DataDir, como la clave: con un embed
+	// roto, muelle no arranca y la base queda como estaba.
+	panelHandler, err := panel.Embedded()
+	if err != nil {
+		return nil, fmt.Errorf("container: %w", err)
+	}
 	engine, closeDocker := o.docker, func() error { return nil }
 	if engine == nil {
 		client, err := docker.New(docker.Options{})
@@ -118,7 +127,7 @@ func New(ctx context.Context, s settings.Settings, log *slog.Logger, opts ...Opt
 	if err != nil {
 		return nil, errors.Join(err, closeDocker())
 	}
-	c, err := build(ctx, db, ciph, engine, s, log)
+	c, err := build(ctx, db, ciph, engine, s, log, panelHandler)
 	if err != nil {
 		return nil, errors.Join(err, db.Close(), closeDocker())
 	}
@@ -144,7 +153,7 @@ func keyError(path string, err error) error {
 	return fmt.Errorf("container: MUELLE_MASTER_KEY_FILE=%s: %w (en una instalación nueva, crea la clave con `muelle genkey`; si ya hay datos, hace falta la clave con la que se cifraron)", path, err)
 }
 
-func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docker.Engine, s settings.Settings, log *slog.Logger) (*Container, error) {
+func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docker.Engine, s settings.Settings, log *slog.Logger, panelHandler http.Handler) (*Container, error) {
 	if err := db.Migrate(ctx); err != nil {
 		return nil, err
 	}
@@ -188,6 +197,7 @@ func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docke
 		Auth:          c.Identity.Authenticator(),
 		Logger:        log,
 		ProxyOrigin:   c.Admin.PanelOrigin,
+		Panel:         panelHandler,
 	})
 	k := c.Server.Kit()
 	c.Identity.RegisterRoutes(k)

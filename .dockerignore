@@ -1,0 +1,36 @@
+# Lista de permitidos (contrato §5.4): el contexto de la imagen de muelle lleva
+# solo lo que la construye. Nunca .git, .claude (otros worktrees), claves,
+# bases, ni los .env del panel (un VITE_USE_MOCKS=1 metería MSW en la imagen).
+*
+!go.mod
+!go.sum
+!main.go
+!src/
+!web/
+
+# Un build del panel copiado a mano: la imagen copia el que construye su etapa web.
+src/cmd/http/panel/build/
+**/*_test.go
+**/testdata/
+
+# Lo mismo que ignora git, por si quedó algo adentro de src/ o web/.
+**/*.key
+**/muelle_master_key
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/.env
+**/.env.*
+
+# Lo que genera o deja el panel en una máquina de desarrollo.
+web/node_modules/
+web/build/
+web/build-e2e/
+web/.svelte-kit/
+web/test-results/
+web/playwright-report/
+web/coverage/
+web/project.inlang/cache/
+web/src/shared/ui/i18n/paraglide/
+web/.env
+web/.env.*

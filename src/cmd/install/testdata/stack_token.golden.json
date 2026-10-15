@@ -1,0 +1,95 @@
+{
+  "services": {
+    "muelle": {
+      "image": "it5-muelle:test",
+      "environment": {
+        "MUELLE_DATA_DIR": "/data",
+        "MUELLE_INIT_ACME_EMAIL": "it5@example.com",
+        "MUELLE_INIT_CLOUDFLARE_TOKEN_FILE": "/run/secrets/muelle_init_cloudflare_token",
+        "MUELLE_INIT_PROXY_HTTPS_PORT": "22443",
+        "MUELLE_INIT_PROXY_HTTP_PORT": "22080",
+        "MUELLE_LISTEN": ":8080",
+        "MUELLE_MASTER_KEY_FILE": "/run/secrets/muelle_master_key",
+        "MUELLE_PANEL_ORIGIN": "https://127.0.0.1:22443"
+      },
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "/var/run/docker.sock",
+          "target": "/var/run/docker.sock"
+        },
+        {
+          "type": "volume",
+          "source": "data",
+          "target": "/data"
+        },
+        {
+          "type": "volume",
+          "source": "caddy_admin",
+          "target": "/run/caddy-admin"
+        }
+      ],
+      "secrets": [
+        {
+          "source": "master_key",
+          "target": "muelle_master_key"
+        },
+        {
+          "source": "init_cloudflare_token",
+          "target": "muelle_init_cloudflare_token"
+        }
+      ],
+      "networks": [
+        "panel"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "deploy": {
+        "replicas": 1,
+        "placement": {
+          "constraints": [
+            "node.role == manager",
+            "node.id == node-1"
+          ]
+        },
+        "update_config": {
+          "order": "stop-first",
+          "failure_action": "rollback",
+          "monitor": "30s"
+        },
+        "rollback_config": {
+          "order": "stop-first"
+        }
+      }
+    }
+  },
+  "volumes": {
+    "caddy_admin": {
+      "name": "it5abc_caddy_admin"
+    },
+    "data": {
+      "name": "it5abc_data"
+    }
+  },
+  "secrets": {
+    "init_cloudflare_token": {
+      "external": true,
+      "name": "it5abc_init_cloudflare_token"
+    },
+    "master_key": {
+      "external": true,
+      "name": "it5abc_master_key"
+    }
+  },
+  "networks": {
+    "panel": {
+      "external": true,
+      "name": "it5abc_panel"
+    }
+  }
+}

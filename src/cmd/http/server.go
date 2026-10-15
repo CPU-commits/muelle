@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
@@ -25,6 +26,10 @@ type Config struct {
 	// cookie pasaría, ni el login, hasta actualizar MUELLE_PANEL_ORIGIN. Se
 	// consulta solo cuando el Origin no es PanelOrigin.
 	ProxyOrigin func(ctx context.Context) string
+	// Panel, opcional, sirve el panel (cmd/http/panel) en toda ruta fuera de
+	// /api que no tiene una ruta registrada (contrato §5.5). Con nil, esas
+	// rutas responden 404 no_route, como las de /api.
+	Panel http.Handler
 }
 
 type Server struct {
@@ -32,6 +37,7 @@ type Server struct {
 	kit         *utils.Kit
 	origin      string
 	proxyOrigin func(ctx context.Context) string
+	panel       http.Handler
 }
 
 // NewServer arma el mux y el Kit, y registra los errores comunes:
@@ -62,7 +68,7 @@ func NewServer(c Config) *Server {
 	k.RegisterError(entity.ErrDockerUnavailable, http.StatusServiceUnavailable, "docker_unavailable", "Docker no responde; reintenta en unos segundos")
 	k.RegisterError(entity.ErrNotImplemented, http.StatusNotImplemented, "not_implemented", "todavía no está implementado en esta versión de muelle")
 	k.RegisterError(entity.ErrCloudflareUnavailable, http.StatusBadGateway, "cloudflare_unavailable", "Cloudflare no responde; reintenta en unos minutos")
-	return &Server{mux: mux, kit: k, origin: c.PanelOrigin, proxyOrigin: c.ProxyOrigin}
+	return &Server{mux: mux, kit: k, origin: c.PanelOrigin, proxyOrigin: c.ProxyOrigin, panel: c.Panel}
 }
 
 // Kit es lo que reciben los módulos en RegisterRoutes.
@@ -76,6 +82,7 @@ func (s *Server) Kit() *utils.Kit { return s.kit }
 // ruta existe con otro método, y 404 no_route si no. no_route es distinto de
 // not_found (un recurso que no existe en una ruta que sí existe): el panel lo
 // usa para saber que un endpoint todavía no está en el backend.
+// Fuera de /api, en vez de no_route responde Config.Panel, si está.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -105,7 +112,18 @@ func (s *Server) notMatched(w http.ResponseWriter, r *http.Request, h http.Handl
 		utils.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "método no permitido")
 		return
 	}
+	if s.panel != nil && !isAPIPath(r.URL.Path) {
+		s.panel.ServeHTTP(w, r)
+		return
+	}
 	utils.WriteError(w, http.StatusNotFound, "no_route", "la ruta no existe")
+}
+
+// isAPIPath dice si p, ya limpio, es /api o algo debajo: esas rutas sin una
+// ruta registrada son no_route, nunca el panel.
+func isAPIPath(p string) bool {
+	c := path.Clean(p)
+	return c == "/api" || strings.HasPrefix(c, "/api/")
 }
 
 // originAllowed protege contra CSRF: toda petición que modifica algo y no
