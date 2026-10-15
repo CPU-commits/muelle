@@ -703,7 +703,7 @@ El subcomando que vacía `panel_allowed_cidrs` desde dentro del contenedor y rei
 - Create: `src/cmd/settingscli/settingscli.go`, `settingscli_test.go`
 - Modify: `main.go`, `main_test.go`, `README.md`
 
-- [ ] **Step 1: `naming.LabelSwarmService`.** En `src/shared/domain/naming/install.go` (archivo nuevo, para no tocar `naming.go`):
+- [x] **Step 1: `naming.LabelSwarmService`.** En `src/shared/domain/naming/install.go` (archivo nuevo, para no tocar `naming.go`):
   ```go
   // LabelSwarmService la pone Swarm en cada contenedor de una tarea, con el
   // nombre del servicio. muelle settings reset-panel-ips la lee en su propio
@@ -711,9 +711,9 @@ El subcomando que vacía `panel_allowed_cidrs` desde dentro del contenedor y rei
   const LabelSwarmService = "com.docker.swarm.service.name"
   ```
 
-- [ ] **Step 2: `docker.ServiceRestarter`, tests primero.**
+- [x] **Step 2: `docker.ServiceRestarter`, tests primero.**
   - `client_dist_test.go` (`package docker`, con `newFakeAPIClient`):
-    - `TestForceUpdateService`: `GET /services/muelle_muelle` responde un `swarm.Service` con `ID: "svc1"`, `Version.Index: 7`, `Spec.Name`, `Spec.Labels`, `Spec.TaskTemplate.ContainerSpec.Image` y `ForceUpdate: 2`. `POST /services/svc1/update` responde `{}`. Asserts: el update llegó con la query `version=7`, y el cuerpo (un `swarm.ServiceSpec`) trae `TaskTemplate.ForceUpdate == 3` y el resto del spec igual (nombre, etiquetas, imagen).
+    - `TestForceUpdateService`: `GET /services/muelle_muelle` responde un `swarm.Service` con `ID: "svc1"`, `Version.Index: 7`, `Spec.Name`, `Spec.Labels`, `Spec.TaskTemplate.ContainerSpec.Image` y `ForceUpdate: 2`. `POST /services/svc1/update` responde `{}`. Asserts: el update llegó con la query `version=7` y `registryAuthFrom=spec` (las credenciales que el servicio ya tiene, como `docker service update` sin `--with-registry-auth`: con las imágenes privadas, sin ellas Swarm no podría bajar la imagen al recrear la tarea), y el cuerpo (un `swarm.ServiceSpec`) trae `TaskTemplate.ForceUpdate == 3` y el resto del spec igual (nombre, etiquetas, imagen).
     - `TestForceUpdateServiceNotFound`: `GET` responde `404` → `errors.Is(err, ErrNotFound)`, y no hubo `POST`.
   - `dockertest/fake_dist_test.go`: `TestFakeForceUpdateService` (`Version` sube en 1 y `Calls()` registra `ForceUpdateService <nombre>`; un servicio que no existe → `ErrNotFound`; `SetUnavailable(true)` → `ErrUnavailable`; sin Swarm activo → `ErrUnavailable`). Nada de `PutContainer` ni de su test: es de la Fase 2 (`fake_deploy.go`), y declararlo acá rompería la compilación al integrar.
 
@@ -742,7 +742,9 @@ El subcomando que vacía `panel_allowed_cidrs` desde dentro del contenedor y rei
     	}
     	spec := res.Service.Spec
     	spec.TaskTemplate.ForceUpdate++
-    	_, err = c.api.ServiceUpdate(ctx, res.Service.ID, client.ServiceUpdateOptions{Version: res.Service.Version, Spec: spec})
+    	_, err = c.api.ServiceUpdate(ctx, res.Service.ID, client.ServiceUpdateOptions{
+    		Version: res.Service.Version, Spec: spec, RegistryAuthFrom: swarm.RegistryAuthFromSpec,
+    	})
     	return wrap("reiniciando el servicio "+nameOrID, err)
     }
     ```
@@ -757,14 +759,14 @@ El subcomando que vacía `panel_allowed_cidrs` desde dentro del contenedor y rei
     ```
     (El contenedor de una tarea, con sus etiquetas, los tests lo crean con `CreateContainer`: ver el Step 5.)
 
-- [ ] **Step 3: Integración del puerto** (`integration_dist_test.go`, `//go:build integration`, `package docker_test`). Reusa `realClient`, `requireLocalImage`, `serviceImage`, `eventually` y `removeNetworkEventually` del archivo de `ctr23`, pero con su propio prefijo:
+- [x] **Step 3: Integración del puerto** (`integration_dist_test.go`, `//go:build integration`, `package docker_test`). Reusa `realClient`, `requireLocalImage`, `serviceImage`, `eventually` y `removeNetworkEventually` del archivo de `ctr23`, pero con su propio prefijo:
   ```go
   const distPrefix = "it5"
   func distName(t *testing.T) string // "it5" + 8 hex de crypto/rand
   ```
   `TestIntegrationDistForceUpdate`:
-  - despliega con `DeployStack` el stack `distName(t)` con un servicio `app` (`serviceImage`, `entrypoint: ["sh", "-c", "exec sleep 600"]`, `deploy.labels: {muelle.test: it5}`, `memory: 32M`) en la red por defecto del stack;
-  - `t.Cleanup`: `RemoveStack`, esperar a que no queden servicios con la etiqueta (60 s) y `removeNetworkEventually(<stack>_default)`;
+  - despliega con `DeployStack` el stack `distName(t)` con un servicio `app` (`serviceImage`, `entrypoint: ["sh", "-c", "trap 'exit 0' TERM; sleep 600 & wait"]`, que termina enseguida con el `SIGTERM` de Swarm, `deploy.labels: {muelle.test: it5}`, `memory: 32M`) en la red por defecto del stack;
+  - `t.Cleanup`: `RemoveStack`, esperar (60 s cada uno) a que no queden servicios con `com.docker.stack.namespace=<stack>` ni los contenedores de las tareas que vio el test, `removeNetworkEventually(<stack>_default)` y esperar a que la red ya no exista (el nodo la sigue viendo unos segundos);
   - espera la tarea corriendo; `InspectContainer(task.ContainerID[:12])` (como `os.Hostname` dentro del contenedor) trae `Labels[naming.LabelSwarmService] == <stack>_app`;
   - `ForceUpdateService(<stack>_app)` → `Version` sube y, antes de 90 s, hay una tarea corriendo con otro id;
   - `ForceUpdateService("it5-no-existe")` → `ErrNotFound`.
