@@ -1677,7 +1677,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): verificación de certificados a los 30 s, cada minuto los pending y cada hora`
 
-- [ ] **Step 5: Los casos de uso de dominios.**
+- [x] **Step 5: Los casos de uso de dominios.**
 
   **Tests primero** (`usecases/domains_test.go`, `adopt_test.go`, `retry_domain_test.go`). Usan un fixture con:
   - sqlite e `ingresstest`;
@@ -1787,7 +1787,10 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   	UpdatedAt     time.Time      `json:"updated_at"`
   }
   ```
-  - `usecases/domains.go`: un `DomainDeps` compartido (`Repo`, `Catalog`, `Settings`, `DNS`, `Syncer`, `Certs`, `Ops`, `Clock`, `Audit`, `Log`, `Timing`).
+  - `usecases/domains.go`: un `DomainDeps` compartido (`Repo`, `Catalog`, `Settings`, `DNS`, `Syncer`, `Certs`, `Ops`, `Clock`, `Audit`, `Log`, y los plazos `DomainOp` y `DomainRetry`: `Timing` está en el paquete `ingress`, que `usecases` no puede importar).
+    - La app y los ajustes se leen con `context.WithoutCancel(ctx)` (hallado al implementar): con un `ctx` ya cancelado, la lectura de la app fallaba antes del `Ops.Do`, y el test "el cliente se va" no creaba nada.
+    - `PATCH` lee el dominio y valida **dentro** del `Ops.Do`: así el `422` de `proxied` mira los registros de ese momento, no los de antes de esperar el lock.
+    - Las fixtures de los Steps 4 y 5 viven en `domains_fixture_test.go` (`ucFixture` y `fakeProbe`).
     - Constructores: `NewListDomains`, `NewCreateDomain`, `NewUpdateDomain` y `NewDeleteDomain`; en sus archivos, `NewAdoptDomain` y `NewRetryDomain`. Cada uno con `Execute(ctx, in)`.
     - `toOutput(d, p)` arma la salida: los `*string` son nil para `""`, y `records` sale de `entity.Records(d.Hostname, p.PublicIP, p.PublicIPv6)`.
     - **Orden de crear** (D5):
