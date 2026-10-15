@@ -1472,7 +1472,9 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `test(ingress): integración del ciclo de vida de muelle-caddy (redes en caliente, aislamiento entre stages, recreación, puerto ocupado, huérfanas)`
 
-- [ ] **Step 8: Cierre de T3.** Las verificaciones de "Convenciones" pasan, y los tests de integración de T2 y T3 también.
+- [x] **Step 8: Cierre de T3.** Las verificaciones de "Convenciones" pasan, y los tests de integración de T2 y T3 también.
+  - Hecho: gofmt, `go vet ./...` (y con `-tags integration` en ingress), `go test -race -count=1 ./...` (53 paquetes), `go mod tidy -diff` y `go test -tags integration -race -count=1 -run Integration ./src/internal/ingress/...` (`TestIntegrationCaddyAcceptsConfig` ~7 s y `TestIntegrationCaddyLifecycle` ~16 s). Después no queda nada con `it3` salvo la red `it3febd_panel` de la primera corrida del Step 7 (la tarea `attachment` de Docker; se va reiniciando el daemon).
+  - Para T5: el contrato §3.4 todavía no nombra `muelle-caddy-probe` (D11) ni la espera al Caddy recién creado (`syncStarting`).
 
 ---
 
