@@ -769,6 +769,15 @@ go test -tags integration -run TestRenderGoldensAcceptedByDockerCLI -count=1 ./s
 
 **Integración en T2:** `TestRenderGoldensAcceptedByDockerCLI` (solo `docker stack config`).
 
+**Notas de la implementación de T2** (lo que T3 y T4 tienen que saber, y lo que se agregó al plan):
+- `RegistryUsername` también rechaza `:` y el UTF-8 inválido (HTTP Basic separa en el primer `:`); el contrato §2.10 lo dice.
+- `ResolvedRef` falla si la ref pedida ya trae un digest distinto del que devolvió el registry: el paso 2 puede llamarla sin comparar antes con `PinnedDigest`, y un error ahí es `failed` sin tocar Swarm.
+- `Verdict.Service` es el nombre **corto** (el de `Progress` y del log), y `Verdict.ServiceID` el id en Swarm del que falló (para `Tasks`/`TaskLogs`). `Verdict.Reason` ya trae el estado y el `Message` de Swarm (`Swarm hizo rollback (rollback_completed): …`, `Swarm pausó la actualización (paused): …`): el paso 6 cierra con `fail("<Service>: <Reason>")`. `Progress` de un servicio que no está es `todavía no está en Swarm`. El margen de 2 s de "un `UpdateStatus` de este deploy" vale también para `CreatedAt` (servicio nuevo).
+- `AppendPlan` con `final`: si una línea de cierre no cabe en `LogCap`, ni ella ni las siguientes se escriben y `nowTruncated` queda en `true` (sin otra marca).
+- `ReadConfig` devuelve `ctx.Err()` (no un `RenderError`) con el ctx cancelado. `ParseFormSpec` solo revisa lo que el render necesita (imagen, puerto, réplicas, nombres de volúmenes, tipo de healthcheck), con errores `render: spec: …`.
+- `Render`, además de §6.2: falla si la imagen resuelta no pasa `validate.ImageRef`, si `StorageNodeID` no tiene forma de id de nodo, o si un driver de logging no es `json-file`, `local` o `none` (última barrera, aunque `compose.Load` ya lo rechazó); una opción `max-size`/`max-file` vacía (`${X}` con `X=""`) cuenta como faltante; la restricción propia sobre el nodo se reconoce sin importar mayúsculas (`node.ID`), como swarmkit. No modifica la `Config` (la copia).
+- Los golden usan el proyecto `it2g` (el prefijo de las pruebas de esta línea), porque el test de integración se los pasa a `docker stack config`.
+
 ---
 
 ### Task T3: La base, los registries y la API de los deploys (sin el worker)
