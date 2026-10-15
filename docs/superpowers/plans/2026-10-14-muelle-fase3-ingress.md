@@ -83,6 +83,7 @@
   go mod tidy -diff
   ```
   Ojo: `git ls-files` solo ve archivos ya agregados. Haz `git add` antes del gofmt, o corre `gofmt -l` sobre los archivos nuevos.
+  Ojo también con el encadenado: todo hasta el `git commit` va con `&&` (o dentro de un `bash -c 'set -e; …'`). En T2, un `… | grep -v ok ; go mod tidy -diff && git commit` dejó pasar dos commits con un test sin gofmt: el `;` corta la cadena, y el gofmt que falló se saltó también el `go vet` y el `go test` (lo arregló `862ccb9`).
 - **Commits:**
   - en español con los acentos reales;
   - `git commit -m "<mensaje>" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`;
@@ -1115,7 +1116,9 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `test(ingress): integración, Caddy real acepta la configuración y enruta por hostname y por client_ip`
 
-- [ ] **Step 7: Cierre de T2.** Las verificaciones de "Convenciones" pasan, y el test de integración del Step 6 también.
+- [x] **Step 7: Cierre de T2.** Las verificaciones de "Convenciones" pasan, y el test de integración del Step 6 también.
+  - Hecho: gofmt, `go vet ./...` (y con `-tags integration` en ingress), `go test -race ./...` (51 paquetes), `go mod tidy -diff` y `go test -tags integration -race ./src/internal/ingress/...` (`TestIntegrationCaddyAcceptsConfig` en ~10 s, tres corridas seguidas sin fallar). Después, `docker ps -a`, `docker network ls` y `docker volume ls` con `it3` no muestran nada.
+  - `caddy validate` en `caddy:2-alpine` acepta los golden `panel_only`, `no_token` e `internal`; `full` y `no_email` fallan ahí solo por `dns.providers.cloudflare`, que esa imagen no trae (D4).
 
 ---
 
