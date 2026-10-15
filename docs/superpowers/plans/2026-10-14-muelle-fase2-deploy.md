@@ -178,7 +178,7 @@ Un paquete puro que parsea un compose con compose-go, aplica la lista de permiti
 - Create: `src/internal/catalog/app/usecases/service_names.go`
 - Modify: `src/internal/catalog/app/usecases/app.go`, `usecases_test.go`, `src/internal/catalog/app/dto/dto.go`, `src/internal/catalog/module_test.go`
 
-- [ ] **Step 1: La dependencia**
+- [x] **Step 1: La dependencia**
 
 ```bash
 go get github.com/compose-spec/compose-go/v2@v2.16.1
@@ -186,7 +186,7 @@ go get github.com/compose-spec/compose-go/v2@v2.16.1
 
 Expected: `go.mod` con `github.com/compose-spec/compose-go/v2 v2.16.1`. `go mod tidy` recién cuando haya código que la importe (si no, la quita).
 
-- [ ] **Step 2: La API del paquete** (`compose.go`, sin implementar todavía, para que compilen los tests):
+- [x] **Step 2: La API del paquete** (`compose.go`, sin implementar todavía, para que compilen los tests):
 
 ```go
 // Package compose es la parte pura del compose de una app (§6 del diseño):
@@ -233,17 +233,17 @@ func Services(src string) []ServiceInfo
 func Marshal(f *File) ([]byte, error)
 ```
 
-- [ ] **Step 3: Tests de `compose_test.go`** (escribir primero; todos con `errors.AsType[*validate.Error]` y `ve.Field == "compose_yaml"` cuando esperan un error):
+- [x] **Step 3: Tests de `compose_test.go`** (escribir primero; todos con `errors.AsType[*validate.Error]` y `ve.Field == "compose_yaml"` cuando esperan un error):
   - `TestValidateKitchenSink`: `testdata/kitchen-sink.yaml` usa **todas** las claves permitidas de §6.3, en sus dos sintaxis cuando hay dos: `volumes` corto (`data:/data`) y largo (con `read_only` y `volume.nocopy`), `tmpfs` largo (`tmpfs.size`, `tmpfs.mode`) y como lista, `environment` como mapa y como lista (`- A=1`, `- B`), `labels` como mapa y como lista, `command`/`entrypoint` como string y como lista, `extra_hosts` (lista y mapa), `ulimits` (entero y `{soft, hard}`), `healthcheck` completo, `deploy` completo (`mode`, `replicas`, `placement` con `constraints`, `preferences` y `max_replicas_per_node`, `resources` con `cpus`/`memory` en `limits` y `reservations` (`limits.cpus: "0.5"` y `reservations.cpus: 0.1`), `restart_policy`, `update_config`, `rollback_config`, `endpoint_mode`, `labels`), `logging` (`json-file` con `options`), `x-common` con ancla y `<<: *common`, más `depends_on`, `restart`, `platform` y `version: "3.8"`. `Validate` no da error y devuelve los nombres ordenados.
   - `TestValidateInterpolationNotNeeded`: `image: ghcr.io/x/api:${TAG}`, `replicas: ${N:-1}` y `logging.driver: ${D}` pasan al guardar (todavía no hay variables). Lo que es error de sintaxis sin importar los valores sí falla al guardar (decisión 17): `${A:-${B}}` y `${A:-$B}` (un `$` en un valor por defecto), `${}` y `${A B}` → `compose_yaml: …` con la ruta.
   - `TestValidateSizeAndCount`: `""` y `"  \n"` → `compose_yaml: es obligatorio`; `MaxBytes+1` bytes → `compose_yaml: no puede superar 256 KiB`; `services: {}` → al menos un servicio; 33 servicios → a lo más 32; YAML roto → `compose_yaml: el compose no es válido: …`.
   - `TestValidateNames`: un servicio `Web`, `a_b` o de 17 caracteres, y un volumen `Data`, dan error y el mensaje nombra el servicio o volumen.
   - `TestValidateNeverReadsFiles`: crea un archivo en `t.TempDir()` con el contenido `MARCADOR-QUE-NO-DEBE-LEERSE: 1`, y un compose para cada clave que lee archivos (`include: [<path>]`, `extends: {file: <path>, service: x}`, `env_file: <path>`, `label_file: <path>`, `secrets: {s: {file: <path>}}` con el `secrets:` del servicio, `configs` igual). Cada uno da error, con el motivo de §6.3, y **ningún** mensaje contiene el marcador. Además, uno con `include` de un archivo que no existe da el error de la lista de permitidos, no "no such file".
   - `TestLoadUsesOnlyGivenEnv`: con `t.Setenv("MUELLE_TEST_SECRETO", "x")`, un compose con `${MUELLE_TEST_SECRETO}` y `env` vacío da el error de variable sin definir; `${COMPOSE_PROJECT_NAME}` vale el `project` (con `env` vacío y con `env` nil: la copia lo lleva siempre, Step 9); y después de `Load`, `env` no cambió (compose-go le agrega `COMPOSE_PROJECT_NAME` al mapa que recibe: hay que pasarle una copia). Un `env` que trae su propio `COMPOSE_PROJECT_NAME` no gana: vale el `project`.
-  - `TestLoadModel`: convierte el kitchen sink con un `env` y verifica el `File`: `environment` como mapa (sin las variables sin valor), `command` como lista, montajes largos, etiquetas como mapa, duraciones como `"10s"`, memoria en bytes, `cpus` como string (`"0.5"` y `"0.1"`: compose-go los lee como `float32`, y `0.1` en 64 bits saldría `"0.10000000149011612"`), `ulimits` con `soft`/`hard`, `extra_hosts` como `"host:ip"` ordenados, y sin `depends_on`, `restart`, `platform` ni `x-*`.
+  - `TestLoadModel`: convierte el kitchen sink con un `env` y verifica el `File`: `environment` como mapa (una variable sin valor, `- B` o `B:`, toma la de `env` como en compose con la shell, y si `env` no la tiene no va: `docker stack deploy` la tomaría del entorno de muelle; `TestLoadEnvironmentWithoutValue`), `command` como lista, montajes largos, etiquetas como mapa, duraciones como `"10s"`, memoria en bytes como string decimal (`"536870912"`), `cpus` como string (`"0.5"` y `"0.1"`: compose-go los lee como `float32`, y `0.1` en 64 bits saldría `"0.10000000149011612"`), `ulimits` con `soft`/`hard`, `extra_hosts` como `"host:ip"` ordenados, y sin `depends_on`, `restart`, `platform` ni `x-*`.
   - `TestLoadChecksInterpolatedValues`: `logging.driver: ${D}` con `D=syslog` y `image: ${IMG}` con `IMG="Mala Imagen"` dan error en `Load` (y pasan en `Validate`).
 
-- [ ] **Step 4: `reject_test.go`**, un caso por cada rechazo de §6.3 (tabla; cada fila: el compose mínimo `services: {web: {image: nginx, …}}` con la clave, y un pedazo del motivo esperado). Como mínimo:
+- [x] **Step 4: `reject_test.go`**, un caso por cada rechazo de §6.3 (tabla; cada fila: el compose mínimo `services: {web: {image: nginx, …}}` con la clave, y un pedazo del motivo esperado). Como mínimo:
   - publicar o construir: `ports`, `build`;
   - montar el host: `volumes: ["/var/run/docker.sock:/var/run/docker.sock"]`, `["./x:/x"]`, `type: bind`, `type: npipe`, `type: cluster`, `type: image`, un volumen anónimo (`type: volume` sin `source`), un `source` que no está en los `volumes` de primer nivel, `volume.subpath`; de primer nivel: `driver`, `driver_opts` (`{type: none, o: bind, device: /var/run}`), `external`, `name`; `devices`, `device_cgroup_rules`, `volumes_from`;
   - privilegios: `privileged`, `cap_add`, `security_opt`, `sysctls`, `pid`, `ipc`, `uts`, `userns_mode`, `cgroup`, `cgroup_parent`, `runtime`, `isolation`, `credential_spec`;
@@ -257,7 +257,7 @@ func Marshal(f *File) ([]byte, error)
 
   Lo que el esquema o `validation.Validate` de compose-go rechazan por la **combinación** de claves (por ejemplo `external` y `driver` juntos en un volumen: `volumes.data: conflicting parameters "external" and "driver" specified`) sale con el texto de compose-go detrás de `compose_yaml: el compose no es válido: `. Por eso cada fila de la tabla prueba **una** clave sola.
 
-- [ ] **Step 5: `interpolate_test.go`** (`TestStrictInterpolation`, con `Load`; y `TestStrictSubstitute`, tabla directa sobre `strictSubstitute` con un `Mapping` de mapa):
+- [x] **Step 5: `interpolate_test.go`** (`TestStrictInterpolation`, con `Load`; y `TestStrictSubstitute`, tabla directa sobre `strictSubstitute` con un `Mapping` de mapa):
   - `${A}` y `$A` sin definir → error que nombra `A`; `${A:-x}` y `${A-x}` → `x`; `${A:-x}` con `A=""` → `x` y `${A-x}` con `A=""` → `""`; `${A:+y}` sin definir → `""` y definida → `y`; `${A:?falta A}` → error con "falta A"; `${A?}` con `A=""` → `""`;
   - `$$A` → el valor `$A` en el modelo (y `Marshal` lo vuelve a escribir `$$A`); `$1` y un `$` al final quedan literales (como en compose-go);
   - **lo que compose-go deja pasar** (decisión 17): `${A:-x}-${B}` con `B` sin definir → error que nombra `B`; `${A:-${B}}` y `${A:-$B}` → error de `$` en un valor por defecto, **aunque `B` esté definida**; `${A}${B}` con `B` sin definir → error;
@@ -266,15 +266,15 @@ func Marshal(f *File) ([]byte, error)
   - **la ruta en el mensaje** (con `Load`): `labels: {com.example.v: ${UNDEF}}` → `compose_yaml: services.web.labels.com.example.v: la variable UNDEF no está definida…` (compose-go guarda el `.` de una clave como `👻` en su `tree.Path`, y `Path.String()` lo devuelve: el mensaje nunca trae `👻`); con dos variables sin definir en servicios distintos, el mensaje es **uno** solo, el de la primera ruta en orden (compose-go los junta con `errors.Join`, ordenados por ruta); un `${UNDEF}` en `deploy.replicas` nombra `services.web.deploy.replicas`;
   - ningún caso escribe en logrus (no hay `WARN … variable is not set` en stderr).
 
-- [ ] **Step 6: `marshal_test.go` y `services_test.go`:**
+- [x] **Step 6: `marshal_test.go` y `services_test.go`:**
   - `TestMarshalEscapesDollar`: un `$` en un valor de `environment`, en un argumento de `command`, en un valor de `labels` y en el `test` de un healthcheck sale como `$$`; una clave de `environment` con `$` queda igual.
   - `TestMarshalDeterministic`: dos `Marshal` del mismo `File` dan los mismos bytes; el resultado es JSON válido; no aparecen claves vacías (`networks`, `volumes` sin nada).
   - `TestServices`: nombres ordenados; `expose: ["80", 8080, "9000/tcp", "100-200", "${P}"]` → `[80, 8080, 9000]`; un servicio sin `expose` → `Ports: []`; un compose ilegible → `nil`.
 
-- [ ] **Step 7: `integration_test.go`** (`//go:build integration`, sin crear nada en Docker):
+- [x] **Step 7: `integration_test.go`** (`//go:build integration`, sin crear nada en Docker):
   - `TestMarshalAcceptedByDockerCLI`: `Load` del kitchen sink con un `env`, le agrega una red externa (`it2x_staging`, `external: true`) a `File.Networks` y a cada servicio, `Marshal`, y corre `docker stack config -c -` con el JSON por stdin, `cmd.Dir = t.TempDir()` y un entorno mínimo (`PATH`, `HOME`, `DOCKER_HOST` si está, `DOCKER_CONFIG=t.TempDir()`). Termina con código 0, y un `$$` del JSON sale como `$` en la salida. Se salta si `docker` no está en el `PATH`.
 
-- [ ] **Step 8: Verificar que fallan**
+- [x] **Step 8: Verificar que fallan**
 
 ```bash
 go test ./src/shared/domain/compose/
@@ -282,7 +282,7 @@ go test ./src/shared/domain/compose/
 
 Expected: no compila o falla por las funciones vacías.
 
-- [ ] **Step 9: Implementar.** Lo que importa del diseño:
+- [x] **Step 9: Implementar.** Lo que importa del diseño:
 
 ```go
 // details arma la entrada de compose-go: el compose en memoria, nunca un
@@ -330,12 +330,12 @@ func options(d *types.ConfigDetails, project string, interpolate bool, found *[]
 
 - **`Validate`:** tamaño → `d := details(src, "compose", nil)` → `loader.LoadModelWithContext(ctx, d, options(&d, "compose", false, &found)...)` → el primer hallazgo de `found` (vienen ordenados por ruta) da el error, con el motivo de `allowlist.go` → `check(dict, false)`.
 - **El orden dentro de compose-go** (v2.16.1, `loader.go`): `loadYamlFile` interpola, después corre el esquema (`schema.Validate`, que tiene `additionalProperties: false` en el primer nivel y `unevaluatedProperties: false` en los servicios) y `transform.Canonical`; `load` corre `validation.Validate` y **recién después** la lista de permitidos (`check.Report`). Un error del esquema vuelve antes y `found` queda vacío. La validación del esquema **queda prendida** (`SkipValidation = false`: es la que revisa los tipos al guardar, y sin ella `transform.Canonical` hace `panic` con formas inválidas, por ejemplo `networks: [1]`). Lo que hace `schemaMessage(err)`:
-  - un error de clave desconocida del esquema sale con el mismo formato que un hallazgo: `compose_yaml: <ruta>: <motivo>`, con el motivo de `reasons` por el último segmento o el genérico. compose-go no exporta el error del esquema (`validationError`), así que se reconocen sus dos textos, verificados en v2.16.1: `validating compose.yaml: <ruta> false schema` (una clave de un servicio: `services.web.foo false schema`) y `validating compose.yaml: <ruta> additional properties '<k>'[, '<k2>'…] not allowed` (la ruta del padre, vacía en el primer nivel: `validating compose.yaml:  additional properties 'bar', 'foo' not allowed`; se usa la primera clave, `<ruta>.<k>` o solo `<k>`);
+  - un error de clave desconocida del esquema sale con el mismo formato que un hallazgo: `compose_yaml: <ruta>: <motivo>`, con el motivo de `reasons` por el último segmento o el genérico. compose-go no exporta el error del esquema (`validationError`), así que se reconocen sus dos textos, verificados en v2.16.1: `validating compose.yaml: <ruta> false schema` (una clave de un servicio: `services.web.foo false schema`) y `validating compose.yaml: <ruta> additional properties '<k>'[, '<k2>'…] not allowed` (la ruta del padre, vacía en el primer nivel: `validating compose.yaml:  additional properties 'bar', 'foo' not allowed`; las claves vienen en el orden de un mapa de Go, así que se usa la primera **en orden alfabético**, `<ruta>.<k>` o solo `<k>`, para que el mensaje sea estable);
   - cualquier otro error (un tipo, `validation.Validate`, YAML roto) va tal cual: `compose_yaml: el compose no es válido: <texto de compose-go>`, con los saltos de línea como espacios;
   - un test de `schemaMessage` fija los dos textos de compose-go (si cambian al subir la versión, el test lo dice).
 - **`Load`:** igual, con `d := details(src, project, env)` y `interpolate = true` siempre (un `env` nil cuenta como vacío); después `check(dict, true)`, `loader.ModelToProject(dict, loader.ToOptions(&d, opts), d)` (con `SkipResolveEnvironment` y `SkipResolveLabels`, no lee archivos; `SkipConsistencyCheck` queda en `false`: verifica que cada volumen usado esté declarado) y `convert(project)`.
 - **`allowlist.go`:** `allowed []tree.Path` con las rutas del modelo **canónico** (el que ve la lista de permitidos, después de `transform.Canonical`). `*` vale para cualquier clave y también para los ítems de una lista. Cada mapa de claves libres necesita su `.*` (`labels.*`, `environment.*`, `logging.options.*`, `ulimits.*`, `volumes.*.labels.*`) y cada lista su `.*`; si no, cada clave del mapa sale como hallazgo. El kitchen sink del Step 3 es lo que prueba que la lista está completa. `reasons` asocia la clave rechazada (el último segmento con nombre de la ruta) a su motivo de §6.3 (por ejemplo `ports` → "publicar puertos no está soportado en la v1: los dominios van por Caddy"); lo que no está en `reasons`: "no está soportado: muelle solo acepta las claves de compose que conoce (§6.3)". El mensaje es `compose_yaml: <ruta>: <motivo>`, con la ruta del hallazgo sin los segmentos `[]` (por ejemplo `compose_yaml: services.web.ports: publicar puertos…`).
-- **`check.go`** (sobre el `map[string]any` canónico): de 1 a 32 servicios; nombres de servicio y de volumen con `validate.VolumeName`; `image` obligatoria y, si ya no tiene `$`, `validate.ImageRef`; cada montaje es `type: volume` con un `source` declarado arriba, o `type: tmpfs`; `logging.driver` en `json-file`, `local` o `none` (vacío vale porque el render lo completa con `json-file`, T2 Step 6: el compose final siempre lleva un driver); ninguna etiqueta (`labels`, `deploy.labels`, las de un volumen) empieza con `muelle.` o `com.docker.stack.`. Las etiquetas no pasan por `transform.Canonical`: en el modelo pueden venir como mapa o como lista. En una lista, la clave de cada ítem es lo que va antes del **primer** `=`, o el string entero si no tiene `=` (`- muelle.app` es la clave `muelle.app` con valor `""`, como la lee `Labels.DecodeMapstructure`); `deploy.mode` vacío, `replicated` o `global`. Con `interpolated=false`, las reglas sobre un valor que contiene `${` se saltan, pero cada string con `$` pasa por `checkTemplate` (la sintaxis de `interpolate.go`, sin buscar valores): así un `${A:-${B}}` o un `${}` fallan al guardar.
+- **`check.go`** (sobre el `map[string]any` canónico): de 1 a 32 servicios; nombres de servicio y de volumen con `validate.VolumeName`; `image` obligatoria y, si ya no tiene `$`, `validate.ImageRef`; cada montaje es `type: volume` con un `source` declarado arriba, o `type: tmpfs`; `logging.driver` en `json-file`, `local` o `none` (vacío vale porque el render lo completa con `json-file`, T2 Step 6: el compose final siempre lleva un driver); ninguna etiqueta (`labels`, `deploy.labels`, las de un volumen) empieza con `muelle.` o `com.docker.stack.`. Las etiquetas no pasan por `transform.Canonical`: en el modelo pueden venir como mapa o como lista. En una lista, la clave de cada ítem es lo que va antes del **primer** `=`, o el string entero si no tiene `=` (`- muelle.app` es la clave `muelle.app` con valor `""`, como la lee `Labels.DecodeMapstructure`); `deploy.mode` vacío, `replicated` o `global`. Con `interpolated=false`, las reglas sobre un valor que contiene `$` se saltan (también `$VAR` es una variable), pero cada string con `$` pasa por `checkTemplate` (la sintaxis de `interpolate.go`, sin buscar valores): así un `${A:-${B}}` o un `${}` fallan al guardar. Además, para que guardar no acepte lo que el render (la verificación de consistencia de compose-go) rechaza: cada `depends_on` nombra un servicio del compose, `healthcheck.test` en lista empieza con `CMD`, `CMD-SHELL` o `NONE`, y `deploy.replicas` no es negativo.
 - **`interpolate.go`** (decisión 17: propio, no envuelve `template.Substitute`):
 
 ```go
@@ -344,7 +344,9 @@ func options(d *types.ConfigDetails, project string, interpolate bool, found *[]
 // $$ (un $ literal), $NAME, ${NAME} y ${NAME<op>valor} con op en :- - :+ + :? ?
 // (NAME es [_a-zA-Z][_a-zA-Z0-9]*); un $ seguido de otra cosa ($1, un $ al
 // final) queda literal. El cierre de ${…} se busca contando llaves, con la regla
-// de getFirstBraceClosingIndex de compose-go (se copia: no es exportada).
+// de getFirstBraceClosingIndex de compose-go (se copia: no es exportada; sin
+// su salto del carácter que sigue a cada {, que en un ${…} válido nunca es una
+// llave: mismo resultado, y ${} da un mensaje más claro).
 // Diferencias, a propósito (compose-go las resuelve sin error):
 //   - una variable sin definir y sin op es *UndefinedError, también si viene
 //     después de otra con op en el mismo string (${A:-x}-${B});
@@ -363,7 +365,8 @@ func checkTemplate(s string) error
   - recorre el árbol de `err` en profundidad y en orden (`Unwrap() error` y `Unwrap() []error`), y se queda con el **primer** nodo `e` cuyo `errors.Unwrap(e)` (el directo) es uno de nuestros tres tipos;
   - `path = strings.TrimSuffix(strings.TrimPrefix(e.Error(), "error while interpolating "), ": "+inner.Error())`, y `ok` solo si las dos partes coincidieron (así una ruta con `: `, por ejemplo la clave de una etiqueta, no se corta mal);
   - nuestros tres tipos **no** envuelven `*template.InvalidTemplateError`: si lo hicieran, compose-go usaría su otro mensaje (`invalid interpolation format for <ruta>.\nYou may need to escape…`) y el prefijo no coincidiría;
-  - el mensaje es uno solo, el del primer error: los demás se descartan (el usuario corrige y vuelve a guardar).
+  - el mensaje es uno solo, el del primer error: los demás se descartan (el usuario corrige y vuelve a guardar);
+  - la ruta va sin los segmentos `.[]` de las listas, como la de un hallazgo (`services.web.command`, no `services.web.command.[]`).
 
   Con eso:
   - `*UndefinedError` → `compose_yaml: <ruta>: la variable X no está definida: agrégala en las variables de la app o del stage, o usa ${X:-valor}`;
@@ -416,19 +419,19 @@ type Service struct {
 	StdinOpen       bool              `json:"stdin_open,omitempty"`
 }
 // Healthcheck, Deploy (Mode, Replicas *uint64, Labels, EndpointMode, Placement,
-// Resources {Limits, Reservations *Resource{CPUs string, Memory int64}},
+// Resources {Limits, Reservations *Resource{CPUs string, Memory string}},
 // RestartPolicy, UpdateConfig, RollbackConfig *UpdateConfig{Parallelism
 // *uint64, Delay, FailureAction, Monitor string, MaxFailureRatio *float64,
 // Order}), Logging {Driver, Options}, Mount {Type, Source, Target, ReadOnly,
 // Volume *{NoCopy}, Tmpfs *{Size int64, Mode uint32}}, Ulimit {Soft, Hard}.
 ```
 
-  Las duraciones van como `time.Duration.String()` (`"30s"`), la memoria en bytes y los `cpus` (compose-go los da como `types.NanoCPUs`, un `float32`) con `strconv.FormatFloat(float64(x), 'f', -1, 32)`: con 64 bits, `cpus: 0.1` saldría `"0.10000000149011612"`. (El `cpus` de un formulario es un `float64` del JSON: ahí va con 64, T2 Step 5.)
+  Las duraciones van como `time.Duration.String()` (`"30s"`), la memoria en bytes **como string decimal** (`"536870912"`: el esquema de `docker stack deploy` exige un string en `memory`, verificado con Docker 29.6.1; un entero da `must be a string`) y los `cpus` (compose-go los da como `types.NanoCPUs`, un `float32`) con `strconv.FormatFloat(float64(x), 'f', -1, 32)`: con 64 bits, `cpus: 0.1` saldría `"0.10000000149011612"`. (El `cpus` de un formulario es un `float64` del JSON: ahí va con 64, T2 Step 5.)
 - **`marshal.go`:** `json.Marshal` → decodificar a `any` con `UseNumber` → recorrer y reemplazar `$` por `$$` en cada string **valor** (no en las claves de los mapas) → `json.MarshalIndent` con dos espacios y `\n` final.
-- **`Services`:** `LoadModelWithContext` sin interpolar, con las mismas opciones de lectura, sin lista de permitidos y **con** la validación del esquema (no `SkipValidation`: sin ella, `transform.Canonical` hace `panic` con una forma inválida, verificado con `networks: [1]`, y las filas que guardó la Fase 1 solo pasaron por el chequeo de vacío y de tamaño). Devuelve los nombres y los puertos enteros de `expose` (`80`, `"8080"`, `"9000/tcp"`; los rangos y los `${…}` se omiten). Ante cualquier error, `nil`. `TestServices` suma un compose que el esquema rechaza (`networks: [1]`, `a: 1`) → `nil`, sin `panic`.
+- **`Services`:** `LoadModelWithContext` sin interpolar, con las mismas opciones de lectura, sin lista de permitidos y **con** la validación del esquema (no `SkipValidation`: sin ella, `transform.Canonical` hace `panic` con una forma inválida, verificado con `networks: [1]`, y las filas que guardó la Fase 1 solo pasaron por el chequeo de vacío y de tamaño). Devuelve los nombres y los puertos enteros de `expose` (`80`, `"8080"`, `"9000/tcp"`; los rangos, los `/udp` y los `${…}` se omiten), ordenados y sin repetir. Ante cualquier error, `nil`. `TestServices` suma un compose que el esquema rechaza (`networks: [1]`, `a: 1`) → `nil`, sin `panic`.
 - compose-go puede escribir advertencias con logrus en stderr (por ejemplo, `version` obsoleta). No llevan valores de variables; no se cambia la configuración global de logrus.
 
-- [ ] **Step 10: Verificar y commit**
+- [x] **Step 10: Verificar y commit**
 
 ```bash
 go mod tidy
@@ -675,7 +678,7 @@ type Config struct {
 func ReadConfig(ctx context.Context, app App, env map[string]string) (Config, error)
 ```
 
-  El healthcheck de un formulario (§6.1): `http` → `["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:<port><path>"]`; `bun-http` → `["CMD", "bun", "-e", "fetch('http://127.0.0.1:<port><path>').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]`; `command` → `["CMD", …command]`; `none` → sin `healthcheck`. Tiempos como `"10s"`, `retries` tal cual. `memory_mb` → bytes (`MB << 20`), `cpus` (un `float64` del JSON) → `strconv.FormatFloat(x, 'f', -1, 64)` (`0.1` → `"0.1"`).
+  El healthcheck de un formulario (§6.1): `http` → `["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:<port><path>"]`; `bun-http` → `["CMD", "bun", "-e", "fetch('http://127.0.0.1:<port><path>').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]`; `command` → `["CMD", …command]`; `none` → sin `healthcheck`. Tiempos como `"10s"`, `retries` tal cual. `memory_mb` → bytes (`MB << 20`) como string decimal (`Resource.Memory`, T1), `cpus` (un `float64` del JSON) → `strconv.FormatFloat(x, 'f', -1, 64)` (`0.1` → `"0.1"`).
 - [ ] **Step 6: `render.go` (tests primero, con golden files).**
 
 ```go
