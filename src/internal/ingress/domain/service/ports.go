@@ -149,6 +149,15 @@ type CaddyAdmin interface {
 	Load(ctx context.Context, cfg ProxyConfig, force bool) error
 }
 
+// CertProbe verifica el certificado que sirve Caddy para un hostname: se
+// conecta por TLS a muelle-caddy:443 con SNI = hostname (adaptador:
+// infra/out/service.TLSProbe, §8 del spec). Un handshake que falla, o un
+// certificado que no verifica, es una observación inválida y no un error;
+// si no llega a Caddy, ErrCaddyUnreachable ("no se sabe", D9).
+type CertProbe interface {
+	Probe(ctx context.Context, hostname string) (CertObservation, error)
+}
+
 // CaddyWant es cómo tiene que quedar muelle-caddy (contrato §3.4).
 type CaddyWant struct {
 	Image               string
