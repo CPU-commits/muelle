@@ -44,7 +44,7 @@
 | `src/shared/infra/out/docker` | Archivos nuevos `dist.go`, `client_dist.go`, `dockertest/fake_dist.go` y sus tests; **no** se toca `docker.go` ni `Engine`, y el fake no declara `PutContainer` (es de la Fase 2: ver "Nombres nuevos en paquetes compartidos") | T3, T4 |
 | `src/internal/admin` | Archivo nuevo `reset_panel_ips.go` (y su test) | T3 |
 | `main.go`, `main_test.go` | Subcomandos `version`, `settings` e `install`; el evento `listening` | T2, T3, T4 |
-| `.github/workflows/ci.yaml` | Dos pasos nuevos al final | T1, T5 |
+| `.github/workflows/ci.yaml` | Dos pasos nuevos al final; `workflow_call:` en el `on:`, para que `release.yml` corra el mismo job | T1, T2, T5 |
 | `.gitignore` | Una línea | T1 |
 | `README.md` | Secciones nuevas de instalación, uso y recuperación; la línea de la Fase 5 en "Estado" y en "Estructura"; el bloque de la Fase 5 en las notas | T1–T5 |
 
@@ -200,7 +200,7 @@ action/
 ├── deploy.sh                                  (T5) PUT env, POST deploy, polling del log
 └── action_test.go                             (T5) el script contra un muelle falso
 .github/workflows/
-├── ci.yaml                                    (T1, T5) + -tags panel con un build de prueba, + shellcheck
+├── ci.yaml                                    (T1, T2, T5) + -tags panel con un build de prueba, + workflow_call, + shellcheck
 └── release.yml                                (T2) tests → imágenes en tags vX.Y.Z
 src/
 ├── cmd/
@@ -443,7 +443,7 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
 **Files:**
 - Modify: `main.go`, `main_test.go` (subcomando `version`)
 - Create: `Dockerfile`, `.dockerignore`, `deploy/caddy/Dockerfile`, `.github/workflows/release.yml`
-- Modify: `README.md` (sección "Imágenes")
+- Modify: `README.md` (sección "Imágenes"), `.github/workflows/ci.yaml` (`workflow_call:`, Step 7)
 
 - [x] **Step 1: `muelle version`.** Tests en `main_test.go`:
   - `TestRunVersion`: `run([]string{"version"}, …)` → código 0, stdout `dev\n`, stderr vacío.
@@ -602,7 +602,7 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
 
   **Hecho:** además del esqueleto, el `Dockerfile` corre `caddy list-modules | grep -qx dns.providers.cloudflare` (el build falla sin el módulo) y toma `ARG VERSION` para la etiqueta `org.opencontainers.image.version`, que si no quedaría con la versión de Caddy de la imagen base (el release le pasa el mismo `VERSION` que a muelle). **Resultado:** `v2.11.7`, el módulo está, `/config/` responde `null` por el socket y no hay admin API en TCP. Memoria de `it5-caddy-smoke`: 20,0 MiB (`docker stats`; VmRSS 47,6 MiB). Con muelle: 34,3 MiB (`docker stats`) o 73,3 MiB (VmRSS), bajo los 100 MB. Imagen: 163 MB en disco, 43 MB comprimida.
 
-- [ ] **Step 7: `.github/workflows/release.yml`.** No lo corras nunca (ni con `act`). Fija `actions/checkout`, `actions/setup-go` y las tres de `docker/` por SHA de commit, con la versión en un comentario (`git ls-remote --tags https://github.com/docker/build-push-action | sort -V -k2 | tail -3`; en un tag anotado, la línea `^{}` es el commit). Confirma las entradas con Context7 (`/docker/build-push-action`, `/docker/login-action`).
+- [x] **Step 7: `.github/workflows/release.yml`.** No lo corras nunca (ni con `act`). Fija `actions/checkout`, `actions/setup-go` y las tres de `docker/` por SHA de commit, con la versión en un comentario (`git ls-remote --tags https://github.com/docker/build-push-action | sort -V -k2 | tail -3`; en un tag anotado, la línea `^{}` es el commit). Confirma las entradas con Context7 (`/docker/build-push-action`, `/docker/login-action`).
   ```yaml
   name: Release
 
@@ -669,6 +669,13 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
   ```
   - Ningún `${{ … }}` con datos del evento va dentro de un `run:` (el tag se lee de `$GITHUB_REF_NAME`).
   - Verifica la sintaxis con `actionlint` si está en la máquina; si no, revisa el YAML a mano (indentación, `on:`, `needs:`). No instales herramientas nuevas para esto.
+
+  **Cambios al esqueleto:**
+  - El job `test` es `uses: ./.github/workflows/ci.yaml`, y `ci.yaml` suma `workflow_call:` a su `on:` (una línea). Así el release corre exactamente los pasos de CI, también los que agregue T5 (shellcheck), en vez de una copia que se desincroniza.
+  - El checkout va con `persist-credentials: false`.
+  - Las dos imágenes llevan `org.opencontainers.image.revision` (el `github.sha`), y muelle-caddy también recibe `VERSION` (Step 6).
+  - Versiones fijadas: `actions/checkout` v7.0.1, `docker/setup-buildx-action` v4.4.1, `docker/login-action` v4.6.0 y `docker/build-push-action` v7.4.0 (los cuatro tags son livianos: el SHA es el commit). `actions/setup-go` no hace falta en este archivo.
+  - `actionlint` no está en la máquina: el YAML se revisó con el parser de Ruby, y el script del paso `versión y tags` se corrió en bash con eventos simulados (tag final, `-rc.1`, tags que no sirven y `workflow_dispatch`).
 
 - [ ] **Step 8: README**, sección **"Imágenes"** (después de "Tests"): qué trae cada imagen, que se publican con el mismo tag `vX.Y.Z` (`:latest` solo muelle, solo versiones finales), cómo construirlas en local desde la raíz con `web/` presente (`docker build --build-arg VERSION=… .` y `docker build deploy/caddy`), y que hasta integrar el panel (`fase-4-panel`) el contexto se arma con su `web/` aparte.
 
