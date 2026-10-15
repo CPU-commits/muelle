@@ -524,7 +524,7 @@ type Deploy struct {
   - `registry.go`: `Registry{ID, Host, Username, Password, CreatedAt, UpdatedAt}`, con `String`, `GoString`, `LogValue` y `MarshalJSON` que ocultan `Password` (la entidad lleva la contraseña en claro en memoria). Sin las reglas de validación: van en `shared/domain/validate` (abajo).
   - `src/shared/domain/validate/registry_deploy.go` (archivo nuevo del paquete compartido; decisión 19: `settings.Load` también las usa, y `src/settings` no puede importar el dominio de un módulo): `RegistryHost(field, s)`, `RegistryUsername(field, s)` y `RegistryPassword(field, s)`, con la convención del paquete (`*validate.Error` en `field`, como `ImageRef(field, s)`) y los mensajes de contrato §2.10. Deploy las llama con `"host"`, `"username"` y `"password"`. Host canónico: `^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$`, puerto de 1 a 65535, hasta 255 caracteres; `index.docker.io`, `registry-1.docker.io` y `registry.hub.docker.com` → `<field>: para Docker Hub usa docker.io`. Usuario de 1 a 255 caracteres, UTF-8 válido, sin caracteres de control ni `:` (la autenticación HTTP Basic separa usuario y contraseña en el primer `:`, RFC 7617: un usuario con `:` nunca funcionaría; agregado en T2, también en contrato §2.10). Contraseña de 1 a 4096 bytes, sin `\n` ni `\r`. **Ningún mensaje incluye el valor** (tampoco el usuario: un mensaje de `settings.Load` no debe dar pistas de la credencial).
   - Tests: en `registry_deploy_test.go`, `TestRegistryHost` (aceptados: `ghcr.io`, `docker.io`, `registry.example.com:5000`, `localhost:5000`; rechazados: `GHCR.io`, `https://ghcr.io`, `ghcr.io/`, `ghcr.io/x`, `ghcr.io:0`, `ghcr.io:70000`, `-x.io`, los tres alias con su mensaje), `TestRegistryUsername` (vacío, 256 caracteres, `\x00`, `:`, UTF-8 inválido), `TestRegistryPassword` (vacío, 4097 bytes, con `\n` o `\r`; 4096 pasa; ningún mensaje contiene la contraseña probada); en `entity_test.go`, `TestRegistryNeverPrintsPassword` (`%v`, `%+v`, `%#v`, `slog` JSON, `json.Marshal`: ninguno contiene la contraseña).
-- [ ] **Step 2: Tipos de Swarm en `ports.go`** (para `Evaluate`; los usa T4):
+- [x] **Step 2: Tipos de Swarm en `ports.go`** (para `Evaluate`; los usa T4):
 
 ```go
 // SwarmService es un servicio de Swarm como lo lee deploy.
@@ -562,7 +562,7 @@ type LogLine struct {
 }
 ```
 
-- [ ] **Step 3: `images.go` (tests primero, `images_test.go`).**
+- [x] **Step 3: `images.go` (tests primero, `images_test.go`).**
 
 ```go
 // ChooseImages elige la ref pedida de cada servicio de la configuración
@@ -573,7 +573,8 @@ type LogLine struct {
 func ChooseImages(config, overrides map[string]string, current *entity.Deploy) map[string]string
 
 // ResolvedRef es la ref resuelta: la pedida con el tag explícito y el digest
-// (`nginx` → `nginx:latest@sha256:…`); una pedida con digest queda igual.
+// (`nginx` → `nginx:latest@sha256:…`); una pedida con digest queda igual, y
+// es un error si el digest que devolvió el registry no es el que fija (T2).
 func ResolvedRef(requested, digest string) (string, error)
 
 // ImageHost es el host de la credencial: reference.Domain(ParseNormalizedNamed(ref)).
@@ -590,7 +591,7 @@ func PinnedDigest(ref string) string
   - `TestRollbackNotUndoneByBodylessDeploy`: D1 (`x:staging` → `x:staging@sha256:A`), D2 (`x:staging@sha256:B`), el rollback R pide `D1.Images` (con digest); `ChooseImages(config, {}, R)` → `x:staging@sha256:A`. Es la afirmación del contrato §2.2.
   - `TestResolvedRef`: `nginx` → `nginx:latest@d`; `ghcr.io/x/y:sha-1` → `ghcr.io/x/y:sha-1@d`; `ghcr.io/x/y@sha256:…` igual; `x:tag@sha256:…` igual; `docker.io/library/nginx:1` → `nginx:1@d` (forma familiar).
   - `TestImageHost`: `nginx` → `docker.io`; `ghcr.io/x` → `ghcr.io`; `localhost:5000/x` → `localhost:5000`; `registry.example.com:5000/a/b` → `registry.example.com:5000`.
-- [ ] **Step 4: `masker.go` y `deploylog.go` (tests primero).**
+- [x] **Step 4: `masker.go` y `deploylog.go` (tests primero).**
 
 ```go
 // Masker reemplaza los valores secretos por *** (contrato §2.5): cada valor

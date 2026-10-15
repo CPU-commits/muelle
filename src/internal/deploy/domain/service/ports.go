@@ -98,3 +98,52 @@ type Stacks interface {
 	// Docker caído o sin Swarm: un error que envuelve entity.ErrDockerUnavailable.
 	Remove(ctx context.Context, stack string) error
 }
+
+// Estados de una actualización de un servicio de Swarm (UpdateStatus.State,
+// §7 paso 6): los mismos de shared/infra/out/docker, que el adaptador copia tal cual.
+const (
+	UpdateUpdating          = "updating"
+	UpdatePaused            = "paused"
+	UpdateCompleted         = "completed"
+	UpdateRollbackStarted   = "rollback_started"
+	UpdateRollbackPaused    = "rollback_paused"
+	UpdateRollbackCompleted = "rollback_completed"
+)
+
+// SwarmService es un servicio de Swarm como lo lee deploy.
+type SwarmService struct {
+	ID, Name         string
+	Labels           map[string]string // deploy.labels (muelle.deploy, …)
+	Image            string
+	Replicas         *uint64 // nil: global
+	RunningTasks     uint64
+	DesiredTasks     uint64
+	MemoryLimitBytes int64
+	Update           *UpdateStatus // nil: nunca se actualizó (o Swarm la reinició)
+	CreatedAt        time.Time
+}
+
+// UpdateStatus es el estado de la última actualización de un servicio. Queda
+// el de la actualización anterior hasta que empieza la siguiente: quien espera
+// un deploy mira StartedAt (Evaluate).
+type UpdateStatus struct {
+	State, Message string // Update*
+	StartedAt      *time.Time
+}
+
+// SwarmTask es una tarea de Swarm (una réplica en un momento dado).
+type SwarmTask struct {
+	ID, ServiceID, NodeID    string
+	Slot                     int // 0 en un servicio global
+	State, DesiredState, Err string
+	ContainerID              string
+	CreatedAt, UpdatedAt     time.Time
+}
+
+// LogLine es una línea de log de una tarea; Time cero y TaskID vacío en el
+// pedazo de una línea larga (contrato §2.5).
+type LogLine struct {
+	Time           time.Time
+	Stream, TaskID string
+	Text           string
+}
