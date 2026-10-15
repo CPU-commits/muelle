@@ -857,7 +857,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): la configuración de Caddy en JSON, con golden y sin atajos del Caddyfile`
 
-- [ ] **Step 3: La admin API falsa y el cliente.**
+- [x] **Step 3: La admin API falsa y el cliente.**
 
   **`caddytest` primero** (`caddy/caddytest/admin.go`, con su test). Es un `httptest.Server` en TCP:
   ```go
@@ -898,11 +898,14 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   var _ service.CaddyAdmin = (*Admin)(nil)
   func (a *Admin) Load(ctx context.Context, cfg service.ProxyConfig, force bool) error
   // redact reemplaza por "***" el token y sus formas escapadas (sin las
-  // comillas de afuera): strconv.Quote, y JSON con y sin el escape de HTML.
+  // comillas de afuera): strconv.Quote, y JSON con y sin el escape de HTML,
+  // también una dentro de otra (dos niveles: un %q de un pedazo de JSON).
   // Las reemplaza de la más larga a la más corta, y corta a 500 runas. Con
   // token "" no reemplaza nada.
   func redact(msg, token string) string
   ```
+  - Un rechazo que no trae `{"error": …}` (un 5xx con texto) usa el cuerpo, o "respondió <status>", también con `redact` (`TestLoadRejectedPlainBody`). El mensaje pasa por `strings.ToValidUTF8`: `encoding/json/v2` no serializa UTF-8 inválido, y el mensaje va a `GET /proxy`.
+  - `TestLoadPlaceholder`: con `{` en el token, `Load` no manda nada.
 
   **Commit** (dos): `test(ingress): admin API de Caddy falsa (caddytest)` y `feat(ingress): cliente de la admin API de Caddy por el socket, con los errores sin el token`
 
