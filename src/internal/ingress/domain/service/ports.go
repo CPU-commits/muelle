@@ -125,6 +125,8 @@ type Catalog interface {
 }
 
 // Credential es la credencial de un registry (tabla registries, de deploy).
+// La contraseña va en claro: String, GoString, LogValue y MarshalJSON la
+// ocultan (credential.go).
 type Credential struct{ Host, Username, Password string }
 
 // Registries lee las credenciales de los registries (de deploy, §4.1 regla 1;
@@ -145,4 +147,28 @@ type CaddyAdmin interface {
 	// ErrPlaceholderInSettings (no se manda nada), ErrCaddyUnreachable o un
 	// *CaddyRejected. Ninguno trae el token.
 	Load(ctx context.Context, cfg ProxyConfig, force bool) error
+}
+
+// CaddyWant es cómo tiene que quedar muelle-caddy (contrato §3.4).
+type CaddyWant struct {
+	Image               string
+	HTTPPort, HTTPSPort int
+	// Networks son las redes de stage a las que tiene que estar conectado.
+	Networks []string
+	// Auth es la credencial del registry de Image (nil: anónima). Su
+	// contraseña nunca sale en un log, un error ni un JSON (credential.go).
+	Auth *Credential
+}
+
+// CaddyRuntime es el contenedor muelle-caddy (adaptador: caddy.Runtime, D2
+// del plan de la Fase 3).
+type CaddyRuntime interface {
+	// Ensure lo deja como pide want (contrato §3.4) y devuelve si lo creó de
+	// nuevo. Errores: la imagen que no baja (ErrCaddyImagePull; el contenedor
+	// anterior sigue intacto), ErrPortInUse (el contenedor queda borrado) o
+	// Docker caído (entity.ErrDockerUnavailable).
+	Ensure(ctx context.Context, want CaddyWant) (recreated bool, err error)
+	// Status es lo que corre de verdad: la imagen con que se creó y si corre;
+	// found false si el contenedor no existe.
+	Status(ctx context.Context) (image string, running, found bool, err error)
 }

@@ -48,3 +48,13 @@ func (e *CaddyRejected) Error() string { return "Caddy no aceptó la configuraci
 // que Caddy expandiría como placeholders (D16 del plan de la Fase 3). No se
 // manda nada.
 var ErrPlaceholderInSettings = errors.New("el email ACME o el token de Cloudflare tienen { o }, que Caddy tomaría como placeholders")
+
+// ErrPortInUse: un puerto del host que publica muelle-caddy ya está tomado,
+// por otro contenedor o por un proceso del host. El contenedor que no arrancó
+// ya se borró (contrato §3.4).
+var ErrPortInUse = errors.New("un puerto del host que publica muelle-caddy ya está en uso")
+
+// ErrCaddyImagePull: la imagen de Caddy no bajó (el registry caído, sin
+// acceso o sin la imagen). El contenedor anterior sigue sirviendo (D11 del
+// plan de la Fase 3).
+var ErrCaddyImagePull = errors.New("no se pudo bajar la imagen de Caddy")
