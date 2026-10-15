@@ -7,6 +7,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/entity"
@@ -461,7 +462,7 @@ func (r *run) converge(ctx context.Context, expected []string, appliedAt, settle
 				}
 			}
 			if v.Failed {
-				r.taskDetails(ctx, v.Service, v.ServiceID, true)
+				r.taskDetails(ctx, v.Service, v.ServiceID, appliedAt, v.Reason, true)
 				return failf("%s: %s", v.Service, v.Reason)
 			}
 			if v.Done {
@@ -470,7 +471,7 @@ func (r *run) converge(ctx context.Context, expected []string, appliedAt, settle
 		}
 		now := u.Clock.Now()
 		if !now.Before(deadline) {
-			return r.timeout(ctx, last, lastServices)
+			return r.timeout(ctx, last, lastServices, appliedAt)
 		}
 		t := time.NewTimer(min(u.Timing.Poll, deadline.Sub(now)))
 		select {
@@ -484,7 +485,7 @@ func (r *run) converge(ctx context.Context, expected []string, appliedAt, settle
 
 // timeout dice el estado de cada servicio que no llegó y el Err de su última
 // tarea fallida, y falla (§7 paso 6).
-func (r *run) timeout(ctx context.Context, v service.Verdict, services []service.SwarmService) error {
+func (r *run) timeout(ctx context.Context, v service.Verdict, services []service.SwarmService, appliedAt time.Time) error {
 	app := r.app
 	byName := make(map[string]service.SwarmService, len(services))
 	for _, s := range services {
@@ -493,7 +494,7 @@ func (r *run) timeout(ctx context.Context, v service.Verdict, services []service
 	for _, short := range v.Pending {
 		r.line("%s: %s", short, v.Progress[short])
 		if s, ok := byName[naming.Service(app.Project, app.Stage, app.Slug, short)]; ok {
-			r.taskDetails(ctx, short, s.ID, false)
+			r.taskDetails(ctx, short, s.ID, appliedAt, "", false)
 		}
 	}
 	return failf("%s", reasonTimeout)
@@ -502,7 +503,13 @@ func (r *run) timeout(ctx context.Context, v service.Verdict, services []service
 // taskDetails escribe el Err de la última tarea fallida del servicio y, con
 // logs, sus últimas 50 líneas de log ("    | …"), con los pedazos de una
 // línea larga unidos antes de enmascarar (contrato §2.5).
-func (r *run) taskDetails(ctx context.Context, short, serviceID string, logs bool) {
+//
+// La tarea es la que nombra Swarm en el Message de la actualización (hint:
+// "…early termination of task <id>"); si no nombra ninguna, la más nueva de
+// este deploy (creada desde appliedAt−2s) que falló o fue rechazada, o que
+// trae un Err. Una tarea que no pasó el healthcheck termina complete y sin
+// Err; una rechazada antes de este deploy (Swarm la reintentó) no cuenta.
+func (r *run) taskDetails(ctx context.Context, short, serviceID string, appliedAt time.Time, hint string, logs bool) {
 	tasks, err := r.u.Cluster.Tasks(ctx, serviceID)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -510,18 +517,14 @@ func (r *run) taskDetails(ctx context.Context, short, serviceID string, logs boo
 		}
 		return
 	}
-	var failed *service.SwarmTask
-	for i, t := range tasks {
-		if t.State == "failed" || t.State == "rejected" || t.Err != "" {
-			failed = &tasks[i]
-			break
-		}
-	}
+	failed := failedTask(tasks, appliedAt, hint)
 	if failed == nil {
 		return
 	}
 	if failed.Err != "" {
 		r.line("%s: última tarea fallida: %s", short, failed.Err)
+	} else {
+		r.line("%s: última tarea fallida: terminó en %s, sin un motivo de Swarm", short, failed.State)
 	}
 	if !logs {
 		return
@@ -542,6 +545,27 @@ func (r *run) taskDetails(ctx context.Context, short, serviceID string, logs boo
 		texts[i] = "    | " + l.Text
 	}
 	r.lines(texts)
+}
+
+// failedTask elige la tarea de taskDetails; tasks va de la más nueva a la más vieja.
+func failedTask(tasks []service.SwarmTask, appliedAt time.Time, hint string) *service.SwarmTask {
+	if hint != "" {
+		for i, t := range tasks {
+			if t.ID != "" && strings.Contains(hint, t.ID) {
+				return &tasks[i]
+			}
+		}
+	}
+	since := appliedAt.Add(-2 * time.Second)
+	for i, t := range tasks {
+		if t.CreatedAt.Before(since) {
+			continue
+		}
+		if t.State == "failed" || t.State == "rejected" || t.Err != "" {
+			return &tasks[i]
+		}
+	}
+	return nil
 }
 
 // routes es el paso 7: un error de SyncRoutes es solo una advertencia (§13).

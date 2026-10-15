@@ -78,7 +78,7 @@ func (r *run) resume(ctx context.Context) error {
 
 	now := u.Clock.Now()
 	if v := service.Evaluate(expected, services, *d.StartedAt, now, now, u.Timing.Settle); v.Failed {
-		r.taskDetails(ctx, v.Service, v.ServiceID, true)
+		r.taskDetails(ctx, v.Service, v.ServiceID, *d.StartedAt, v.Reason, true)
 		return failf("%s: %s", v.Service, v.Reason)
 	}
 	switch service.AppliedState(expected, services, d.ID) {

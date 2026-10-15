@@ -423,6 +423,40 @@ func TestRunDeployRollbackDetected(t *testing.T) {
 	}
 }
 
+// La tarea que hizo fallar la actualización es la que nombra Swarm en el
+// Message ("…early termination of task <id>"): una que no pasó el
+// healthcheck termina complete y sin Err. Una tarea rechazada de antes de
+// este deploy no cuenta.
+func TestRunDeployFailedTaskOfThisDeploy(t *testing.T) {
+	w := newWorld(t)
+	w.deploy(t, apiRef, nil, nil)
+	w.runOK(t, w.apiID)
+	w.sim.age(time.Minute)
+	ctx := context.Background()
+	tasks, _ := w.docker.ListTasks(ctx, docker.TaskFilter{Service: "auditfy_staging_api_api"})
+	old := docker.Task{ID: "vieja", Slot: 1, State: docker.TaskRejected, DesiredState: docker.TaskShutdown,
+		Err: "invalid pool request", CreatedAt: time.Now().Add(-30 * time.Second)}
+	w.docker.SetTasks("auditfy_staging_api_api", append(tasks, old)...)
+
+	w.docker.SetDigest("ghcr.io/x/api:2", digestB)
+	w.sim.set(simOpts{State: docker.UpdateRollbackStarted, Message: "update rolled back due to failure or early termination of task",
+		TaskInMessage: true, FailedState: docker.TaskComplete, FailedLogs: 3})
+	w.deploy(t, apiRef, new("ghcr.io/x/api:2"), nil)
+	d, err := w.claimAndRun(t, w.apiID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectFailed(t, w, d, "api: Swarm hizo rollback (rollback_started): update rolled back due to failure or early termination of task")
+	texts := w.texts(t, d.ID)
+	if err := containsInOrder(texts, "api: última tarea fallida: terminó en complete, sin un motivo de Swarm",
+		"    | línea 0", "    | línea 2", "failed: "); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(w.log(t, d.ID), "invalid pool request") {
+		t.Fatalf("tomó una tarea de antes del deploy:\n%s", w.log(t, d.ID))
+	}
+}
+
 // Si no converge en deploy_timeout_s: failed con el estado de cada servicio
 // que no llegó y el Err de su última tarea fallida.
 func TestRunDeployTimeout(t *testing.T) {

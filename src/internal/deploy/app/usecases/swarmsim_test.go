@@ -27,6 +27,11 @@ type simOpts struct {
 	// Err y FailedLogs líneas de log ("línea 0", "línea 1"…).
 	FailedErr  string
 	FailedLogs int
+	// FailedState es el estado de esa tarea (failed por defecto): una que no
+	// pasó el healthcheck termina complete y sin Err. TaskInMessage suma su
+	// id al Message, como Swarm ("…early termination of task <id>").
+	FailedState   string
+	TaskInMessage bool
 	// Block retiene el deploy dentro de OnDeployStack hasta que se cierra (no
 	// ve el ctx: solo para los tests que no cancelan).
 	Block chan struct{}
@@ -191,12 +196,16 @@ func (s *swarmSim) deploy(d docker.StackDeploy) error {
 			}
 			started := now
 			ss.svc.ID, ss.svc.CreatedAt = prev.svc.ID, prev.svc.CreatedAt
-			ss.svc.Update = &docker.UpdateStatus{State: state, Message: o.Message, StartedAt: &started}
 			ss.tasks = s.tasks(full, replicas, running, o, now)
+			msg := o.Message
+			if o.TaskInMessage && o.FailedErr+o.FailedState != "" {
+				msg += " " + ss.tasks[0].ID
+			}
+			ss.svc.Update = &docker.UpdateStatus{State: state, Message: msg, StartedAt: &started}
 		}
 		s.services[full] = ss
 		s.put(ss)
-		if o.FailedErr != "" && o.FailedLogs > 0 && (prev == nil || prev.template != tmpl) {
+		if o.FailedErr+o.FailedState != "" && o.FailedLogs > 0 && (prev == nil || prev.template != tmpl) {
 			lines := make([]docker.LogLine, o.FailedLogs)
 			for i := range lines {
 				lines[i] = docker.LogLine{Time: now.Add(time.Duration(i) * time.Millisecond), Stream: docker.StreamStderr,
@@ -219,9 +228,13 @@ func (s *swarmSim) deploy(d docker.StackDeploy) error {
 // (la más nueva), si hay, y una por réplica, corriendo las primeras running.
 func (s *swarmSim) tasks(name string, replicas, running uint64, o simOpts, now time.Time) []docker.Task {
 	var out []docker.Task
-	if o.FailedErr != "" {
+	if o.FailedErr+o.FailedState != "" {
+		state := o.FailedState
+		if state == "" {
+			state = docker.TaskFailed
+		}
 		out = append(out, docker.Task{ID: fmt.Sprintf("%s-fallida-%d", name, now.UnixNano()), Slot: 1,
-			State: docker.TaskFailed, DesiredState: docker.TaskShutdown, Err: o.FailedErr, CreatedAt: now.Add(time.Millisecond)})
+			State: state, DesiredState: docker.TaskShutdown, Err: o.FailedErr, CreatedAt: now.Add(time.Millisecond)})
 	}
 	for i := range replicas {
 		state := docker.TaskRunning
