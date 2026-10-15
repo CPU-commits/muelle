@@ -1351,7 +1351,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `feat(ingress): EnsureCaddy y el borrado de las redes de stage huérfanas a la segunda pasada`
   - `feat(ingress): reintentos de /load con backoff y la recreación agendada de muelle-caddy`
 
-- [ ] **Step 4: El job `"proxy"`.**
+- [x] **Step 4: El job `"proxy"`.**
 
   **Tests primero** (`proxy_job_test.go` y `infra/in/cron/jobs_test.go`):
   - `TestProxyJobDisabled`: no llama a Docker ni a la admin API.
@@ -1366,6 +1366,8 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   **Implementar:**
   - `proxy_job.go`: `ProxyJob.Run(ctx) error`, en el orden de D12 (sin la parte de Cloudflare, que llega en T5). Junta los errores con `errors.Join`; cada uno ya quedó en el log.
   - `infra/in/cron/jobs.go`: `func Jobs(proxy func(ctx) error) []cron.Job`. T4 le suma `"certificados"`.
+
+  Hecho así: si la red de un stage falla con Docker caído, no prueba las demás (fallarían todas). `TestProxyJobRemovesOrphans` y `TestProxyJobKeepsGoing` (una red ajena con el nombre de un stage no corta el job: muelle-caddy y el `Sync` van igual) se sumaron a la lista.
 
   **Commit:** `feat(ingress): el job proxy asegura redes y muelle-caddy, borra huérfanas y reenvía la configuración`
 
