@@ -410,7 +410,7 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
 - Create: `Dockerfile`, `.dockerignore`, `deploy/caddy/Dockerfile`, `.github/workflows/release.yml`
 - Modify: `README.md` (sección "Imágenes")
 
-- [ ] **Step 1: `muelle version`.** Tests en `main_test.go`:
+- [x] **Step 1: `muelle version`.** Tests en `main_test.go`:
   - `TestRunVersion`: `run([]string{"version"}, …)` → código 0, stdout `dev\n`, stderr vacío.
   - En `TestRunUsage`, agregar `{[]string{"version", "extra"}, 2}`.
 

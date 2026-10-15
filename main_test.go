@@ -57,6 +57,7 @@ func TestRunUsage(t *testing.T) {
 		{[]string{"serve", "extra"}, 2},
 		{[]string{"genkey", "extra"}, 2},
 		{[]string{"genkey", "-h"}, 2},
+		{[]string{"version", "extra"}, 2},
 		{[]string{"-h"}, 0},
 		{[]string{"--help"}, 0},
 		{[]string{"help"}, 0},
@@ -77,6 +78,21 @@ func TestRunUsage(t *testing.T) {
 		if other.Len() != 0 {
 			t.Errorf("%q: salida inesperada: %q", tc.args, other.String())
 		}
+	}
+}
+
+// muelle version imprime la versión con que se compiló el binario (contrato
+// §5.1): la imagen la fija con -ldflags "-X main.version=…", y sin eso es dev.
+func TestRunVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"version"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("código %d: %s", code, stderr.String())
+	}
+	if stdout.String() != "dev\n" {
+		t.Errorf("stdout=%q, esperaba \"dev\\n\"", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr=%q", stderr.String())
 	}
 }
 

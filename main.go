@@ -1,6 +1,7 @@
 // Comando muelle: `muelle serve` levanta el panel y la API; `muelle genkey`
 // imprime una clave maestra nueva (para desarrollo local; en producción la
-// genera `muelle install`, Fase 5).
+// genera `muelle install`, Fase 5); `muelle version` imprime la versión del
+// binario.
 package main
 
 import (
@@ -28,6 +29,7 @@ const usage = `uso: muelle <comando>
 comandos:
   serve    levanta el panel y la API (configuración por variables MUELLE_*)
   genkey   imprime una clave maestra nueva en base64
+  version  imprime la versión de muelle
   help     muestra esta ayuda (también -h y --help)`
 
 // version es la versión de muelle. La imagen la fija al compilar (Fase 5):
@@ -65,34 +67,51 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, usage)
 		return 2
 	}
+	// Cada comando valida sus propios argumentos.
 	cmd, extra := args[0], args[1:]
 	switch cmd {
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, usage)
 		return 0
-	case "serve", "genkey":
-		if len(extra) > 0 {
-			fmt.Fprintf(stderr, "muelle %s: no recibe argumentos (sobra %q)\n\n%s\n", cmd, extra[0], usage)
+	case "version":
+		if !noArgs(cmd, extra, stderr) {
 			return 2
 		}
+		fmt.Fprintln(stdout, version)
+		return 0
+	case "genkey":
+		if !noArgs(cmd, extra, stderr) {
+			return 2
+		}
+		fmt.Fprintln(stdout, crypto.GenerateKey())
+		return 0
+	case "serve":
+		if !noArgs(cmd, extra, stderr) {
+			return 2
+		}
+		// También el error final y lo que se registre con slog.Default o el
+		// paquete log sale en JSON.
+		log := slog.New(slog.NewJSONHandler(stdout, nil))
+		slog.SetDefault(log)
+		if err := serve(log); err != nil {
+			log.Error("muelle terminó con error", "err", err)
+			return 1
+		}
+		return 0
 	default:
 		fmt.Fprintf(stderr, "muelle: comando desconocido %q\n\n%s\n", cmd, usage)
 		return 2
 	}
+}
 
-	if cmd == "genkey" {
-		fmt.Fprintln(stdout, crypto.GenerateKey())
-		return 0
+// noArgs dice si un comando sin argumentos no recibió ninguno; si recibió
+// alguno, escribe el error y el uso en stderr.
+func noArgs(cmd string, extra []string, stderr io.Writer) bool {
+	if len(extra) == 0 {
+		return true
 	}
-	// También el error final y lo que se registre con slog.Default o el
-	// paquete log sale en JSON.
-	log := slog.New(slog.NewJSONHandler(stdout, nil))
-	slog.SetDefault(log)
-	if err := serve(log); err != nil {
-		log.Error("muelle terminó con error", "err", err)
-		return 1
-	}
-	return 0
+	fmt.Fprintf(stderr, "muelle %s: no recibe argumentos (sobra %q)\n\n%s\n", cmd, extra[0], usage)
+	return false
 }
 
 func serve(log *slog.Logger) error {
