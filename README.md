@@ -16,6 +16,8 @@ Etapa de contratos de las Fases 2, 3 y 5:
 - los ajustes del proxy y el DNS en `/settings`;
 - las migraciones reservadas.
 
+Fase 3 (ingress): muelle crea y mantiene el contenedor muelle-caddy y le manda las rutas (los dominios de cada app y el panel, con TLS por Cloudflare o por HTTP y las IPs permitidas del panel); maneja los dominios con su DNS en Cloudflare (crear, adoptar, reintentar, la IP pública) y el registro del panel; verifica los certificados, y expone `GET /api/v1/proxy`. Ver "Proxy y dominios".
+
 Todavía no despliega nada.
 
 ## Estructura (spec §4.1)
@@ -93,6 +95,30 @@ La contraseña tiene al menos 12 caracteres. Los tokens de API (`Authorization: 
 
 Crear y borrar un stage crea y borra su red overlay, y borrar una app hace `docker stack rm` (con el CLI `docker` en el `PATH`). Para eso, el Docker local tiene que ser manager de un Swarm (`docker swarm init`); si no, esas peticiones responden `503 docker_unavailable` y no cambian nada. El resto de la API anda sin Docker. Sin un Swarm, esos caminos se prueban con los tests, que usan el Docker en memoria (`dockertest`, que `container.WithDocker` inyecta).
 
+## Proxy y dominios
+
+ingress crea muelle-caddy y lo mantiene: el job `"proxy"`, al arrancar y cada 5 minutos, asegura el contenedor y las redes, y le reenvía la configuración. Cambiar los puertos del proxy en Ajustes lo recrea 2 s después de responder el `PATCH` (contrato §3.5).
+
+- **En desarrollo** (un `MUELLE_PANEL_ORIGIN` con una IP o `localhost`, que deja `panel_domain` vacío, o un binario sin versión y sin `caddy_image`), muelle no crea muelle-caddy ni toca los puertos del host, y `GET /api/v1/proxy` dice `disabled`. Los dominios y su DNS en Cloudflare funcionan igual.
+- **El token de Cloudflare** (Ajustes) necesita los permisos Zone:Read y DNS:Edit sobre las zonas de tus dominios. muelle lo verifica al guardarlo, y con él crea los registros de los dominios y el del panel, y valida los certificados por DNS-01.
+- **Una `caddy_image` propia** (`MUELLE_INIT_CADDY_IMAGE`) tiene que ser Caddy 2.10 o más nuevo, con el módulo `dns.providers.cloudflare` (contrato §3.4). Antes de la 2.10, la admin API por socket unix revisa el header `Host` y rechaza el que manda muelle (caddy#6832), y todo `POST /load` falla. La imagen `muelle-caddy` de cada versión cumple las dos cosas.
+- **Imágenes privadas:** muelle baja la muelle-caddy de cada versión nueva con el registry `ghcr.io` de Ajustes → Registries, que siembra install. Si su token vence, muelle-caddy sigue con la imagen anterior y el error de `GET /api/v1/proxy` dice que hay que actualizar la credencial en Ajustes → Registries (el token de GitHub con `read:packages` que explica la parte de install, Fase 5).
+
+**Antes de migrar los sitios (spec §15), a mano, contra una zona de prueba:**
+1. Guarda en Ajustes un token que vea solo la zona de prueba, y la IP pública del servidor.
+2. Crea un dominio de esa zona: tiene que pasar de `pending` a `active` en menos de 2 minutos (criterio §1.4), con el certificado emitido por DNS-01.
+3. Cambia su `proxied` y mira en Cloudflare que el registro cambió.
+4. Crea a mano en Cloudflare un registro de otro nombre, agrega ese nombre como dominio (queda en `error` con `record_exists`) y adóptalo.
+5. Borra el dominio y mira que su registro se fue de Cloudflare.
+
+**Tests de integración de ingress**, con Caddy real (necesitan un Swarm activo en el que este nodo es manager, y las imágenes `caddy:2-alpine` y `alpine/socat:latest`; si falta algo, se saltan):
+
+```bash
+go test -tags integration -count=1 -run Integration -v ./src/internal/ingress/...
+```
+
+Solo crean contenedores, redes y volúmenes con el prefijo `it3`, en los puertos 21000–21999, y los borran al terminar; nunca usan 80, 443 ni 2019, ni la API real de Cloudflare. No se corren a la vez que la integración de la Fase 5: su test de install falla si mientras corre desaparece una red con la etiqueta `muelle.project`, y estos crean y borran redes de stage.
+
 ## Solo detrás de Caddy (o de otro proxy)
 
 **muelle nunca debe quedar expuesto directo.** Para limitar los logins por IP usa la IP del cliente, y confía en el header `X-Real-IP` cuando la conexión viene de loopback o de una red privada (RFC 1918, ULA), que es por donde llega Caddy (spec §8). Si un cliente puede conectarse a muelle sin pasar por el proxy desde una de esas redes, escribe su propio `X-Real-IP` y se salta el límite por IP.
@@ -144,11 +170,14 @@ Hallazgos de la revisión de código que las próximas fases deben respetar.
 
 **Fase 3**
 - Crear un stage ya crea la red overlay y conecta Caddy (etapa de contratos).
-- El pool de direcciones de la overlay debe ser privado (RFC1918/ULA) para que se pueda confiar en `X-Real-IP` (`docker.Network.Subnets`).
-- Las IPs permitidas del panel van con el matcher `client_ip` de Caddy, no `remote_ip` (contrato §3.4).
-- La configuración de Caddy es JSON: placeholders completos (`{http.vars.client_ip}`), nunca los atajos del Caddyfile. El golden lo verifica.
-- muelle-caddy se crea con `naming.CaddyCommand()` y `naming.CaddyEnv()`, nunca con el CMD de la imagen (la admin API quedaría en TCP, sin el socket).
-- Docker 29 arranca sin puertos un contenedor cuyo arranque falló con `ErrPortInUse`: muelle-caddy se recrea, nunca se rearranca (`Container.PublishedPorts`).
+- El pool de direcciones de la overlay debe ser privado (RFC1918/ULA) para que se pueda confiar en `X-Real-IP` (`docker.Network.Subnets`). Verificarlo en `muelle_panel` le toca a install: ingress no lo revisa.
+- ~~Las IPs permitidas del panel van con el matcher `client_ip` de Caddy, no `remote_ip` (contrato §3.4).~~
+- ~~La configuración de Caddy es JSON: placeholders completos (`{http.vars.client_ip}`), nunca los atajos del Caddyfile. El golden lo verifica.~~
+- ~~muelle-caddy se crea con `naming.CaddyCommand()` y `naming.CaddyEnv()`, nunca con el CMD de la imagen (la admin API quedaría en TCP, sin el socket).~~
+- ~~Docker 29 arranca sin puertos un contenedor cuyo arranque falló con `ErrPortInUse`: muelle-caddy se recrea, nunca se rearranca (`Container.PublishedPorts`).~~
+- Los rangos de IP de Cloudflare de `trusted_proxies` (`ingress/infra/out/service/caddy/ranges.go`) son una lista estática: se revisan con cada versión contra cloudflare.com/ips-v4 y ips-v6.
+- La emisión por DNS-01 con el módulo de Cloudflare no tiene un test automático (la imagen oficial de Caddy no lo trae, y no se usa la API real): se prueba a mano contra una zona de prueba, con los pasos de "Proxy y dominios".
+- El aislamiento entre stages por nombre lo prueba `TestIntegrationCaddyLifecycle`; por IP (sin pasar por el nombre del servicio) no hay un test automático, y queda para la prueba manual.
 
 **Fase 5 / install**
 - Considerar el prefijo `__Host-` en el nombre de la cookie de sesión cuando las cookies son Secure.
