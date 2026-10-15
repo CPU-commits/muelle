@@ -30,19 +30,53 @@ const (
 )
 
 // recordingEngine envuelve el fake y anota lo que el fake no guarda: el spec
-// de cada CreateContainer y la credencial de cada PullImage (D20).
+// de cada CreateContainer y la credencial de cada PullImage (D20). failOn
+// hace fallar una operación sobre un contenedor ("CreateContainer t-caddy"),
+// sin tocar la del contenedor de prueba de los puertos.
 type recordingEngine struct {
 	*dockertest.Fake
-	mu    sync.Mutex
-	specs []docker.ContainerSpec
-	auths []*docker.RegistryAuth
+	mu     sync.Mutex
+	specs  []docker.ContainerSpec
+	auths  []*docker.RegistryAuth
+	failOn map[string]error
+}
+
+func (r *recordingEngine) fail(op, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	err := r.failOn[op+" "+name]
+	delete(r.failOn, op+" "+name)
+	return err
 }
 
 func (r *recordingEngine) CreateContainer(ctx context.Context, spec docker.ContainerSpec) (string, error) {
 	r.mu.Lock()
 	r.specs = append(r.specs, spec)
 	r.mu.Unlock()
+	if err := r.fail("CreateContainer", spec.Name); err != nil {
+		return "", err
+	}
 	return r.Fake.CreateContainer(ctx, spec)
+}
+
+func (r *recordingEngine) StartContainer(ctx context.Context, name string) error {
+	if err := r.fail("StartContainer", name); err != nil {
+		return err
+	}
+	return r.Fake.StartContainer(ctx, name)
+}
+
+// created son los specs de los CreateContainer de ese nombre.
+func (r *recordingEngine) created(name string) []docker.ContainerSpec {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []docker.ContainerSpec
+	for _, s := range r.specs {
+		if s.Name == name {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (r *recordingEngine) PullImage(ctx context.Context, ref string, auth *docker.RegistryAuth) error {
@@ -66,7 +100,7 @@ type runtimeFixture struct {
 func newRuntimeFixture(t *testing.T) *runtimeFixture {
 	t.Helper()
 	f := dockertest.New()
-	e := &recordingEngine{Fake: f}
+	e := &recordingEngine{Fake: f, failOn: map[string]error{}}
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	return &runtimeFixture{fake: f, engine: e, runtime: NewRuntime(e, testNames, log), log: &buf}
@@ -105,12 +139,28 @@ func baseWant(networks ...string) service.CaddyWant {
 	return service.CaddyWant{Image: testImage, HTTPPort: 8080, HTTPSPort: 8443, Networks: networks}
 }
 
+// callMatches dice si la llamada empieza con las palabras de prefix, enteras:
+// "StartContainer t-caddy" no es "StartContainer t-caddy-probe".
+func callMatches(call, prefix string) bool {
+	c, p := strings.Fields(call), strings.Fields(prefix)
+	return len(c) >= len(p) && slices.Equal(c[:len(p)], p)
+}
+
 func hasCall(calls []string, prefix string) bool {
-	return slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, prefix) })
+	return slices.ContainsFunc(calls, func(c string) bool { return callMatches(c, prefix) })
 }
 
 func callIndex(calls []string, prefix string) int {
-	return slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, prefix) })
+	return slices.IndexFunc(calls, func(c string) bool { return callMatches(c, prefix) })
+}
+
+func lastCallIndex(calls []string, prefix string) int {
+	for i := len(calls) - 1; i >= 0; i-- {
+		if callMatches(calls[i], prefix) {
+			return i
+		}
+	}
+	return -1
 }
 
 // Desde Docker vacío: crea la red panel y el contenedor como dice el
@@ -130,10 +180,11 @@ func TestEnsureCreates(t *testing.T) {
 	if err != nil || n.Driver != "overlay" || !n.Attachable {
 		t.Fatalf("red panel: %+v %v", n, err)
 	}
-	if len(f.engine.specs) != 1 {
-		t.Fatalf("CreateContainer: %d", len(f.engine.specs))
+	specs := f.engine.created(testNames.Container)
+	if len(specs) != 1 {
+		t.Fatalf("CreateContainer: %d", len(specs))
 	}
-	spec := f.engine.specs[0]
+	spec := specs[0]
 	if spec.Name != testNames.Container || spec.Image != testImage || spec.RestartPolicy != "unless-stopped" ||
 		spec.Network != testNames.PanelNetwork {
 		t.Fatalf("spec: %+v", spec)
@@ -327,7 +378,7 @@ func TestEnsureRecreates(t *testing.T) {
 				t.Fatal("recreated debería ser true")
 			}
 			calls := f.since(n)
-			stop, remove := callIndex(calls, "StopContainer"), callIndex(calls, "RemoveContainer")
+			stop, remove := callIndex(calls, "StopContainer "+testNames.Container), callIndex(calls, "RemoveContainer "+testNames.Container)
 			if remove < 0 || (tc.running && (stop < 0 || stop > remove)) || (!tc.running && stop >= 0) {
 				t.Fatalf("detener (si corría) y después borrar: %v", calls)
 			}
@@ -414,8 +465,16 @@ func TestEnsurePortInUse(t *testing.T) {
 	if !errors.Is(err, service.ErrPortInUse) {
 		t.Fatalf("error: %v", err)
 	}
-	if _, err := f.fake.InspectContainer(context.Background(), testNames.Container); !errors.Is(err, docker.ErrNotFound) {
-		t.Fatalf("el contenedor debería estar borrado: %v", err)
+	ctx := context.Background()
+	for _, name := range []string{testNames.Container, testProbe} {
+		if _, err := f.fake.InspectContainer(ctx, name); !errors.Is(err, docker.ErrNotFound) {
+			t.Fatalf("%s debería estar borrado: %v", name, err)
+		}
+	}
+	// Lo encontró la prueba: muelle-caddy ni se creó, así que ninguna red de
+	// Swarm quedó a medias.
+	if len(f.engine.created(testNames.Container)) != 0 {
+		t.Fatalf("no debería crear muelle-caddy: %v", f.fake.Calls())
 	}
 
 	f.fake.FreeHostPort(8080)
@@ -424,6 +483,51 @@ func TestEnsurePortInUse(t *testing.T) {
 	}
 	if c := f.container(t); !c.Running || len(c.PublishedPorts) == 0 {
 		t.Fatalf("contenedor: %+v", c)
+	}
+}
+
+// testProbe es el contenedor con que Ensure prueba los puertos.
+const testProbe = "t-caddy-probe"
+
+// Antes de crear muelle-caddy, Ensure prueba los puertos con un contenedor
+// descartable sin redes de Swarm (la red bridge por defecto): si el arranque
+// de muelle-caddy fallara por un puerto ocupado, Docker no suelta la
+// conexión de Swarm de la red panel (una tarea "attachment" que no se borra
+// y se queda con una IP de esa red). La prueba se borra siempre.
+func TestEnsureProbesPorts(t *testing.T) {
+	f := newRuntimeFixture(t)
+	f.fake.SetImagePresent(testImage)
+	f.ensure(t, baseWant())
+	probes := f.engine.created(testProbe)
+	if len(probes) != 1 {
+		t.Fatalf("una prueba: %+v", probes)
+	}
+	p := probes[0]
+	real := f.engine.created(testNames.Container)[0]
+	if p.Image != testImage || p.Network != "" || len(p.Mounts) != 0 || !slices.Equal(p.Ports, real.Ports) ||
+		!slices.Equal(p.Cmd, []string{"caddy", "version"}) || p.RestartPolicy != "" {
+		t.Fatalf("la prueba: %+v", p)
+	}
+	calls := f.fake.Calls()
+	start, remove := callIndex(calls, "StartContainer "+testProbe), lastCallIndex(calls, "RemoveContainer "+testProbe)
+	create := callIndex(calls, "CreateContainer "+testNames.Container)
+	if start < 0 || remove < start || create < remove {
+		t.Fatalf("probar, borrar la prueba y recién crear muelle-caddy: %v", calls)
+	}
+	if _, err := f.fake.InspectContainer(context.Background(), testProbe); !errors.Is(err, docker.ErrNotFound) {
+		t.Fatalf("la prueba queda borrada: %v", err)
+	}
+
+	// Una prueba que falla por otra cosa (sin red bridge, por ejemplo) no
+	// frena a muelle-caddy: queda en el log.
+	g := newRuntimeFixture(t)
+	g.fake.SetImagePresent(testImage)
+	g.engine.failOn["CreateContainer "+testProbe] = errors.New("network bridge not found")
+	if !g.ensure(t, baseWant()) {
+		t.Fatal("recreated debería ser true")
+	}
+	if !strings.Contains(g.log.String(), "network bridge not found") {
+		t.Fatalf("el log: %s", g.log)
 	}
 }
 
@@ -452,7 +556,10 @@ func TestEnsureHidesRegistryPassword(t *testing.T) {
 			if op != "PullImage" {
 				f.fake.SetImagePresent(testImage)
 			}
-			f.fake.FailNext(op, errors.New("falló "+op))
+			f.engine.failOn[op+" "+testNames.Container] = errors.New("falló " + op)
+			if op == "PullImage" {
+				f.fake.FailNext(op, errors.New("falló "+op))
+			}
 			want := baseWant()
 			want.Auth = &service.Credential{Host: "ghcr.io", Username: "bot", Password: testPassword}
 			_, err := f.runtime.Ensure(context.Background(), want)

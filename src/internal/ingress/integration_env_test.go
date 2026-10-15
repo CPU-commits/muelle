@@ -71,6 +71,7 @@ func slotPorts(n int) slot {
 //	las redes de stage                  it3<id>_<stage>
 //	la red panel (opts.PanelNetwork)    it3<id>_panel
 //	muelle-caddy (opts.CaddyContainer)  it3-<id>-caddy
+//	su prueba de los puertos            it3-<id>-caddy-probe
 //	sus volúmenes                       it3-<id>-caddy-data, -config y -admin
 //	el puente de la admin API           it3-<id>-admin
 //	los backends y la sonda             it3-<id>-<app>
@@ -174,7 +175,9 @@ func (e *itEnv) module() *Module {
 func (e *itEnv) cleanup() {
 	ctx := context.Background()
 	e.mu.Lock()
-	names := append([]string{e.opts.CaddyContainer}, e.containers...)
+	// muelle-caddy y su contenedor de prueba de los puertos (caddy.Runtime),
+	// más los que creó el test.
+	names := append([]string{e.opts.CaddyContainer, e.opts.CaddyContainer + "-probe"}, e.containers...)
 	e.mu.Unlock()
 	for _, n := range names {
 		if err := e.docker.RemoveContainer(ctx, n, true); err != nil && !errors.Is(err, docker.ErrNotFound) {
@@ -424,6 +427,23 @@ func (e *itEnv) get(host, path string) (status int, body string, err error) {
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return resp.StatusCode, strings.TrimSpace(string(b)), err
+}
+
+// caddy inspecciona el muelle-caddy del test (opts.CaddyContainer).
+func (e *itEnv) caddy() (docker.Container, error) {
+	return e.docker.InspectContainer(context.Background(), e.opts.CaddyContainer)
+}
+
+// proxyStatus es el estado de GET /proxy en memoria, como un check de
+// eventually que espera want.
+func (e *itEnv) proxyStatus(m *Module, want string) func() (bool, error) {
+	return func() (bool, error) {
+		status, msg, _ := m.state.Snapshot(true)
+		if string(status) != want {
+			return false, fmt.Errorf("estado %s: %q", status, msg)
+		}
+		return true, nil
+	}
 }
 
 // eventually repite check cada 500 ms hasta que devuelve true o pasa timeout.

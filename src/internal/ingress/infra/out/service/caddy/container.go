@@ -20,6 +20,10 @@ import (
 // bien y suelta el socket de la admin API.
 const stopTimeout = 10 * time.Second
 
+// probeSuffix es el sufijo del contenedor descartable con que se prueban los
+// puertos antes de crear muelle-caddy (muelle-caddy-probe).
+const probeSuffix = "-probe"
+
 // Names son los nombres de Docker de muelle-caddy: los de naming en
 // producción, otros en los tests de integración (ingress.Options).
 type Names struct {
@@ -79,8 +83,9 @@ func (r *Runtime) spec(want service.CaddyWant) docker.ContainerSpec {
 //     conecta a las redes que le faltan (la panel y las de stage) y vuelve;
 //  3. si no, lo recrea (D11 del plan de la Fase 3): baja la imagen si falta
 //     (si no baja, el contenedor anterior queda intacto), lo detiene si
-//     corría, lo borra, crea uno nuevo, lo conecta a las redes de stage y lo
-//     arranca. Con un puerto del host ocupado, borra el que no arrancó.
+//     corría, lo borra, prueba los puertos (probePorts), crea uno nuevo, lo
+//     conecta a las redes de stage y lo arranca. Con un puerto del host
+//     ocupado, borra el que no arrancó.
 //
 // Nunca registra want, la credencial ni el RegistryAuth; sus errores nombran
 // la imagen, no la credencial.
@@ -116,6 +121,9 @@ func (r *Runtime) Ensure(ctx context.Context, want service.CaddyWant) (bool, err
 			return false, fmt.Errorf("borrando muelle-caddy: %w", err)
 		}
 	}
+	if err := r.probePorts(ctx, spec); err != nil {
+		return false, err
+	}
 	if _, err := r.docker.CreateContainer(ctx, spec); err != nil {
 		return false, fmt.Errorf("creando muelle-caddy con %s: %w", want.Image, err)
 	}
@@ -124,8 +132,9 @@ func (r *Runtime) Ensure(ctx context.Context, want service.CaddyWant) (bool, err
 	}
 	if err := r.docker.StartContainer(ctx, r.names.Container); err != nil {
 		if errors.Is(err, docker.ErrPortInUse) {
-			// Docker 29 lo arrancaría sin puertos si alguien lo vuelve a
-			// arrancar: se borra ya, y el job "proxy" lo crea de nuevo.
+			// Alguien tomó el puerto después de la prueba. Docker 29 lo
+			// arrancaría sin puertos si alguien lo vuelve a arrancar: se
+			// borra ya, y el job "proxy" lo crea de nuevo.
 			if rmErr := r.docker.RemoveContainer(ctx, r.names.Container, true); rmErr != nil && !errors.Is(rmErr, docker.ErrNotFound) {
 				r.log.Warn("ingress: no se pudo borrar muelle-caddy después del puerto ocupado", "contenedor", r.names.Container, "error", rmErr)
 			}
@@ -147,6 +156,49 @@ func (r *Runtime) Status(ctx context.Context) (image string, running, found bool
 		return "", false, false, err
 	}
 	return c.Image, c.Running, true, nil
+}
+
+// probePorts prueba que los puertos del host de spec estén libres, con un
+// contenedor descartable (<contenedor>-probe) de la misma imagen, en la red
+// bridge por defecto y sin redes de Swarm, que corre "caddy version" y se
+// borra enseguida. Hace falta porque Docker (29) no suelta la conexión de
+// Swarm de la red con que se creó un contenedor cuyo arranque falla por un
+// puerto ocupado: queda una tarea "attachment" que no se borra, con una IP de
+// la red panel, y la red ya no se puede borrar. Con un puerto ocupado, el job
+// "proxy" reintentaría cada 5 minutos y se comería la red panel en un día.
+// Devuelve ErrPortInUse si un puerto está ocupado; si la prueba falla por
+// otra cosa (sin la red bridge, por ejemplo), lo registra y sigue: la prueba
+// es una protección, no un requisito.
+func (r *Runtime) probePorts(ctx context.Context, spec docker.ContainerSpec) error {
+	name := r.names.Container + probeSuffix
+	remove := func() {
+		err := r.docker.RemoveContainer(context.WithoutCancel(ctx), name, true)
+		if err != nil && !errors.Is(err, docker.ErrNotFound) {
+			r.log.Warn("ingress: no se pudo borrar el contenedor de prueba de los puertos", "contenedor", name, "error", err)
+		}
+	}
+	remove() // uno que quedó de una prueba cortada
+	_, err := r.docker.CreateContainer(ctx, docker.ContainerSpec{
+		Name: name, Image: spec.Image, Cmd: []string{"caddy", "version"}, Ports: spec.Ports,
+	})
+	if err != nil {
+		if errors.Is(err, entity.ErrDockerUnavailable) {
+			return err
+		}
+		r.log.Warn("ingress: no se pudieron probar los puertos de muelle-caddy; se crea igual", "error", err)
+		return nil
+	}
+	defer remove()
+	if err := r.docker.StartContainer(ctx, name); err != nil {
+		switch {
+		case errors.Is(err, docker.ErrPortInUse):
+			return fmt.Errorf("%w: %w", service.ErrPortInUse, err)
+		case errors.Is(err, entity.ErrDockerUnavailable):
+			return err
+		}
+		r.log.Warn("ingress: no se pudieron probar los puertos de muelle-caddy; se crea igual", "error", err)
+	}
+	return nil
 }
 
 // ensurePanelNetwork crea la red panel (overlay attachable) si falta.

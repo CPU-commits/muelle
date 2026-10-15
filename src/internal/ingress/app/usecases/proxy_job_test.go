@@ -69,7 +69,7 @@ func TestProxyJobFirstRun(t *testing.T) {
 	if err := newProxyJob(f).Run(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if n := f.count("CreateContainer"); n != 1 {
+	if n := f.creates(); n != 1 {
 		t.Fatalf("CreateContainer %d veces", n)
 	}
 }
@@ -99,7 +99,7 @@ func TestProxyJobSkipsCaddyWhileRecreating(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, op := range []string{"CreateContainer", "RemoveContainer", "StopContainer"} {
-				if n := f.count(op); n > 1 || (op != "CreateContainer" && n > 0) {
+				if n := f.count(op + " " + testCaddyNames.Container); n > 1 || (op != "CreateContainer" && n > 0) {
 					t.Fatalf("no debería tocar muelle-caddy: %v", f.docker.Calls())
 				}
 			}
@@ -177,7 +177,7 @@ func TestProxyJobWaitsForNewCaddy(t *testing.T) {
 	f.caddy.SetDown(true)
 	done := make(chan error, 1)
 	go func() { done <- newProxyJob(f).Run(context.Background()) }()
-	eventually(t, 2*time.Second, "crea muelle-caddy", func() bool { return f.count("StartContainer") == 1 })
+	eventually(t, 2*time.Second, "crea muelle-caddy", func() bool { return f.count("StartContainer "+testCaddyNames.Container) == 1 })
 	time.Sleep(20 * time.Millisecond)
 	f.caddy.SetDown(false)
 	select {

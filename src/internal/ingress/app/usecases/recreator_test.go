@@ -51,7 +51,7 @@ func TestRecreatorDebounce(t *testing.T) {
 	r.Schedule()
 
 	eventually(t, 2*time.Second, "la recreación termina", func() bool { return !f.state.Recreating() })
-	if n := f.count("CreateContainer"); n != 2 {
+	if n := f.creates(); n != 2 {
 		t.Fatalf("una sola recreación: CreateContainer %d veces", n)
 	}
 	if c := f.container(t); c.Ports[0].HostPort != 9080 {
@@ -73,7 +73,7 @@ func TestRecreatorKeepsLaterSchedule(t *testing.T) {
 	f.caddy.Delay(100 * time.Millisecond)
 	f.changePorts(t, 9080)
 	r.Schedule()
-	eventually(t, 2*time.Second, "la primera recreación crea el contenedor", func() bool { return f.count("CreateContainer") == 2 })
+	eventually(t, 2*time.Second, "la primera recreación crea el contenedor", func() bool { return f.creates() == 2 })
 	r.Schedule() // llega mientras el Sync de la primera espera a Caddy
 
 	eventually(t, 2*time.Second, "el Load de la primera", func() bool { return len(f.caddy.Loads()) == loads+1 })
@@ -96,13 +96,13 @@ func TestRecreatorWaitsForHold(t *testing.T) {
 		t.Fatalf("con el Hold: %s", status)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if n := f.count("CreateContainer"); n != 1 {
+	if n := f.creates(); n != 1 {
 		t.Fatalf("no recrea mientras el hook no vuelve: CreateContainer %d veces", n)
 	}
 
 	at := time.Now()
 	release()
-	eventually(t, 2*time.Second, "recrea después del release", func() bool { return f.count("CreateContainer") == 2 })
+	eventually(t, 2*time.Second, "recrea después del release", func() bool { return f.creates() == 2 })
 	if d := time.Since(at); d < 20*time.Millisecond {
 		t.Fatalf("recreó %s después del release, antes del delay", d)
 	}
@@ -111,9 +111,9 @@ func TestRecreatorWaitsForHold(t *testing.T) {
 	loads := len(f.caddy.Loads())
 	release() // idempotente
 	time.Sleep(60 * time.Millisecond)
-	if f.state.Recreating() || f.count("CreateContainer") != 2 || len(f.caddy.Loads()) != loads {
+	if f.state.Recreating() || f.creates() != 2 || len(f.caddy.Loads()) != loads {
 		t.Fatalf("un segundo release no hace nada: recreating %v, CreateContainer %d, loads %d → %d",
-			f.state.Recreating(), f.count("CreateContainer"), loads, len(f.caddy.Loads()))
+			f.state.Recreating(), f.creates(), loads, len(f.caddy.Loads()))
 	}
 }
 
@@ -125,13 +125,13 @@ func TestRecreatorHoldStopsPendingSchedule(t *testing.T) {
 	r.Schedule()
 	release := r.Hold()
 	time.Sleep(150 * time.Millisecond)
-	if n := f.count("CreateContainer"); n != 1 {
+	if n := f.creates(); n != 1 {
 		t.Fatalf("no recrea durante el Hold: CreateContainer %d veces", n)
 	}
 	release()
 	eventually(t, 2*time.Second, "termina", func() bool { return !f.state.Recreating() })
 	time.Sleep(80 * time.Millisecond)
-	if n := f.count("CreateContainer"); n != 2 {
+	if n := f.creates(); n != 2 {
 		t.Fatalf("una sola recreación: CreateContainer %d veces", n)
 	}
 }
@@ -143,7 +143,7 @@ func TestRecreatorWaitsForCaddy(t *testing.T) {
 	f.caddy.SetDown(true)
 	f.changePorts(t, 9080)
 	r.Schedule()
-	eventually(t, 2*time.Second, "recrea", func() bool { return f.count("CreateContainer") == 2 })
+	eventually(t, 2*time.Second, "recrea", func() bool { return f.creates() == 2 })
 	time.Sleep(30 * time.Millisecond)
 	if status, _, _ := f.state.Snapshot(true); status != ProxyRecreating {
 		t.Fatalf("mientras Caddy no responde: %s", status)

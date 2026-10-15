@@ -83,14 +83,23 @@ func (f *lifecycleFixture) container(t *testing.T) docker.Container {
 	return c
 }
 
-func (f *lifecycleFixture) count(op string) int {
+// count cuenta las llamadas que empiezan con las palabras de prefix, enteras
+// ("CreateContainer t-caddy" no cuenta el contenedor de prueba de los
+// puertos, t-caddy-probe).
+func (f *lifecycleFixture) count(prefix string) int {
+	p := strings.Fields(prefix)
 	n := 0
 	for _, c := range f.docker.Calls() {
-		if strings.HasPrefix(c, op+" ") || c == op {
+		if fs := strings.Fields(c); len(fs) >= len(p) && slices.Equal(fs[:len(p)], p) {
 			n++
 		}
 	}
 	return n
+}
+
+// creates cuenta los CreateContainer de muelle-caddy.
+func (f *lifecycleFixture) creates() int {
+	return f.count("CreateContainer " + testCaddyNames.Container)
 }
 
 // recordingRuntime es un CaddyRuntime que anota lo que le piden.
@@ -334,7 +343,7 @@ func TestEnsureCaddySerialized(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if n := f.count("CreateContainer"); n != 1 {
+	if n := f.creates(); n != 1 {
 		t.Fatalf("CreateContainer %d veces: %v", n, f.docker.Calls())
 	}
 }
