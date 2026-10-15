@@ -801,7 +801,7 @@ La migración, los repositorios, el ocultamiento en los tipos de Docker, el CRUD
 - Modify (Step 8, solo dos lugares): `src/shared/infra/container/container.go`
 - Create (Step 8): `src/shared/infra/container/deploy_test.go` (T5 le suma los contratos)
 
-- [ ] **Step 1: La migración (test primero).** En `migrations_test.go`, `TestDeploysSchema` suma: los defaults `requested_images = '{}'` y `log_truncated = 0`, y que `log_truncated = 2` falla. En `0002_deploy.sql`, en `deploys`:
+- [x] **Step 1: La migración (test primero).** En `migrations_test.go`, `TestDeploysSchema` suma: los defaults `requested_images = '{}'` y `log_truncated = 0`, y que `log_truncated = 2` falla. En `0002_deploy.sql`, en `deploys`:
 
 ```sql
   -- JSON servicio → ref pedida, antes de resolver (contrato §2.2): un deploy

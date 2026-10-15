@@ -77,18 +77,25 @@ func TestDeploysSchema(t *testing.T) {
 	app := seedApp(t, d)
 
 	mustExec(t, d, insertDeploy, app, "queued", `{"api":"ghcr.io/x/api:sha-1"}`, "api", "token", 7, "ci", 1)
-	// Los valores por defecto: sin log, sin imágenes de la configuración, sin
-	// error, sin tiempos de inicio y fin.
-	var log, configImages string
+	// Los valores por defecto: sin log (ni truncado), sin imágenes pedidas ni
+	// de la configuración, sin error, sin tiempos de inicio y fin.
+	var log, configImages, requestedImages string
+	var truncated int
 	var errText, superseded, started, finished any
 	ctx := context.Background()
 	if err := d.Conn(ctx).QueryRowContext(ctx,
-		`SELECT log, config_images, error, superseded_by, started_at, finished_at FROM deploys`).Scan(&log, &configImages, &errText, &superseded, &started, &finished); err != nil {
+		`SELECT log, log_truncated, requested_images, config_images, error, superseded_by, started_at, finished_at FROM deploys`).Scan(
+		&log, &truncated, &requestedImages, &configImages, &errText, &superseded, &started, &finished); err != nil {
 		t.Fatal(err)
 	}
-	if log != "" || configImages != "{}" || errText != nil || superseded != nil || started != nil || finished != nil {
-		t.Fatalf("valores por defecto: log=%q config_images=%q error=%v superseded_by=%v started=%v finished=%v", log, configImages, errText, superseded, started, finished)
+	if log != "" || truncated != 0 || requestedImages != "{}" || configImages != "{}" || errText != nil || superseded != nil || started != nil || finished != nil {
+		t.Fatalf("valores por defecto: log=%q log_truncated=%d requested_images=%q config_images=%q error=%v superseded_by=%v started=%v finished=%v",
+			log, truncated, requestedImages, configImages, errText, superseded, started, finished)
 	}
+	// log_truncated es una marca: 0 o 1 (contrato §2.5).
+	mustExec(t, d, `UPDATE deploys SET log_truncated = 1 WHERE id = 1`)
+	mustFail(t, d, "log_truncated fuera de 0 y 1", `UPDATE deploys SET log_truncated = 2 WHERE id = 1`)
+	mustExec(t, d, `UPDATE deploys SET log_truncated = 0 WHERE id = 1`)
 
 	for _, status := range []string{"queued", "running", "succeeded", "failed", "superseded"} {
 		mustExec(t, d, insertDeploy, app, status, "{}", "panel", "user", 1, "ana", 2)
