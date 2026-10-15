@@ -62,6 +62,7 @@ type Module struct {
 	retrier       *usecases.Retrier
 	recreator     *usecases.Recreator
 	ops           *usecases.Ops
+	panelDNS      *usecases.EnsurePanelDNS
 	certs         *usecases.CertChecker
 	jobs          []cron.Job
 	httpUC        inhttp.UseCases
@@ -109,16 +110,18 @@ func New(d Deps) *Module {
 	m.removeNetwork = usecases.NewRemoveStageNetwork(nets, o.CaddyContainer, d.Log)
 	m.caddy = usecases.NewEnsureCaddy(runtime, settings, catalog, registries, m.state, defImage, d.Log)
 	m.orphans = usecases.NewRemoveOrphanNetworks(nets, catalog, o.CaddyContainer, o.NetworkPrefix, d.Log)
-	m.proxyJob = usecases.NewProxyJob(settings, catalog, m.ensureNetwork, m.caddy, m.orphans, m.syncer, m.state, defImage,
-		o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
-	m.recreator = usecases.NewRecreator(m.caddy, m.syncer, m.state, o.Timing.RecreateDelay, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	m.ops = &usecases.Ops{}
+	dns := cloudflare.New(o.CloudflareURL)
+	m.panelDNS = usecases.NewEnsurePanelDNS(settings, dns, m.ops, o.Timing.DomainOp, d.Log)
+	m.proxyJob = usecases.NewProxyJob(settings, catalog, m.ensureNetwork, m.caddy, m.orphans, m.syncer, m.panelDNS, m.state,
+		defImage, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
+	m.recreator = usecases.NewRecreator(m.caddy, m.syncer, m.state, o.Timing.RecreateDelay, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	probe := outservice.TLSProbe{Addr: o.CaddyTLSAddr, Roots: o.TLSRoots, Timeout: outservice.DefaultProbeTimeout}
 	m.certs = usecases.NewCertChecker(probe, domains, m.state, m.ops, d.Clock, o.Timing.FirstCheck, o.Timing.PendingEvery,
 		o.Timing.DomainOp, d.Log)
 	m.jobs = incron.Jobs(m.proxyJob.Run, func(ctx context.Context) error { return m.certs.CheckAll(ctx, usecases.EligibleHourly) })
 	dd := usecases.DomainDeps{
-		Repo: domains, Catalog: catalog, Settings: settings, DNS: cloudflare.New(o.CloudflareURL), Syncer: m.syncer,
+		Repo: domains, Catalog: catalog, Settings: settings, DNS: dns, Syncer: m.syncer,
 		Certs: m.certs, Ops: m.ops, Clock: d.Clock, Audit: d.Audit, Log: d.Log,
 		DomainOp: o.Timing.DomainOp, DomainRetry: o.Timing.DomainRetry,
 	}
@@ -139,9 +142,10 @@ func (m *Module) RegisterRoutes(k *utils.Kit) { inhttp.Register(k, m.httpUC) }
 
 // Jobs son las tareas periódicas: "proxy" cada 5 min (cron.Run lo corre
 // también al arrancar: asegura muelle-caddy y las redes de todos los
-// stages, borra las redes de stage huérfanas y reenvía la configuración,
-// §3.1 y §7 "Reconciliación al arrancar") y "certificados" cada hora, que
-// verifica los dominios pending, active y error + certificate (§8).
+// stages, borra las redes de stage huérfanas, reenvía la configuración y,
+// con token, actualiza cloudflare_zones y el registro DNS del panel, §3.1 y
+// §7 "Reconciliación al arrancar") y "certificados" cada hora, que verifica
+// los dominios pending, active y error + certificate (§8).
 func (m *Module) Jobs() []cron.Job { return m.jobs }
 
 // Run corre lo que ingress necesita en segundo plano hasta que ctx se cancela,

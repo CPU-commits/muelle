@@ -1931,7 +1931,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): CheckCloudflareToken verifica el token y cuenta sus zonas (contrato §3.5)`
 
-- [ ] **Step 2: El registro del panel y `cloudflare_zones`.**
+- [x] **Step 2: El registro del panel y `cloudflare_zones`.**
 
   **Tests primero** (`usecases/panel_dns_test.go`). El `panel_domain` es `panel.tudominio.cl` y la zona `z1 tudominio.cl`:
   - `TestPanelDNSCreates`:

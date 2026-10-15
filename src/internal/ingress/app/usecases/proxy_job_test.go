@@ -22,7 +22,7 @@ func newProxyJob(f *lifecycleFixture) *ProxyJob {
 	return NewProxyJob(f.settings, f.catalog,
 		NewEnsureStageNetwork(nets, testCaddyNames.Container, f.slog), f.ensure,
 		NewRemoveOrphanNetworks(nets, f.catalog, testCaddyNames.Container, "", f.slog),
-		f.syncer, f.state, defCaddyImage, time.Millisecond, 4*time.Millisecond, f.slog)
+		f.syncer, f.panel, f.state, defCaddyImage, time.Millisecond, 4*time.Millisecond, f.slog)
 }
 
 // En desarrollo no hace nada: ni Docker ni la admin API.
@@ -71,6 +71,56 @@ func TestProxyJobFirstRun(t *testing.T) {
 	}
 	if n := f.creates(); n != 1 {
 		t.Fatalf("CreateContainer %d veces", n)
+	}
+	// Sin token, nunca llama a Cloudflare.
+	if calls := f.cf.Calls(); len(calls) != 0 {
+		t.Fatalf("Cloudflare: %v", calls)
+	}
+}
+
+// Con token, el job lleva el registro del panel y cloudflare_zones (contrato
+// §1.2 y §3.4). Si con eso cambia la zona del panel, manda la configuración
+// otra vez: el panel pasa a TLS por Cloudflare. Un Cloudflare caído no
+// atrasa el Sync.
+func TestProxyJobCloudflare(t *testing.T) {
+	f := newLifecycleFixture(t)
+	f.cf.AddToken(syncToken)
+	f.cf.AddZone("z1", "auditfy.cl")
+	f.enableCaddy(t, func(p *shared.ProxySettings) { p.CloudflareToken, p.PublicIP = syncToken, "203.0.113.24" })
+	f.docker.SetImagePresent(defCaddyImage)
+	job := newProxyJob(f)
+	ctx := context.Background()
+	if err := job.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.caddy.Loads()); n != 2 {
+		t.Fatalf("con la zona nueva del panel, dos Load: %d", n)
+	}
+	if !strings.Contains(f.lastLoad(t), `"dns"`) {
+		t.Fatalf("el panel va por Cloudflare: %s", f.lastLoad(t))
+	}
+	recs := f.cf.Records("z1")
+	if len(recs) != 1 || recs[0].Name != "panel.auditfy.cl" || recs[0].Content != "203.0.113.24" {
+		t.Fatalf("el registro del panel: %+v", recs)
+	}
+	dns, err := f.settings.PanelDNS(ctx)
+	if err != nil || dns.ZoneID != "z1" || dns.RecordID != recs[0].ID {
+		t.Fatalf("claves: %+v %v", dns, err)
+	}
+
+	if err := job.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.caddy.Loads()); n != 3 {
+		t.Fatalf("la pasada siguiente, un Load: %d", n)
+	}
+
+	f.cf.SetDown(true)
+	if err := job.Run(ctx); !errors.Is(err, shared.ErrCloudflareUnavailable) {
+		t.Fatalf("Run: %v", err)
+	}
+	if n := len(f.caddy.Loads()); n != 4 {
+		t.Fatalf("el Sync va igual: %d", n)
 	}
 }
 

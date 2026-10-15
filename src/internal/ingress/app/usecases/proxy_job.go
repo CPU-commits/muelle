@@ -21,6 +21,7 @@ type ProxyJob struct {
 	caddy    *EnsureCaddy
 	orphans  *RemoveOrphanNetworks
 	syncer   *Syncer
+	panel    *EnsurePanelDNS
 	state    *ProxyState
 	defImage string
 	lo, hi   time.Duration
@@ -31,10 +32,10 @@ type ProxyJob struct {
 // que decide si el proxy está habilitado, y el backoff con que espera a un
 // muelle-caddy recién creado (Timing.RetryMin y RetryMax).
 func NewProxyJob(settings service.Settings, catalog service.Catalog, networks *EnsureStageNetwork, caddy *EnsureCaddy,
-	orphans *RemoveOrphanNetworks, syncer *Syncer, state *ProxyState, defImage string, retryMin, retryMax time.Duration,
-	log *slog.Logger) *ProxyJob {
+	orphans *RemoveOrphanNetworks, syncer *Syncer, panel *EnsurePanelDNS, state *ProxyState, defImage string,
+	retryMin, retryMax time.Duration, log *slog.Logger) *ProxyJob {
 	return &ProxyJob{settings: settings, catalog: catalog, networks: networks, caddy: caddy, orphans: orphans,
-		syncer: syncer, state: state, defImage: defImage, lo: retryMin, hi: retryMax, log: log}
+		syncer: syncer, panel: panel, state: state, defImage: defImage, lo: retryMin, hi: retryMax, log: log}
 }
 
 // Run, en el orden de D12 del plan de la Fase 3:
@@ -44,12 +45,15 @@ func NewProxyJob(settings service.Settings, catalog service.Catalog, networks *E
 //     por un hook: esa la hace el Recreator, después de que el hook vuelve;
 //  4. borra las redes de stage huérfanas;
 //  5. le manda la configuración a Caddy; si recién lo creó, espera a que su
-//     admin API responda (syncStarting).
+//     admin API responda (syncStarting);
+//  6. con token, Cloudflare: cloudflare_zones y el registro del panel
+//     (EnsurePanelDNS). Si cambió la zona del panel, y con ella su TLS, manda
+//     la configuración otra vez. Va al final: un Cloudflare lento no atrasa
+//     la configuración de los sitios.
 //
 // Un paso que falla no corta los que siguen: los errores se juntan
 // (errors.Join), y cada uno ya quedó en el log y, si es de Caddy, en el
-// estado de GET /proxy. La parte de Cloudflare (las zonas y el registro del
-// panel) llega con los hooks de admin.
+// estado de GET /proxy.
 func (j *ProxyJob) Run(ctx context.Context) error {
 	p, err := j.settings.ProxySettings(ctx)
 	if err != nil {
@@ -79,6 +83,18 @@ func (j *ProxyJob) Run(ctx context.Context) error {
 	}
 	if err != nil {
 		errs = append(errs, err)
+	}
+	if p.CloudflareToken != "" {
+		zoneChanged, err := j.panel.Execute(ctx)
+		if err != nil {
+			j.log.Warn("ingress: el registro DNS del panel", "error", err)
+			errs = append(errs, err)
+		}
+		if zoneChanged {
+			if err := j.syncer.Sync(ctx, false); err != nil {
+				errs = append(errs, err)
+			}
+		}
 	}
 	return errors.Join(errs...)
 }

@@ -8,10 +8,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy"
+	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/cloudflare"
+	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/cloudflare/cftest"
 	"github.com/CPU-commits/muelle/src/internal/ingress/ingresstest"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/domain/naming"
@@ -33,8 +36,9 @@ const (
 )
 
 // lifecycleFixture es syncFixture con Docker en memoria, muelle-caddy
-// (caddy.Runtime con nombres de prueba) y EnsureCaddy. La imagen de Caddy por
-// defecto es la de v0.1.0.
+// (caddy.Runtime con nombres de prueba) y EnsureCaddy, más Cloudflare falso
+// (sin tokens ni zonas: cada test agrega los suyos) y el registro del panel.
+// La imagen de Caddy por defecto es la de v0.1.0.
 type lifecycleFixture struct {
 	*syncFixture
 	docker   *dockertest.Fake
@@ -42,6 +46,9 @@ type lifecycleFixture struct {
 	ensure   *EnsureCaddy
 	settings *outservice.ProxySettingsReader
 	catalog  *outservice.CatalogReader
+	cf       *cftest.Server
+	ops      *Ops
+	panel    *EnsurePanelDNS
 	slog     *slog.Logger
 }
 
@@ -55,9 +62,11 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 		defCaddyImage, false, func() { sf.fails.Add(1) }, log)
 	d := dockertest.New()
 	rt := caddy.NewRuntime(d, testCaddyNames, log)
+	cf, ops := cftest.New(t), &Ops{}
 	return &lifecycleFixture{
-		syncFixture: sf, docker: d, runtime: rt, settings: settings, catalog: catalog, slog: log,
+		syncFixture: sf, docker: d, runtime: rt, settings: settings, catalog: catalog, slog: log, cf: cf, ops: ops,
 		ensure: NewEnsureCaddy(rt, settings, catalog, outservice.NewRegistriesReader(sf.db, sf.cipher), sf.state, defCaddyImage, log),
+		panel:  NewEnsurePanelDNS(settings, cloudflare.New(cf.URL()), ops, 30*time.Second, log),
 	}
 }
 
