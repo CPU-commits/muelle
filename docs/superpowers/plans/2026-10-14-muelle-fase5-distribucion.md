@@ -1374,7 +1374,7 @@ La composite action que reemplaza `sync-env` y `deploy` de los workflows actuale
   ```
   Expected: PASS y shellcheck sin avisos (o con un `# shellcheck disable=SCxxxx` justificado en un comentario). `docker image ls koalaman/shellcheck` queda como estaba antes.
 
-- [ ] **Step 4: CI**, un paso al final del job `test` de `ci.yaml` (después del de `-tags panel`): `- name: shellcheck` con `run: shellcheck action/deploy.sh` (viene en `ubuntu-latest`). Los tests de la action ya corren en `go test -race ./...`.
+- [x] **Step 4: CI**, un paso al final del job `test` de `ci.yaml` (después del de `-tags panel`): `- name: shellcheck` con `run: shellcheck action/deploy.sh` (viene en `ubuntu-latest`). Los tests de la action ya corren en `go test -race ./...`.
 
 - [ ] **Step 5: README:**
   - **"GitHub Action"**: el ejemplo de auditfy del diseño §14 con `@v0`; las entradas y salidas (`url` es solo el origen: `https://panel…`, sin ruta; `http://` solo con `localhost` o `127.0.0.1`); que `env-json` reemplaza todas las variables de la app (`PUT`) y tiene que quedar bajo 128 KiB (es una variable de entorno del paso, y Linux no deja pasar una más grande); los tokens de API con alcance mínimo (un token por proyecto o stage, contrato §0.1); `env-exclude`; qué pasa con `failed`, `superseded` y el timeout.

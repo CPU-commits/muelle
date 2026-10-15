@@ -35,3 +35,6 @@ jobs:
           printf "default-src 'self'; frame-ancestors 'none'\n" > src/cmd/http/panel/build/csp-header.txt
           go vet -tags panel ./...
           go test -race -tags panel ./src/cmd/http/... ./src/shared/infra/container/
+      # Los tests de la action (action/) ya corren en go test; shellcheck viene en ubuntu-latest.
+      - name: shellcheck
+        run: shellcheck action/deploy.sh
