@@ -882,12 +882,12 @@ networks:
 
 1. Valida los flags (código 2 si no sirven).
 2. Docker (`Info`): si no responde, aborta y sugiere montar `/var/run/docker.sock`. Un nodo worker, o un Swarm `pending`, `error` o `locked`, aborta. Un Swarm `inactive` se inicia en el paso 7.
-3. Una instalación anterior (abajo).
+3. Una instalación anterior, y la red `muelle_panel` si ya existe (abajo).
 4. La IP pública, si no vino `--public-ip` (§3.3 paso 2 del diseño): la línea `ip=` de `https://1.1.1.1/cdn-cgi/trace`, con un plazo de 5 s. Solo IPv4: una respuesta que no es una IPv4 canónica cuenta como no detectada (la IPv6 va solo con `--public-ipv6`). Si no se puede detectar, es un aviso y la variable no va.
 5. La imagen: `InspectImage` y, si da `ErrNotFound`, `PullImage`.
 6. La prueba de puertos (abajo).
-7. `InitSwarm(--advertise-addr)` solo si el Swarm está `inactive`. Su id de nodo (o el de `Info.NodeID`) va en la restricción `node.id` de §5.3.
-8. La red, los secretos y el stack. Si `DeployStack` falla, install borra lo que creó en esta corrida (el stack, si el CLI alcanzó a crear el servicio, los secretos y la red; no el Swarm) y no imprime la clave. Lo que no pudo borrar lo nombra en stderr, con el comando para borrarlo.
+7. `InitSwarm(--advertise-addr)` solo si el Swarm está `inactive`. Su id de nodo (o el de `Info.NodeID`) va en la restricción `node.id` de §5.3. Si falla sin `--advertise-addr` (Docker no elige entre varias IPs), el error lo sugiere.
+8. La red, los secretos y el stack. Si algo falla desde que crea lo primero hasta que `DeployStack` funciona (las subredes de la red, un secreto, el secreto del token que quedó y no se pudo borrar, o `DeployStack`), install borra lo que creó en esta corrida (el stack, si el CLI alcanzó a crear el servicio, los secretos y la red; no el Swarm) y no imprime la clave: nunca queda un `muelle_master_key` cuya clave nadie vio. Lo que no pudo borrar lo nombra en stderr, con el comando para borrarlo.
 9. La clave maestra, impresa una sola vez, y después el link de setup.
 
 **Salida:** la clave maestra y el link de setup (o el aviso de que muelle ya tiene usuarios) van a stdout; el avance y los avisos, a stderr. Así `docker run … install > install.txt` guarda solo lo que hay que conservar. Código 0 si terminó con el link (o con usuarios), 1 si algo falló (también el plazo del link), 2 si un flag no sirve. Ctrl-C cancela; lo que se crea en esta corrida antes de que `DeployStack` funcione se borra igual, como si `DeployStack` fallara.
@@ -905,7 +905,7 @@ networks:
 - Con `--reinstall` y un `muelle-caddy` que ya existe, la prueba no se hace: ese contenedor tiene tomados los puertos, y ingress lo recrea si cambian.
 - Sin `--cloudflare-token` y con `--http-port` distinto de 80, install avisa que Let's Encrypt valida por HTTP-01 en el puerto 80 público: solo funciona si el 80 del router llega a ese puerto. Es un aviso, no un error, por ese caso.
 
-**La red:** si `muelle_panel` ya existe, se usa si es overlay, attachable y de scope `swarm`; si no, aborta. Sus `Subnets` tienen que ser privadas. Una red recién creada puede venir sin `Subnets` unos milisegundos (`docker.Networks`): se reintenta hasta 5 s.
+**La red:** si `muelle_panel` ya existe, se usa si es overlay, attachable y de scope `swarm`; si no, aborta. Eso se revisa en el paso 3 (`InspectNetwork` funciona con el Swarm inactivo), así una red local con ese nombre aborta antes de iniciar el Swarm. Sus `Subnets` tienen que ser privadas (paso 8). Una red recién creada puede venir sin `Subnets` unos milisegundos (`docker.Networks`): se reintenta hasta 5 s.
 
 **Clave maestra:** `crypto.GenerateKey()`, que se guarda con `CreateSecret(naming.MasterKeySecret, …)` y se imprime **una sola vez**, después de que `DeployStack` funcionó.
 
@@ -914,7 +914,8 @@ networks:
 - **Solo vale la de la tarea que corre ahora.** Cada arranque sin usuarios invalida el link anterior (`EnsureSetupInvite`). Si la primera tarea se reinició, los logs del servicio traen varias líneas `setup_url`, y solo la última sirve. Por eso install lee los de la tarea actual (`ListTasks` del servicio: la de `desired_state: running` y `state: running`, la más nueva) con `TaskLogs`, desde el principio y con `Follow`. Si esa tarea cambia durante el plazo, vuelve a buscar la actual y su línea.
 - **`"event":"listening"`:** serve la escribe cuando empieza a atender (`muelle escuchando`), siempre después de la de `setup_url`. Si llega sin un `setup_url` antes en la misma tarea, muelle ya tiene usuarios: install lo dice y termina bien.
 - Una línea de nivel `ERROR` de esa tarea (muelle no arrancó: una variable que no sirve, la clave) se muestra en stderr mientras se espera: Swarm reintenta la tarea, y el error explica por qué no llega el link.
-- El plazo es de 2 min. Si se pasa, el stack queda desplegado e install termina con código 1 y sugiere `docker service logs muelle_muelle`.
+- **Sin una tarea corriendo:** muelle que sale enseguida (la clave, una variable) deja la tarea `failed` en milisegundos, y Swarm la reintenta cada ~5 s; una tarea `rejected` (el bind de `/var/run/docker.sock` no existe, con Docker rootless) o `pending` sin un nodo posible (la restricción no se cumple: "no suitable node") nunca corre, y el motivo está solo en su `Err`. Por eso, mientras ninguna corre, install toma la tarea más nueva del servicio (con cualquier `desired_state`), muestra en stderr su estado y su `Err` (`aviso: …`) y, si tuvo contenedor y terminó, las líneas `ERROR` de su log, una vez por tarea.
+- El plazo es de 2 min. Si se pasa, el stack queda desplegado e install termina con código 1 y sugiere `docker service logs muelle_muelle` y `docker service ps --no-trunc muelle_muelle`.
 
 **Actualizar:** `docker service update --image ghcr.io/cpu-commits/muelle:<v> muelle_muelle`.
 - Con `caddy_image` vacío, el job `"proxy"` del arranque recrea muelle-caddy con la imagen de la versión nueva, con unos segundos de corte.
