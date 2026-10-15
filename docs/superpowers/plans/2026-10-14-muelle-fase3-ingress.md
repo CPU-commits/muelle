@@ -2092,7 +2092,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - Contrato: §1.1 (hecho en las filas de ingress, y la fila de `registries` dice que se usa para la imagen privada de Caddy), el bloque `ingress` de §1.2 (el orden real del job y el barrido de los `pending`), §3.1 (el handshake que no termina en 5 s es "no se sabe"), §3.4 (`muelle-caddy-probe`, el `AAAA` del panel con el `proxied` del `A`, sin `public_ip` no toca el registro del panel, y D29 para el panel), §3.5 (los mensajes del `422` del token, solo el contenido de los `A`, y `error`/`cloudflare` → `pending`) y una fila en §7 (el cambio de IP pública, compatible).
   - Diseño: sin cambios; §3.1, §3.2, §8 y §9 ya dicen lo que hace el código.
 
-- [ ] **Step 7: Cierre de la fase.**
+- [x] **Step 7: Cierre de la fase.**
   1. Las verificaciones de "Convenciones" pasan.
   2. `go test -tags integration -count=1 -run Integration -v ./src/internal/ingress/...` pasa (los tres tests).
   3. `docker ps -a --filter name=it3-`, `docker network ls --filter name=it3` y `docker volume ls --filter name=it3` no muestran nada.
@@ -2105,6 +2105,12 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
      - los commits;
      - los cambios de contrato (con lo que el panel tiene que saber);
      - las preguntas abiertas al dueño.
+
+  Hecho (T5):
+  - Convenciones: gofmt, `go vet ./...` (y con `-tags integration` en ingress), `go test -race -count=1 ./...` y `go mod tidy -diff` pasan.
+  - Integración con `-race`: los tres tests pasan (`TestIntegrationCaddyAcceptsConfig` ~8 s, `TestIntegrationCaddyLifecycle` ~16 s y `TestIntegrationDomainsAndCertificates` ~5 s). Mientras corría a la vez la integración de la Fase 2 (redes y stacks `it2…`), `TestIntegrationCaddyAcceptsConfig` falló dos veces al arrancar su backend: Docker respondió "attaching to network failed … context deadline exceeded" al conectar un contenedor a la overlay recién creada. Sin la Fase 2 corriendo pasó tres veces seguidas. Es el manager de Swarm cargado, no el código: conviene correr las integraciones de las fases por separado también con la Fase 2, no solo con la 5 ("Al integrar").
+  - Después no queda nada con `it3` salvo la red `it3febd_panel` de T3 (la tarea `attachment` que Docker no suelta, D11; `docker network rm` sigue respondiendo "is in use by task").
+  - Punta a punta con el binario (`MUELLE_PANEL_ORIGIN=http://127.0.0.1:21950`, el proyecto `it3e2e`): `GET /api/v1/proxy` da `disabled`; `PATCH` de `public_ip` da `200` (el hook corre, sin red); `{"cloudflare_token":"corto"}` da `422` en `cloudflare_token`; `POST …/domains` sin token da `201` con `tls_mode: http`, `proxied: false` aunque se mandó `true`, y `records` con el `A`. Después se borraron el dominio, la app, el stage (y su red `it3e2e_s1`) y el proyecto.
 
 ---
 
