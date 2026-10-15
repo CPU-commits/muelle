@@ -27,6 +27,9 @@ type Verdict struct {
 	// "<Service>: <Reason>".
 	Reason   string
 	Progress map[string]string // nombre corto → "1/2 réplicas corriendo"
+	// Pending son los nombres cortos de los que todavía no convergieron
+	// (también el que falló), ordenados: el timeout dice el estado de cada uno.
+	Pending []string
 }
 
 // Evaluate aplica la regla del paso 6 a los servicios esperados (nombres de
@@ -63,6 +66,7 @@ func Evaluate(expected []string, services []SwarmService, appliedAt, settleFrom,
 		if !ok {
 			v.Progress[short] = "todavía no está en Swarm"
 			v.Done = false
+			v.Pending = append(v.Pending, short)
 			continue
 		}
 		desired := s.DesiredTasks
@@ -90,6 +94,7 @@ func Evaluate(expected []string, services []SwarmService, appliedAt, settleFrom,
 		}
 		if !converged {
 			v.Done = false
+			v.Pending = append(v.Pending, short)
 		}
 	}
 	if v.Failed {

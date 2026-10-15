@@ -156,6 +156,23 @@ func TestEvaluateSlowCLI(t *testing.T) {
 	}
 }
 
+// Pending son los que todavía no convergieron (el timeout del paso 6 dice el
+// estado de cada uno), por nombre corto y ordenados; uno que falló también.
+func TestEvaluatePending(t *testing.T) {
+	at := t0.Add(time.Second)
+	svcs := []SwarmService{
+		{ID: "s1", Name: "p_s_a_web", Replicas: u64(2), RunningTasks: 1, CreatedAt: at},
+		{ID: "s2", Name: "p_s_a_api", Replicas: u64(1), RunningTasks: 1, CreatedAt: at},
+	}
+	v := Evaluate([]string{"p_s_a_web", "p_s_a_api", "p_s_a_db"}, svcs, t0, t0, t0.Add(time.Minute), 5*time.Second)
+	if v.Done || strings.Join(v.Pending, ",") != "db,web" {
+		t.Fatalf("Pending: %+v", v)
+	}
+	if v := Evaluate([]string{"p_s_a_api"}, svcs, t0, t0, t0.Add(time.Minute), 5*time.Second); !v.Done || len(v.Pending) != 0 {
+		t.Fatalf("listo: %+v", v)
+	}
+}
+
 func TestEvaluateNoServices(t *testing.T) {
 	v := Evaluate(nil, nil, t0, t0, t0, 5*time.Second)
 	if !v.Done || v.Failed || len(v.Progress) != 0 {

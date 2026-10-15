@@ -1109,7 +1109,7 @@ type ManagerNode interface {
 ```
 
   `ErrImageNotFound`, `ErrImageDenied`, `ErrSwarmNotFound` y `ErrAppRemoved` (la causa con que `RemoveApp` cancela un worker) van en `errors.go`. `infra/out/service/docker.go` implementa `Images`, `Cluster` y `Stacks.Deploy` con `docker.Engine`: traduce `docker.ErrNotFound` → `ErrImageNotFound` (en `Digest`) o `ErrSwarmNotFound`, `docker.ErrDenied` → `ErrImageDenied`, y deja pasar `ErrUnavailable` (es `entity.ErrDockerUnavailable`). `settings.go` (el adaptador de T3, que ya tiene `MarkOnce`) suma `ManagerNode`: `SELECT value FROM settings WHERE key = ?` y `INSERT … ON CONFLICT(key) DO NOTHING` + lectura, con `encrypted = 0`. Tests: los mapeos de error con `FailNext`/`DenyImage`, `AppServices` filtra por etiquetas, `TaskLogs` con `tail`, `SetIfMissing` no pisa.
-- [ ] **Step 2: El simulador de Swarm para los tests** (`swarmsim_test.go`, solo test): `simulate(f *dockertest.Fake, o simOpts)` pone `f.OnDeployStack`, que lee el JSON del compose y, por cada servicio, hace `f.PutStackService(stack, docker.Service{…})` con el nombre `<stack>_<servicio>`, `Labels` = sus `deploy.labels`, `Image`, `Replicas`, `RunningTasks`/`DesiredTasks`, `CreatedAt` (el anterior si ya existía) y `Update`:
+- [x] **Step 2: El simulador de Swarm para los tests** (`swarmsim_test.go`, solo test): `simulate(f *dockertest.Fake, o simOpts)` pone `f.OnDeployStack`, que lee el JSON del compose y, por cada servicio, hace `f.PutStackService(stack, docker.Service{…})` con el nombre `<stack>_<servicio>`, `Labels` = sus `deploy.labels`, `Image`, `Replicas`, `RunningTasks`/`DesiredTasks`, `CreatedAt` (el anterior si ya existía) y `Update`:
   - si el servicio ya existía y su plantilla cambió (imagen, env, command… cualquier cosa fuera de `deploy.labels`): `{State: o.state (completed por defecto), StartedAt: ahora}`;
   - si solo cambió `deploy.labels`: el `Update` anterior, sin tocar las tareas;
   - si es nuevo: `nil`.
@@ -1117,7 +1117,7 @@ type ManagerNode interface {
   `simOpts` permite: `state` (`rollback_completed` con `Message`), `running` (cuántas corren), una tarea fallida con `Err` y N líneas de log (`AppendTaskLogs`), un `block chan struct{}` para retener el deploy, `delay` (cuánto tarda el CLI simulado) y `noUpdate` (un servicio cambiado queda sin `UpdateStatus`, como en Swarm antes de que empiece el rollout).
 
   **Dónde se retiene un deploy:** `block` lo retiene **dentro** de `OnDeployStack`, que no recibe el ctx: cancelar el worker no lo suelta (`Stop` esperaría sus 15 s) y, al soltarlo, el stack igual queda aplicado. Sirve solo para los tests que no cancelan (`TestDispatcherOneAtATimePerApp`, `TestDispatcherSupersede`, que cierran `block` al final). Los que cancelan (`RemoveApp`, el apagado) retienen el deploy en el **paso 6**: `running: 0` y un `deploy_timeout_s` largo, así la convergencia espera y el ctx sí la corta.
-- [ ] **Step 3: `RunDeploy` (tests primero).**
+- [x] **Step 3: `RunDeploy` (tests primero).**
 
 ```go
 // Timing son los plazos del deploy (decisión 13); los tests los acortan.
