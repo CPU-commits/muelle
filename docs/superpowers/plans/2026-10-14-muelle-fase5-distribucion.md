@@ -988,7 +988,7 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   func detectPublicIP(ctx context.Context, client *http.Client, url string) (string, error)
   ```
 
-- [ ] **Step 6: El link de setup, tests primero** (`setup_test.go`, con el fake; `poll` de 10 ms):
+- [x] **Step 6: El link de setup, tests primero** (`setup_test.go`, con el fake; `poll` de 10 ms):
   - `TestWaitSetupURL`: el servicio con una tarea `running` cuyas líneas son texto suelto, un JSON con `"event":"setup_url","url":"https://p/setup?token=A"` y `"event":"listening"` → `https://p/setup?token=A`.
   - `TestWaitSetupURLCurrentTask`: una tarea `shutdown` (desired `shutdown`) con el link A y otra `running` con el B y `listening` → B. Una tarea con desired `running` pero `state: starting` no cuenta hasta que corre.
   - `TestWaitSetupURLTaskReplaced`: la tarea t1 corre con el link A y sin `listening`; 100 ms después el test hace `SetTasks(t1 shutdown, t2 running)` y `AppendTaskLogs(t2, link B, listening)` → B.
@@ -997,9 +997,11 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   - `TestWaitSetupURLShowsErrors`: una tarea `running` con la línea `{"level":"ERROR","msg":"muelle terminó con error","err":"MUELLE_INIT_ACME_EMAIL: …"}` → stderr la muestra; sin más líneas, termina por el plazo.
   - `TestWaitSetupURLFailedTask` (lo que pasa de verdad con una clave equivocada o un `--panel-origin` que no sirve: muelle sale en milisegundos, la tarea queda `failed` y Swarm reintenta cada ~5 s, así que casi nunca se la ve `running`): el servicio solo tiene una tarea `failed` con desired `shutdown`, `ContainerID: "c1"`, `Err: "task: non-zero exit (1)"`, y en su log (`AppendTaskLogs`) la línea `ERROR` de arriba; ninguna tarea `running`; plazo de 300 ms → antes de `ErrSetupTimeout`, stderr trae una línea `aviso:` con el id de la tarea, `failed` y su `Err`, y la línea `ERROR` (su `err`). Cada una sale **una sola vez**, aunque el bucle vio la tarea muchas veces (cuenta las apariciones en stderr).
   - `TestWaitSetupURLRejectedTask` (la tarea nunca corre: el bind de `/var/run/docker.sock` no existe, con Docker rootless; una restricción que no se cumple deja la tarea `pending` con `Err` "no suitable node", que sale por la misma regla): una tarea `rejected` con desired `shutdown`, sin `ContainerID`, `Err: "invalid mount config for type \"bind\": bind source path does not exist: /var/run/docker.sock"` → stderr trae `rejected` y ese `Err` una sola vez, y en `Calls()` no hay ningún `TaskLogs` (sin contenedor no hay log).
+  - `TestWaitSetupURLPendingErrLater`: una tarea `pending` sin `Err` no escribe nada; cuando aparece su `Err` ("no suitable node"), sale una sola vez.
   - `TestWaitSetupURLFailedThenRunning`: la tarea t1 `failed` (con su `ERROR` en el log) y, 100 ms después, `SetTasks(t1, t2 running)` con el link B y `listening` en t2 → B, y stderr trae el `ERROR` de t1 una vez.
   - `TestWaitSetupURLStreamEnds` (el stream de la tarea actual se corta antes de `listening`: un `io.EOF`, o el daemon que lo cierra): el fake envuelto en `endsOnce{Fake, task: "t1"}`, un tipo de `setup_test.go` que embebe `*dockertest.Fake` y cuya **primera** llamada a `TaskLogs` de t1 con `Follow` le pide al fake el mismo log con `Follow: false` (así el stream termina con `io.EOF` después de las líneas que ya hay) y lo avisa por un canal. t1 corre con el link A y una línea `ERROR`, sin `listening`; cuando se cierra el primer stream, el test hace `AppendTaskLogs(t1, listening)` → A y sin error (nunca `ErrSetupTimeout`); `Calls()` trae dos `TaskLogs t1`, y la línea `ERROR` sale una sola vez en stderr aunque el log se leyó dos veces.
   - `TestWaitSetupURLTimeout`: plazo de 200 ms sin líneas → `errors.Is(err, ErrSetupTimeout)` y el mensaje trae `docker service logs <servicio>` y `docker service ps --no-trunc <servicio>`.
+  - `TestWaitSetupURLCanceled`: un Ctrl-C (el `ctx` de quien llama, cancelado) devuelve `context.Canceled`, no `ErrSetupTimeout`.
 
   `setup.go` (contrato §5.4, "El link de setup"):
   ```go
