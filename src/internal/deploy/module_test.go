@@ -89,13 +89,13 @@ func TestRemoveAppDockerDown(t *testing.T) {
 	}
 }
 
-// Mientras la Fase 2 no está, sus rutas no existen (404 no_route): el panel
-// muestra "Llega con la Fase 2".
+// Las rutas que todavía no están no existen (404 no_route): el panel muestra
+// "Llega con la Fase 2".
 func TestModuleRoutesAndStubs(t *testing.T) {
 	m, _ := newTestModule(t)
 	c := httptestutil.New(t, httptestutil.FakeAuth{Sessions: map[string]entity.Principal{"s": {UserID: 1, Username: "felipe"}}}, m.RegisterRoutes)
 	app := "/api/v1/projects/auditfy/stages/staging/apps/api"
-	for _, path := range []string{app + "/deploys", app + "/deploys/1", app + "/deploys/1/log", app + "/status", app + "/logs", "/api/v1/registries"} {
+	for _, path := range []string{app + "/deploys", app + "/deploys/1", app + "/deploys/1/log", app + "/status", app + "/logs"} {
 		w := c.Do("GET", path, nil, httptestutil.WithSession("s"))
 		if w.Code != http.StatusNotFound || !bytes.Contains(w.Body.Bytes(), []byte(`"no_route"`)) {
 			t.Errorf("GET %s: %d %s", path, w.Code, w.Body)

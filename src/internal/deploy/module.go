@@ -21,6 +21,8 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/deploy/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/deploy/app/usecases"
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/service"
+	dephttp "github.com/CPU-commits/muelle/src/internal/deploy/infra/in/http"
+	depsqlite "github.com/CPU-commits/muelle/src/internal/deploy/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/deploy/infra/out/service"
 	"github.com/CPU-commits/muelle/src/package/audit"
 	"github.com/CPU-commits/muelle/src/package/cipher"
@@ -44,14 +46,20 @@ type Deps struct {
 
 type Module struct {
 	removeApp *usecases.RemoveApp
+	uc        dephttp.UseCases
 	log       *slog.Logger
 }
 
-// New arma el módulo. DB, Docker, Env e Ingress son obligatorios; Clock y Log, opcionales.
+// New arma el módulo. DB, Cipher, Audit, Docker, Env e Ingress son
+// obligatorios; Clock y Log, opcionales.
 func New(d Deps) *Module {
 	switch {
 	case d.DB == nil:
 		panic("deploy.New: falta Deps.DB")
+	case d.Cipher == nil:
+		panic("deploy.New: falta Deps.Cipher")
+	case d.Audit == nil:
+		panic("deploy.New: falta Deps.Audit")
 	case d.Docker == nil:
 		panic("deploy.New: falta Deps.Docker")
 	case d.Env == nil:
@@ -65,18 +73,24 @@ func New(d Deps) *Module {
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
+	regs := depsqlite.NewRegistryRepository(d.DB, d.Cipher)
 	return &Module{
 		removeApp: usecases.NewRemoveApp(outservice.NewDockerStacks(d.Docker)),
-		log:       d.Log,
+		uc: dephttp.UseCases{
+			ListRegistries: usecases.NewListRegistries(regs),
+			CreateRegistry: usecases.NewCreateRegistry(d.DB, regs, d.Clock, d.Audit),
+			UpdateRegistry: usecases.NewUpdateRegistry(d.DB, regs, d.Clock, d.Audit),
+			DeleteRegistry: usecases.NewDeleteRegistry(d.DB, regs, d.Audit),
+		},
+		log: d.Log,
 	}
 }
 
-// RegisterRoutes registra los errores y las rutas del módulo. Fase 2 (ver el
-// contrato): POST/GET …/apps/{a}/deploys, GET …/deploys/{id}, …/log y
-// …/log/stream, POST …/apps/{a}/rollback, GET …/apps/{a}/status y …/logs
-// (AccessToken), y /api/v1/registries (AccessSession). El esqueleto no
-// registra nada.
-func (m *Module) RegisterRoutes(k *utils.Kit) {}
+// RegisterRoutes registra los errores y las rutas del módulo (contrato §2):
+// /api/v1/registries (AccessSession). Faltan POST/GET …/apps/{a}/deploys, GET
+// …/deploys/{id}, …/log y …/log/stream, POST …/apps/{a}/rollback, GET
+// …/apps/{a}/status y …/logs (AccessToken).
+func (m *Module) RegisterRoutes(k *utils.Kit) { dephttp.Register(k, m.uc) }
 
 // Jobs son las tareas periódicas. Fase 2: ninguna obligatoria (la retención de
 // los últimos 20 deploys por app se hace al cerrar cada deploy).
