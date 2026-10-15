@@ -1971,7 +1971,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): el registro DNS del panel y cloudflare_zones en el job proxy (contrato §3.4 y §3.6)`
 
-- [ ] **Step 3: Los registros cuando cambia la IP pública.**
+- [x] **Step 3: Los registros cuando cambia la IP pública.**
 
   **Tests primero** (`usecases/records_update_test.go`). Tres dominios: dos con registros propios (uno en `error` + `cloudflare`) y uno sin registros:
   - Un `public_ip` nuevo actualiza el `A` de los dos; el que estaba en error vuelve a `pending`; el que no tiene registros no se toca.
@@ -1980,13 +1980,15 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - Lo mismo con un `AAAA` propio presente (D29): el `AAAA` se borra en `cftest`, **los dos ids** quedan vacíos, y el `error` + `cloudflare` se guarda (el `repo.Update` no choca con el `CHECK` de D19).
   - Borrar `public_ip` no hace ninguna llamada a `cftest`.
   - **Los ajustes de ese momento** (D30): el hook se llama con un `next` que trae `203.0.113.50`, pero la base ya tiene `203.0.113.60` (otro `PATCH` llegó entretanto). Los `A` quedan en `.60`.
-  - **Plazos:** con `cftest.Hang(200ms)`, `Timing.DomainOp: 50ms` y dos dominios, cada uno queda `error` + `cloudflare`, y `Execute` vuelve en poco más de 100 ms. Con un `ctx` que vence en 60 ms (como el plazo del hook), el segundo dominio no espera otros 50 ms: su `opCtx` usa lo que queda del plazo del hook (D6).
+  - **Plazos:** con `cftest.Hang(200ms)`, `Timing.DomainOp: 50ms` y dos dominios, cada uno queda `error` + `cloudflare`, y `Execute` vuelve en poco más de 100 ms. Con un `ctx` que vence en 60 ms (como el plazo del hook), el segundo dominio no espera otros 50 ms: su `opCtx` usa lo que queda del plazo del hook (D6). (Hecho con el doble de cada plazo, 100 ms y 120 ms, para que `-race` con la máquina cargada no lo haga fallar.)
   - Un `public_ipv6` nuevo crea el `AAAA` (con el `proxied` del dominio) de los que tienen `A` propio. Si ya hay un `AAAA` ajeno, `error` + `cloudflare`.
   - Borrar `public_ipv6` borra los `AAAA` propios y limpia los ids.
   - Sin token, los dominios con registros propios quedan `error` + `cloudflare` con el mensaje del token (D18).
 
   **Implementar** `records_update.go`: `UpdateManagedRecords.Execute(ctx, old, next shared.ProxySettings)`.
-  - `old`/`next` solo deciden si hay algo que hacer: si no cambió `public_ip` ni `public_ipv6`, vuelve.
+  - `old`/`next` solo deciden si hay algo que hacer: si no cambió `public_ip` ni `public_ipv6`, vuelve. Un `public_ip` borrado (sin cambio de `public_ipv6`) tampoco hace nada: no toca registros (§3.5).
+  - Cambia solo el contenido del `A`, nunca su `proxied` (lo puede haber cambiado el usuario en Cloudflare). El `AAAA` va con `dnsOps.syncAAAA`, como al crear.
+  - Un dominio que no estaba en `error` no cambia de estado ni de `updated_at` (el plazo de 10 min del certificado no se reinicia).
   - Lista los dominios con `cf_record_id`. Cada uno va en su propio `Ops.Do(ctx, Timing.DomainOp, …)`, así un hook largo no bloquea todo de una vez.
   - Dentro de cada `Do`, vuelve a leer el dominio (uno que ya no está se salta) y los ajustes actuales (D30), y lleva sus registros a esos ajustes:
     - el `A`, a `public_ip` si hay (sin `public_ip` no se toca);
