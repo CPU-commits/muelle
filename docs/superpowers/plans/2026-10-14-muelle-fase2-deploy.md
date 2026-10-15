@@ -831,7 +831,7 @@ func (d StackDeploy) MarshalJSON() ([]byte, error)
 ```
 
   `MarshalJSON` serializa un struct anónimo (sin recursión). Una contraseña vacía sale `""`. Verificar que `dockerConfig`, `encodeRegistryAuth` y el fake siguen usando los campos (no cambian). Commit: `feat(docker): RegistryAuth y StackDeploy no imprimen la contraseña ni el compose`.
-- [ ] **Step 3: Repositorios (tests primero, con `sqlitetest.New` y una app sembrada por SQL).**
+- [x] **Step 3: Repositorios (tests primero, con `sqlitetest.New` y una app sembrada por SQL).**
 
 ```go
 type DeployRepository interface {

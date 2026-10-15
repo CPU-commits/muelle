@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 )
 
@@ -23,6 +24,10 @@ type Registry struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+
+// PasswordAAD liga la contraseña cifrada a su fila (contrato §1.3, la lista
+// de shared/infra/out/crypto): registries:password:<id>.
+func PasswordAAD(id int64) string { return "registries:password:" + strconv.FormatInt(id, 10) }
 
 // redacted es r con la contraseña como "***" (si hay).
 func (r Registry) redacted() Registry {

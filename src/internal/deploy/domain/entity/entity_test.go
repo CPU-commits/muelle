@@ -84,3 +84,10 @@ func TestRegistryNeverPrintsPassword(t *testing.T) {
 		t.Fatalf("sin contraseña no hay nada que esconder: %s", s)
 	}
 }
+
+// La AAD de la contraseña es la de la lista de shared/infra/out/crypto.
+func TestPasswordAAD(t *testing.T) {
+	if got := PasswordAAD(42); got != "registries:password:42" {
+		t.Fatalf("PasswordAAD(42) = %q", got)
+	}
+}
