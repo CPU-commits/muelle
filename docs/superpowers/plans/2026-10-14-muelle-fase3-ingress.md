@@ -1156,7 +1156,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): las redes se listan con sus etiquetas`
 
-- [ ] **Step 2: `caddy.Runtime`, el contenedor.**
+- [x] **Step 2: `caddy.Runtime`, el contenedor.**
 
   **Tests primero, la credencial** (`domain/service/credential_test.go`), `TestCredentialHidesPassword`, con `Credential{Host: "ghcr.io", Username: "bot", Password: "reg-secret-1234567890"}`:
   - `fmt.Sprint(c)`, `fmt.Sprintf("%+v", c)`, `fmt.Sprintf("%#v", c)` y `fmt.Sprint(&c)` no contienen la contraseña, y sí el host y el usuario;
