@@ -531,7 +531,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
 
   **Commit:** `feat(ingress): los puertos de Cloudflare, catalog, registries y settings, y la zona por sufijo`
 
-- [ ] **Step 5: El repositorio de `domains`.**
+- [x] **Step 5: El repositorio de `domains`.**
 
   **Tests primero** (`infra/out/repository/sqlite/domains_test.go`), con la app sembrada por `ingresstest` (Step 8: créalo primero o en el mismo paso):
   - `TestDomainsCRUD`:
@@ -645,7 +645,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
 
   **Commit** (dos): `test(ingress): Cloudflare falso para los tests (cftest)` y `feat(ingress): cliente mínimo de Cloudflare (token, zonas y registros DNS)`
 
-- [ ] **Step 8: `ingresstest`.** Helpers para los tests de varios paquetes de ingress (`testing.TB`, con `t.Fatal` ante cualquier error):
+- [x] **Step 8: `ingresstest`.** Helpers para los tests de varios paquetes de ingress (`testing.TB`, con `t.Fatal` ante cualquier error):
   ```go
   func Stage(t testing.TB, db *sqlite.DB, project, stage string)               // crea el proyecto y el stage si faltan (sin apps)
   func App(t testing.TB, db *sqlite.DB, project, stage, app, kind string) int64 // usa Stage; spec '{}' o compose_yaml 'services: {}'
