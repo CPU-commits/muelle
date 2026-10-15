@@ -301,7 +301,7 @@ func TestRunAlreadyInstalled(t *testing.T) {
 		h.o.Reinstall = reinstall
 		h.f.PutService(docker.Service{Name: "muelle_muelle"})
 		err := h.run()
-		if !errors.Is(err, ErrAlreadyInstalled) || !strings.Contains(err.Error(), "docker service update --image") {
+		if !errors.Is(err, ErrAlreadyInstalled) || !strings.Contains(err.Error(), "docker service update --with-registry-auth --image") {
 			t.Fatalf("reinstall=%v: err=%v", reinstall, err)
 		}
 		noCall(t, h.calls(), "CreateContainer", "CreateNetwork", "CreateSecret", "DeployStack", "PullImage")

@@ -231,7 +231,7 @@ func (in *installer) checkPrevious(ctx context.Context) error {
 			return fmt.Errorf("buscando el servicio %s: %w", n.Service, err)
 		}
 		if svc {
-			return fmt.Errorf("%w (el servicio %s existe): para actualizarlo, docker service update --image %s:<versión> %s",
+			return fmt.Errorf("%w (el servicio %s existe): para actualizarlo, docker service update --with-registry-auth --image %s:<versión> %s",
 				ErrAlreadyInstalled, n.Service, naming.MuelleImage, n.Service)
 		}
 		secrets := []struct {
