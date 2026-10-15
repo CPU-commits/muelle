@@ -33,3 +33,18 @@ type DNSError struct {
 func (e *DNSError) Error() string {
 	return "Cloudflare rechazó el pedido (" + strconv.Itoa(e.Status) + "): " + e.Message
 }
+
+// ErrCaddyUnreachable: no se pudo hablar con la admin API, o con el TLS de Caddy.
+var ErrCaddyUnreachable = errors.New("muelle no pudo conectarse con Caddy")
+
+// CaddyRejected: Caddy no aceptó la configuración (POST /load respondió con
+// error) y conserva la anterior. Message ya viene sin el token (***) y
+// cortado a 500 caracteres.
+type CaddyRejected struct{ Message string }
+
+func (e *CaddyRejected) Error() string { return "Caddy no aceptó la configuración: " + e.Message }
+
+// ErrPlaceholderInSettings: el email ACME o el token de Cloudflare tienen { o },
+// que Caddy expandiría como placeholders (D16 del plan de la Fase 3). No se
+// manda nada.
+var ErrPlaceholderInSettings = errors.New("el email ACME o el token de Cloudflare tienen { o }, que Caddy tomaría como placeholders")

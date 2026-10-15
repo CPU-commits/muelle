@@ -131,3 +131,13 @@ type Registries interface {
 
 // PanelDNS son las claves panel_cf_* (contrato §3.6); "" = la clave no está.
 type PanelDNS struct{ ZoneID, RecordID, RecordIDAAAA string }
+
+// CaddyAdmin es la admin API de muelle-caddy (adaptador: caddy.Admin, por el
+// socket unix de naming.CaddyAdminSocket).
+type CaddyAdmin interface {
+	// Load manda la configuración completa (POST /load); force agrega
+	// Cache-Control: must-revalidate (recarga aunque sea igual). Errores:
+	// ErrPlaceholderInSettings (no se manda nada), ErrCaddyUnreachable o un
+	// *CaddyRejected. Ninguno trae el token.
+	Load(ctx context.Context, cfg ProxyConfig, force bool) error
+}

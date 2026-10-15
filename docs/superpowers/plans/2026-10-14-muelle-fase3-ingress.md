@@ -726,7 +726,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 - Modify: `src/shared/infra/container/container.go` (`WithIngress` y `build`), `ports_test.go` (solo `TestContractProxySettings`)
 - Create: `src/internal/ingress/integration_env_test.go`, `integration_test.go` (`//go:build integration`)
 
-- [ ] **Step 1: `BuildProxyConfig`.**
+- [x] **Step 1: `BuildProxyConfig`.**
 
   **Tests primero** (`proxy_config_test.go`):
   - `TestBuildProxyConfigRoutes`:
