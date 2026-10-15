@@ -1544,7 +1544,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): la regla de los certificados (pending, active y error, con los 14 días y los 10 minutos)`
 
-- [ ] **Step 2: `TLSProbe`.**
+- [x] **Step 2: `TLSProbe`.**
 
   **Tests primero** (`infra/out/service/certs_test.go`). Usa una CA de prueba generada en el test con `crypto/x509` (raíz, intermedia y hoja para `a.it3.test`), y `httptest.NewUnstartedServer` con `TLS.Certificates`:
   - `TestProbeValid`:
@@ -1555,6 +1555,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `TestProbeExpired`: `Valid == false`.
   - `TestProbeHandshakeFails`: un listener que cierra al aceptar da `Valid == false` ("Caddy no presentó un certificado para …"), sin error.
   - `TestProbeUnreachable`: un puerto sin nadie da `errors.Is(err, service.ErrCaddyUnreachable)`.
+  - `TestProbeHandshakeTimeout` (sumado al implementar): un listener que acepta y no responde, con `Timeout` 50 ms, da `ErrCaddyUnreachable` y no un inválido. Un Caddy colgado es "no se sabe" (D9): si no, la verificación de cada hora pasaría los `active` a `error`.
 
   **Implementar:**
   ```go
@@ -1566,7 +1567,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   ```
   - Dial TCP; si falla, `ErrCaddyUnreachable`.
   - `tls.Client` con `ServerName = host`, `InsecureSkipVerify: true` y TLS 1.2 como mínimo.
-  - `HandshakeContext`; si falla, inválido.
+  - `HandshakeContext`; si falla, inválido, salvo que se haya vencido el plazo (`ErrCaddyUnreachable`).
   - `leaf.Verify(x509.VerifyOptions{DNSName: host, Roots, Intermediates: <el resto de la cadena>})`.
 
   **Commit:** `feat(ingress): verificar el certificado que sirve Caddy por TLS con SNI`
