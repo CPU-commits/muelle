@@ -484,7 +484,7 @@ Se valida en su forma canónica, sin normalizar: minúsculas, etiquetas `[a-z0-9
 | Endpoint | Cuerpo | Respuesta | Errores |
 |---|---|---|---|
 | `GET /registries` | — | `200 [registry]`, ordenados por host | |
-| `POST /registries` | `{host, username, password}` | `201 registry` | `409 conflict` si el host ya está; `422` en `host`, `username` (1–255, sin caracteres de control) o `password` (1–4096 bytes, sin saltos de línea) |
+| `POST /registries` | `{host, username, password}` | `201 registry` | `409 conflict` si el host ya está; `422` en `host`, `username` (1–255 caracteres, UTF-8 válido, sin caracteres de control ni `:`, que la autenticación HTTP Basic usa de separador) o `password` (1–4096 bytes, sin saltos de línea) |
 | `PATCH /registries/{host}` | `{username, password}`, los dos obligatorios: reemplaza las credenciales | `200 registry` | `404 not_found`, `422` |
 | `DELETE /registries/{host}` | — | `204` | `404 not_found` |
 
