@@ -38,6 +38,9 @@ type Deps struct {
 	// Version es la de este binario (main.version): con caddy_image vacío,
 	// muelle-caddy usa naming.CaddyImageFor(Version) (Fase 3).
 	Version string
+	// Options cambian los nombres de Docker, cómo se llega a Caddy y a
+	// Cloudflare, y los plazos. El cero es producción; solo los tests las cambian.
+	Options Options
 }
 
 type Module struct {
@@ -46,11 +49,14 @@ type Module struct {
 	log           *slog.Logger
 }
 
-// New arma el módulo. DB y Docker son obligatorios; Clock y Log, opcionales.
+// New arma el módulo. DB, Cipher y Docker son obligatorios; Clock, Log y
+// Options, opcionales.
 func New(d Deps) *Module {
 	switch {
 	case d.DB == nil:
 		panic("ingress.New: falta Deps.DB")
+	case d.Cipher == nil:
+		panic("ingress.New: falta Deps.Cipher")
 	case d.Docker == nil:
 		panic("ingress.New: falta Deps.Docker")
 	}
@@ -60,10 +66,11 @@ func New(d Deps) *Module {
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
+	o := d.Options.withDefaults()
 	nets := outservice.NewDockerNetworks(d.Docker)
 	return &Module{
-		ensureNetwork: usecases.NewEnsureStageNetwork(nets, d.Log),
-		removeNetwork: usecases.NewRemoveStageNetwork(nets, d.Log),
+		ensureNetwork: usecases.NewEnsureStageNetwork(nets, o.CaddyContainer, d.Log),
+		removeNetwork: usecases.NewRemoveStageNetwork(nets, o.CaddyContainer, d.Log),
 		log:           d.Log,
 	}
 }
