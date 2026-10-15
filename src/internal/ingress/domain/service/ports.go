@@ -43,9 +43,16 @@ type Networks interface {
 }
 
 // Settings lee los ajustes del proxy y el DNS que guarda admin en la tabla
-// settings (adaptador SQL en infra/out/service, que descifra el token).
+// settings, y escribe las claves que son de ingress (contrato §3.6). El
+// adaptador SQL (infra/out/service) descifra el token.
 type Settings interface {
 	ProxySettings(ctx context.Context) (entity.ProxySettings, error)
+	PanelDNS(ctx context.Context) (PanelDNS, error)
+	// SavePanelDNS escribe las claves no vacías y borra las vacías.
+	SavePanelDNS(ctx context.Context, p PanelDNS) error
+	// SaveZones guarda cloudflare_zones solo si el token guardado sigue siendo
+	// token (en una transacción); saved dice si lo guardó.
+	SaveZones(ctx context.Context, token string, zones int) (saved bool, err error)
 }
 
 // Zone es una zona de Cloudflare visible para el token.

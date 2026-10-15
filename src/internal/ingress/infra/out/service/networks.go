@@ -1,5 +1,8 @@
 // Package service tiene los adaptadores de salida de ingress: Docker (con
-// shared/infra/out/docker) y los ajustes de la tabla settings.
+// shared/infra/out/docker) y lo que ingress lee de otros módulos por SQL
+// (§4.1 regla 1): las apps y los stages de catalog, las credenciales de
+// registries y los ajustes de la tabla settings, donde también escribe sus
+// claves (contrato §3.6).
 package service
 
 import (

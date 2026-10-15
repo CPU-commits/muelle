@@ -548,7 +548,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
 
   **Commit:** `feat(ingress): repositorio SQLite de domains`
 
-- [ ] **Step 6: Adaptadores de catalog, registries y settings.**
+- [x] **Step 6: Adaptadores de catalog, registries y settings.**
 
   **Tests primero:**
   - `TestCatalogApp`: encuentra la app con su `Kind`; una app de otro stage o que no existe da `repository.ErrNotFound`.
