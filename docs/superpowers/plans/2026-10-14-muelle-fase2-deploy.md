@@ -1039,13 +1039,31 @@ func (u *SeedInitRegistry) Execute(ctx context.Context, r *dto.InitRegistry) err
 
   Test en `src/shared/infra/container/deploy_test.go` (archivo nuevo; T5 le suma los contratos): `TestInitRegistrySeededOnce`, con `testSettings(t)` más `s.Init.Registry`: el primer `New` deja el registry (`SELECT` por `c.DB`: está, y `password` no es la contraseña en claro); se borra como lo haría el panel (el caso de uso `Delete` de registries o un `DELETE` por SQL); `Close` y otro `New` sobre el mismo `DataDir` con el mismo `s` → la tabla sigue vacía.
 
-- [ ] **Step 9: Verificar y commits:**
+- [x] **Step 9: Verificar y commits:**
   1. `feat(deploy): registries por HTTP (contrato §2.10)`
   2. `feat(deploy): encolar deploys y rollbacks y leerlos por HTTP (contrato §2.1–§2.5 y §2.7)`
   3. `feat(settings): MUELLE_INIT_REGISTRY_FILE, el registry inicial de install, con la contraseña oculta`
   4. `feat(deploy): el registry inicial de install se guarda solo en el primer arranque de la base`
 
+  (Además, commits chicos para los Steps 1 a 5: la migración, el ocultamiento en Docker, los repositorios, y el log con el Hub y los puertos.)
+
 **Integración en T3:** ninguna (no usa Docker real).
+
+**Notas de la implementación de T3** (lo que T4 y T5 tienen que saber, y en qué se apartó del plan):
+- **`usecases.Deps`** (`Tx`, `Apps`, `Deploys`, `Queue`, `Hub`, `Clock`, `Audit`) es lo que comparten `CreateDeploy`, `Rollback`, `ListDeploys`, `GetDeploy` y `ReadLog`. `module.go` arma uno con `noQueue{}` (acepta todo, no corre nada) y un `Hub` propio: T4 pone el despachador en `Queue` (y lo arma antes que los casos de uso) y T5 necesita **ese mismo** `Hub` para los streams. Desde T3, `deploy.New` exige `Cipher` y `Audit` (panic si faltan).
+- **Repositorios:** `Create` usa `d.CreatedAt` del que llama, asigna `ID` y `Status` y deja los mapas en `{}`; `NextQueued` es el queued **más viejo**; `Finish` solo cierra un `queued` o `running` (si no, `ErrNotFound`) y rechaza un estado que no es final; `SupersedeQueued`, `FailQueued` y `ActiveApps` devuelven ids ordenados y nunca `nil`. `AppendLog` hace su propio `InTx` (usa el del ctx si viene). `RegistryRepository.Get` y `List` no traen la contraseña; solo `Credentials` la descifra (un error de descifrado nombra el host).
+- **El log:** `LogWriter.For(id, m)` da un `DeployLog` con `Line`, `Lines` y `Final`, que escriben con `context.Background()` (una línea decidida se escribe aunque el worker se cancele) y avisan con `Hub.Notify` después de guardar: solo fuera de una transacción. Para las líneas de cierre que van en el mismo `InTx` que `Finish` (la regla de T4 Step 3), `DeployLog.Format(texts...)` devuelve las líneas formateadas y la marca de truncado, para `Deploys.AppendLog(ctx, id, lines, true, marker)`; el `Hub.Notify` va después del commit.
+- **`Hub.Wait`** deja un canal en el mapa hasta el próximo `Notify` de ese id: un stream que abre un deploy ya terminado y no vuelve a recibir un aviso lo deja ahí (unos bytes por deploy). T5 puede evitarlo no llamando a `Wait` si el deploy ya es final, o sumar un contador.
+- **El offset:** `ParseOffset(url.Values) int` (en `infra/in/http`) devuelve `-1` si no es un entero ≥ 0 en decimal (`?offset=`, `+3`, `1.5`, desbordado), y el caso de uso `ReadLog` responde, en orden, el 404 de la app, el 404 del deploy y recién después el 422 (`usecases.ErrBadOffset`, `offset: tiene que ser un entero ≥ 0`). El SSE de T5 puede reusar `parseOffset` para `Last-Event-ID`.
+- **Cuerpos opcionales:** `readOptionalBody` (en `infra/in/http/deploys.go`) sirve al deploy y al rollback: vacío o solo espacios (dentro de 1 MiB) es "sin cuerpo"; si no, `utils.DecodeJSON` sobre el cuerpo vuelto a armar (más de 1 MiB, también de espacios, es `400` "el cuerpo supera 1 MiB").
+- **Auditoría:** `deploy.create` y `registry.*` se guardan **dentro** del `InTx` (si la transacción se deshace, no queda el evento). `deploy.create` lleva `images` siempre como objeto (`{}` sin overrides).
+- **Errores:** `RegisterErrors` registra `ErrNoPreviousDeploy` (409 `no_previous_deploy`) y `ErrAppRemoving` (409 `conflict`); T4 suma `ErrWorkerBusy`.
+- **Desvíos del plan:**
+  - el DTO de las credenciales es `dto.RegistryInput` (con `String`, `GoString`, `LogValue` y `MarshalJSON` que ocultan la contraseña), y `dto.InitRegistry` es un alias de él: el mismo tipo sirve para `POST`/`PATCH /registries` y para el registry inicial;
+  - `SeedInitRegistry` vuelve a validar host, usuario y contraseña antes de su `InTx` (última barrera: un registry inválido no deja arrancar y no deja la marca); si el host ya tiene un registry, no lo toca y la marca queda (`TestSeedInitRegistryExistingHost`, de más);
+  - en `src/settings`, los casos del registry van en un test propio, `TestLoadRejectsBadInitRegistry`, no dentro de `TestLoadRejectsBadInit`; suma `null`, una clave repetida, basura después del objeto, un archivo vacío y uno de más de 16 KiB;
+  - los tests HTTP de Step 7 están en el paquete `deploy` (`http_test.go`, `deploys_http_test.go`), con el módulo completo detrás del servidor de `cmd/http`, no en `infra/in/http`;
+  - `RegistryAuth` y `StackDeploy` (Docker) muestran la contraseña como `[oculta]`, como decía el Step 2; la entidad y los DTOs de deploy y `settings.InitRegistry` usan `***`.
 
 ---
 
