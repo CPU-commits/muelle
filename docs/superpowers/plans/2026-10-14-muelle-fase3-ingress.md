@@ -230,7 +230,8 @@ Lo que el contrato no fija y este plan decide. Cada una con su porqué.
 - **D26. `proxied` sin zona:** se guarda `false` si no hay token o no hay zona. Si no se pudieron listar las zonas, se guarda el pedido, para que `retry` lo use.
 - **D27. El registro del panel:**
   - Se crea solo si no hay ningún `A`, `AAAA` ni `CNAME` de ese nombre que muelle no maneje. Va con `proxied: false` y el comentario `muelle`.
-  - Su `AAAA` se crea solo si muelle maneja el `A`.
+  - Su `AAAA` se crea solo si muelle maneja el `A`, con el `proxied` que tiene el `A` en Cloudflare (T5: un `AAAA` sin proxy junto a un `A` con proxy dejaría ver la IPv6 del servidor).
+  - Sin `public_ip`, no se crea ni se actualiza ninguno (como en §3.5: borrar `public_ip` no toca registros); la zona y `cloudflare_zones` se guardan igual.
   - Nunca se cambia su `proxied`.
   - Un id guardado que ya no existe, o que es de otro nombre, se olvida y no se borra (contrato §3.4).
   - **Un id guardado que el token ya no puede leer también se olvida**, sin borrarlo.
@@ -2058,7 +2059,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `test(container): los contratos de ingress con el contenedor completo, con Cloudflare falso`
 
-- [ ] **Step 6: La documentación.**
+- [x] **Step 6: La documentación.**
 
   - **`README.md`:**
     - **"Estado":** una línea de la Fase 3: muelle-caddy, rutas, dominios con Cloudflare, certificados y `GET /proxy`.
@@ -2085,6 +2086,11 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - **Diseño:** §3.1, §3.2, §8 y §9, solo si algo quedó distinto de lo que dicen.
 
   **Commit** (separados): `docs: la Fase 3 en el README (estado, integración y notas)` y, si hubo cambios, `docs(contrato): la Fase 3 hecha en §1.1 …`.
+
+  Hecho (T5):
+  - README: la sección nueva "Proxy y dominios" va después de "Docker" y no junto a "Tests", donde la Fase 5 ya agregó texto en `fase-23-base`: así el merge no choca ahí. Los tests de integración de ingress quedan en esa sección.
+  - Contrato: §1.1 (hecho en las filas de ingress, y la fila de `registries` dice que se usa para la imagen privada de Caddy), el bloque `ingress` de §1.2 (el orden real del job y el barrido de los `pending`), §3.1 (el handshake que no termina en 5 s es "no se sabe"), §3.4 (`muelle-caddy-probe`, el `AAAA` del panel con el `proxied` del `A`, sin `public_ip` no toca el registro del panel, y D29 para el panel), §3.5 (los mensajes del `422` del token, solo el contenido de los `A`, y `error`/`cloudflare` → `pending`) y una fila en §7 (el cambio de IP pública, compatible).
+  - Diseño: sin cambios; §3.1, §3.2, §8 y §9 ya dicen lo que hace el código.
 
 - [ ] **Step 7: Cierre de la fase.**
   1. Las verificaciones de "Convenciones" pasan.
