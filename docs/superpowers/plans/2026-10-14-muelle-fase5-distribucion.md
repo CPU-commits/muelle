@@ -571,7 +571,7 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
 
   **Resultado (2026-10-15, build sin caché):** todo como arriba. El binario y el `docker` son estáticos; `/tmp` 1777; la CSP del header es la del `<meta>` más `frame-ancestors 'none'`; `POST /` con `Origin` da `405` con `Allow: GET, HEAD`. Memoria de `it5-smoke` después de cargar el panel: 14,3 MiB en `docker stats` (VmRSS 25,7 MiB). Imagen: 102 MB en disco, 30,8 MB comprimida.
 
-- [ ] **Step 6: `deploy/caddy/Dockerfile`** y su prueba:
+- [x] **Step 6: `deploy/caddy/Dockerfile`** y su prueba:
   ```dockerfile
   # syntax=docker/dockerfile:1
   # muelle-caddy (contrato §3.4 y §5.4): Caddy con el módulo de DNS de
@@ -599,6 +599,8 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
   docker rm -f it5-caddy-smoke
   ```
   El otro objetivo de §1 del diseño es muelle más Caddy bajo 100 MB: en el reporte (y en el commit de la imagen de Caddy) anota la memoria de `it5-caddy-smoke`, la de `it5-smoke` del Step 5 y la suma. Es una cota de abajo (Caddy sin sitios ni certificados); si la suma ya pasa de 100 MB, no lo arregles en esta tarea: anótalo con los valores.
+
+  **Hecho:** además del esqueleto, el `Dockerfile` corre `caddy list-modules | grep -qx dns.providers.cloudflare` (el build falla sin el módulo) y toma `ARG VERSION` para la etiqueta `org.opencontainers.image.version`, que si no quedaría con la versión de Caddy de la imagen base (el release le pasa el mismo `VERSION` que a muelle). **Resultado:** `v2.11.7`, el módulo está, `/config/` responde `null` por el socket y no hay admin API en TCP. Memoria de `it5-caddy-smoke`: 20,0 MiB (`docker stats`; VmRSS 47,6 MiB). Con muelle: 34,3 MiB (`docker stats`) o 73,3 MiB (VmRSS), bajo los 100 MB. Imagen: 163 MB en disco, 43 MB comprimida.
 
 - [ ] **Step 7: `.github/workflows/release.yml`.** No lo corras nunca (ni con `act`). Fija `actions/checkout`, `actions/setup-go` y las tres de `docker/` por SHA de commit, con la versión en un comentario (`git ls-remote --tags https://github.com/docker/build-push-action | sort -V -k2 | tail -3`; en un tag anotado, la línea `^{}` es el commit). Confirma las entradas con Context7 (`/docker/build-push-action`, `/docker/login-action`).
   ```yaml
