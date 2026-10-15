@@ -451,7 +451,7 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
 
   Implementación: `case "version"` en `run` (sin argumentos; imprime `version`), y la línea en `usage` (`version  imprime la versión de muelle`). Reordena el `switch` para que cada comando valide sus argumentos en su propio `case` (T3 y T4 agregan `settings` e `install`, que sí reciben argumentos). Commit: `feat: muelle version imprime la versión del binario`.
 
-- [ ] **Step 2: Versiones y digests.** Para cada imagen base, fija el tag exacto (con parche) y el digest del índice multi-arquitectura:
+- [x] **Step 2: Versiones y digests.** Para cada imagen base, fija el tag exacto (con parche) y el digest del índice multi-arquitectura:
   ```bash
   for img in node:24-alpine golang:1.27-alpine docker:29.9.0-cli alpine:3.24 caddy:2.11-builder-alpine caddy:2.11-alpine; do
     docker buildx imagetools inspect "$img" | sed -n '1,3p'   # Name y Digest del índice
@@ -461,7 +461,9 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
   ```
   Usa el tag más específico que publique cada imagen (`node:24.X.Y-alpine3.ZZ`, `golang:1.27.X-alpine3.ZZ`, `alpine:3.24.X`, `caddy:2.11.X-builder-alpine` y `caddy:2.11.X-alpine`, con la misma `2.11.X` en las dos). Para `github.com/caddy-dns/cloudflare`, la última versión: `go list -m -versions github.com/caddy-dns/cloudflare` (o Context7 / las releases del repo). Confirma con Context7 (`/caddyserver/caddy-docker`) cómo se usa `xcaddy build` en el builder.
 
-- [ ] **Step 3: `.dockerignore`** (lista de permitidos, decisión 16):
+  **Hecho (2026-10-15):** `node:24.22.0-alpine3.24`, `golang:1.27.2-alpine3.24`, `docker:29.9.0-cli`, `alpine:3.24.2`, `caddy:2.11.7-builder-alpine` y `caddy:2.11.7-alpine` (cada uno igual a su tag corto), y `caddy-dns/cloudflare@v0.2.4`. Además, la línea `# syntax` de los dos `Dockerfile` fija el frontend: `docker/dockerfile:1.27.1@sha256:…` (sin el digest, BuildKit bajaría `docker/dockerfile:1` sin fijar en cada build).
+
+- [x] **Step 3: `.dockerignore`** (lista de permitidos, decisión 16):
   ```
   # El contexto lleva solo lo que construye la imagen de muelle: nunca .git,
   # .claude (otros worktrees), claves, bases ni el .env del panel.
@@ -484,8 +486,9 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
   web/.env
   web/.env.*
   ```
+  Hecho con lo mismo más `**/*.key`, `**/muelle_master_key`, `**/*.db*` y `**/.env*` dentro de `src/` y `web/` (lo que ignora git), `web/coverage/` y `web/project.inlang/cache/`. Comprobado con un build que lista el contexto: con un `web/.env.production`, una clave, una base, `node_modules`, `web/build` y `src/cmd/http/panel/build` puestos a propósito, ninguno entra.
 
-- [ ] **Step 4: `Dockerfile`** (raíz). Esqueleto; reemplaza `<…>` con lo del Step 2:
+- [x] **Step 4: `Dockerfile`** (raíz). Esqueleto; reemplaza `<…>` con lo del Step 2:
   ```dockerfile
   # syntax=docker/dockerfile:1
   # Imagen de muelle (contrato §5.4): el panel (web/) construido con pnpm, el
@@ -535,7 +538,9 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
   ```
   Si `pnpm codegen` o `pnpm build` piden otra cosa (una variable, un archivo), resuélvelo en el `Dockerfile`, nunca editando `web/`; si no se puede, para y repórtalo.
 
-- [ ] **Step 5: Construir y probar la imagen de muelle.** Arma el contexto como en las convenciones y construye `it5-muelle:test` con `VERSION=v0.0.0-it5`. Después, con nombres `it5` y el puerto 22080 solo en loopback (es un test: en producción el puerto de muelle nunca se publica). Abajo se omite por brevedad, pero cada `docker run --rm` (también los de los Steps 2 y 6) lleva su `--name it5-<algo>` (convenciones):
+  **Cambios al esqueleto:** `go build` usa `GOOS=${TARGETOS} GOARCH=${TARGETARCH}` (los `ARG` que define BuildKit) en vez de `linux`/`amd64` fijos: el release los pasa como `linux/amd64` igual, y un build local en otra arquitectura no mete un binario amd64 en una imagen arm64. La CSP se comprueba con `test -s` (no vacía), y la línea `# syntax` va fijada (Step 2). `pnpm codegen` y `pnpm build` no pidieron nada más.
+
+- [x] **Step 5: Construir y probar la imagen de muelle.** Arma el contexto como en las convenciones y construye `it5-muelle:test` con `VERSION=v0.0.0-it5`. Después, con nombres `it5` y el puerto 22080 solo en loopback (es un test: en producción el puerto de muelle nunca se publica). Abajo se omite por brevedad, pero cada `docker run --rm` (también los de los Steps 2 y 6) lleva su `--name it5-<algo>` (convenciones):
   ```bash
   docker run --rm it5-muelle:test version                          # v0.0.0-it5
   docker run --rm it5-muelle:test help | head -3                   # el uso
@@ -563,6 +568,8 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
   docker image ls it5-muelle:test                                    # anota el tamaño en el commit
   ```
   Si el RSS pasa de 40 MiB, no lo arregles en esta tarea: anótalo en el reporte con el valor.
+
+  **Resultado (2026-10-15, build sin caché):** todo como arriba. El binario y el `docker` son estáticos; `/tmp` 1777; la CSP del header es la del `<meta>` más `frame-ancestors 'none'`; `POST /` con `Origin` da `405` con `Allow: GET, HEAD`. Memoria de `it5-smoke` después de cargar el panel: 14,3 MiB en `docker stats` (VmRSS 25,7 MiB). Imagen: 102 MB en disco, 30,8 MB comprimida.
 
 - [ ] **Step 6: `deploy/caddy/Dockerfile`** y su prueba:
   ```dockerfile
