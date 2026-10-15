@@ -31,3 +31,17 @@ func (f *Fake) ForceUpdateService(ctx context.Context, nameOrID string) error {
 	s.svc.UpdatedAt = f.Now()
 	return nil
 }
+
+// PutNetwork deja una red tal cual, con su Driver, Scope, Attachable y
+// Subnets, como una que ya existía en el daemon (install revisa que
+// muelle_panel sea overlay, attachable y con subred privada). Sin ID se le
+// asigna uno. No mira el Swarm ni registra una llamada.
+func (f *Fake) PutNetwork(n docker.Network) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if n.ID == "" {
+		n.ID = f.id("net")
+	}
+	c := copyNetwork(&n)
+	f.networks[n.Name] = &c
+}

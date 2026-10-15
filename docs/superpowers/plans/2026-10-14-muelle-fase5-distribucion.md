@@ -905,7 +905,7 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   func InstallNamesFor(prefix string) InstallNames
   ```
 
-- [ ] **Step 2: `PutNetwork` en el fake** (`fake_dist.go`): `func (f *Fake) PutNetwork(n docker.Network)` la deja tal cual (con sus `Subnets`, `Driver`, `Scope` y `Attachable`; sin ID se le asigna uno). Test `TestFakePutNetwork` en `fake_dist_test.go` (`InspectNetwork` la devuelve igual; `CreateNetwork` con ese nombre da `ErrConflict`).
+- [x] **Step 2: `PutNetwork` en el fake** (`fake_dist.go`): `func (f *Fake) PutNetwork(n docker.Network)` la deja tal cual (con sus `Subnets`, `Driver`, `Scope` y `Attachable`; sin ID se le asigna uno). Test `TestFakePutNetwork` en `fake_dist_test.go` (`InspectNetwork` la devuelve igual; `CreateNetwork` con ese nombre da `ErrConflict`).
 
 - [ ] **Step 3: Flags, tests primero** (`options_test.go`):
   - `TestParseArgsDefaults`: `--panel-domain panel.example.com --email a@example.com` → puertos 80/443, `NamePrefix` `muelle`, sin `Reinstall`.
