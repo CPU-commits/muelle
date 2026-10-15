@@ -95,13 +95,17 @@ Ambos viven en el nodo manager.
 
 ```
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  -v ~/.docker/config.json:/root/.docker/config.json:ro \
   ghcr.io/cpu-commits/muelle:<versión> install \
   --panel-domain panel.tudominio.cl --email tu@correo \
   [--cloudflare-token …] [--public-ip …] [--public-ipv6 …] [--advertise-addr …] \
-  [--http-port 80] [--https-port 443] [--caddy-image …] [--reinstall]
+  [--http-port 80] [--https-port 443] [--caddy-image …] [--reinstall] \
+  [--registry-user … --registry-password-stdin]
 ```
 
 Sin `:<versión>` se usa `:latest`, la última versión final. `--cloudflare-token -` lee el token de stdin (`docker run -i`), así no queda en el historial de la shell.
+
+Las imágenes de muelle son privadas: antes se hace `docker login ghcr.io` en el servidor (un token de GitHub con `read:packages`) y se monta su `config.json`, o se pasa la credencial con `--registry-user` y `--registry-password-stdin`. install baja con ella las imágenes de muelle y de Caddy, y se la pasa a muelle, que la guarda como el registry `ghcr.io` en su primer arranque (contrato §5.2).
 
 Pasos (el orden y los detalles están en el contrato de las fases 2 y 3, §5.4). install no cambia nada hasta el paso 4, así un puerto ocupado aborta sin dejar nada:
 1. Verifica Docker y el estado del Swarm, y que no haya una instalación anterior (con `--reinstall`, reusa la clave maestra de una que se borró con `docker stack rm muelle`).
@@ -116,7 +120,7 @@ Pasos (el orden y los detalles están en el contrato de las fases 2 y 3, §5.4).
 10. Imprime una URL de setup de un solo uso (`https://panel…/setup?token=…`, vence en 24 h) para crear el primer usuario. Si muelle ya tiene usuarios (una reinstalación), lo dice.
 11. Sobre el dominio del panel: con `--cloudflare-token`, muelle crea su registro DNS y usa DNS-01; sin token, el registro DNS tiene que existir de antemano y se usa HTTP-01, que necesita que el puerto 80 público llegue a `--http-port` (install avisa si no es 80).
 
-**Actualizar muelle:** `docker service update --image ghcr.io/cpu-commits/muelle:<versión> muelle_muelle`. Los sitios no se ven afectados, porque Caddy es un contenedor aparte.
+**Actualizar muelle:** `docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<versión> muelle_muelle`, con el `docker login ghcr.io` del servidor. Los sitios no se ven afectados, porque Caddy es un contenedor aparte.
 
 **Recuperar el acceso** si la lista de IPs permitidas te deja fuera del panel: `docker exec <contenedor de muelle> muelle settings reset-panel-ips` vacía la lista y reinicia muelle, que al arrancar reenvía la configuración a Caddy (contrato §4.1 y §5.4).
 
