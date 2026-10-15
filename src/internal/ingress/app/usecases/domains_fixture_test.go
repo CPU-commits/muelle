@@ -6,16 +6,19 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/CPU-commits/muelle/src/internal/ingress/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
 	reposqlite "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy/caddytest"
+	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/cloudflare"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/cloudflare/cftest"
 	"github.com/CPU-commits/muelle/src/internal/ingress/ingresstest"
 	"github.com/CPU-commits/muelle/src/package/clock"
@@ -93,6 +96,7 @@ type ucFixture struct {
 	probe  *fakeProbe
 	certs  *CertChecker
 	ops    *Ops
+	deps   DomainDeps
 	// apiID es la app de formulario auditfy/staging/api; infraID la compose
 	// auditfy/staging/infra.
 	apiID, infraID int64
@@ -124,6 +128,11 @@ func newUCFixture(t *testing.T) *ucFixture {
 	catalog := outservice.NewCatalogReader(db)
 	f.syncer = NewSyncer(settings, f.repo, catalog, caddy.NewAdmin(f.caddy.Dial), f.state, f.clock, "", false, nil, log)
 	f.certs = NewCertChecker(f.probe, f.repo, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, log)
+	f.deps = DomainDeps{
+		Repo: f.repo, Catalog: catalog, Settings: settings, DNS: cloudflare.New(f.cf.URL()), Syncer: f.syncer,
+		Certs: f.certs, Ops: f.ops, Clock: f.clock, Audit: sqlite.NewAuditRecorder(db, f.clock, log), Log: log,
+		DomainOp: 30 * time.Second, DomainRetry: 20 * time.Second,
+	}
 	f.apiID = ingresstest.App(t, db, "auditfy", "staging", "api", "service")
 	f.infraID = ingresstest.App(t, db, "auditfy", "staging", "infra", "compose")
 	f.settings(t, nil)
@@ -201,4 +210,43 @@ func (f *ucFixture) audits(t *testing.T) []string {
 		out = append(out, a+" "+target+" "+details)
 	}
 	return out
+}
+
+var (
+	apiRef   = dto.AppRef{Project: "auditfy", Stage: "staging", App: "api"}
+	infraRef = dto.AppRef{Project: "auditfy", Stage: "staging", App: "infra"}
+)
+
+func ptr[T any](v T) *T { return &v }
+
+// create crea host en la app api por el caso de uso (target api:3000).
+func (f *ucFixture) create(t *testing.T, host string, proxied bool) dto.DomainOutput {
+	t.Helper()
+	out, err := NewCreateDomain(f.deps).Execute(context.Background(), dto.CreateDomainInput{
+		AppRef: apiRef, Hostname: host, TargetService: "api", TargetPort: 3000, Proxied: &proxied,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// writes son las llamadas a cftest que cambian algo.
+func (f *ucFixture) writes() []string {
+	return slices.DeleteFunc(f.cf.Calls(), func(c string) bool { return strings.HasPrefix(c, "GET ") })
+}
+
+// recordsOf son los registros de host en z1, por tipo.
+func (f *ucFixture) recordsOf(host, typ string) []service.Record {
+	return slices.DeleteFunc(f.cf.Records("z1"), func(r service.Record) bool { return r.Name != host || r.Type != typ })
+}
+
+// lastLoad es el último POST /load, como texto.
+func (f *ucFixture) lastLoad(t *testing.T) string {
+	t.Helper()
+	loads := f.caddy.Loads()
+	if len(loads) == 0 {
+		t.Fatal("no llegó ningún POST /load")
+	}
+	return string(loads[len(loads)-1])
 }

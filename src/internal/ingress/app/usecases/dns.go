@@ -3,6 +3,7 @@ package usecases
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -233,4 +234,178 @@ func (o dnsOps) dropManaged(ctx context.Context, d *entity.Domain, p shared.Prox
 	}
 	d.CFRecordID, d.CFRecordIDAAAA = "", ""
 	return aaaaKept
+}
+
+// setProxied cambia el proxied de los registros propios (PATCH, contrato
+// §3.2). El valor pedido se guarda siempre; si Cloudflare falla, o no hay
+// token, d queda en error + cloudflare. Si funciona y d estaba en error +
+// cloudflare, vuelve a pending. Si el A ya no está, D29 y error + cloudflare.
+func (o dnsOps) setProxied(ctx context.Context, d *entity.Domain, p shared.ProxySettings, proxied bool) {
+	now := o.clock.Now()
+	d.Proxied = proxied
+	if p.CloudflareToken == "" {
+		d.Fail(entity.CodeCloudflare, msgNoToken, now)
+		return
+	}
+	change := service.RecordChange{Proxied: &proxied}
+	_, err := o.dns.UpdateRecord(ctx, p.CloudflareToken, d.CFZoneID, d.CFRecordID, change)
+	if errors.Is(err, service.ErrDNSNotFound) {
+		kept := o.dropManaged(ctx, d, p)
+		d.Fail(entity.CodeCloudflare, msgRecordGone(typeA, d.Hostname, kept), now)
+		return
+	}
+	if err != nil {
+		d.Fail(entity.CodeCloudflare, cloudflareMsg(err), now)
+		return
+	}
+	if d.CFRecordIDAAAA != "" {
+		_, err := o.dns.UpdateRecord(ctx, p.CloudflareToken, d.CFZoneID, d.CFRecordIDAAAA, change)
+		if errors.Is(err, service.ErrDNSNotFound) {
+			d.CFRecordIDAAAA = ""
+			d.Fail(entity.CodeCloudflare, msgRecordGone(typeAAAA, d.Hostname, false), now)
+			return
+		}
+		if err != nil {
+			d.Fail(entity.CodeCloudflare, cloudflareMsg(err), now)
+			return
+		}
+	}
+	if d.Status == entity.StatusError && d.ErrorCode == entity.CodeCloudflare {
+		d.MarkPending(now)
+		return
+	}
+	d.Touch(now)
+}
+
+// remove borra los registros propios de d en Cloudflare, el AAAA primero;
+// uno que ya no está (404) no es un error. kept: había registros propios y
+// no hay token, así que quedan en Cloudflare (contrato §3.2). Cualquier otro
+// fallo, también un rechazo (un token sin permiso), es un error que envuelve
+// entity.ErrCloudflareUnavailable (502), y no se borra nada en muelle.
+func (o dnsOps) remove(ctx context.Context, d entity.Domain, p shared.ProxySettings) (kept bool, err error) {
+	if !d.Managed() {
+		return false, nil
+	}
+	if p.CloudflareToken == "" {
+		return true, nil
+	}
+	for _, id := range []string{d.CFRecordIDAAAA, d.CFRecordID} {
+		if id == "" {
+			continue
+		}
+		err := o.dns.DeleteRecord(ctx, p.CloudflareToken, d.CFZoneID, id)
+		if err == nil || errors.Is(err, service.ErrDNSNotFound) {
+			continue
+		}
+		if !errors.Is(err, shared.ErrCloudflareUnavailable) {
+			err = fmt.Errorf("%w: %w", shared.ErrCloudflareUnavailable, err)
+		}
+		return false, fmt.Errorf("ingress: borrando los registros de %s: %w", d.Hostname, err)
+	}
+	return false, nil
+}
+
+// adopt pasa a manejar el registro ajeno de d (contrato §3.2, D17 y D32). Usa
+// d.CFZoneID, que record_exists siempre trae (D7): no vuelve a buscar la
+// zona, y deja TLSCloudflare. Necesita el token y public_ip:
+//   - un A o un CNAME: lo lleva a un A con public_ip y conserva su proxied,
+//     que se copia al dominio. Con public_ipv6, adopta el AAAA que haya (con
+//     su proxied) o lo crea (con el del A);
+//   - solo AAAA (D32): crea su A con el proxied de ese AAAA y, con
+//     public_ipv6, después adopta el AAAA (si el A falla, el AAAA no se toca);
+//   - ninguno: crea los suyos, como al crear;
+//   - más de un A o CNAME, o con public_ipv6 más de un AAAA: no toca nada.
+//
+// Sin public_ipv6, un AAAA ajeno nunca se toca. Si todo sale bien, d queda
+// pending; si no, en error + cloudflare.
+func (o dnsOps) adopt(ctx context.Context, d *entity.Domain, p shared.ProxySettings) {
+	now := o.clock.Now()
+	switch {
+	case p.CloudflareToken == "":
+		d.Fail(entity.CodeCloudflare, msgNoToken, now)
+		return
+	case p.PublicIP == "":
+		d.Fail(entity.CodeCloudflare, msgNoPublicIP, now)
+		return
+	}
+	tok, zone := p.CloudflareToken, d.CFZoneID
+	d.TLSMode = entity.TLSCloudflare
+	recs, err := o.dns.Records(ctx, tok, zone, d.Hostname)
+	if err != nil {
+		d.Fail(entity.CodeCloudflare, cloudflareMsg(err), now)
+		return
+	}
+	var addr, aaaas []service.Record
+	for _, r := range recs {
+		switch r.Type {
+		case typeA, typeCNAME:
+			addr = append(addr, r)
+		case typeAAAA:
+			aaaas = append(aaaas, r)
+		}
+	}
+	switch {
+	case len(addr) > 1:
+		d.Fail(entity.CodeCloudflare, msgMultiple("A o CNAME", d.Hostname), now)
+		return
+	case p.PublicIPv6 != "" && len(aaaas) > 1:
+		d.Fail(entity.CodeCloudflare, msgMultiple(typeAAAA, d.Hostname), now)
+		return
+	case len(addr) == 0 && len(aaaas) == 0:
+		o.createRecords(ctx, d, p, d.Proxied, now)
+		return
+	}
+
+	ip := p.PublicIP
+	if len(addr) == 1 {
+		r := addr[0]
+		change := service.RecordChange{Content: &ip}
+		if r.Type != typeA {
+			a := typeA
+			change.Type = &a
+		}
+		if _, err := o.dns.UpdateRecord(ctx, tok, zone, r.ID, change); err != nil {
+			d.Fail(entity.CodeCloudflare, cloudflareMsg(err), now)
+			return
+		}
+		d.CFRecordID, d.Proxied = r.ID, r.Proxied
+	} else {
+		proxied := aaaaProxied(aaaas, d.Proxied)
+		a, err := o.dns.CreateRecord(ctx, tok, zone, service.Record{Type: typeA, Name: d.Hostname, Content: ip, Proxied: proxied})
+		if err != nil {
+			d.Fail(entity.CodeCloudflare, cloudflareMsg(err), now)
+			return
+		}
+		d.CFRecordID, d.Proxied = a.ID, proxied
+	}
+
+	if p.PublicIPv6 != "" {
+		ip6 := p.PublicIPv6
+		if len(aaaas) == 1 {
+			if _, err := o.dns.UpdateRecord(ctx, tok, zone, aaaas[0].ID, service.RecordChange{Content: &ip6}); err != nil {
+				d.Fail(entity.CodeCloudflare, cloudflareMsg(err), now)
+				return
+			}
+			d.CFRecordIDAAAA = aaaas[0].ID
+		} else {
+			aaaa, err := o.dns.CreateRecord(ctx, tok, zone, service.Record{Type: typeAAAA, Name: d.Hostname, Content: ip6, Proxied: d.Proxied})
+			if err != nil {
+				d.Fail(entity.CodeCloudflare, cloudflareMsg(err), now)
+				return
+			}
+			d.CFRecordIDAAAA = aaaa.ID
+		}
+	}
+	d.MarkPending(now)
+}
+
+// aaaaProxied es el proxied de los AAAA ajenos si todos tienen el mismo (con
+// uno solo, el suyo: D32); si no, def.
+func aaaaProxied(aaaas []service.Record, def bool) bool {
+	for _, r := range aaaas[1:] {
+		if r.Proxied != aaaas[0].Proxied {
+			return def
+		}
+	}
+	return aaaas[0].Proxied
 }
