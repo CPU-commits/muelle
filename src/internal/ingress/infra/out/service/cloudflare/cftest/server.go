@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -235,7 +236,15 @@ func ok(w http.ResponseWriter, result any, info *resultInfo) {
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
-	path, found := strings.CutPrefix(r.URL.Path, BasePath)
+	// Los segmentos salen del path escapado: un id con "/" escapado sigue
+	// siendo un solo segmento.
+	escaped, found := strings.CutPrefix(r.URL.EscapedPath(), BasePath)
+	parts := strings.Split(strings.Trim(escaped, "/"), "/")
+	for i, p := range parts {
+		if u, err := url.PathUnescape(p); err == nil {
+			parts[i] = u
+		}
+	}
 	call := strings.TrimPrefix(r.URL.RequestURI(), BasePath)
 
 	s.mu.Lock()
@@ -276,7 +285,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	status, known := s.tokens[token]
-	if path == "/user/tokens/verify" && r.Method == http.MethodGet {
+	if slices.Equal(parts, []string{"user", "tokens", "verify"}) && r.Method == http.MethodGet {
 		if !known || status == statusAccount {
 			fail(w, http.StatusUnauthorized, 1000, "Invalid API Token")
 			return
@@ -289,7 +298,6 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parts := strings.Split(strings.Trim(path, "/"), "/")
 	switch {
 	case len(parts) == 1 && parts[0] == "zones" && r.Method == http.MethodGet:
 		s.listZones(w, r)

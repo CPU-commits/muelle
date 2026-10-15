@@ -576,7 +576,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
 
   **Commit:** `feat(ingress): leer apps, stages y registries, y escribir las claves del panel y cloudflare_zones`
 
-- [ ] **Step 7: El cliente de Cloudflare y su servidor falso.**
+- [x] **Step 7: El cliente de Cloudflare y su servidor falso.**
 
   **`cftest` primero** (`cloudflare/cftest/server.go`), con su test `server_test.go`. Es un servidor `httptest` con estado en memoria:
   ```go
