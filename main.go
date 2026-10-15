@@ -1,7 +1,8 @@
 // Comando muelle: `muelle serve` levanta el panel y la API; `muelle genkey`
 // imprime una clave maestra nueva (para desarrollo local; en producción la
 // genera `muelle install`, Fase 5); `muelle version` imprime la versión del
-// binario.
+// binario; `muelle settings reset-panel-ips` recupera el acceso al panel desde
+// el contenedor de muelle.
 package main
 
 import (
@@ -19,18 +20,21 @@ import (
 	"time"
 
 	"github.com/CPU-commits/muelle/src/cmd/cron"
+	"github.com/CPU-commits/muelle/src/cmd/settingscli"
 	"github.com/CPU-commits/muelle/src/settings"
 	"github.com/CPU-commits/muelle/src/shared/infra/container"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
 )
 
 const usage = `uso: muelle <comando>
 
 comandos:
-  serve    levanta el panel y la API (configuración por variables MUELLE_*)
-  genkey   imprime una clave maestra nueva en base64
-  version  imprime la versión de muelle
-  help     muestra esta ayuda (también -h y --help)`
+  serve     levanta el panel y la API (configuración por variables MUELLE_*)
+  genkey    imprime una clave maestra nueva en base64
+  settings  ajustes desde el servidor (reset-panel-ips recupera el acceso al panel)
+  version   imprime la versión de muelle
+  help      muestra esta ayuda (también -h y --help)`
 
 // version es la versión de muelle. La imagen la fija al compilar (Fase 5):
 // go build -ldflags "-X main.version=v0.1.0". Con una versión publicada,
@@ -60,8 +64,8 @@ func main() {
 }
 
 // run ejecuta el comando de args (sin el nombre del programa) y devuelve el
-// código de salida: 0 si terminó bien, 1 si serve falló y 2 si los
-// argumentos no sirven (con el uso en stderr).
+// código de salida: 0 si terminó bien, 1 si serve o settings fallaron y 2 si
+// los argumentos no sirven (con el uso en stderr).
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
@@ -85,6 +89,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintln(stdout, crypto.GenerateKey())
 		return 0
+	case "settings":
+		return runSettings(extra, stdout, stderr)
 	case "serve":
 		if !noArgs(cmd, extra, stderr) {
 			return 2
@@ -102,6 +108,33 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "muelle: comando desconocido %q\n\n%s\n", cmd, usage)
 		return 2
 	}
+}
+
+// runSettings es muelle settings <subcomando> (settingscli), con el entorno
+// de muelle y el Docker del socket. Corre dentro del contenedor de muelle.
+func runSettings(args []string, stdout, stderr io.Writer) int {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return settingscli.Run(ctx, args, settingscli.Deps{
+		// settings.Load ya dice qué variable falta; settingscli le agrega la
+		// pista de docker exec.
+		DataDir: func() (string, error) {
+			s, err := settings.Load()
+			if err != nil {
+				return "", err
+			}
+			return s.DataDir, nil
+		},
+		Hostname: os.Hostname,
+		Docker: func() (settingscli.Engine, func() error, error) {
+			c, err := docker.New(docker.Options{})
+			if err != nil {
+				return nil, nil, err
+			}
+			return c, c.Close, nil
+		},
+		Log: slog.New(slog.NewTextHandler(stderr, nil)),
+	}, stdout, stderr)
 }
 
 // noArgs dice si un comando sin argumentos no recibió ninguno; si recibió

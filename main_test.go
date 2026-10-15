@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/base64"
 	jsonv2 "encoding/json/v2"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CPU-commits/muelle/src/cmd/settingscli"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
 )
 
@@ -51,16 +53,21 @@ func TestRunUsage(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
 		code int
+		use  string // el uso que se espera; "" es el de muelle
 	}{
-		{nil, 2},
-		{[]string{"otro"}, 2},
-		{[]string{"serve", "extra"}, 2},
-		{[]string{"genkey", "extra"}, 2},
-		{[]string{"genkey", "-h"}, 2},
-		{[]string{"version", "extra"}, 2},
-		{[]string{"-h"}, 0},
-		{[]string{"--help"}, 0},
-		{[]string{"help"}, 0},
+		{nil, 2, ""},
+		{[]string{"otro"}, 2, ""},
+		{[]string{"serve", "extra"}, 2, ""},
+		{[]string{"genkey", "extra"}, 2, ""},
+		{[]string{"genkey", "-h"}, 2, ""},
+		{[]string{"version", "extra"}, 2, ""},
+		{[]string{"-h"}, 0, ""},
+		{[]string{"--help"}, 0, ""},
+		{[]string{"help"}, 0, ""},
+		// muelle settings muestra su propio uso.
+		{[]string{"settings"}, 2, settingscli.Usage},
+		{[]string{"settings", "x"}, 2, settingscli.Usage},
+		{[]string{"settings", "-h"}, 0, settingscli.Usage},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := run(tc.args, &stdout, &stderr)
@@ -72,7 +79,8 @@ func TestRunUsage(t *testing.T) {
 		if tc.code == 0 {
 			out, other = &stdout, &stderr
 		}
-		if !strings.Contains(out.String(), usage) {
+		use := cmp.Or(tc.use, usage)
+		if !strings.Contains(out.String(), use) {
 			t.Errorf("%q: falta el uso en la salida: %q", tc.args, out.String())
 		}
 		if other.Len() != 0 {
@@ -225,5 +233,23 @@ func TestLogSetupURL(t *testing.T) {
 	m := lastLogLine(t, out.String())
 	if m["level"] != "INFO" || m["event"] != "setup_url" || m["url"] != "https://panel.example.com/setup?token=abc123" {
 		t.Fatalf("log=%v", m)
+	}
+}
+
+// muelle settings reset-panel-ips fuera del contenedor de muelle (sin su
+// entorno) termina con 1, sin tocar DataDir, y dice que se corre con docker
+// exec (contrato §5.4).
+func TestRunSettingsOutsideContainer(t *testing.T) {
+	dataDir := serveEnv(t, "127.0.0.1:0", "")
+	t.Setenv("MUELLE_PANEL_ORIGIN", "")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "reset-panel-ips"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("código %d, esperaba 1\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "MUELLE_PANEL_ORIGIN") || !strings.Contains(stderr.String(), "docker exec") {
+		t.Errorf("stderr=%q", stderr.String())
+	}
+	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+		t.Errorf("no se debió crear DataDir: %v", err)
 	}
 }
