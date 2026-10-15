@@ -1386,7 +1386,7 @@ La composite action que reemplaza `sync-env` y `deploy` de los workflows actuale
     - con `--name-prefix`, muelle-caddy (nombres fijos) no comparte la red ni el socket con ese muelle: es solo para tests;
     - un `GET /healthz` (pendiente de la Fase 1) permitiría un healthcheck en el stack de muelle.
 
-- [ ] **Step 6: Verificar, limpiar y commits.** Las cuatro verificaciones de las convenciones. Borra las imágenes de prueba: `docker rmi it5-muelle:test it5-muelle-caddy:test`. Nada de `docker image prune` ni `docker builder prune`: alcanzarían imágenes y caché de otras líneas. Commits:
+- [x] **Step 6: Verificar, limpiar y commits.** Las cuatro verificaciones de las convenciones. Borra las imágenes de prueba: `docker rmi it5-muelle:test it5-muelle-caddy:test`. Nada de `docker image prune` ni `docker builder prune`: alcanzarían imágenes y caché de otras líneas. Commits:
   - `feat(action): la GitHub Action de deploy: variables, deploy y log hasta el resultado`
   - `ci: shellcheck del script de la action`
   - `docs(readme): la GitHub Action, publicar una versión y el estado de la Fase 5`
