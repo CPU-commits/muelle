@@ -47,3 +47,80 @@ type Networks interface {
 type Settings interface {
 	ProxySettings(ctx context.Context) (entity.ProxySettings, error)
 }
+
+// Zone es una zona de Cloudflare visible para el token.
+type Zone struct{ ID, Name string }
+
+// Record es un registro DNS de Cloudflare.
+type Record struct {
+	ID, Type, Name, Content string
+	Proxied                 bool
+}
+
+// RecordChange es un cambio de un registro: los campos nil no cambian.
+type RecordChange struct {
+	Type, Content *string
+	Proxied       *bool
+}
+
+// DNS es la API de Cloudflare (adaptador: infra/out/service/cloudflare). Cada
+// método recibe el token: los ajustes pueden cambiar entre una llamada y otra.
+// Errores: un error que envuelve entity.ErrCloudflareUnavailable (sin red, 5xx,
+// 429, respuesta ilegible), ErrDNSNotFound (404) o un *DNSError (Cloudflare
+// rechazó el pedido). Ninguno trae el token.
+type DNS interface {
+	// VerifyToken verifica el token (GET /user/tokens/verify). Uno rechazado,
+	// o que no está activo (desactivado o vencido), es un *DNSError.
+	VerifyToken(ctx context.Context, token string) error
+	// Zones son todas las zonas que ve el token, de todas las páginas y en
+	// cualquier estado.
+	Zones(ctx context.Context, token string) ([]Zone, error)
+	// Records son los registros de la zona con ese nombre exacto, de todos los tipos.
+	Records(ctx context.Context, token, zoneID, name string) ([]Record, error)
+	Record(ctx context.Context, token, zoneID, id string) (Record, error)
+	// CreateRecord crea r con ttl automático y el comentario "muelle", y
+	// devuelve el registro creado (con su id).
+	CreateRecord(ctx context.Context, token, zoneID string, r Record) (Record, error)
+	UpdateRecord(ctx context.Context, token, zoneID, id string, c RecordChange) (Record, error)
+	DeleteRecord(ctx context.Context, token, zoneID, id string) error
+}
+
+// App es una app de catalog como la necesita ingress.
+type App struct {
+	ID                   int64
+	Project, Stage, Slug string
+	Kind                 string // KindService o KindCompose
+}
+
+// Los tipos de app (apps.kind).
+const (
+	KindService = "service"
+	KindCompose = "compose"
+)
+
+// Stage es un stage de catalog.
+type Stage struct{ Project, Stage string }
+
+// Catalog lee apps, stages y projects (de catalog, §4.1 regla 1; adaptador
+// SQL en infra/out/service).
+type Catalog interface {
+	// App es la app por sus slugs; repository.ErrNotFound si no existe.
+	App(ctx context.Context, project, stage, app string) (App, error)
+	// Apps son todas las apps, por id.
+	Apps(ctx context.Context) (map[int64]App, error)
+	// Stages son todos los stages, ordenados por proyecto y stage.
+	Stages(ctx context.Context) ([]Stage, error)
+}
+
+// Credential es la credencial de un registry (tabla registries, de deploy).
+type Credential struct{ Host, Username, Password string }
+
+// Registries lee las credenciales de los registries (de deploy, §4.1 regla 1;
+// adaptador SQL en infra/out/service, que descifra la contraseña).
+type Registries interface {
+	// Credential devuelve nil, nil si no hay una para ese host.
+	Credential(ctx context.Context, host string) (*Credential, error)
+}
+
+// PanelDNS son las claves panel_cf_* (contrato §3.6); "" = la clave no está.
+type PanelDNS struct{ ZoneID, RecordID, RecordIDAAAA string }

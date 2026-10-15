@@ -417,7 +417,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
 
   **Commit:** `feat(ingress): la entidad Domain con sus estados y los registros que necesita`
 
-- [ ] **Step 4: Puertos y zona por sufijo.**
+- [x] **Step 4: Puertos y zona por sufijo.**
 
   **Tests primero** (`zones_test.go`): `TestMatchZone`.
   - `api.a.example.com`, con las zonas `example.com` y `a.example.com`, da `a.example.com`.
@@ -486,7 +486,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
   // PanelDNS son las claves panel_cf_* (contrato §3.6); "" = la clave no está.
   type PanelDNS struct{ ZoneID, RecordID, RecordIDAAAA string }
   ```
-  - `Settings` crece:
+  - `Settings` crece (en el commit del Step 6, junto con su adaptador: así cada commit compila, porque `ProxySettingsReader` afirma `var _ service.Settings`):
   ```go
   type Settings interface {
   	ProxySettings(ctx context.Context) (entity.ProxySettings, error)
