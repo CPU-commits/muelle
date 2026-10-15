@@ -1211,7 +1211,7 @@ La composite action que reemplaza `sync-env` y `deploy` de los workflows actuale
 - Create: `action/action.yml`, `action/deploy.sh` (modo `100755`), `action/action_test.go`
 - Modify: `.github/workflows/ci.yaml`, `README.md`
 
-- [ ] **Step 1: Tests primero** (`action/action_test.go`, `package action`: un paquete con solo tests, decisión 12). Se saltan si falta `bash`, `curl` o `jq` (`exec.LookPath`).
+- [x] **Step 1: Tests primero** (`action/action_test.go`, `package action`: un paquete con solo tests, decisión 12). Se saltan si falta `bash`, `curl` o `jq` (`exec.LookPath`). Al implementarlo: `runAction` devuelve un `result` (stdout, stderr, salidas, el `$GITHUB_OUTPUT` crudo, código y duración) y pone `RUNNER_TEMP` en un directorio que al terminar tiene que quedar vacío (el archivo del token se borra); `TestSecretsStayOffArgv` exige `env.INPUT_ENV_JSON` en cada aparición, sin pedir `jq` en la misma línea (el filtro del `PUT` ocupa varias); `TestCurlGlobOff` usa `[1-2]`, que `net/http` acepta en la ruta; y se agregaron `TestLogWithoutTrailingNewline` (el cierre `::<tok>::` va en su propia línea aunque el `chunk` no termine en `\n`), un `GET …/log` sin respuesta en `TestPollRetriesTransient` y tres `status_url` más en `TestStatusURLMustBeLocal` (`//otro…`, `/api/v2/…` y uno con espacio).
   - Un muelle falso con `httptest.NewServer` que guarda cada petición (método, ruta con query, header `Authorization`, cuerpo) y responde según el test: `PUT …/env` (`204`, como muelle), `POST …/deploys` (`202 {"id":145,"status":"queued","status_url":"/api/v1/projects/auditfy/stages/staging/apps/api/deploys/145"}`), `GET …/deploys/145/log?offset=N` (una secuencia de respuestas por offset) y `GET …/deploys/145` (el deploy, con su `error`).
   - `runAction(t, srvURL, inputs map[string]string) (stdout string, outputs map[string]string, code int)`: corre `bash deploy.sh` en el directorio del paquete con un entorno mínimo (`PATH`, `HOME`), las entradas como `INPUT_*`, `GITHUB_OUTPUT` en un archivo temporal, `MUELLE_ACTION_TEST_POLL=0.01` y `MUELLE_ACTION_TEST_RETRY_DELAYS="0 0"`; lee las salidas `clave=valor` del archivo.
 
@@ -1237,7 +1237,7 @@ La composite action que reemplaza `sync-env` y `deploy` de los workflows actuale
   - `TestStatusURLMustBeLocal`: un `status_url` `https://otro.example.com/api/v1/…` → código 1, y ninguna petición fuera del servidor falso.
   - `TestEscapesWorkflowCommands`: un `error` del deploy con `%` y `\n` sale como `%25` y `%0A` en el `::error::`.
 
-- [ ] **Step 2: `action/action.yml`:**
+- [x] **Step 2: `action/action.yml`:**
   ```yaml
   name: muelle deploy
   description: Sincroniza las variables de una app de muelle, la despliega y sigue el log hasta el resultado.
@@ -1291,7 +1291,7 @@ La composite action que reemplaza `sync-env` y `deploy` de los workflows actuale
   ```
   Las descripciones van entre comillas: varias llevan `:` o `,`.
 
-- [ ] **Step 3: `action/deploy.sh`** (bash, `set -euo pipefail`). Esqueleto; los nombres de las funciones son sugeridos, el comportamiento es el del diseño §14:
+- [x] **Step 3: `action/deploy.sh`** (bash, `set -euo pipefail`). Al implementarlo: `want_id` acepta `^[0-9]{1,15}$` (un número más largo desbordaría la aritmética de bash); el `status_url` además tiene que ser ASCII visible (`^/api/v1/[!-~]+$`); el directorio temporal va en `$RUNNER_TEMP` (el runner lo borra al terminar el job aunque el script muera) y el `trap` de `EXIT` cierra el bloque del log; el timeout se cuenta con `SECONDS` y `>`, así espera al menos `timeout` segundos. Esqueleto; los nombres de las funciones son sugeridos, el comportamiento es el del diseño §14:
   ```bash
   #!/usr/bin/env bash
   # muelle/action (diseño §14): sincroniza las variables, crea el deploy y sigue
