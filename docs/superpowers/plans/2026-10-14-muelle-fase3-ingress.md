@@ -1572,7 +1572,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): verificar el certificado que sirve Caddy por TLS con SNI`
 
-- [ ] **Step 3: `Ops`, los mensajes y el DNS de un dominio.**
+- [x] **Step 3: `Ops`, los mensajes y el DNS de un dominio.**
 
   **Tests primero** (`usecases/dns_test.go`, contra `cftest` y el cliente real; ver "Convenciones"), para `dnsOps.ensure`. La zona es `z1 tudominio.cl`, y `public_ip`/`public_ipv6` son `203.0.113.24`/`2001:db8::24`:
   - `TestEnsureNoToken`: `tls http`, `pending`, `proxied false` (aunque se pidió `true`), sin ids y sin llamadas a `cftest`.
@@ -1585,7 +1585,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - `Proxied == true`, el pedido;
     - `cftest` no recibió `POST`/`PATCH`/`DELETE`.
   - `TestEnsureZonesFail`: con `SetDown`, `error` + `cloudflare`, `tls http` y el `proxied` pedido se conserva (D26).
-  - `TestEnsureAAAAFails`: con `FailNext("POST", "dns_records", 400, …)` después de crear el `A`, queda `CFRecordID` sin `AAAA` y `error` + `cloudflare`.
+  - `TestEnsureAAAAFails`: si crear el `AAAA` falla después de crear el `A`, queda `CFRecordID` sin `AAAA` y `error` + `cloudflare`. (Al implementar: `FailNext("POST", "dns_records", …)` le pega al primer `POST`, el del `A`; el test envuelve el `service.DNS` en un tipo que rechaza solo el `CreateRecord` de un `AAAA`.)
   - `TestEnsureManaged`: con el `A` propio, actualiza su contenido y su `proxied`, crea el `AAAA` que falta y queda `pending`. Sin `public_ipv6` y con el `AAAA` propio, lo borra y limpia el id.
   - `TestEnsureManagedAGone` (D29): con los ids de un `A` que ya no está en `cftest` y de un `AAAA` que sí está:
     - el `AAAA` se borra en `cftest`;
@@ -1593,6 +1593,8 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - `repo.Update` del dominio pasa: el `CHECK` de D19 se cumple.
     - Con `FailNext("DELETE", …, 403)` en el `AAAA`: los dos ids se olvidan, ese `AAAA` queda en `cftest` y el dominio da `record_exists`.
   - `TestEnsureManagedNoToken`: `error` + `cloudflare`, con el mensaje del token (D18).
+  - Sumados al implementar: `TestEnsureManagedForeignAAAA` (con el `A` propio y un `AAAA` ajeno, no crea el `AAAA`: `error` + `cloudflare`, contrato §3.5), `TestEnsureManagedAGoneDeleteFails` (la segunda mitad de `TestEnsureManagedAGone`, en su propio test) y `TestFindZone`.
+  - `setProxied`, `remove` y `adopt` se prueban en el Step 5, por sus casos de uso, y se implementan ahí.
 
   **Implementar:**
   - `ops.go`:
@@ -1609,7 +1611,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `TestOpsDeadlineIncludesWait`: con un `Do` que tiene el lock 40 ms, otro `Do` con `limit` 50 ms recibe un `opCtx` al que le quedan 10 ms o menos.
   - `TestOpsShorterParent`: con un `ctx` que vence en 20 ms y `limit` 1 min, `opCtx` vence cerca de los 20 ms, y `dbCtx` no.
   - `TestOpsCanceledParent`: un `ctx` ya cancelado corre fn igual; `opCtx` y `dbCtx` no están cancelados.
-  - `messages.go`: los textos en español en un solo lugar (`msgNoPublicIP`, `msgNoToken`, `msgRecordExists(typ, host)`, `msgMultiple(typ, host)`, `cloudflareMsg(err)` → "Cloudflare no responde; reintenta en unos minutos" o el texto de `*DNSError`).
+  - `messages.go`: los textos en español en un solo lugar (`msgNoPublicIP`, `msgNoToken`, `msgRecordExists(typ, host)`, `msgMultiple(typ, host)`, `msgForeignAAAA(host)`, `msgRecordGone(typ, host, aaaaKept)` para D29, `cloudflareMsg(err)` → "Cloudflare no responde; reintenta en unos minutos" o el texto de `*DNSError`).
   - `dns.go`:
   ```go
   type dnsOps struct {
