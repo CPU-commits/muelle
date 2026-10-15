@@ -3,12 +3,14 @@ package deploy
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
 	"github.com/CPU-commits/muelle/src/package/clock"
@@ -36,16 +38,27 @@ func (fakeIngress) SyncRoutes(ctx context.Context) error                        
 
 func newTestModule(t *testing.T) (*Module, *dockertest.Fake) {
 	t.Helper()
+	m, f, _ := newTestModuleDB(t)
+	return m, f
+}
+
+func newTestModuleDB(t *testing.T) (*Module, *dockertest.Fake, *sqlite.DB) {
+	t.Helper()
 	db := sqlitetest.New(t)
+	f := dockertest.New()
+	return newModuleOn(t, db, f), f, db
+}
+
+// newModuleOn arma un módulo sobre esa base y ese Docker (como un arranque nuevo de muelle).
+func newModuleOn(t *testing.T, db *sqlite.DB, f *dockertest.Fake) *Module {
+	t.Helper()
 	c, err := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	f := dockertest.New()
-	m := New(Deps{DB: db, Cipher: c, Clock: clock.System{}, Audit: sqlite.NewAuditRecorder(db, clock.System{}, log), Log: log,
+	return New(Deps{DB: db, Cipher: c, Clock: clock.System{}, Audit: sqlite.NewAuditRecorder(db, clock.System{}, log), Log: log,
 		Docker: f, Env: fakeEnv{}, Ingress: fakeIngress{}})
-	return m, f
 }
 
 // Borrar una app (catalog) ejecuta docker stack rm de su stack: sus
@@ -104,7 +117,54 @@ func TestModuleRoutesAndStubs(t *testing.T) {
 	if jobs := m.Jobs(); len(jobs) != 0 {
 		t.Fatalf("Jobs: %v", jobs)
 	}
-	m.Run(context.Background()) // el esqueleto vuelve enseguida
+}
+
+// Run corre los workers hasta que se cancela el ctx, y vuelve.
+func TestRun(t *testing.T) {
+	m, _ := newTestModule(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.Run(ctx); close(done) }()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run no volvió al cancelar el ctx")
+	}
+}
+
+// Run guarda manager_node_id al arrancar (contrato §1.2); con Docker caído no
+// lo guarda y Run igual corre (lo reintenta el primer deploy).
+func TestManagerNodeStored(t *testing.T) {
+	m, f, db := newTestModuleDB(t)
+	read := func() string {
+		var v []byte
+		ctx := context.Background()
+		err := db.Conn(ctx).QueryRowContext(ctx, `SELECT value FROM settings WHERE key = 'manager_node_id'`).Scan(&v)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			t.Fatal(err)
+		}
+		return string(v)
+	}
+	run := func(m *Module) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { m.Run(ctx); close(done) }()
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+		<-done
+	}
+
+	f.SetUnavailable(true)
+	run(m)
+	if got := read(); got != "" {
+		t.Fatalf("con Docker caído: %q", got)
+	}
+	f.SetUnavailable(false)
+	run(newModuleOn(t, db, f))
+	if got := read(); got != "node-1" {
+		t.Fatalf("manager_node_id = %q", got)
+	}
 }
 
 // SeedInitRegistry guarda Deps.InitRegistry en el primer arranque, y nada en

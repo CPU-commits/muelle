@@ -1165,7 +1165,7 @@ func (u *RunDeploy) Execute(ctx context.Context, d entity.Deploy) error
   - `TestRunDeployUnchangedRedeploy`: un segundo deploy sin cambios → `succeeded` después de `Settle`, sin `UpdateStatus` nuevo y con las mismas tareas.
   - `TestRunDeployStorageNode`: formulario con volumen → `storage_node_id` = `manager_node_id` (o el del nodo local) y `node.id == …` en el compose.
   - `TestRollbackFlow`: D1 y D2 con `x:staging` y `SetDigest` distinto en cada uno (`A` y `B`). Primero, sin `SetDigest` de la ref fijada (el registry ya no tiene `A`), el rollback R1 → `failed` "la imagen x:staging@sha256:<A> no existe en el registry" y `StackDeploys()` sigue con dos. Después, `SetDigest("x:staging@sha256:<A>", "sha256:<A>")` y otro rollback R2 (el destino sigue siendo D1: R1 no cuenta) → `succeeded` con `x:staging@sha256:<A>`, y `DistributionCalls()` trae esa ref; un deploy sin cuerpo después → el mismo (contrato §2.2), aunque el tag ahora resuelva a otro digest.
-- [ ] **Step 4: El despachador y la reconciliación (tests primero).**
+- [x] **Step 4: El despachador y la reconciliación (tests primero).**
 
 ```go
 // Dispatcher es la cola por app (§7 paso 1, contrato §1.2): un worker por app
