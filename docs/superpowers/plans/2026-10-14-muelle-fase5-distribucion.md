@@ -1173,12 +1173,12 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   ```
   Commit: `test(install): instalar de verdad con el prefijo it5, reinstalar, recuperar el acceso dentro del contenedor, los puertos ocupados y un registry privado`.
 
-- [ ] **Step 11: README** (secciones nuevas, antes de "Desarrollo local"; contrato §5.2–§5.4 y diseño §3.3 y §16):
+- [x] **Step 11: README** (secciones nuevas, antes de "Desarrollo local"; contrato §5.2–§5.4 y diseño §3.3 y §16; "Instalar", "Actualizar", "Reinstalar y empezar de cero" y "Después de instalar", con lo de "Cambio de requisito del dueño": el `docker login ghcr.io`, el `config.json` montado o `--registry-user`/`--registry-password-stdin`, `--with-registry-auth` al actualizar, qué hacer si el token vence y quitar `muelle_init_registry` del servicio):
   - **"Instalar"**: requisitos (Linux amd64, Docker con Swarm o sin iniciar, los puertos del proxy libres); el comando del diseño §3.3 con `:<versión>`; la tabla de flags; el token por stdin (`docker run -i … --cloudflare-token -`); qué imprime (la clave una sola vez, el link de 24 h) y `> install.txt`; la migración desde Dokploy con `--http-port 8080 --https-port 8443` (diseño §16); el aviso de HTTP-01 sin token. Además, tres cuidados:
     - **siempre con `--rm`**: sin él, el contenedor del instalador queda parado con la clave maestra en `docker logs`. Si se corrió sin `--rm`, `docker rm <contenedor>` después de guardar la clave;
     - **sin `-t`**: con una TTY, Docker junta stderr y stdout, y `> install.txt` guardaría también el avance (con `\r\n`). Para el token por stdin alcanza con `-i`;
     - **varias IPs**: si el Swarm no está iniciado y la máquina tiene varias direcciones, `docker swarm init` no elige una; install falla con el error de Docker y la pista de `--advertise-addr <ip>` (la IP privada por la que se van a hablar los nodos).
-  - **"Actualizar"**: `docker service update --image ghcr.io/cpu-commits/muelle:<v> muelle_muelle`; Caddy sigue a muelle salvo con `caddy_image`; `failure_action: rollback`.
+  - **"Actualizar"**: `docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<v> muelle_muelle`; Caddy sigue a muelle salvo con `caddy_image`; `failure_action: rollback`.
   - **"Reinstalar"**, en este orden:
     1. `docker stack rm muelle`;
     2. esperar a que `docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle` quede vacío: `docker stack rm` vuelve antes de que el contenedor termine, y un install en ese momento tendría dos muelle sobre la misma base;

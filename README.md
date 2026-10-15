@@ -21,11 +21,12 @@ Todavía no despliega nada.
 ## Estructura (spec §4.1)
 
 ```
-main.go             subcomandos serve, genkey, settings y version
+main.go             subcomandos serve, install, genkey, settings y version
 Dockerfile          la imagen de muelle (ver "Imágenes"); deploy/caddy/, la de muelle-caddy
 src/
 ├── cmd/http/       ServeMux, middleware y errores → HTTP
 ├── cmd/cron/       ejecuta las tareas periódicas de los módulos
+├── cmd/install/     muelle install (ver "Instalar")
 ├── cmd/settingscli/ muelle settings reset-panel-ips (ver "Recuperar el acceso")
 ├── internal/
 │   ├── identity/   usuarios, sesiones, 2FA, invitaciones, tokens de API
@@ -40,6 +41,122 @@ src/
 ```
 
 Cada módulo tiene `domain/`, `app/` e `infra/` (in/out). Los módulos no se importan entre sí.
+
+## Instalar
+
+**Requisitos:** un servidor Linux amd64 con Docker, con un Swarm en el que ese nodo es manager, o sin Swarm (install lo inicia). Los puertos del proxy (80 y 443, o los que elijas) tienen que estar libres.
+
+**Las imágenes son privadas.** Primero, en el servidor, `docker login ghcr.io` con un token de GitHub (classic) que tenga solo el permiso `read:packages`:
+
+```bash
+docker login ghcr.io -u <tu-usuario-de-github>      # pega el token cuando lo pida
+```
+
+Después, install, montando el `config.json` de ese login (solo lectura) y el socket de Docker:
+
+```bash
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  -v ~/.docker/config.json:/root/.docker/config.json:ro \
+  ghcr.io/cpu-commits/muelle:<versión> install \
+  --panel-domain panel.tudominio.cl --email tu@correo.cl > install.txt
+```
+
+- Sin `:<versión>` se usa `:latest`, la última versión final.
+- Si `docker login` guardó la credencial en un helper (`credsStore`, como en Docker Desktop o con `pass`), el `config.json` no la trae y el helper no corre dentro del contenedor: pasa la credencial con `--registry-user` y `--registry-password-stdin`, con el token en stdin (`-i`):
+
+  ```bash
+  docker run -i --rm -v /var/run/docker.sock:/var/run/docker.sock \
+    ghcr.io/cpu-commits/muelle:<versión> install --panel-domain panel.tudominio.cl --email tu@correo.cl \
+    --registry-user <tu-usuario-de-github> --registry-password-stdin < ghcr-token.txt > install.txt
+  ```
+- install baja con esa credencial la imagen de muelle y la de Caddy, y se la pasa a muelle, que la guarda como el registry `ghcr.io` en su primer arranque (Ajustes → Registries). Con ella, muelle baja la Caddy de la versión siguiente al actualizar, y tus apps pueden usar imágenes privadas de `ghcr.io`.
+
+| Flag | Qué es |
+|---|---|
+| `--panel-domain <dominio>` | Obligatorio. El panel queda en `https://<dominio>` (con `:<puerto>` si `--https-port` no es 443) |
+| `--email <correo>` | Obligatorio. El correo de Let's Encrypt |
+| `--cloudflare-token <token>` | El token de la API de Cloudflare: muelle crea los registros DNS y valida los certificados por DNS-01. `-` lo lee de la primera línea de stdin (`docker run -i … --cloudflare-token - < cf-token.txt`), así no queda en el historial de la shell |
+| `--public-ip <ipv4>` | La IP pública del servidor. Si no viene, install la detecta con `https://1.1.1.1/cdn-cgi/trace`; si no puede, avisa y sigue |
+| `--public-ipv6 <ipv6>` | La IPv6 pública (opcional; no se detecta) |
+| `--http-port`, `--https-port` | Los puertos del proxy (80 y 443) |
+| `--caddy-image <imagen>` | Fija la imagen de muelle-caddy (avanzado). Sin él, Caddy sigue a la versión de muelle |
+| `--advertise-addr <ip>` | La dirección de `docker swarm init`, si el Swarm no está iniciado y la máquina tiene varias IPs. Con un Swarm activo se ignora |
+| `--registry-user <usuario>`, `--registry-password-stdin` | La credencial de las imágenes, si no viene del `config.json` (arriba). No se puede juntar con `--cloudflare-token -`: los dos leen stdin |
+| `--reinstall` | Vuelve a desplegar después de un `docker stack rm muelle`, con la misma clave y la misma base (ver "Reinstalar") |
+
+**Qué hace:** revisa Docker, el Swarm y que no haya una instalación anterior; prueba los puertos del proxy con un contenedor temporal (`muelle-install-probe`, que borra siempre); inicia el Swarm si hace falta; crea la red `muelle_panel`, el secreto `muelle_master_key` (y `muelle_init_cloudflare_token` y `muelle_init_registry` si corresponde) y el stack `muelle`. Si algo falla antes de que el stack quede desplegado (o lo cortas con Ctrl-C), borra lo que creó. Nada cambia antes de la prueba de puertos: un puerto ocupado aborta sin dejar nada.
+
+**Qué imprime:** por stdout, la **clave maestra, una sola vez**, y el link de setup para crear el primer usuario (de un solo uso, vence en 24 h); por stderr, el avance y los avisos. Con `> install.txt` guardas solo lo que hay que conservar: respalda la clave fuera del servidor (sin ella no se pueden descifrar los secretos ni los backups) y borra el archivo. Si muelle no muestra el link en 2 min, install termina con código 1, deja el stack desplegado y sugiere `docker service logs muelle_muelle` y `docker service ps --no-trunc muelle_muelle`.
+
+Tres cuidados:
+- **Siempre con `--rm`:** sin él, el contenedor del instalador queda parado con la clave maestra en `docker logs`. Si lo corriste sin `--rm`, `docker rm <contenedor>` después de guardar la clave.
+- **Sin `-t`:** con una TTY, Docker junta stderr y stdout, y `> install.txt` guardaría también el avance (con `\r\n`). Para el token o la contraseña por stdin alcanza con `-i`.
+- **Varias IPs:** si el Swarm no está iniciado y la máquina tiene varias direcciones, `docker swarm init` no elige una; install falla con el error de Docker y la pista de `--advertise-addr <ip>` (la IP privada por la que se van a hablar los nodos).
+
+**Sin `--cloudflare-token`,** el registro DNS del panel tiene que existir de antemano y Let's Encrypt valida por HTTP-01, en el puerto 80 público: con `--http-port` distinto de 80, solo funciona si el 80 de tu router o firewall llega a ese puerto (install lo avisa).
+
+**Junto a Dokploy** (diseño §16): su Traefik ocupa 80 y 443, así que install se corre con otros puertos y el token de Cloudflare (DNS-01 no necesita el 80):
+
+```bash
+docker run -i --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  -v ~/.docker/config.json:/root/.docker/config.json:ro \
+  ghcr.io/cpu-commits/muelle:<versión> install --panel-domain panel.tudominio.cl --email tu@correo.cl \
+  --cloudflare-token - --http-port 8080 --https-port 8443 < cf-token.txt > install.txt
+```
+
+El panel queda en `https://panel.tudominio.cl:8443`. Cuando apagues Dokploy, cambia los puertos del proxy a 80/443 en Ajustes, y después `MUELLE_PANEL_ORIGIN` (abajo).
+
+## Actualizar
+
+```bash
+docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<versión> muelle_muelle
+```
+
+- Con el `docker login ghcr.io` del servidor: `--with-registry-auth` le pasa a Swarm la credencial para bajar la imagen nueva.
+- muelle-caddy sigue a muelle: al arrancar, muelle lo recrea con la Caddy de la versión nueva (unos segundos de corte en los sitios), que baja con el registry `ghcr.io` guardado. Con `caddy_image` fijo en Ajustes, Caddy no cambia.
+- Si la versión nueva se cae al arrancar, Swarm vuelve sola a la anterior (`failure_action: rollback`, con `monitor: 30s`).
+- **Si el token de GitHub vence:** actualízalo en Ajustes → Registries (lo usa muelle) y vuelve a hacer `docker login ghcr.io` en el servidor (lo usa `docker service update`).
+
+## Reinstalar y empezar de cero
+
+**Reinstalar** (volver a desplegar muelle con la misma base y la misma clave, por ejemplo después de borrar el stack), en este orden:
+1. `docker stack rm muelle`;
+2. esperar a que `docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle` quede vacío: `docker stack rm` vuelve antes de que el contenedor termine, y un install en ese momento tendría dos muelle sobre la misma base;
+3. el mismo `docker run … install` con `--reinstall`. Reusa el secreto `muelle_master_key` (no imprime una clave) y, si muelle ya tiene usuarios, lo dice en vez de mostrar un link. Los flags no cambian los ajustes de una base que ya arrancó: se cambian en el panel.
+
+**Empezar de cero** (**se pierden los datos:** la base y sus backups de `muelle_data`, y los certificados de Caddy). Después de los pasos 1 y 2 de "Reinstalar":
+
+```bash
+docker rm -f muelle-caddy        # es un contenedor aparte: docker stack rm lo deja con los puertos tomados
+docker volume rm muelle_data muelle_caddy_data muelle_caddy_config muelle_caddy_admin
+docker network rm muelle_panel
+docker secret rm muelle_master_key muelle_init_cloudflare_token muelle_init_registry   # los que existan
+```
+
+Los stacks y las redes de las apps (`docker stack ls`, `docker network ls --filter label=muelle.project`) no se tocan: bórralos aparte si también los quieres sacar.
+
+## Después de instalar
+
+**Leer la clave maestra** (si no la guardaste; también vive en el secreto Swarm):
+
+```bash
+docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle | head -n1)" cat /run/secrets/muelle_master_key
+```
+
+**Quitar el token y la credencial de install del servicio** (opcional). muelle los guardó en su base en el primer arranque, y después ya no los usa como ajustes, pero los relee en cada arranque: cada secreto se quita junto con su variable, en un solo `docker service update` (reinicia muelle):
+
+```bash
+docker service update --secret-rm muelle_init_cloudflare_token --env-rm MUELLE_INIT_CLOUDFLARE_TOKEN_FILE muelle_muelle
+docker secret rm muelle_init_cloudflare_token
+docker service update --secret-rm muelle_init_registry --env-rm MUELLE_INIT_REGISTRY_FILE muelle_muelle
+docker secret rm muelle_init_registry
+```
+
+**Cambiar `MUELLE_PANEL_ORIGIN`** (por ejemplo, después de pasar los puertos del proxy de 8443 a 443): el panel funciona enseguida en el origen nuevo, pero los links de las invitaciones salen con el viejo hasta que se actualiza la variable (reinicia muelle, no los sitios):
+
+```bash
+docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl muelle_muelle
+```
 
 ## Desarrollo local
 
