@@ -124,7 +124,7 @@ func (u *EnsureCaddy) message(ctx context.Context, err error, p shared.ProxySett
 		}
 		return msg
 	}
-	return "muelle no pudo crear muelle-caddy: " + truncateRunes(hideSecret(err.Error(), password), maxCauseRunes)
+	return "muelle no pudo dejar muelle-caddy como piden los ajustes: " + truncateRunes(hideSecret(err.Error(), password), maxCauseRunes)
 }
 
 // previous dice qué pasa con el contenedor anterior cuando la imagen nueva

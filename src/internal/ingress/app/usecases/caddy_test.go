@@ -347,3 +347,17 @@ func TestEnsureCaddySerialized(t *testing.T) {
 		t.Fatalf("CreateContainer %d veces: %v", n, f.docker.Calls())
 	}
 }
+
+// Otro error de Docker queda en el estado tal cual, sin decir que fue al
+// crearlo (puede ser al inspeccionarlo o al conectar una red).
+func TestEnsureCaddyOtherError(t *testing.T) {
+	f := newLifecycleFixture(t)
+	f.enableCaddy(t, nil)
+	f.docker.FailNext("InspectContainer", errors.New("respuesta rara del daemon"))
+	if _, err := f.ensure.Execute(context.Background()); err == nil {
+		t.Fatal("debería fallar")
+	}
+	if _, msg, _ := f.state.Snapshot(true); msg != "muelle no pudo dejar muelle-caddy como piden los ajustes: respuesta rara del daemon" {
+		t.Fatalf("mensaje: %q", msg)
+	}
+}
