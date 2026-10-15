@@ -89,6 +89,27 @@ curl -b cookies -H "Origin: $O" -H 'Content-Type: application/json' \
 
 La contraseña tiene al menos 12 caracteres. Los tokens de API (`Authorization: Bearer mk_…`) no necesitan `Origin`.
 
+### Con el panel
+
+Compilado sin `-tags panel` (`go run . serve`, `go build`), muelle no trae el panel: toda ruta fuera de `/api` responde `404` con una página que lo dice, y la API anda igual. La imagen de muelle sí lo trae. Para probar el panel en local hay dos caminos:
+
+- **Embebido, como en la imagen:** construir el panel (`web/`, Fase 4; Node 24 y pnpm), copiar el build en `src/cmd/http/panel/build/` (ignorado por git) y compilar con el tag:
+
+  ```bash
+  (cd web && pnpm install && VITE_USE_MOCKS=0 pnpm build)
+  rm -rf src/cmd/http/panel/build && mkdir -p src/cmd/http/panel/build
+  cp -R web/build/. src/cmd/http/panel/build/
+  MUELLE_PANEL_ORIGIN=http://127.0.0.1:18080 \
+  MUELLE_SECURE_COOKIES=false \
+  MUELLE_LISTEN=127.0.0.1:18080 \
+  MUELLE_DATA_DIR=/tmp/muelle-data \
+  MUELLE_MASTER_KEY_FILE=/tmp/muelle.key \
+  go run -tags panel . serve                  # el panel en http://127.0.0.1:18080/
+  ```
+
+  muelle sirve el archivo del build o, si no existe, el `200.html`, siempre con la CSP de `csp-header.txt` (contrato §5.5). Si al build le falta `200.html` o `csp-header.txt`, muelle no arranca; con el tag y sin `src/cmd/http/panel/build/`, no compila. Después de cada `pnpm build` hay que volver a copiarlo: el hash de la CSP cambia en cada build. `VITE_USE_MOCKS=0` le gana a un `VITE_USE_MOCKS=1` de los `web/.env*`, que metería los mocks (MSW) en el build.
+- **`pnpm dev` en `web/`:** Vite proxea `/api` a un `muelle serve` local, con `MUELLE_PANEL_ORIGIN=http://localhost:5173` (ver `web/README.md`). No hace falta el tag.
+
 ### Docker
 
 Crear y borrar un stage crea y borra su red overlay, y borrar una app hace `docker stack rm` (con el CLI `docker` en el `PATH`). Para eso, el Docker local tiene que ser manager de un Swarm (`docker swarm init`); si no, esas peticiones responden `503 docker_unavailable` y no cambian nada. El resto de la API anda sin Docker. Sin un Swarm, esos caminos se prueban con los tests, que usan el Docker en memoria (`dockertest`, que `container.WithDocker` inyecta).

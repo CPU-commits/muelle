@@ -364,7 +364,7 @@ Un paquete que sirve el build de SvelteKit (`web/build`, en `fase-4-panel`) con 
   ```
   `build` recibe `panelHandler http.Handler` como último parámetro y pone `Panel: panelHandler,` en el `httpserver.Config`. En el comentario de `New`, "La clave se lee antes de tocar DataDir" pasa a "La clave y el panel embebido se leen antes de tocar DataDir". Nada más en `container.go`.
 
-- [ ] **Step 6: `.gitignore`, CI y README.**
+- [x] **Step 6: `.gitignore`, CI y README.**
   - `.gitignore`: `/src/cmd/http/panel/build/`.
   - `.github/workflows/ci.yaml`, un paso nuevo al final del job `test` (después de `build`):
     ```yaml
