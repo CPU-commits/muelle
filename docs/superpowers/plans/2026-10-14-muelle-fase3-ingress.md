@@ -1045,7 +1045,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `feat(ingress): Options, y las redes de stage usan su nombre de muelle-caddy` (`options.go`, `stage_network.go`, `Deps.Options`, `newTestModule` y `TestModuleStageNetworkCustomName`);
   - `feat(ingress): SyncRoutes manda la configuración a Caddy, y WithIngress en el contenedor para que los tests usen fakes` (lo demás).
 
-- [ ] **Step 6: Integración — Caddy real acepta la configuración y enruta.**
+- [x] **Step 6: Integración — Caddy real acepta la configuración y enruta.**
 
   **`integration_env_test.go`** (`//go:build integration`, `package ingress`), con los helpers que reusan T3 y T4:
   ```go
@@ -1076,6 +1076,14 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   func (e *itEnv) get(host, path string) (status int, body string, err error) // HTTPS a 127.0.0.1:<https> con ServerName y Host = host (InsecureSkipVerify: el TLS se prueba en T4)
   func (e *itEnv) eventually(timeout time.Duration, what string, check func() (bool, error))
   ```
+  Hecho así, con algunos helpers más (`integration_env_test.go`):
+  - `module()` arma ingress con `e.db`, `e.cipher`, el Docker real y `e.opts`; `host(sub)`, `panelHost()`, `addDomain(appID, host, svc, port)` y `expectGet(host, path, status, body)` (un check para `eventually`).
+  - Todo contenedor pasa por `createAndStart(spec, redesExtra...)`, que lo anota para la limpieza **antes** de crearlo, se niega a crear uno sin el prefijo del test y le pone la etiqueta `muelle.test=it3`.
+  - **`waitNetwork`:** antes de conectar un contenedor a una overlay, `createAndStart` espera a que Swarm le dé subred (hasta 30 s). Sin eso, arrancar un contenedor en una overlay recién creada falló con "attaching to network failed … context deadline exceeded" (lo mismo que ya espera el test de redes del paquete docker).
+  - La limpieza toma como del test los nombres que empiezan con `it3<id>_` o `it3-<id>-` (con el separador: el id tiene largo fijo, pero así ni se acerca a otro).
+  - `settings(p)` cambia 80 y 443 (o 0) por los puertos de la ranura: un test nunca los publica.
+  - `startCaddyManually` publica en `127.0.0.1`, como el puente.
+
   **Los nombres exactos** (los fija `newITEnv`; ninguno es un nombre fijo de producción):
 
   | Qué | Nombre |
@@ -1419,7 +1427,8 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   1. **Primera pasada:** arranca el puente, siembra el stage `s1` y la app `web` con su dominio, y arranca el backend.
      - `job()` (`m.Jobs()[0].Run`) da `nil`: crea muelle-caddy con los nombres `it3` y lo conecta a `it3<id>_s1`.
      - `eventually`: el estado da `synced` y `get("web.it3<id>.test")` da `200 "hola web"`.
-  2. **Red nueva en caliente:** con el id y `StartedAt` del contenedor guardados, `ingresstest.Stage(…, project, "s2")` y después `m.EnsureStageNetwork(ctx, project, "s2")`. El stage va en la base **antes**: si no, el `job()` de los pasos siguientes borraría `it3<id>_s2` por huérfana. Queda el mismo id y `StartedAt`, y `Networks` incluye `it3<id>_s2` (spec §15).
+  2. **Red nueva en caliente:** con el id y `StartedAt` del contenedor guardados, `ingresstest.Stage(…, project, "s2")` y después `m.EnsureStageNetwork(ctx, project, "s2")`.
+     - **Ojo (visto en T2):** conectar un contenedor a una overlay recién creada puede fallar con "attaching to network failed … context deadline exceeded" mientras Swarm no le dio subred (`Subnets` vacío). `EnsureStageNetwork` crea la red y conecta muelle-caddy enseguida. Si este paso lo muestra, el arreglo va en el código (que `DockerNetworks.CreateOverlay`, o `Connect`, espere la subred con un plazo), no en el test: en producción es crear un stage. El stage va en la base **antes**: si no, el `job()` de los pasos siguientes borraría `it3<id>_s2` por huérfana. Queda el mismo id y `StartedAt`, y `Networks` incluye `it3<id>_s2` (spec §15).
   3. **Aislamiento entre stages** (spec §15: "un contenedor de un stage no resuelve ni alcanza servicios de otro stage"):
      - arranca el backend `web2` en `s2`, siembra la app `web2` en `s2` con el dominio `web2.it3<id>.test` → `web2:8080`, y corre `job()`;
      - `eventually(30 s)`: `get("web2.it3<id>.test")` da `200 "hola web2"`. Así `web2` ya responde, y el negativo de la sonda no pasa solo porque `web2` todavía no arrancó;
