@@ -124,7 +124,7 @@ Decididas en este plan (con la razón). Si una tarea encuentra que una no sirve,
 2. **El panel se monta en `notMatched` de `cmd/http.Server`**, después del `405` del mux y antes del `no_route`, solo si la ruta limpia (`path.Clean`) no es `/api` ni `/api/…`. Así `/api/v1/…` sin ruta sigue siendo `no_route`, el `Origin` se revisa antes (como en toda petición) y no hace falta registrar un patrón `/` en el mux, que cambiaría el `405` de las rutas de `/api`.
 3. **ETag solo fuera de `_app/immutable/`.** Esos archivos son chicos (el `200.html`, `version.json`, el favicon) y con `no-cache` el `304` ahorra la descarga. Los inmutables ya se cachean un año; hashearlos al arrancar leería todo el embed y lo dejaría residente (RSS, §1).
 4. **`Content-Type` de una tabla propia** (contrato §5.5), no `mime.TypeByExtension`: Go completa su tabla chica con los archivos del sistema (`/etc/mime.types`), así que el resultado dependería de la imagen (`.woff2`, el charset de `.js`). Con `nosniff`, un tipo equivocado rompe el panel.
-5. **Flags ocultos para los tests** (`--name-prefix`, `--image`, `--panel-origin`; contrato §5.1). El test de integración instala con un origen que es una IP: sin `panel_domain`, ingress queda `disabled` y el muelle del test no crea `muelle-caddy` ni `muelle_panel`. El test lo verifica sin borrar nada.
+5. **Flags ocultos para los tests** (`--name-prefix`, `--image`, `--panel-origin`; contrato §5.1). El test de integración instala con un origen que es una IP: sin `panel_domain`, ingress queda `disabled` y el muelle del test no crea `muelle-caddy` ni `muelle_panel`. El test lo verifica sin crear ni borrar nada ajeno: mira esos dos nombres fijos y una red centinela propia (`it5`), nunca las redes de las otras líneas (T4 Step 10, "Guarda de lo ajeno").
 6. **La prueba de puertos usa la imagen de muelle con `help`** (contrato §5.4): no hace falta otra imagen en el nodo, y es la misma que se va a desplegar.
 7. **El stack es JSON armado con structs**, sin `version:`. Verificado con el CLI 29: `docker stack config -c -` lo acepta como 3.13 y convierte `$$` en `$`. Un test unitario lo pasa por `docker stack config` si el CLI está (sin daemon: funciona con `DOCKER_HOST` apuntando a un socket que no existe).
 8. **install deshace lo que creó ante cualquier error o Ctrl-C antes de que `DeployStack` funcione** (contrato §5.4, paso 8), no solo si falla el deploy: un `CreateSecret` del token que falla con `muelle_master_key` ya creado dejaría un secreto cuya clave nunca se imprimió. **Si `docker stack deploy` falla, deshace también el stack** (`2eac145`): un CLI que creó el servicio y falló después dejaría un servicio con un secreto que nadie más conoce, y el secreto no se podría borrar (está en uso).
@@ -132,17 +132,20 @@ Decididas en este plan (con la razón). Si una tarea encuentra que una no sirve,
 10. **`reset-panel-ips` reinicia siempre** (también con la lista vacía, salvo `--no-restart`; contrato §5.4): el arranque reenvía la configuración a Caddy, que es lo que sirve si el problema era otro. No necesita la clave maestra: abre la base sin migrar y escribe una clave sin cifrar.
 11. **`docker.ServiceRestarter` es una interfaz aparte**, en un archivo nuevo, y no entra en `Engine`: así no se toca `docker.go`, que las tres fases editan. El fake implementa el método en `fake_dist.go` sin campos nuevos en el struct (usa `Version` del servicio y el registro de llamadas). `fake_dist.go` declara solo `ForceUpdateService` y `PutNetwork`, nunca `PutContainer` (es de la Fase 2, ver "Nombres nuevos en paquetes compartidos").
 12. **Los tests de la action son de Go** (`action/action_test.go`, un paquete con solo tests): corren el `deploy.sh` real con `bash` contra un muelle falso de `httptest`. Entran en `go test ./...` y en CI sin otra herramienta; se saltan si falta `bash`, `curl` o `jq`. El script lee dos variables solo para los tests (`MUELLE_ACTION_TEST_POLL` y `MUELLE_ACTION_TEST_RETRY_DELAYS`), que no se documentan como entradas: el nombre largo evita que una variable que el workflow define en el `env:` del job (un `MUELLE_POLL_INTERVAL` de otra cosa) cambie la action sin querer.
-13. **La action exige `https://`** (salvo `localhost`/`127.0.0.1`) y nunca pone un secreto en la línea de comandos (el `argv` de un proceso lo ve cualquiera en el runner, en `/proc/<pid>/cmdline`):
+13. **La action solo habla con un origen `https://`** (o `http://localhost` y `http://127.0.0.1`, para probar en la misma máquina) y nunca pone un secreto en la línea de comandos (el `argv` de un proceso lo ve cualquiera en el runner, en `/proc/<pid>/cmdline`):
+    - `url`, sin la `/` final, tiene que ser un origen entero, con una expresión **anclada** (con `LC_ALL=C`): `^(https://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(:[0-9]{1,5})?|http://(localhost|127\.0\.0\.1)(:[0-9]{1,5})?)$`. Un prefijo (`http://localhost*`) aceptaría `http://localhost.example.com` o `http://127.0.0.1.nip.io` y mandaría el token en claro; la expresión tampoco deja pasar una ruta, una query ni un `usuario@`;
     - el token se valida (`^[!-~]+$` con `LC_ALL=C`: solo ASCII visible, así un CR/LF no agrega headers y `::add-mask::`, que enmascara una sola línea, lo tapa entero) y va en un archivo de headers `0600` (`-H @archivo`);
     - `env-json` (en la práctica `toJson(secrets)`) llega solo por `INPUT_ENV_JSON` y `jq` lo lee con `jq -n 'env.INPUT_ENV_JSON | fromjson'`, nunca con `--arg`/`--argjson`; el cuerpo del `PUT` va en un archivo (`--data-binary @archivo`). Una variable de entorno tiene el mismo tope que un argumento (`MAX_ARG_STRLEN`, 128 KiB), así que el README dice que `env-json` tiene que quedar bajo ese tamaño;
     - `curl` corre siempre con `--globoff`: sin él, `[]` y `{}` de una URL (un `status_url`, un origen IPv6) son patrones;
-    - el token solo se manda a `url`: el `status_url` tiene que empezar con `/api/v1/` (diseño §14).
+    - el token solo se manda a `url`: el `status_url` tiene que empezar con `/api/v1/` (diseño §14);
+    - lo que viene de muelle y va a `$GITHUB_OUTPUT` o a una URL se valida antes de usarlo: `id`, `next_offset` y `superseded_by` (si no es `null`) con `^[0-9]+$`, y `status` tiene que ser `queued`, `running`, `succeeded`, `failed` o `superseded` (contrato §2.1). `output` escribe una línea `clave=valor`: un valor con `\n` agregaría otras salidas. Si no sirve, `::error::` que nombra el campo (sin repetir el valor) y código 1.
 14. **Release:** un job de tests y después uno de imágenes, con las actions de terceros fijadas por SHA de commit (el job tiene `packages: write`). `:latest` solo para versiones finales de muelle. `workflow_dispatch` construye sin subir. El tag mayor de la action (`v0`) se mueve a mano (ver la pregunta 2).
 15. **Imágenes base:** `node:24-alpine` (LTS) con `pnpm@11.1.2` instalado con `npm` (la versión de `packageManager`; sin corepack), `golang:1.27-alpine`, `docker:29.9.0-cli` (ya está en este nodo; trae el CLI 29.9.0, más nuevo que el 29.6.1 del nodo, y el CLI negocia la versión de la API con el daemon: lo confirma `TestIntegrationInstallFromImage`, que corre `docker stack deploy` desde la imagen) y `alpine:3.24.x`; Caddy `2.11.x` (builder y alpine). Todas con tag exacto y digest del índice; solo `linux/amd64` (contrato §5.4).
 16. **`.dockerignore` es una lista de permitidos:** el contexto nunca lleva `.git`, `.claude` (otros worktrees), claves, bases ni `web/.env*` (un `.env` con `VITE_USE_MOCKS=1` metería MSW en la imagen). Además, la etapa de `pnpm` fija `VITE_USE_MOCKS=0` y falla si el build trae `mockServiceWorker.js`.
 17. **El test de integración de install corre install dos veces:** en el proceso del test (con el cliente real, para verificar cada recurso) y una vez con `docker run … it5-muelle:test install`, que es como lo corre un usuario (el CLI de docker de la imagen, `/tmp`, los certificados).
 18. **`muelle version`** imprime `main.version`: lo usa el smoke test de la imagen y lo cita el contrato §5.1.
 19. **serve escribe `"event":"listening"`** en la línea de "muelle escuchando" (contrato §5.4): install la usa para saber que muelle atiende y, si no hubo `setup_url` antes, que ya tiene usuarios.
+20. **El `PUT` de la action reintenta también un `429`**, en los mismos 3 intentos, porque el diseño §14 dice que "un `4xx` que no es `429` no se reintenta, en ningún paso" (el paso 1 del diseño lo dice ahora explícito). La espera es la mayor entre el retraso que toca y el `Retry-After` (muelle manda `60`, diseño §10), hasta 60 s: uno más largo no se espera y falla con el error de muelle, para no colgar el job. El `POST` sigue siendo de un solo intento (no es idempotente).
 
 ## Preguntas para el dueño
 
@@ -555,7 +558,7 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
   curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:22080/mockServiceWorker.js
   #   200 con el 200.html (no existe en el build), nunca el worker de MSW
   docker logs it5-smoke | head -5                                    # el JSON de arranque, con event=setup_url
-  docker stats --no-stream --format '{{.MemUsage}}' it5-smoke        # < 40MiB (§1 del diseño)
+  docker stats --no-stream --format '{{.MemUsage}}' it5-smoke        # < 40MiB (§1 del diseño); anótalo para el Step 6
   docker rm -f it5-smoke && rm -f "$CTX/it5.key"
   docker image ls it5-muelle:test                                    # anota el tamaño en el commit
   ```
@@ -585,8 +588,10 @@ Los dos `Dockerfile`, el `.dockerignore` y el workflow que publica las imágenes
     it5-muelle-caddy:test caddy run --resume
   docker exec it5-caddy-smoke curl -s --unix-socket /run/caddy-admin/admin.sock http://localhost/config/
   #   null (Caddy vacío, con la admin API en el socket)
+  docker stats --no-stream --format '{{.MemUsage}}' it5-caddy-smoke  # la de Caddy vacío
   docker rm -f it5-caddy-smoke
   ```
+  El otro objetivo de §1 del diseño es muelle más Caddy bajo 100 MB: en el reporte (y en el commit de la imagen de Caddy) anota la memoria de `it5-caddy-smoke`, la de `it5-smoke` del Step 5 y la suma. Es una cota de abajo (Caddy sin sitios ni certificados); si la suma ya pasa de 100 MB, no lo arregles en esta tarea: anótalo con los valores.
 
 - [ ] **Step 7: `.github/workflows/release.yml`.** No lo corras nunca (ni con `act`). Fija `actions/checkout`, `actions/setup-go` y las tres de `docker/` por SHA de commit, con la versión en un comentario (`git ls-remote --tags https://github.com/docker/build-push-action | sort -V -k2 | tail -3`; en un tag anotado, la línea `^{}` es el commit). Confirma las entradas con Context7 (`/docker/build-push-action`, `/docker/login-action`).
   ```yaml
@@ -885,8 +890,9 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
 - [ ] **Step 3: Flags, tests primero** (`options_test.go`):
   - `TestParseArgsDefaults`: `--panel-domain panel.example.com --email a@example.com` → puertos 80/443, `NamePrefix` `muelle`, sin `Reinstall`.
   - `TestParseArgsRequired`: sin `--panel-domain` (y sin `--panel-origin`) → error que nombra `--panel-domain`; sin `--email` → nombra `--email`.
-  - `TestParseArgsInvalid` (tabla; cada error nombra su flag): `--panel-domain Panel.Example.com`, `--email x`, `--public-ip 1.2.3`, `--public-ipv6 2001:0db8::1`, `--http-port 0`, `--https-port 70000`, los dos puertos iguales (nombra `--https-port`), `--cloudflare-token corto`, un token con un espacio, `--caddy-image -x`, `--image 'a b'`, `--name-prefix It5`, `--name-prefix it5_x`, `--advertise-addr -x`, un argumento suelto.
-  - `TestParseArgsTokenFromStdin`: `--cloudflare-token -` con stdin `"<token de 40>\nsobra\n"` → la primera línea sin espacios; stdin vacío → error.
+  - `TestParseArgsInvalid` (tabla; cada error nombra su flag): `--panel-domain Panel.Example.com`, `--email x`, `--public-ip 1.2.3`, `--public-ipv6 2001:0db8::1`, `--http-port 0`, `--https-port 70000`, los dos puertos iguales (nombra `--https-port`), `--cloudflare-token corto`, un token con un espacio, `--caddy-image -x`, `--image 'a b'`, `--name-prefix It5`, `--name-prefix it5_x`, `--advertise-addr -x`, un argumento suelto. En los casos del token (`corto`, con un espacio, y uno de 600 caracteres), el error **no contiene el valor** (`strings.Contains(err.Error(), token)` es falso): dice qué no cumple, nunca lo cita.
+  - `TestParseArgsTokenFromStdin`: `--cloudflare-token -` con stdin `"<token de 40>\nsobra\n"` → la primera línea sin espacios; stdin vacío → error; una primera línea que no sirve (con un espacio en el medio) → error que tampoco la contiene.
+  - `TestOptionsHidesSecrets` (como `TestInitDoesNotPrintToken` de `settings`): unas `Options` con `CloudflareToken` y `RegistryPassword`; ni `%v`, `%+v`, `%#v` ni `fmt.Sprint` de `o` y de `&o`, ni un log de `slog` con `"opts", o` (JSON y texto), contienen el token ni la contraseña; `o.String()` trae `***` y el resto de los campos (`PanelDomain`, `RegistryUser`).
   - `TestParseArgsPanelOrigin`: `--panel-origin https://127.0.0.1:22443` sin `--panel-domain` sirve; `https://x/y`, `ftp://x`, `x` → error.
   - `TestParseArgsAdvertiseAddr`: sirven `10.0.0.5`, `10.0.0.5:2377`, `[2001:db8::1]:2377`, `eth0`; no `-x` ni `a b`.
   - `TestParseArgsHelp`: `-h` → `flag.ErrHelp`.
@@ -901,9 +907,31 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   	CloudflareToken                                          string // ya leído si vino "-"
   	CaddyImage                                               string
   	Reinstall                                                bool
+  	// Las credenciales de las imágenes privadas ("Cambio de requisito del
+  	// dueño"); la contraseña ya leída de stdin.
+  	RegistryUser, RegistryPassword string
   	// Ocultos, solo para los tests de integración (contrato §5.1).
   	NamePrefix, Image, PanelOrigin string
   }
+
+  // String es Options con el token y la contraseña como "***" (si hay), como
+  // settings.Init: unas Options en un %+v de un error o de un log de test no
+  // filtran nada.
+  func (o Options) String() string {
+  	if o.CloudflareToken != "" {
+  		o.CloudflareToken = "***"
+  	}
+  	if o.RegistryPassword != "" {
+  		o.RegistryPassword = "***"
+  	}
+  	type plain Options // sin métodos: no vuelve a llamar a String
+  	return fmt.Sprintf("%+v", plain(o))
+  }
+
+  // GoString es String para %#v, y LogValue para slog (el JSONHandler
+  // serializaría el struct).
+  func (o Options) GoString() string { return o.String() }
+  func (o Options) LogValue() slog.Value { return slog.StringValue(o.String()) }
 
   // ParseArgs lee los flags de `muelle install` (stdin solo para
   // --cloudflare-token -) y los valida sin tocar Docker. Un error es de uso
@@ -913,7 +941,7 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   const Usage = `uso: muelle install --panel-domain <dominio> --email <correo> [flags]
   …(un flag por línea, en español, solo los públicos)…`
   ```
-  Validación con `validate.Hostname`, `Email`, `IPv4`, `IPv6`, `Port` e `ImageRef` usando el flag como campo (`validate.Email("--email", …)` da `--email: …`); el token con `^[\x21-\x7e]{20,512}$` (el mismo formato que `PATCH /settings`); el prefijo con `^[a-z][a-z0-9]{0,15}$`; `--advertise-addr` con `netip.ParseAddr`, `netip.ParseAddrPort` o un nombre de interfaz `^[A-Za-z0-9][A-Za-z0-9._-]{0,14}(:[0-9]{1,5})?$`; `--panel-origin` con `url.Parse` (esquema `http` o `https`, host, sin ruta ni query; muelle lo valida entero al arrancar).
+  Validación con `validate.Hostname`, `Email`, `IPv4`, `IPv6`, `Port` e `ImageRef` usando el flag como campo (`validate.Email("--email", …)` da `--email: …`); el token con `^[\x21-\x7e]{20,512}$` (el mismo formato que `PATCH /settings`), con un error fijo que no lo cita (`--cloudflare-token: tiene que tener de 20 a 512 caracteres ASCII visibles, sin espacios`; nunca un `%q` del valor, tampoco el de stdin), y lo mismo para la contraseña del registry; el prefijo con `^[a-z][a-z0-9]{0,15}$`; `--advertise-addr` con `netip.ParseAddr`, `netip.ParseAddrPort` o un nombre de interfaz `^[A-Za-z0-9][A-Za-z0-9._-]{0,14}(:[0-9]{1,5})?$`; `--panel-origin` con `url.Parse` (esquema `http` o `https`, host, sin ruta ni query; muelle lo valida entero al arrancar).
 
 - [ ] **Step 4: El stack, tests primero** (`stack_test.go`):
   - `TestComposeGolden` (dos casos, con `-update` para regenerar): (a) prefijo `muelle`, sin token, con `public_ip`, `public_ipv6` y `caddy_image` → `testdata/stack.golden.json`; (b) prefijo `it5abc`, con token, sin las opcionales → `testdata/stack_token.golden.json`. Revisa los dos golden a mano contra el YAML del contrato §5.3 antes del commit: `image`, `environment` (las fijas, `MUELLE_INIT_PROXY_*` siempre, las opcionales solo con valor, `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE` solo con token), los tres montajes, el secreto con `target: muelle_master_key` (y el del token), `networks: [panel]`, `logging`, `deploy` (`replicas: 1`, las dos restricciones con el id del nodo, `update_config` y `rollback_config` `stop-first`), y los bloques de primer nivel con `name:` (`external: true` en secretos y red).
@@ -948,6 +976,7 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   - `TestWaitSetupURLFailedTask` (lo que pasa de verdad con una clave equivocada o un `--panel-origin` que no sirve: muelle sale en milisegundos, la tarea queda `failed` y Swarm reintenta cada ~5 s, así que casi nunca se la ve `running`): el servicio solo tiene una tarea `failed` con desired `shutdown`, `ContainerID: "c1"`, `Err: "task: non-zero exit (1)"`, y en su log (`AppendTaskLogs`) la línea `ERROR` de arriba; ninguna tarea `running`; plazo de 300 ms → antes de `ErrSetupTimeout`, stderr trae una línea `aviso:` con el id de la tarea, `failed` y su `Err`, y la línea `ERROR` (su `err`). Cada una sale **una sola vez**, aunque el bucle vio la tarea muchas veces (cuenta las apariciones en stderr).
   - `TestWaitSetupURLRejectedTask` (la tarea nunca corre: el bind de `/var/run/docker.sock` no existe, con Docker rootless; una restricción que no se cumple deja la tarea `pending` con `Err` "no suitable node", que sale por la misma regla): una tarea `rejected` con desired `shutdown`, sin `ContainerID`, `Err: "invalid mount config for type \"bind\": bind source path does not exist: /var/run/docker.sock"` → stderr trae `rejected` y ese `Err` una sola vez, y en `Calls()` no hay ningún `TaskLogs` (sin contenedor no hay log).
   - `TestWaitSetupURLFailedThenRunning`: la tarea t1 `failed` (con su `ERROR` en el log) y, 100 ms después, `SetTasks(t1, t2 running)` con el link B y `listening` en t2 → B, y stderr trae el `ERROR` de t1 una vez.
+  - `TestWaitSetupURLStreamEnds` (el stream de la tarea actual se corta antes de `listening`: un `io.EOF`, o el daemon que lo cierra): el fake envuelto en `endsOnce{Fake, task: "t1"}`, un tipo de `setup_test.go` que embebe `*dockertest.Fake` y cuya **primera** llamada a `TaskLogs` de t1 con `Follow` le pide al fake el mismo log con `Follow: false` (así el stream termina con `io.EOF` después de las líneas que ya hay) y lo avisa por un canal. t1 corre con el link A y una línea `ERROR`, sin `listening`; cuando se cierra el primer stream, el test hace `AppendTaskLogs(t1, listening)` → A y sin error (nunca `ErrSetupTimeout`); `Calls()` trae dos `TaskLogs t1`, y la línea `ERROR` sale una sola vez en stderr aunque el log se leyó dos veces.
   - `TestWaitSetupURLTimeout`: plazo de 200 ms sin líneas → `errors.Is(err, ErrSetupTimeout)` y el mensaje trae `docker service logs <servicio>` y `docker service ps --no-trunc <servicio>`.
 
   `setup.go` (contrato §5.4, "El link de setup"):
@@ -957,7 +986,8 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   // waitSetup sigue el log de la tarea actual del servicio (la running más
   // nueva) hasta "event":"listening". Devuelve el último setup_url de esa
   // tarea, o hasUsers si no hubo ninguno. Si la tarea actual cambia, cierra el
-  // stream y lee la nueva desde el principio. Mientras no hay una tarea
+  // stream y lee la nueva desde el principio; si el stream se corta antes de
+  // listening, vuelve a leer la misma desde el principio. Mientras no hay una tarea
   // corriendo, muestra en stderr por qué: el estado y el Err de la tarea más
   // nueva, y las líneas ERROR de su log si ya terminó. Las líneas de nivel
   // ERROR de cualquier tarea van a stderr, una vez cada una.
@@ -966,11 +996,16 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   Forma:
   - un `context.WithTimeout`, y un bucle que cada vez lee **todas** las tareas del servicio (`ListTasks` con `Service` y sin `DesiredState`; vienen de la más nueva a la más vieja);
   - **hay una tarea corriendo** (desired `running` y state `running`, la más nueva): `TaskLogs(task, LogOptions{Tail: -1, Follow: true})`, con una goroutine que cada `poll` vuelve a buscar la tarea actual y cierra el stream si cambió (o si se acabó el plazo). Cada línea se decodifica como JSON (las que no son JSON se ignoran). Al salir de una tarea sin `listening`, vuelve al bucle;
+    - **si el stream termina antes de `listening`** (`io.EOF`, u otro error porque el daemon lo cerró) y la tarea sigue siendo la actual, el bucle la vuelve a seguir **desde el principio** (otra vez `Tail: -1`), después de esperar `poll`. Una tarea actual nunca se salta por haberla leído antes: el `setup_url` que vale es el último de la lectura que llegó a `listening`;
   - **no hay ninguna corriendo**: toma la tarea más nueva del servicio, con cualquier desired state (si no hay ninguna, espera `poll`):
     - si tiene `Err`, o su estado es final (`failed`, `rejected`, `shutdown`, `complete`, `orphaned`), escribe una vez por tarea `aviso: la tarea <id> de <servicio> está <state>: <Err>` (sin `: <Err>` si está vacío; una tarea `pending` cuyo `Err` aparece después, como "no suitable node", sale cuando aparece);
     - si tiene `ContainerID` y su estado es final, lee su log **una vez** (`TaskLogs` con `Tail: -1` y `Follow: false`) y escribe sus líneas `ERROR`;
     - después espera `poll` y vuelve al bucle;
-  - las tareas cuyo log ya se leyó (seguido o una vez) y las ya avisadas se anotan por id, así nada sale dos veces aunque el bucle pase muchas veces por la misma tarea;
+  - lo que se anota para que nada salga dos veces aunque el bucle pase muchas veces por la misma tarea:
+    - los `aviso:`, por id de tarea;
+    - el log de una tarea que ya terminó, leído una vez sin `Follow`, por id (ya no cambia);
+    - las líneas `ERROR` escritas en stderr, por tarea y texto de la línea (el id y la línea cruda), así una tarea seguida dos veces no las repite;
+    - el log seguido de la tarea actual, en cambio, **no** se anota: se puede volver a leer entero cuantas veces haga falta;
   - con el plazo vencido, `ErrSetupTimeout`, con el mensaje "revisa `docker service logs <servicio>` y `docker service ps --no-trunc <servicio>`" (la segunda muestra el `Err` entero de cada tarea).
 
 - [ ] **Step 7: `Run`, tests primero** (`install_test.go`, con el fake). Un helper `newInstall(t)` arma `dockertest.New()`, `SetImagePresent("ghcr.io/cpu-commits/muelle:v0.1.0")`, un `Config` con `Version: "v0.1.0"`, `DetectIP` que devuelve `203.0.113.24` (y cuenta llamadas), `SetupTimeout: 2 * time.Second`, `Poll` y `NetworkWait` cortos, y stdout/stderr en buffers; y un `muelleStarts(f, names, lines...)` para `OnDeployStack`, que crea el servicio con `PutStackService` (una tarea `running`) y le agrega esas líneas con `AppendTaskLogs` (por defecto, `setup_url` + `listening`).
@@ -989,7 +1024,7 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   - `TestRunReinstallSkipsProbe`: `Reinstall` + un `muelle-caddy` creado con `CreateContainer` (después de `SetImagePresent` de su imagen) + `BusyHostPort(443)` → sin contenedor de prueba, y termina bien.
   - `TestRunTokenSecret`: con token → `CreateSecret muelle_init_cloudflare_token` con el token como dato; el compose monta el secreto y trae `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE`. Si el secreto ya existía, primero `RemoveSecret`.
   - `TestRunReinstallKeepsTokenSecret`: `Reinstall` sin token y con el secreto del token → no se borra ni se monta.
-  - `TestRunPortsBusy`: `BusyHostPort(443)` → `errors.Is(err, ErrPortsBusy)`, el mensaje sugiere `--http-port`/`--https-port`, el contenedor de prueba no quedó, y no hubo `InitSwarm`, `CreateNetwork`, `CreateSecret` ni `DeployStack`.
+  - `TestRunPortsBusy`: `BusyHostPort(443)` → `errors.Is(err, ErrPortsBusy)`, el mensaje sugiere `--http-port`/`--https-port`, el contenedor de prueba no quedó, y no hubo `InitSwarm`, `CreateNetwork`, `CreateSecret` ni `DeployStack`. Sin `muelle-caddy`, el mensaje no lo nombra. Variante (quedó el proxy de una instalación borrada a medias): además un `muelle-caddy` creado con `CreateContainer` (después de `SetImagePresent` de su imagen) → el mensaje dice que ese contenedor tiene tomados los puertos y trae `docker rm -f muelle-caddy`.
   - `TestProbeSpec` (sobre la función que arma el contenedor de prueba): `Cmd: ["help"]`, la imagen, y los puertos `http/tcp → 80`, `https/tcp → 443`, `https/udp → 443`, sin red ni reinicio.
   - `TestRunRemovesStaleProbe`: un `muelle-install-probe` que quedó (creado antes con `CreateContainer` y la imagen de muelle, que `newInstall` ya dejó presente) se borra antes, y la instalación sigue.
   - `TestRunHTTP01Warning`: sin token y `--http-port 8080` → aviso de HTTP-01 en stderr; con token, sin aviso.
@@ -998,7 +1033,10 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   - `TestRunWrongNetwork`:
     - una `muelle_panel` `bridge` (también con el Swarm inactivo, que es cuando más sorprende) y una overlay no attachable → error en el paso 3: en `Calls()` no hay `PullImage`, `CreateContainer`, `InitSwarm`, `CreateNetwork` ni `CreateSecret`;
     - una overlay attachable con subred pública (`PutNetwork` con `203.0.113.0/24`) → error en el paso 8, antes de crear secretos (el contenedor de prueba ya se borró).
-  - `TestRunDeployFailsRollsBack`: `FailNext("DeployStack", …)` → error con la salida del CLI; se borraron los secretos y la red creados en la corrida; stdout sin clave; sin `RemoveStack` (el servicio no existe). Variante: `OnDeployStack` crea el servicio y devuelve error → además `RemoveStack muelle`, y los secretos se borran después de que el servicio ya no existe.
+  - `TestRunDeployFailsRollsBack`: `FailNext("DeployStack", …)` → error con la salida del CLI; se borraron los secretos y la red creados en la corrida; stdout sin clave; sin `RemoveStack` (el servicio no existe). Variante: `OnDeployStack` crea el servicio y devuelve error → además `RemoveStack muelle`, y los secretos se borran después de que el servicio ya no existe. Variantes con volúmenes (la tarea alcanzó a arrancar: el daemon creó los volúmenes y muelle una base con una clave que nadie vio):
+    - `OnDeployStack` además hace `PutVolume(muelle_data)` y `PutVolume(muelle_caddy_admin)` → los dos se borran: `RemoveVolume` de cada uno después de `RemoveStack muelle` en `Calls()`, y `ListVolumes` ya no los trae;
+    - con `Reinstall`, el secreto y un `muelle_data` que existían antes de `Run`, más el mismo `OnDeployStack` → `muelle_data` sigue (no hay `RemoveVolume muelle_data`), y `muelle_caddy_admin`, que creó esta corrida, se borra;
+    - `FailNext("RemoveVolume", errors.New("x"))` (un error que no es `ErrConflict`: no se reintenta) → `Run` devuelve el error del deploy, y stderr trae `docker volume rm <el volumen que no se pudo borrar>`.
   - `TestRunUndoOnTokenSecretFailure`: con token, el fake envuelto en `failSecret{Fake, name: "muelle_init_cloudflare_token"}` (un tipo de `install_test.go` cuyo `CreateSecret` falla solo con ese nombre y si no llama al del fake) → error; ya se habían creado la red y `muelle_master_key`, y después de `Run` ninguno de los dos existe (`InspectNetwork` y `InspectSecret` dan `ErrNotFound`); stdout no trae la clave; sin `DeployStack`. Variante (un Ctrl-C en ese momento): el `CreateSecret` del token cancela el `ctx` de `Run` y devuelve `context.Canceled` → lo mismo.
   - `TestRunUndoOnLeftoverTokenSecret`: con token, el secreto del token que quedó de una corrida cortada y `FailNext("RemoveSecret", …)` (el único `RemoveSecret` antes del deploy es el de ese secreto) → error; la red y `muelle_master_key` creados en esta corrida se borraron; stdout sin clave.
   - `TestRunUndoNetworkWithoutSubnets`: el fake envuelto en `noSubnets{Fake}` (su `InspectNetwork` devuelve la red sin `Subnets`, como una red recién creada que todavía no las tiene) y `NetworkWait` de 100 ms → error que dice que la red no tiene subred todavía; la red creada en esta corrida se borró (`RemoveNetwork muelle_panel` en `Calls()`, y ya no está); no se creó ningún secreto.
@@ -1032,16 +1070,18 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   func Run(ctx context.Context, o Options, c Config) error
   ```
   Puntos de diseño (todos del contrato):
-  - **Paso 3** (instalación anterior): con el Swarm activo, `InspectService(names.Service)`, `InspectSecret(names.MasterKeySecret)` y, si vino token o con `Reinstall`, `InspectSecret(names.InitCloudflareTokenSecret)`; con el Swarm inactivo no se busca ningún servicio ni secreto (el daemon respondería `503`). Siempre `ListVolumes(nil)` buscando `names.DataVolume`; con `Reinstall`, además `InspectContainer(names.CaddyContainer)`. Un error que no es `ErrNotFound` aborta.
+  - **Paso 3** (instalación anterior): con el Swarm activo, `InspectService(names.Service)`, `InspectSecret(names.MasterKeySecret)` y, si vino token o con `Reinstall`, `InspectSecret(names.InitCloudflareTokenSecret)`; con el Swarm inactivo no se busca ningún servicio ni secreto (el daemon respondería `503`). Siempre `ListVolumes(nil)` buscando `names.DataVolume` y `names.CaddyAdminVolume`, y se anota si existían (el deshacer del paso 8 borra solo los que creó esta corrida); con `Reinstall`, además `InspectContainer(names.CaddyContainer)`. Un error que no es `ErrNotFound` aborta.
   - **Paso 3, la red:** siempre `InspectNetwork(names.PanelNetwork)`, que funciona sin Swarm. Si existe y no es overlay, attachable y de scope `swarm`, aborta acá, antes de bajar la imagen, probar los puertos o iniciar el Swarm (una `bridge` local con ese nombre y el Swarm inactivo abortaría recién en el paso 8, con el Swarm ya iniciado). `ErrNotFound` es que hay que crearla en el paso 8. Las subredes se revisan en el paso 8, para la red que existía y para la recién creada.
   - **Paso 5** (imagen): `o.Image`, o `naming.MuelleImageFor(c.Version)`; vacía → error que pide una versión publicada o `--image`. `InspectImage` y, con `ErrNotFound`, `PullImage(ref, nil)`.
-  - **Paso 6** (puertos): borra un contenedor de prueba que quedó (ignora `ErrNotFound`), lo crea con `probeSpec(…)`, lo arranca; `ErrPortInUse` → `ErrPortsBusy`. Lo borra siempre (`force`) con `context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)`.
+  - **Paso 6** (puertos): borra un contenedor de prueba que quedó (ignora `ErrNotFound`), lo crea con `probeSpec(…)`, lo arranca; `ErrPortInUse` → `ErrPortsBusy`. El contenedor de prueba se borra siempre (`force`) con `context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)`.
+    - Con `ErrPortsBusy`, si `InspectContainer(names.CaddyContainer)` lo encuentra, el mensaje agrega que ese contenedor (de una instalación anterior: `docker stack rm` no lo borra) tiene tomados los puertos, con `docker rm -f <names.CaddyContainer>`. Así el error no esconde la causa detrás de "usa otros puertos".
   - **Paso 7** (Swarm): si `InitSwarm` falla, el error trae el de Docker y, si no vino `--advertise-addr`, la pista "si la máquina tiene varias IPs, repite con `--advertise-addr <ip>`" (Docker no elige una sola: "could not choose an IP address to advertise").
   - **Paso 8, el orden:** la red (crearla si no existe; esperar sus subredes hasta `NetworkWait` y revisar que sean privadas), `muelle_master_key` (salvo con `Reinstall`), el secreto del token si vino (`RemoveSecret` del que quedó, y `CreateSecret`), y `DeployStack`.
-  - **Paso 8 con deshacer** (contrato §5.4: "install no cambia nada hasta saber que va a poder terminar"): una lista de funciones de limpieza que se agregan a medida que se crea cada cosa (la red si se creó acá, cada secreto creado). Corre en orden inverso ante **cualquier** error o cancelación del `ctx` desde la primera creación hasta que `DeployStack` funciona: las subredes de la red que no llegan o son públicas, un `CreateSecret` o el `RemoveSecret` del secreto del token que quedó, `DeployStack`, o un Ctrl-C entre medio. Así nunca queda un `muelle_master_key` cuya clave no se imprimió (la próxima corrida abortaría con `ErrPreviousData`, y `--reinstall` reusaría una clave que nadie vio).
+  - **Paso 8 con deshacer** (contrato §5.4: "install no cambia nada hasta saber que va a poder terminar"): una lista de funciones de limpieza que se agregan a medida que se crea cada cosa (la red si se creó acá, cada secreto creado, y el stack con sus volúmenes, abajo). Corre en orden inverso ante **cualquier** error o cancelación del `ctx` desde la primera creación hasta que `DeployStack` funciona: las subredes de la red que no llegan o son públicas, un `CreateSecret` o el `RemoveSecret` del secreto del token que quedó, `DeployStack`, o un Ctrl-C entre medio. Así nunca queda un `muelle_master_key` cuya clave no se imprimió (la próxima corrida abortaría con `ErrPreviousData`, y `--reinstall` reusaría una clave que nadie vio).
     - Forma: `Run` (o la función del paso 8) tiene el error como resultado con nombre y un `defer` que, si el error no es nil y `DeployStack` todavía no funcionó, corre la lista con `context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)`. Con el `ctx` cancelado, cada llamada siguiente falla, y el `defer` limpia igual.
     - Justo antes de `DeployStack` se agrega a la lista (queda primera al correr) un paso que hace `InspectService(names.Service)`: si existe (el CLI alcanzó a crearlo), `RemoveStack(names.Stack)` y espera (hasta 30 s) a que `InspectService` dé `ErrNotFound` antes de seguir con los secretos, que no se pueden borrar mientras un servicio los usa; con `ErrNotFound`, nada.
-    - La red se borra reintentando mientras dé `ErrConflict`. Lo que no se pudo borrar se nombra en stderr con el comando (`docker secret rm …`, `docker network rm …`, `docker stack rm …`).
+    - En ese mismo paso, **después** de que `InspectService` da `ErrNotFound` (el servicio se borró, o nunca existió), se borran `names.DataVolume` y `names.CaddyAdminVolume` si no existían en el paso 3. Si la tarea alcanzó a arrancar, el daemon los creó y muelle inicializó en `names.DataVolume` una base cifrada con una clave que nadie vio: la próxima corrida abortaría con `ErrPreviousData`, y `--reinstall` tampoco serviría (el secreto ya se borró). `RemoveVolume` (sin `force`) reintenta mientras dé `ErrConflict` (el contenedor tarda en terminar; hasta 30 s), y `ErrNotFound` es que no se creó. Un volumen que existía antes de esta corrida (con `Reinstall`, `muelle_data`) nunca se borra.
+    - La red se borra reintentando mientras dé `ErrConflict`. Lo que no se pudo borrar se nombra en stderr con el comando (`docker secret rm …`, `docker network rm …`, `docker stack rm …`, `docker volume rm …`).
     - Una red que ya existía antes de esta corrida nunca se borra (`TestRunExistingNetwork`).
   - **Paso 9:** la clave (si se generó) en stdout, después `waitSetup`, después el link (o el aviso de usuarios). Los textos van como constantes del paquete; la clave y el link en su propia línea, con cuatro espacios adelante, para copiarlos fácil.
   - **Avance y avisos:** una línea por paso en stderr (`Docker 29.6.1, Swarm activo (nodo …)`, `IP pública: … (detectada)`, `puertos 80 y 443 libres`, `red muelle_panel creada`…); los avisos empiezan con `aviso: `.
@@ -1072,20 +1112,20 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
   - `feat: muelle install, y serve avisa con event=listening cuando empieza a atender`
 
 - [ ] **Step 10: Integración** (`src/cmd/install/integration_test.go`, `//go:build integration`, `package install`). Necesita la imagen de **esta** rama (trae `settings reset-panel-ips` y el evento `listening`): reconstruye `it5-muelle:test` con el contexto de las convenciones antes de correr. El test se salta si la imagen no está (`MUELLE_IT_IMAGE`, por defecto `it5-muelle:test`) o si el nodo no es manager de un Swarm activo.
-  - **Guarda de lo ajeno** (decisión 5): el muelle del test tiene `docker.sock`, así que el test cuenta con que, con ingress `disabled`, ningún módulo hace nada con Docker por su cuenta (el plan de la Fase 3 lo cumple: "Con `disabled`, no hace nada"; los jobs de deploy no tienen deploys en una base nueva). Para que una fase que lo rompa se note, al empezar anota:
-    - si existen la red `muelle_panel` y el contenedor `muelle-caddy`;
-    - las redes con la etiqueta `muelle.project` (`naming.LabelProject`), con `ListNetworks(ctx, nil)` y filtrando en Go (un filtro `label=muelle.project=` con valor vacío no encuentra nada: `labelFilters` arma `k=v`).
-
-    Un `t.Cleanup` registrado primero (corre último) falla si `muelle_panel` o `muelle-caddy` aparecieron durante el test, o si falta alguna de las redes anotadas. Nunca borra ni crea nada de eso.
-  - **Limpieza por prefijo** (helper `cleanupInstall(t, c, names)`, registrado antes de instalar): `RemoveStack`, esperar a que el servicio no exista (60 s), borrar el contenedor de prueba (`force`), la red (reintentando con `ErrConflict`, 60 s), los dos secretos y los dos volúmenes (`RemoveVolume`, reintentando mientras dé `ErrConflict`, 60 s). Ignora `ErrNotFound`; cualquier otro error es `t.Errorf`.
+  - **Guarda de lo ajeno** (decisión 5): el muelle del test tiene `docker.sock`, así que el test cuenta con que, con ingress `disabled`, ningún módulo hace nada con Docker por su cuenta (el plan de la Fase 3 lo cumple: "Con `disabled`, no hace nada"; los jobs de deploy no tienen deploys en una base nueva). Para que una fase que lo rompa se note, el test mira **solo** dos nombres fijos y una red propia, nunca las redes de las otras líneas: los tests de las fases 2 y 3 crean y borran redes con `muelle.project` en este mismo daemon y en paralelo (`it2e2e_staging`, `it3<id>_s2`, las huérfanas de la Fase 3), y al integrar `go test -tags integration ./...` corre a la vez los binarios de varios paquetes. Una guarda que anotara esas redes fallaría al azar. Helper `guardForeign(t, c, names)`, para los dos tests que arrancan un muelle (`TestIntegrationInstall` y `TestIntegrationInstallFromImage`), llamado **después** de `cleanupInstall` y antes de instalar:
+    - anota si existen la red `muelle_panel` y el contenedor `muelle-caddy` (nunca los crea ni los borra);
+    - crea una red **centinela** con la forma exacta de una red de stage que el job `"proxy"` tomaría por huérfana (D13 del plan de la Fase 3): `naming.Network(p, "sentinel")` (`<p>_sentinel`), overlay y attachable, con `naming.StageLabels(p, "sentinel")`. Ese stage no está en la base nueva del muelle del test, así que una limpieza de redes de stage que corriera con `disabled` la tomaría. Tiene el prefijo `it5`: ningún test de las otras líneas la toca (la Fase 3 filtra las huérfanas con `NetworkPrefix` `it3<id>`);
+    - registra un `t.Cleanup` que falla si `muelle_panel` o `muelle-caddy` aparecieron durante el test, o si la centinela ya no existe (`InspectNetwork` da `ErrNotFound`). Como los `Cleanup` corren al revés, este corre antes que el de `cleanupInstall`: al final del test, con el muelle todavía arriba. La centinela la borra después `cleanupInstall`.
+    - Es de mejor esfuerzo: la Fase 3 borra una huérfana la segunda vez seguida que la ve (cada 5 min), así que un ingress que corriera con `disabled` lo delatan `muelle-caddy` o `muelle_panel` (los crea en la primera pasada), y la centinela atrapa una limpieza que borre enseguida.
+  - **Limpieza por prefijo** (helper `cleanupInstall(t, c, names)`, registrado antes de `guardForeign` y de instalar): `RemoveStack`, esperar a que el servicio no exista (60 s), borrar el contenedor de prueba (`force`), la red (reintentando con `ErrConflict`, 60 s), la red centinela `<p>_sentinel`, los dos secretos y los dos volúmenes (`RemoveVolume`, reintentando mientras dé `ErrConflict`, 60 s). Ignora `ErrNotFound`; cualquier otro error es `t.Errorf`.
   - `TestIntegrationInstall` (subtests en orden, sobre el mismo prefijo `it5` + 6 hex; puertos 22080 y 22443):
     1. install en el proceso del test, con el cliente real: `Options{PanelOrigin: "https://127.0.0.1:22443", Email: "it5@example.com", PublicIP: "203.0.113.10", HTTPPort: 22080, HTTPSPort: 22443, Image: <imagen>, NamePrefix: <p>}`, `Config{Version: "dev"}`. **Sin token** (con un token, el muelle del test podría llamar a Cloudflare). Asserts: sin error; stdout con una clave base64 de 32 bytes y un link que empieza con `https://127.0.0.1:22443/setup?token=`; existen el secreto `<p>_master_key` y la red `<p>_panel` (overlay, attachable, scope `swarm`, subredes privadas); el servicio `<p>_muelle` tiene una tarea corriendo; el contenedor de prueba no existe.
     2. `docker exec <contenedor de la tarea> muelle settings reset-panel-ips --no-restart` (con `exec.Command`) → código 0, salida con "ya estaba vacía" y `docker service update --force <p>_muelle`.
     3. `docker exec <contenedor> muelle settings reset-panel-ips` → código 0 (o la sesión cortada por el reinicio: acepta un código distinto de 0 solo si la salida ya traía "reiniciando"); antes de 90 s hay una tarea corriendo con otro id.
     4. install de nuevo, sin `Reinstall` → `ErrAlreadyInstalled`; no se creó nada nuevo.
-    5. `RemoveStack(<p>)` y esperar a que el servicio no exista; install sin `Reinstall` → `ErrPreviousData`; con `Reinstall` → sin error, stdout **sin** clave y con un link nuevo (distinto del primero: cada arranque sin usuarios genera otro), stderr con "la base ya existe".
+    5. Antes de `RemoveStack(<p>)`, anota el `ContainerID` de cada tarea de `<p>_muelle` que lo tenga (`ListTasks` con `Service` y sin `DesiredState`). `RemoveStack(<p>)`, esperar a que el servicio no exista **y** a que cada uno de esos contenedores dé `ErrNotFound` en `InspectContainer` (60 s): `docker stack rm` vuelve antes de que el contenedor termine (hasta el `stop_grace_period`, 10 s por defecto), y un install en ese momento tendría dos muelle sobre la misma `<p>_data`, justo lo que evita el `stop-first` del contrato. (Si un contenedor de una tarea vieja queda `exited` y Swarm no lo borra, basta con que ninguno tenga `Running`: anótalo en el reporte.) Después, install sin `Reinstall` → `ErrPreviousData`; con `Reinstall` → sin error, stdout **sin** clave y con un link nuevo (distinto del primero: cada arranque sin usuarios genera otro), stderr con "la base ya existe".
   - `TestIntegrationInstallPortsBusy` (otro prefijo; puertos 22180 y 22543): el test escucha en `0.0.0.0:22180` con `net.Listen`; install → `ErrPortsBusy`; después no existen `<p>_master_key`, `<p>_panel`, `<p>_muelle` ni `<p>-install-probe`.
-  - `TestIntegrationInstallFromImage` (otro prefijo; puertos 22081 y 22444): `docker run --rm --name <p>-installer -v /var/run/docker.sock:/var/run/docker.sock <imagen> install --name-prefix <p> --image <imagen> --panel-origin https://127.0.0.1:22444 --email it5@example.com --public-ip 203.0.113.10 --http-port 22081 --https-port 22444` con `exec.CommandContext` (plazo de 4 min) → código 0, stdout con la clave y el link. La limpieza incluye `docker rm -f <p>-installer`.
+  - `TestIntegrationInstallFromImage` (otro prefijo; puertos 22081 y 22444): `docker run --rm --name <p>-installer -v /var/run/docker.sock:/var/run/docker.sock <imagen> install --name-prefix <p> --image <imagen> --panel-origin https://127.0.0.1:22444 --email it5@example.com --public-ip 203.0.113.10 --http-port 22081 --https-port 22444` con `exec.CommandContext` (plazo de 4 min) → código 0, stdout con la clave y el link. Usa `cleanupInstall` y `guardForeign` como `TestIntegrationInstall`, y la limpieza incluye además `docker rm -f <p>-installer`.
 
   ```bash
   cd /home/felipe/Escritorio/dev/muelle/.claude/worktrees/fase-5-dist
@@ -1102,7 +1142,17 @@ El instalador de §5.4 del contrato: valida, revisa Docker y una instalación an
     - **sin `-t`**: con una TTY, Docker junta stderr y stdout, y `> install.txt` guardaría también el avance (con `\r\n`). Para el token por stdin alcanza con `-i`;
     - **varias IPs**: si el Swarm no está iniciado y la máquina tiene varias direcciones, `docker swarm init` no elige una; install falla con el error de Docker y la pista de `--advertise-addr <ip>` (la IP privada por la que se van a hablar los nodos).
   - **"Actualizar"**: `docker service update --image ghcr.io/cpu-commits/muelle:<v> muelle_muelle`; Caddy sigue a muelle salvo con `caddy_image`; `failure_action: rollback`.
-  - **"Reinstalar"**: después de `docker stack rm muelle`, `install --reinstall …` (reusa la clave; los flags no cambian una base que ya arrancó); borrar todo (secreto y volúmenes) para empezar de cero, con la advertencia de que se pierden los datos.
+  - **"Reinstalar"**, en este orden:
+    1. `docker stack rm muelle`;
+    2. esperar a que `docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle` quede vacío: `docker stack rm` vuelve antes de que el contenedor termine, y un install en ese momento tendría dos muelle sobre la misma base;
+    3. `install --reinstall …` (reusa la clave; los flags no cambian una base que ya arrancó).
+  - **"Empezar de cero"** (con la advertencia de que se pierden los datos: la base y los backups de `muelle_data`, y los certificados de Caddy), después de los pasos 1 y 2 de "Reinstalar", la limpieza entera:
+    - `docker rm -f muelle-caddy`: es un contenedor aparte, con `restart: unless-stopped`, y `docker stack rm` lo deja corriendo con los puertos del proxy tomados (un install nuevo fallaría con "puertos ocupados");
+    - `docker volume rm muelle_data muelle_caddy_data muelle_caddy_config muelle_caddy_admin`;
+    - `docker network rm muelle_panel`;
+    - `docker secret rm muelle_master_key muelle_init_cloudflare_token muelle_init_registry` (los que existan).
+
+    Los stacks y las redes de las apps (`docker stack ls`, `docker network ls --filter label=muelle.project`) no se tocan: se borran aparte si también se quieren sacar.
   - **"Leer la clave maestra"**: `docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle | head -n1)" cat /run/secrets/muelle_master_key`.
   - **"Quitar el token de install del servicio"** y **"Cambiar `MUELLE_PANEL_ORIGIN`"**: los dos `docker service update` del contrato §5.2.
 
@@ -1137,11 +1187,12 @@ La composite action que reemplaza `sync-env` y `deploy` de los workflows actuale
   - `TestDeployTimeout`: `timeout: 1` y el log siempre `running` y vacío → `::error::` con "timeout", código 1, `status=running`.
   - `TestStopCommandsWrapTheLog`: un `chunk` con `::error::de la app` sale después de `::stop-commands::<tok>` y antes de `::<tok>::`; `<tok>` son 32 hex, distinto en dos corridas; el `::warning::`/`::error::` propio va después del cierre.
   - `TestEnvPutFiltersExcluded`: `env-json` con `github_token`, `MUELLE_URL`, `Muelle_Token`, `EXPORT_PASSPHRASE`, `DB_URL` y `env-exclude: " export_passphrase ,,"` → el `PUT` lleva solo `DB_URL`, con `"secret": true`; con `env-secret: false`, `"secret": false`.
-  - `TestEnvPutRetries`: el `PUT` responde `503` dos veces y después `204` → sigue; tres `503` → código 1 sin `POST`. Un `422` no se reintenta.
+  - `TestEnvPutRetries`: el `PUT` responde `503` dos veces y después `204` → sigue; tres `503` → código 1 sin `POST`. Un `422` no se reintenta. Un `429` con `Retry-After: 1` y después `204` → sigue, con dos `PUT`, y la corrida tardó al menos 1 s (los retrasos de prueba son `0 0`: esperó lo que pidió muelle). Un `429` con `Retry-After: 61` → código 1 con el error de muelle y un solo `PUT` (más de 60 s no se espera). Un `429` sin `Retry-After`, o con una fecha HTTP, usa el retraso que toca.
   - `TestPostNotRetried`: el `POST` responde `503` → código 1, un solo `POST`. Sin respuesta (el servidor cierra la conexión con `Hijack`) → código 1 con "revísalo en el panel", un solo `POST`.
   - `TestPollRetriesTransient`: el `GET …/log` responde `503`, después `429`, después el log → termina bien.
   - `TestErrorsShowCodeAndMessage`: un `404 no_route` en el `POST` → `::error::` que dice que ese muelle todavía no tiene la API de deploys; un `403 out_of_scope` → `::error::` con `out_of_scope` y el `message`.
-  - `TestInputsValidated` (sin ninguna petición, código 1): `url` `http://muelle.example.com` (no es https ni localhost), `app` `a/b` y `a/b/c/d` y `A/b/c`, `env-json` `[1]` y `{"a":1}`, `images-json` `"x"`, `env-secret` `quizás`, `timeout` `0` y `abc`, y un `token` vacío, con un espacio, con `"mk_x\r\nX-Evil: 1"` (agregaría un header) o con un carácter no ASCII. El `::error::` del token no repite el token.
+  - `TestInputsValidated` (sin ninguna petición, código 1): `url` `http://muelle.example.com` (no es https ni localhost), `http://localhost.example.com` y `http://127.0.0.1.nip.io` (empiezan como localhost: un prefijo los dejaría pasar y el token iría en claro), `https://muelle.example.com/panel` (con ruta), `https://u:p@muelle.example.com` (con `usuario@`) y `https://muelle.example.com?x=1`, `app` `a/b` y `a/b/c/d` y `A/b/c`, `env-json` `[1]` y `{"a":1}`, `images-json` `"x"`, `env-secret` `quizás`, `timeout` `0` y `abc`, y un `token` vacío, con un espacio, con `"mk_x\r\nX-Evil: 1"` (agregaría un header) o con un carácter no ASCII. El `::error::` del token no repite el token. Y los que sí sirven (sin servidor: no hay `env-json`, así que la primera petición es el `POST`, que no conecta): `https://[::1]:1/` (con la `/` final) y `http://localhost:1` terminan con el error de "revísalo en el panel", no con el de `url`.
+  - `TestOutputsValidated` (lo que responde muelle no agrega salidas): el `POST` responde `202` con `"id": "145\nstatus=succeeded"` → código 1 con un `::error::` que nombra `id`, y `$GITHUB_OUTPUT` no trae ninguna línea `status=` ni `deploy-id=`; un `status_url` correcto pero el log con `"status": "succeeded\nx=y"` → código 1, sin la salida `x`; un `next_offset` `"1&offset=0"` → código 1 sin pedir esa URL; un `superseded_by` `"146\n::error::x"` → código 1.
   - `TestEnvJSONLarge`: un `env-json` de ~100 KiB (una variable con un valor largo; bajo el tope de 128 KiB de una variable de entorno) → el `PUT` lo lleva entero. Junto con el test que sigue, cubre que `env-json` no se copie a un argumento.
   - `TestEnvJSONErrorHidesContent`: un `env-json` que no es JSON (`{"DB_URL": "postgres://u:clave-secreta@db` sin cerrar) → código 1, y ni stdout ni stderr traen `clave-secreta`.
   - `TestSecretsStayOffArgv` (lee `deploy.sh` como texto): `INPUT_ENV_JSON` aparece solo dentro de `env.INPUT_ENV_JSON` de un filtro de `jq` (nunca como `$INPUT_ENV_JSON`: así nunca se pasa con `--arg`/`--argjson` ni a otro comando), e `INPUT_TOKEN` solo en su validación, en el `printf` del archivo de headers y en el `::add-mask::` (los dos son builtins de bash: no hacen `exec`); cada `curl` lleva `--globoff`; y las únicas expansiones `$MUELLE_…`/`${MUELLE_…}` son las de `MUELLE_ACTION_TEST_POLL` y `MUELLE_ACTION_TEST_RETRY_DELAYS` (un `MUELLE_POLL_INTERVAL` del `env:` de un job no cambia nada; los nombres `MUELLE_URL` y `MUELLE_TOKEN` del filtro de `env-json` son strings de `jq`, no variables).
@@ -1216,10 +1267,16 @@ La composite action que reemplaza `sync-env` y `deploy` de los workflows actuale
 
   escape() { local s=$1; s=${s//'%'/'%25'}; s=${s//$'\r'/'%0D'}; s=${s//$'\n'/'%0A'}; printf '%s' "$s"; }
   fail()   { end_log; printf '::error::%s\n' "$(escape "$1")"; exit 1; }
+  # output solo recibe valores ya validados (decisión 13): deploy-id con ^[0-9]+$ y status de
+  # la lista de estados. Un valor de muelle con \n agregaría otras salidas.
   output() { printf '%s=%s\n' "$1" "$2" >> "${GITHUB_OUTPUT:-/dev/null}"; }
+  # want_id CAMPO VALOR: fail (nombra el campo, no repite el valor) si no es ^[0-9]+$.
+  # want_status VALOR: fail si no es queued|running|succeeded|failed|superseded.
 
-  # 1. Validar las entradas, sin tocar muelle: url (https, o http://localhost|127.0.0.1;
-  #    sin la / final), token (re='^[!-~]+$'; [[ $INPUT_TOKEN =~ $re ]]: sin espacios, CR/LF
+  # 1. Validar las entradas, sin tocar muelle: url (se le quita la / final y tiene que ser
+  #    un origen entero, con la expresión anclada de la decisión 13:
+  #      re='^(https://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(:[0-9]{1,5})?|http://(localhost|127\.0\.0\.1)(:[0-9]{1,5})?)$'
+  #    nunca un patrón de prefijo como http://localhost*), token (re='^[!-~]+$'; [[ $INPUT_TOKEN =~ $re ]]: sin espacios, CR/LF
   #    ni no-ASCII; el error no lo repite), app (tres slugs: ^[a-z][a-z0-9-]*$ cada uno),
   #    image xor images-json, images-json y env-json objetos de strings, leídos SIEMPRE del
   #    entorno y nunca de un argumento (decisión 13):
@@ -1233,9 +1290,10 @@ La composite action que reemplaza `sync-env` y `deploy` de los workflows actuale
   printf 'Authorization: Bearer %s\n' "$INPUT_TOKEN" > "$tmp/auth"   # builtin: nunca en un argv
   echo "::add-mask::$INPUT_TOKEN"                                     # una sola línea: el token ya se validó
 
-  # request MÉTODO RUTA [ARCHIVO]: el cuerpo queda en $tmp/body y el status en $status (000 sin respuesta).
+  # request MÉTODO RUTA [ARCHIVO]: el cuerpo queda en $tmp/body, los headers en $tmp/headers
+  # (para el Retry-After de un 429) y el status en $status (000 sin respuesta).
   request() {
-    local args=(-sS --globoff -o "$tmp/body" -w '%{http_code}' --max-time 30 -X "$1" -H @"$tmp/auth" -H 'Accept: application/json')
+    local args=(-sS --globoff -o "$tmp/body" -D "$tmp/headers" -w '%{http_code}' --max-time 30 -X "$1" -H @"$tmp/auth" -H 'Accept: application/json')
     [[ -n "${3:-}" ]] && args+=(-H 'Content-Type: application/json' --data-binary @"$3")
     status=$(curl "${args[@]}" "$url$2" 2>"$tmp/curl.err") || status=000
   }
@@ -1245,17 +1303,22 @@ La composite action que reemplaza `sync-env` y `deploy` de los workflows actuale
 
   # 2. Si hay env-json: filtrar (GITHUB_TOKEN, MUELLE_URL, MUELLE_TOKEN y env-exclude, sin
   #    distinguir mayúsculas; jq con ascii_upcase e index([$k]) == null), PUT $base/env con
-  #    {"vars": …, "secret": …}; hasta 3 intentos con 000 o 5xx, con retry_delays entre ellos.
+  #    {"vars": …, "secret": …}; hasta 3 intentos con 000, 5xx o 429, con retry_delays entre ellos
+  #    (decisión 20). Con un 429, la espera es la mayor entre el retraso que toca y el Retry-After
+  #    (segundos enteros, sin \r; muelle manda 60); un Retry-After de más de 60 no se espera:
+  #    fail api_error enseguida. Sin Retry-After, o con una fecha HTTP, el retraso que toca.
+  #    Otro 4xx no se reintenta.
   #    El cuerpo lo arma jq desde el entorno y va a un archivo, nunca a un argumento:
   #      jq -n --arg secret "$secret" --arg exclude "$INPUT_ENV_EXCLUDE" \
   #        '(env.INPUT_ENV_JSON | fromjson) as $vars | …' > "$tmp/env.json"
   #    (--arg solo con datos que no son secretos: env-exclude y true/false.)
   # 3. POST $base/deploys con {} | {"image"} | {"images"}, una vez: 000 → fail "…revísalo en el
-  #    panel"; si no es 202 → fail api_error. id y status_url (tiene que empezar con /api/v1/).
-  #    output deploy-id; deadline = ahora + timeout.
+  #    panel"; si no es 202 → fail api_error. id (want_id), status (want_status) y status_url
+  #    (tiene que empezar con /api/v1/). output deploy-id; deadline = ahora + timeout.
   # 4. Polling: tok=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'); echo "::stop-commands::$tok".
   #    GET "$status_url/log?offset=$offset": 000, 5xx o 429 → sleep $poll y seguir; otro no-200 → fail.
-  #    jq -j .chunk (lo imprime tal cual); next_offset, status, superseded_by. Si avanzó, pedir enseguida;
+  #    jq -j .chunk (lo imprime tal cual); next_offset (want_id: va en la URL), status (want_status)
+  #    y superseded_by (want_id si no es null). Si avanzó, pedir enseguida;
   #    si no y el status es final, salir; si no, sleep $poll. Pasado el deadline: fail "timeout …".
   # 5. end_log ("::$tok::", una sola vez); output status; succeeded → 0; superseded → ::warning:: con
   #    superseded_by → 0; failed → GET $status_url, fail con .error.
@@ -1277,12 +1340,12 @@ La composite action que reemplaza `sync-env` y `deploy` de los workflows actuale
 - [ ] **Step 4: CI**, un paso al final del job `test` de `ci.yaml` (después del de `-tags panel`): `- name: shellcheck` con `run: shellcheck action/deploy.sh` (viene en `ubuntu-latest`). Los tests de la action ya corren en `go test -race ./...`.
 
 - [ ] **Step 5: README:**
-  - **"GitHub Action"**: el ejemplo de auditfy del diseño §14 con `@v0`; las entradas y salidas; que `env-json` reemplaza todas las variables de la app (`PUT`) y tiene que quedar bajo 128 KiB (es una variable de entorno del paso, y Linux no deja pasar una más grande); los tokens de API con alcance mínimo (un token por proyecto o stage, contrato §0.1); `env-exclude`; qué pasa con `failed`, `superseded` y el timeout.
+  - **"GitHub Action"**: el ejemplo de auditfy del diseño §14 con `@v0`; las entradas y salidas (`url` es solo el origen: `https://panel…`, sin ruta; `http://` solo con `localhost` o `127.0.0.1`); que `env-json` reemplaza todas las variables de la app (`PUT`) y tiene que quedar bajo 128 KiB (es una variable de entorno del paso, y Linux no deja pasar una más grande); los tokens de API con alcance mínimo (un token por proyecto o stage, contrato §0.1); `env-exclude`; qué pasa con `failed`, `superseded` y el timeout.
   - **"Publicar una versión"**: CI en verde; `git tag -a vX.Y.Z -m …` y `git push origin vX.Y.Z` (los hace el dueño); `release.yml` construye y sube las dos imágenes (`:latest` solo las finales); la primera vez, hacer públicos los paquetes `muelle` y `muelle-caddy` en GHCR (pregunta 1); mover el tag mayor de la action: `git tag -f v0 vX.Y.Z && git push -f origin v0` (pregunta 2); `workflow_dispatch` para probar los `Dockerfile` sin subir.
   - **"Estado"** y **"Estructura"**: las fases 2 y 3 también editan esas dos secciones, así que se tocan **solo las líneas de la Fase 5** (agregar las propias, sin reescribir ni reordenar las de las otras fases): al integrar habrá conflictos triviales ahí, que se resuelven dejando las líneas de las tres. "Estado": una línea de la Fase 5 (install, `reset-panel-ips`, imágenes, panel embebido, la action, el release). "Estructura": `version`, `install` y `settings` en la línea de `main.go`; `cmd/install`, `cmd/settingscli` y `cmd/http/panel`; `action/` y `deploy/caddy/`.
   - **"Notas para las fases siguientes"**, bloque **"Fase 5 / install"**: tachar lo que se cumplió (`/tmp` de la imagen, la prueba de puertos con 443/udp y la imagen de la versión, el link de la tarea actual) y dejar:
     - el prefijo `__Host-` de la cookie, al integrar (archivos de identity y `cmd/http/utils`);
-    - el test de integración de install corre un muelle de verdad con `docker.sock` y una base nueva, y cuenta con que, con ingress `disabled` (`Enabled` falso, contrato §5.1), **ningún** módulo hace nada con Docker por su cuenta: ingress no crea `muelle-caddy` ni `muelle_panel` (la Fase 3 lo cumple: con `disabled` no hace nada), y ningún job de deploy toca redes, servicios ni stacks sin un deploy. Al integrar, una fase que agregue un job de arranque que limpie o recree recursos de Docker tiene que respetarlo. El test lo verifica: falla si aparecen `muelle-caddy` o `muelle_panel`, o si desaparece una red con la etiqueta `muelle.project`;
+    - el test de integración de install corre un muelle de verdad con `docker.sock` y una base nueva, y cuenta con que, con ingress `disabled` (`Enabled` falso, contrato §5.1), **ningún** módulo hace nada con Docker por su cuenta: ingress no crea `muelle-caddy` ni `muelle_panel` (la Fase 3 lo cumple: con `disabled` no hace nada), y ningún job de deploy toca redes, servicios ni stacks sin un deploy. Al integrar, una fase que agregue un job de arranque que limpie o recree recursos de Docker tiene que respetarlo. El test lo verifica sin mirar lo de las otras líneas: falla si aparecen `muelle-caddy` o `muelle_panel`, o si desaparece su red centinela `<p>_sentinel` (con la forma de una red de stage huérfana: `naming.Network` y `naming.StageLabels` de un stage que no está en la base);
     - con `--name-prefix`, muelle-caddy (nombres fijos) no comparte la red ni el socket con ese muelle: es solo para tests;
     - un `GET /healthz` (pendiente de la Fase 1) permitiría un healthcheck en el stack de muelle.
 
