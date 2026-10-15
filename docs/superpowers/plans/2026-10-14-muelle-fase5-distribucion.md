@@ -777,8 +777,8 @@ El subcomando que vacía `panel_allowed_cidrs` desde dentro del contenedor y rei
   docker ps -a --filter name=it5 --format '{{.Names}}'; docker network ls --filter name=it5 -q   # nada
   ```
 
-- [ ] **Step 4: `admin.ResetPanelAllowedCIDRs`, test primero** (`src/internal/admin/reset_panel_ips_test.go`, `package admin`, con `newEnv(t)` de `module_test.go`):
-  - `TestResetPanelAllowedCIDRs` (tabla sobre el valor guardado antes): sin la clave → `Changed: false`; `[]` → `Changed: false`; `["190.5.6.0/24","2001:db8::/32"]` → `Changed: true`, `Previous` con los dos; `basura` (no es JSON) → `Changed: true`, `Previous` nil. Después de cada `Changed: true`, el valor guardado es `[]`.
+- [x] **Step 4: `admin.ResetPanelAllowedCIDRs`, test primero** (`src/internal/admin/reset_panel_ips_test.go`, `package admin`, con `newEnv(t)` de `module_test.go`):
+  - `TestResetPanelAllowedCIDRs` (tabla sobre el valor guardado antes): sin la clave → `Changed: false`; `[]`, `""` y `null` → `Changed: false` (los tres son "sin restricción" para `entity.DecodeProxySettings`, y no se tocan); `["190.5.6.0/24","2001:db8::/32"]` → `Changed: true`, `Previous` con los dos; `basura` (no es JSON) → `Changed: true`, `Previous` nil. Después de cada `Changed: true`, el valor guardado es `[]`.
   - `TestResetPanelAllowedCIDRsAudit`: con cambio, la última fila de `audit_events` es `actor_type = 'system'`, `action = 'settings.update'`, `target = 'settings'`, `details = {"panel_allowed_cidrs":[],"via":"cli"}`. Sin cambio, no se agrega ninguna fila (cuenta antes y después).
   - `TestResetPanelAllowedCIDRsKeepsOtherSettings`: con `proxy_https_port = 8443` guardado antes, sigue igual; y `GET /api/v1/settings` (con `e.c` y la sesión `sin`) devuelve `panel_allowed_cidrs: []`.
 
