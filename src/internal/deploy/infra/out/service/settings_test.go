@@ -40,3 +40,31 @@ func TestDeploySettingsMarkOnce(t *testing.T) {
 		t.Fatalf("value=%q encrypted=%v", value, encrypted)
 	}
 }
+
+// manager_node_id: Get da "" mientras no está; SetIfMissing lo guarda sin
+// cifrar y nunca pisa el que ya estaba (devuelve el que quedó).
+func TestDeploySettingsManagerNode(t *testing.T) {
+	db := sqlitetest.New(t)
+	s := NewDeploySettings(db)
+	ctx := context.Background()
+	if id, err := s.Get(ctx); err != nil || id != "" {
+		t.Fatalf("sin guardar: %q, %v", id, err)
+	}
+	if id, err := s.SetIfMissing(ctx, "node-1"); err != nil || id != "node-1" {
+		t.Fatalf("primera: %q, %v", id, err)
+	}
+	if id, err := s.SetIfMissing(ctx, "node-2"); err != nil || id != "node-1" {
+		t.Fatalf("no pisa: %q, %v", id, err)
+	}
+	if id, err := s.Get(ctx); err != nil || id != "node-1" {
+		t.Fatalf("Get: %q, %v", id, err)
+	}
+	var value string
+	var encrypted bool
+	if err := db.Conn(ctx).QueryRowContext(ctx, `SELECT value, encrypted FROM settings WHERE key = 'manager_node_id'`).Scan(&value, &encrypted); err != nil {
+		t.Fatal(err)
+	}
+	if value != "node-1" || encrypted {
+		t.Fatalf("value=%q encrypted=%v", value, encrypted)
+	}
+}

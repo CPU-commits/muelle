@@ -1076,7 +1076,7 @@ func (u *SeedInitRegistry) Execute(ctx context.Context, r *dto.InitRegistry) err
 - Modify: `src/internal/deploy/app/usecases/remove_app.go`, `src/internal/deploy/module.go`, `module_test.go`
 - Create: `src/internal/deploy/integration_test.go` y `integration_main_test.go` (los dos `//go:build integration`)
 
-- [ ] **Step 1: Puertos y adaptadores (tests primero, con `dockertest`).**
+- [x] **Step 1: Puertos y adaptadores (tests primero, con `dockertest`).**
 
 ```go
 // Credential es la credencial de un registry para el paso 2 y el 5; se

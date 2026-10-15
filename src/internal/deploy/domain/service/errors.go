@@ -33,4 +33,24 @@ var (
 	// devuelve DeployRepository.ReadLog; el caso de uso lo traduce a un 422
 	// en offset.
 	ErrOffsetBeyond = errors.New("el offset pasa el largo del log")
+	// ErrWorkerBusy: RemoveApp no pudo detener el worker de la app en 15 s
+	// (contrato §1.1): la app no se borra, 409 conflict, y se reintenta.
+	ErrWorkerBusy = errors.New("un deploy de la app todavía no se detiene; vuelve a intentar en unos segundos")
 )
+
+// Los errores de los puertos de Docker (Images y Cluster).
+var (
+	// ErrImageNotFound: la imagen o el tag no existen en el registry.
+	ErrImageNotFound = errors.New("la imagen no existe en el registry")
+	// ErrImageDenied: el registry no da acceso a la imagen con esa credencial
+	// (o sin credencial).
+	ErrImageDenied = errors.New("el registry no da acceso a la imagen")
+	// ErrSwarmNotFound: el servicio o la tarea no están en Swarm.
+	ErrSwarmNotFound = errors.New("no está en Swarm")
+)
+
+// ErrAppRemoved es la causa con que RemoveApp cancela el worker de una app
+// (context.Cause): el deploy en curso cierra failed con "la app se borró
+// durante el deploy". Una cancelación con otra causa es el apagado, que deja
+// el deploy running (contrato §1.2).
+var ErrAppRemoved = errors.New("la app se borró durante el deploy")

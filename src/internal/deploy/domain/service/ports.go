@@ -93,15 +93,59 @@ type Ingress interface {
 // Stacks es Docker para los stacks de las apps (adaptador en
 // infra/out/service, con shared/infra/out/docker).
 type Stacks interface {
+	// Deploy ejecuta docker stack deploy del compose final (§7 paso 5), con
+	// las credenciales de creds para --with-registry-auth, y devuelve su
+	// salida para el log, sin enmascarar: quien la escribe la enmascara. Si
+	// el comando falla, también devuelve la salida.
+	Deploy(ctx context.Context, stack string, compose []byte, creds []Credential) (string, error)
 	// Remove ejecuta docker stack rm del stack (no espera a que los servicios
 	// terminen ni borra los volúmenes). Un stack que no existe no es un error.
 	// Docker caído o sin Swarm: un error que envuelve entity.ErrDockerUnavailable.
 	Remove(ctx context.Context, stack string) error
 }
 
+// Images resuelve las imágenes en su registry (§7 paso 2).
+type Images interface {
+	// Digest consulta el registry por ref (también si ya trae un digest: así
+	// verifica que exista y que la credencial llegue) y devuelve el digest de
+	// su manifiesto ("sha256:…"). cred nil es anónimo. ErrImageNotFound,
+	// ErrImageDenied o un error que envuelve entity.ErrDockerUnavailable.
+	Digest(ctx context.Context, ref string, cred *Credential) (string, error)
+}
+
+// Cluster es lo que deploy lee de Swarm: los servicios de una app, sus
+// tareas y sus logs, y el nodo local (adaptador en infra/out/service). Con
+// Docker caído o sin Swarm, un error que envuelve entity.ErrDockerUnavailable.
+type Cluster interface {
+	// AppServices son los servicios con las etiquetas de la app
+	// (naming.AppLabels), ordenados por nombre.
+	AppServices(ctx context.Context, project, stage, app string) ([]SwarmService, error)
+	// Service es el servicio de ese nombre de Swarm; ErrSwarmNotFound si no está.
+	Service(ctx context.Context, name string) (SwarmService, error)
+	// Tasks son las tareas del servicio (también las terminadas), de la más
+	// nueva a la más vieja.
+	Tasks(ctx context.Context, serviceID string) ([]SwarmTask, error)
+	// TaskLogs son las últimas tail líneas del log de una tarea, sin seguirlo;
+	// los pedazos de una línea larga vienen tal cual (LogLine).
+	// ErrSwarmNotFound si la tarea no existe.
+	TaskLogs(ctx context.Context, taskID string, tail int) ([]LogLine, error)
+	// LocalNodeID es el id del nodo local en el Swarm (Info().NodeID).
+	LocalNodeID(ctx context.Context) (string, error)
+}
+
+// ManagerNode es settings.manager_node_id (contrato §1.1 y §1.2; la clave es
+// entity.SettingManagerNodeID de shared/domain/entity): el nodo donde quedan
+// los volúmenes de una app si no tiene storage_node_id (§6.2).
+type ManagerNode interface {
+	// Get es el id guardado, o "" si no está.
+	Get(ctx context.Context) (string, error)
+	// SetIfMissing guarda id si no había uno y devuelve el que quedó: nunca
+	// pisa el que ya estaba.
+	SetIfMissing(ctx context.Context, id string) (string, error)
+}
+
 // Queue es la cola de deploys: un worker por app (§7 paso 1). La implementa
-// el despachador (T4); hasta entonces, module.go usa una que siempre acepta y
-// no corre nada.
+// el despachador (usecases.Dispatcher).
 type Queue interface {
 	// Wake avisa que la app tiene un deploy queued nuevo.
 	Wake(appID int64)
