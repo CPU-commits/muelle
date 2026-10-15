@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -378,4 +379,58 @@ func TestSessionRequired(t *testing.T) {
 		httptestutil.Expect(t, e.c.Do("GET", path, nil), http.StatusUnauthorized)
 	}
 	httptestutil.Expect(t, e.c.Do("POST", "/api/v1/projects", map[string]string{"slug": "a", "name": "A"}), http.StatusUnauthorized)
+}
+
+// Contrato §2.12: cada app trae sus servicios y sus puertos, para que el
+// formulario de un dominio ofrezca los destinos sin esperar al primer deploy.
+func TestAppServices(t *testing.T) {
+	e := newEnv(t)
+	e.seedStage(t)
+	c := e.c
+	httptestutil.Expect(t, c.Do("POST", appsPath, map[string]any{"slug": "api", "kind": "service",
+		"spec": map[string]any{"image": "x", "port": 3000}}, s), http.StatusCreated)
+	w := c.Do("POST", appsPath, map[string]any{"slug": "front", "kind": "compose",
+		"compose_yaml": "services:\n  worker:\n    image: y\n  web:\n    image: nginx\n    expose: [\"80\"]\n"}, s)
+	httptestutil.Expect(t, w, http.StatusCreated)
+	if got := httptestutil.Decode[map[string]any](t, w)["services"]; jsonOf(t, got) != `[{"name":"web","ports":[80]},{"name":"worker","ports":[]}]` {
+		t.Fatalf("POST: services = %s", jsonOf(t, got))
+	}
+
+	want := map[string]string{
+		"api":   `[{"name":"api","ports":[3000]}]`,
+		"front": `[{"name":"web","ports":[80]},{"name":"worker","ports":[]}]`,
+	}
+	for slug, services := range want {
+		w := c.Do("GET", appsPath+"/"+slug, nil, s)
+		httptestutil.Expect(t, w, http.StatusOK)
+		if got := jsonOf(t, httptestutil.Decode[map[string]any](t, w)["services"]); got != services {
+			t.Errorf("GET %s: services = %s, esperaba %s", slug, got, services)
+		}
+	}
+	w = c.Do("GET", appsPath, nil, s)
+	httptestutil.Expect(t, w, http.StatusOK)
+	for _, app := range httptestutil.Decode[[]map[string]any](t, w) {
+		if got := jsonOf(t, app["services"]); got != want[app["slug"].(string)] {
+			t.Errorf("GET apps %s: services = %s", app["slug"], got)
+		}
+	}
+
+	// Un compose que se guardó antes de validarlo (Fase 1) y no se puede leer: [], no null.
+	if _, err := e.db.Conn(context.Background()).ExecContext(context.Background(),
+		`UPDATE apps SET compose_yaml = 'a: 1' WHERE slug = 'front'`); err != nil {
+		t.Fatal(err)
+	}
+	w = c.Do("GET", appsPath+"/front", nil, s)
+	if got := jsonOf(t, httptestutil.Decode[map[string]any](t, w)["services"]); got != `[]` {
+		t.Errorf("compose ilegible: services = %s", got)
+	}
+}
+
+func jsonOf(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
