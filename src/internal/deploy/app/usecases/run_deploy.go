@@ -438,6 +438,9 @@ func (r *run) converge(ctx context.Context, expected []string, appliedAt, settle
 	var lastServices []service.SwarmService
 	down := false
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		services, err := u.Cluster.AppServices(ctx, app.Project, app.Stage, app.Slug)
 		switch {
 		case err != nil && ctx.Err() != nil:

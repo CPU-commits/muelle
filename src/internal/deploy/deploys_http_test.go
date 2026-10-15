@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
+	"github.com/CPU-commits/muelle/src/cmd/http/utils"
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/service"
 	depsqlite "github.com/CPU-commits/muelle/src/internal/deploy/infra/out/repository/sqlite"
@@ -303,4 +304,34 @@ func TestTokenScopes(t *testing.T) {
 	// Y el de otro proyecto sí despliega en el suyo.
 	expectQueued(t, h.c.Do("POST", "/api/v1/projects/otro/stages/prod/apps/web/deploys", nil, httptestutil.WithBearer("tx")),
 		"/api/v1/projects/otro/stages/prod/apps/web")
+}
+
+// Mientras una app se borra (RemoveApp, contrato §1.1), POST …/deploys y
+// …/rollback son 409 conflict; las otras apps siguen, y el bloqueo vence a
+// los 2 min (lo que tarda catalog en borrar la fila).
+func TestRemoveAppBlocksDeploysHTTP(t *testing.T) {
+	h := newHTTPTest(t)
+	h.seed(t)
+	if err := h.m.RemoveApp(context.Background(), "auditfy", "staging", "api"); err != nil {
+		t.Fatal(err)
+	}
+	expectError(t, h.c.Do("POST", apiPath+"/deploys", nil, session()), http.StatusConflict, "conflict", "la app se está borrando")
+	expectError(t, h.c.Do("POST", apiPath+"/rollback", nil, session()), http.StatusConflict, "conflict", "la app se está borrando")
+	expectQueued(t, h.c.Do("POST", infraPath+"/deploys", nil, session()), infraPath)
+	h.clock.Advance(2 * time.Minute)
+	expectQueued(t, h.c.Do("POST", apiPath+"/deploys", nil, session()), apiPath)
+}
+
+// ErrWorkerBusy (RemoveApp no pudo detener el worker) es 409 conflict con su
+// mensaje: el Kit es uno solo, así que el DELETE de catalog lo responde igual.
+func TestWorkerBusyIsConflict(t *testing.T) {
+	m, _ := newTestModule(t)
+	c := httptestutil.New(t, testAuth, func(k *utils.Kit) {
+		m.RegisterRoutes(k)
+		k.Handle("DELETE /api/v1/prueba", utils.AccessSession, func(w http.ResponseWriter, r *http.Request) {
+			k.Fail(w, r, fmt.Errorf("deploy: %w", service.ErrWorkerBusy))
+		})
+	})
+	expectError(t, c.Do("DELETE", "/api/v1/prueba", nil, session()), http.StatusConflict, "conflict",
+		"un deploy de la app todavía no se detiene; vuelve a intentar en unos segundos")
 }

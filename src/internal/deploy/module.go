@@ -115,7 +115,7 @@ func New(d Deps) *Module {
 		deploys:      deploys,
 		dispatcher:   dispatcher,
 		storeManager: usecases.NewStoreManagerNode(dk, settings, d.Log),
-		removeApp:    usecases.NewRemoveApp(stacks),
+		removeApp:    usecases.NewRemoveApp(apps, deploys, stacks, dispatcher, hub, d.Clock),
 		seed:         usecases.NewSeedInitRegistry(d.DB, outservice.NewDeploySettings(d.DB), regs, d.Clock, d.Audit),
 		initRegistry: d.InitRegistry,
 		uc: dephttp.UseCases{
@@ -173,11 +173,15 @@ func (m *Module) Run(ctx context.Context) {
 	m.dispatcher.Wait()
 }
 
-// RemoveApp borra lo que la app tiene en Swarm: docker stack rm de
-// proyecto_stage_app (los volúmenes quedan). La llama catalog al borrar la app,
-// antes de borrar la fila; un stack que no existe no es un error. Docker caído
-// o sin Swarm: un error que envuelve entity.ErrDockerUnavailable (503), y la
-// app no se borra. Fase 2: también detiene el worker de la app.
+// RemoveApp borra lo que la app tiene en Swarm (contrato §1.1). La llama
+// catalog al borrar la app, antes de borrar la fila: deja de aceptar deploys
+// de la app por 2 min (409 conflict), detiene su worker (el deploy en curso
+// cierra failed), marca failed sus queued y hace docker stack rm de
+// proyecto_stage_app (los volúmenes quedan); un stack que no existe no es un
+// error. Docker caído o sin Swarm: un error que envuelve
+// entity.ErrDockerUnavailable (503). Si el worker no se detiene en 15 s,
+// service.ErrWorkerBusy (409). En los dos casos la app no se borra y vuelve a
+// aceptar deploys.
 func (m *Module) RemoveApp(ctx context.Context, project, stage, app string) error {
 	return m.removeApp.Execute(ctx, dto.AppRef{Project: project, Stage: stage, App: app})
 }

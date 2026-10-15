@@ -167,6 +167,9 @@ func (s *swarmSim) deploy(d docker.StackDeploy) error {
 		}
 
 		prev := s.services[full]
+		if _, err := s.f.InspectService(context.Background(), full); err != nil {
+			prev = nil // lo borró un docker stack rm: Swarm lo crea de nuevo
+		}
 		ss := &simService{template: tmpl}
 		ss.svc = docker.Service{Name: full, Labels: labels, Image: cs.Image, RunningTasks: running, DesiredTasks: replicas}
 		if !global {
