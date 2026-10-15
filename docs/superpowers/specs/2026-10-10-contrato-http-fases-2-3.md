@@ -93,7 +93,7 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 | De → a | Puerto (dónde se declara) | Lo implementa | Para qué |
 |---|---|---|---|
 | catalog → ingress | `catalog/domain/service.StageNetworks`: `EnsureStageNetwork`, `RemoveStageNetwork` | `ingress.Module` (hecho) | Crear y borrar la red overlay del stage, y conectar o desconectar Caddy (§3.2). Opcional en `catalog.Deps`: con `nil`, catalog no toca Docker |
-| catalog → deploy | `catalog/domain/service.AppRuntime`: `RemoveApp(ctx, p, s, a)` | `deploy.Module` (hecho: `docker stack rm`) | Al borrar una app. Fase 2: antes del `stack rm`, deja de aceptar deploys de la app por 2 min (`409 conflict`, lo que tarda catalog en borrar la fila), cancela el deploy en curso (`failed`: "la app se borró durante el deploy") y marca `failed` los `queued`. Si el `stack rm` falla, vuelve a aceptar deploys enseguida. Opcional |
+| catalog → deploy | `catalog/domain/service.AppRuntime`: `RemoveApp(ctx, p, s, a)` | `deploy.Module` (hecho: `docker stack rm`) | Al borrar una app. Fase 2: antes del `stack rm`, deja de aceptar deploys de la app por 2 min (`409 conflict`, lo que tarda catalog en borrar la fila), cancela el deploy en curso (`failed`: "la app se borró durante el deploy") y marca `failed` los `queued`. Si el `stack rm` falla, vuelve a aceptar deploys enseguida. Si el deploy en curso no se detiene en 15 s, no sigue (ni `queued` ni `stack rm`): vuelve a aceptar deploys y el `DELETE` de la app responde `409 conflict` ("un deploy de la app todavía no se detiene"), sin borrarla; se reintenta. Opcional |
 | deploy → secrets | `deploy/domain/service.EnvResolver`: `ResolveEnv(ctx, appID) (vars, secretValues, err)` | `secrets.Module` (hecho) | Las variables del stage con las de la app encima, y los valores secretos para enmascarar el log |
 | deploy → ingress | `deploy/domain/service.Ingress`: `EnsureStageNetwork`, `SyncRoutes(ctx) error` | `ingress.Module` (red hecha; `SyncRoutes` es esqueleto) | §7 pasos 4 y 7 |
 | admin → ingress | `admin/domain/service.ProxyHook`: `CheckCloudflareToken`, `ProxySettingsChanged(ctx, old, next)` | `ingress.Module` (esqueleto: no verifica y no aplica) | Ver §3.5 |
@@ -104,7 +104,7 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 |---|---|---|---|
 | deploy | `apps` (catalog) | Solo `storage_node_id` (si está vacío) y `last_deployed_at` (solo hacia adelante) | `deploy/infra/out/service.NewCatalogApps` → `service.Apps` (hecho) |
 | deploy | `domains` (ingress): los destinos, para validar el render (§6.3) | — | `NewDomainTargets` → `service.DomainTargets` (hecho) |
-| deploy | `settings.manager_node_id` | `manager_node_id` al arrancar | Fase 2 |
+| deploy | `settings.manager_node_id` y `settings.init_registry_applied` | `manager_node_id` al arrancar; `init_registry_applied`, la marca del registry inicial de install (§2.10), en el primer arranque de la base | Fase 2 |
 | ingress | `settings` (admin): `entity.ProxySettings`, con el token descifrado | `cloudflare_zones` y las claves reservadas de §3.6 | `ingress/infra/out/service.NewProxySettingsReader` (hecho) |
 | ingress | `apps`, `stages` y `projects` (catalog), para el kind de la app y los nombres de los servicios | — | Fase 3 |
 | ingress | `registries` (deploy), solo si `caddy_image` es privada | — | Opcional, Fase 3 |
@@ -117,6 +117,7 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 | Momento | Qué | Dónde |
 |---|---|---|
 | `container.New` | Migra, verifica la clave maestra y guarda los ajustes de arranque: `panel_domain` siempre, y `MUELLE_INIT_*` solo en el primer arranque de la base (§5.2) | `admin.ApplyStartupSettings` (hecho) |
+| `container.New`, justo después | El registry inicial de install (`MUELLE_INIT_REGISTRY_FILE`), solo en el primer arranque de la base (§2.10) | `deploy.SeedInitRegistry` (Fase 2) |
 | `main` → `cron.Run(bgCtx, c.Jobs)` | Corre cada job **al arrancar** y después según su intervalo | `cmd/cron` |
 | `main` → `c.Run(bgCtx)` | `deploy.Run` e `ingress.Run` en paralelo; vuelve cuando los dos terminaron | `container.Run` (hecho) |
 
@@ -410,7 +411,7 @@ El estado real en Swarm de los servicios de la app (filtrados por `naming.AppLab
 | `health` | `healthy`, `unhealthy` o `starting`, del contenedor en el nodo local (`InspectContainer`); null si no tiene healthcheck o no está en este nodo |
 | `node` | El hostname del nodo (`Node`, con caché) |
 | `since` | `Task.UpdatedAt`, truncada al milisegundo (Docker la da con nanosegundos; §0) |
-| `error` | `Task.Err`; null si está vacío |
+| `error` | `Task.Err`, enmascarado como el log (§2.5) con los valores secretos de la app y del stage: puede traer un argumento de `command` ya interpolado. Null si está vacío |
 | `cpu_percent`, `memory_bytes` | Los de su contenedor (`ContainerStats`), si la tarea corre en el nodo local. `cpu_percent` es el % de un núcleo, como `docker stats`. Null si la tarea no está en el nodo local, no corre o no se pudo medir. Las muestras se toman en paralelo, con un plazo total de 2 s |
 
 El panel lee los valores de cada tarea (suma el CPU y promedia la RAM de las que se midieron, para compararla con `memory_limit_bytes`, que es por tarea). Las sumas del servicio son para otros clientes.
@@ -494,6 +495,10 @@ Se valida en su forma canónica, sin normalizar: minúsculas, etiquetas `[a-z0-9
   - el paso 5 pasa a `DeployStack` solo las credenciales de los hosts que usa el compose.
   - `docker.RegistryAuth` y `docker.StackDeploy` (que lleva el compose final, con los valores de las variables) se imprimen sin la contraseña ni el compose: `String`, `GoString`, `LogValue` y `MarshalJSON` los ocultan, así un `slog`, un `%v` o un `json.Marshal` no los filtran.
 - Cambiar o borrar un registry no redespliega nada.
+- **El registry inicial de install.** Las imágenes de muelle son privadas, así que install le pasa a muelle la credencial con que las bajó: un JSON `{"host", "username", "password"}` en un secreto Swarm, con su ruta en `MUELLE_INIT_REGISTRY_FILE` (la Fase 5 documenta el secreto y la variable en §5.2 y §5.3).
+  - `settings.Load` lee y valida el archivo en cada arranque, como el del token de Cloudflare: JSON estricto (sin otros campos) y las reglas de esta sección para `host`, `username` y `password`. Si no sirve, muelle no arranca, y el error nombra la variable sin la contraseña ni el contenido del archivo.
+  - deploy lo guarda como un registry (cifrado, con `registry.create`, actor `system` y details `{"username", "source": "install"}`) **solo en el primer arranque de la base**, como los demás `MUELLE_INIT_*` (§5.2). La marca es suya, `init_registry_applied` en `settings`, y se guarda en ese arranque haya o no archivo, en la misma transacción que el registry.
+  - Por qué una marca: el secreto y la variable quedan en el servicio. Sin la marca, un registry que el admin borró en el panel (porque el token se filtró) volvería con el próximo reinicio. Una reinstalación sobre el mismo `muelle_data` no cambia las credenciales: se editan en el panel.
 - **Limitación aceptada (v1): las credenciales son de todo muelle, no de un proyecto.** Un token con alcance al proyecto A puede mandar `{"image": "ghcr.io/<otra-org>/<privada>"}`: muelle la resuelve y la baja con la credencial de `ghcr.io`, y la corre en la app de A. Así, ese token llega a cualquier imagen que vea la credencial, también a las de otro proyecto.
   - Se acepta porque solo una sesión maneja las credenciales, y una sesión puede hacer todo (§10.1 del diseño). El token ya puede correr la imagen que quiera en sus apps; lo nuevo es que puede leer las imágenes privadas que ve la credencial.
   - Para acotarlo, la credencial debería ver solo las imágenes que despliega muelle (un token de solo lectura de esa organización). El panel puede decirlo al guardar un registry.
