@@ -357,7 +357,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
 
   **Commit:** `feat(entity): las claves panel_cf_* del registro DNS del panel`
 
-- [ ] **Step 3: La entidad `Domain`.**
+- [x] **Step 3: La entidad `Domain`.**
 
   **Tests primero** (`domain_test.go`, `records_test.go`):
   - `TestNewDomain`:
