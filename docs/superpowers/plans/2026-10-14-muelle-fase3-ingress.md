@@ -26,6 +26,7 @@
 - Las rutas responden `404 no_route`.
 - La tabla `domains` existe (`0003_ingress.sql`).
 - El contrato ya tiene las precisiones de la Fase 3 (commits `4479f23` y `5e353d3`), y el diseño está al día (`8f732d2`).
+- La revisión de este plan sumó al contrato (`2249ccc`) y al diseño (`a2220f7`): `record_exists` conserva la zona y el TLS de Cloudflare (D7), la imagen de Caddy se baja antes de detener el contenedor (D11), `trusted_proxies_strict` y sin llaves en el email ni el token (D16).
 
 ---
 
@@ -43,8 +44,8 @@
 | `src/shared/infra/out/sqlite/migrations/0003_ingress.sql` y `TestDomainsSchema` en `migrations_test.go` | T1 | Tres `CHECK` nuevos (D19) |
 | `src/shared/domain/entity/panel_dns.go` (nuevo) | T1 | Las constantes `panel_cf_*` (contrato §3.6) |
 | `src/shared/infra/container/container_test.go` | T3, T4 | Solo la línea de `TestNew` con los nombres de los jobs |
-| `src/shared/infra/container/container.go` | T5 | `WithIngress` y pasar `Options` a `ingress.New` |
-| `src/shared/infra/container/ports_test.go` | T5 | `TestContractProxySettings` usa el Cloudflare falso |
+| `src/shared/infra/container/container.go` | T2 | `WithIngress` y pasar `Options` a `ingress.New` |
+| `src/shared/infra/container/ports_test.go` | T2 | `TestContractProxySettings` usa el Cloudflare falso, mucho antes de que T5 cablee el hook que lo llama |
 | `src/shared/infra/container/ingress_test.go` (nuevo) | T5 | Contratos de ingress con el contenedor completo |
 | `README.md` | T5 | La línea de la Fase 3 en "Estado" y el bloque "Fase 3" de las notas |
 | Contrato (§1.1 y §1.2 de ingress, §3, filas de ingress de §7) y diseño (§3.1, §3.2, §8, §9) | T5 | Marcar "hecho" y lo que cambie al implementar |
@@ -54,6 +55,7 @@
 **Al integrar** (no lo hace este plan):
 - Los tests `ctr23` del paquete docker corren recién al mergear.
 - El conflicto esperable es la línea de jobs de `TestNew`, si la Fase 2 agrega jobs. Se resuelve en el orden de `c.Jobs`: identity, admin, ingress, deploy.
+- Si otra fase suma una opción a `options` en `container.go`, se juntan los dos campos: `WithIngress` no toca nada más.
 
 ## Convenciones (todas las tareas)
 
@@ -80,7 +82,8 @@
   - **Cloudflare:** solo `cftest` (T1), un servidor HTTP falso. **Nunca la API real.**
     - En producción, el cliente usa `https://api.cloudflare.com/client/v4`.
     - Todo test que llegue a Cloudflare pasa `Options.CloudflareURL` al falso.
-    - Un test que use el contenedor completo con un token tiene que inyectarlo (T5).
+    - Desde T2, `newTestModule` (`module_test.go`) siempre pasa un `cftest` nuevo en `Options.CloudflareURL`, y todo test del contenedor completo que mande un token usa `WithIngress` con un `cftest`. Así, cuando T5 cablea los hooks, ningún test existente sale a la red.
+    - Tampoco a mano: la prueba con el binario (T5 Step 7) nunca manda un token bien formado.
   - **Caddy:** `caddytest` (T2), una admin API falsa.
   - Se corren con `-race`.
 - **Tests de integración** (`//go:build integration`, solo los de `./src/internal/ingress/...`):
@@ -89,6 +92,8 @@
   ```
   - Necesitan Docker como manager de un Swarm activo; si no, se saltan.
   - **Nombres:** todo lo que crean empieza con `it3<id>` o `it3-<id>-` (`id` = 4 hex al azar por test), y se borra en `t.Cleanup`, también si el test falla.
+  - **`Run` en segundo plano:** solo con `e.run(m)` (T2 Step 6). Su limpieza cancela `Run` y espera a que vuelva **antes** de borrar contenedores y redes, así el `Recreator` no crea un `it3-<id>-caddy` después de la limpieza.
+  - **Stages:** toda red de stage que crea un test tiene su stage en la base (`ingresstest.Stage`). Si no, el job `"proxy"` la toma por huérfana y la borra a la mitad del test.
   - **Puertos:** solo del host entre 21000 y 21999, por "ranuras": la ranura `n` usa los puertos `21000+100n+1` en adelante (D4). Nunca 80, 443 ni 2019.
   - **Prohibido:** los nombres fijos (`muelle_panel`, `muelle-caddy`, `muelle_caddy_*`, `muelle_muelle`, …) y los tests `ctr23` del paquete docker.
   - No se corren en paralelo: sin `t.Parallel()`.
@@ -121,13 +126,18 @@ Lo que el contrato no fija y este plan decide. Cada una con su porqué.
   - La fila se guarda `pending`, con `tls_mode: http` provisorio.
   - Así el `UNIQUE` de `hostname` reserva el nombre antes de tocar Cloudflare, y un `409` nunca deja registros creados.
   - Un corte a la mitad deja el dominio "sin zona", y `retry` lo arregla (contrato §3.2).
-- **D6. Las operaciones de DNS van de a una:** un `sync.Mutex` (`usecases.Ops`) para crear, editar, borrar, adoptar, reintentar, aplicar un certificado y los hooks.
-  - Cada una corre con `opCtx = context.WithTimeout(context.WithoutCancel(ctx), 30 s)` (20 s en `retry`, 2 min en el hook).
+  - **En cuanto `ensure` encuentra la zona, fija `cf_zone_id` y `tls_mode: cloudflare`**, antes de mirar los registros. Quedan así también con `record_exists`, sin `public_ip` o si falla la creación. `http` con zona no existe: solo queda `http` sin token, sin zona, o si no se pudieron listar las zonas.
+- **D6. Las operaciones de DNS van de a una:** un `sync.Mutex` (`usecases.Ops`) para crear, editar, borrar, adoptar, reintentar, aplicar un certificado, `EnsurePanelDNS` y cada registro de `UpdateManagedRecords`.
+  - Cada una corre con `opCtx = context.WithTimeout(context.WithoutCancel(ctx), limit)`: 30 s (`Timing.DomainOp`), y 20 s en `retry`.
+  - **El plazo corre desde antes de esperar el lock.** Si `ctx` ya trae un plazo más corto (el de 2 min del hook), gana ese. Así el hook nunca pasa de sus 2 min, aunque tenga muchos dominios.
+  - **La espera del lock no se corta, pero tiene un límite:** nadie toma el lock sin un plazo, y la base es rápida. Una operación que esperó llega con menos tiempo para Cloudflare. Si se le acaba, falla por plazo y guarda el error del dominio, como si Cloudflare no respondiera.
   - Las escrituras a la base usan `dbCtx = context.WithoutCancel(ctx)`: así un plazo vencido en Cloudflare igual guarda el error del dominio.
+  - **Fuera del lock**, después de la operación, `syncer.Sync` y `certs.ScheduleFirst` reciben `context.WithoutCancel(ctx)`. Si el cliente se va, el proxy no queda `out_of_sync` por un `ctx` cancelado. `Sync` tiene su propio plazo de 30 s.
   - *Por qué:* contrato §3.2 ("van de a una y no dependen del cliente").
 - **D7. "Registro ajeno" es un `A`, un `AAAA` o un `CNAME` de ese nombre** que muelle no maneja.
   - Los que crea muelle llevan el comentario `muelle` (`cloudflare.RecordComment`).
   - Ya está en el contrato §3.1.
+  - **Un registro ajeno nunca quita la zona.** El dominio en `record_exists` queda con `cf_zone_id` y `tls_mode: cloudflare`: DNS-01 no depende del registro, y es lo que necesita la migración (spec §16) mientras Dokploy tiene 80/443. `adopt` usa esa zona y no vuelve a buscarla.
 - **D8. Zonas:** se listan en cada operación, todas las páginas (`per_page=50`), sin caché y en cualquier estado. La zona es la del sufijo más largo.
   - *Por qué:* son pocas llamadas, y una caché agregaría un estado que se puede quedar viejo cuando el usuario agrega una zona.
 - **D9. Verificar un certificado:**
@@ -140,8 +150,10 @@ Lo que el contrato no fija y este plan decide. Cada una con su porqué.
   - **`pending`:** un barrido cada minuto de todos los `pending`.
   - **Todos los demás:** el job `"certificados"`, cada hora: `pending`, `active` y `error` + `certificate`.
   - *Por qué:* es simple, y sobrevive a un reinicio (el barrido encuentra los `pending` igual).
-- **D11. Recrear muelle-caddy:** `StopContainer` (10 s), `RemoveContainer(force)` y `CreateContainer`. Después se conectan las redes de stage **antes** de `StartContainer`.
+- **D11. Recrear muelle-caddy:** primero la imagen, después `StopContainer` (10 s), `RemoveContainer(force)` y `CreateContainer`. Las redes de stage se conectan **antes** de `StartContainer`.
+  - **La imagen se baja antes de tocar el contenedor que corre** (`InspectImage`, y `PullImage` con la credencial si falta). Si no baja (el registry caído o con rate limit, o una `caddy_image` privada sin credencial: `ErrDenied`), `Ensure` devuelve el error y el contenedor anterior sigue sirviendo los sitios y el panel; el error queda en `GET /proxy`. *Por qué:* en una actualización de muelle (contrato §5.4), detenerlo antes dejaría todo caído durante el pull, y sin proxy (ni panel) si el pull falla: arreglarlo pediría SSH.
   - **Puerto ocupado (`ErrPortInUse`):** se borra enseguida el contenedor que no arrancó, para que nadie lo arranque sin puertos (Docker 29).
+  - **Una red de stage que ya no existe** no es un error, ni al crear ni al conectar en caliente: se registra en el log y se salta.
   - **Con `Enabled` falso:** nunca se borra un contenedor que exista.
 - **D12. El job `"proxy"`, en orden:**
   1. Si está `disabled`, no hace nada.
@@ -163,6 +175,9 @@ Lo que el contrato no fija y este plan decide. Cada una con su porqué.
   - La recreación usa generaciones, así un cambio que llega durante una recreación no se pierde.
 - **D16. El JSON de Caddy:**
   - Un servidor `muelle` en `:443`, con `trusted_proxies` estáticos (los rangos de Cloudflare, una lista verificada el 2026-10-14 en cloudflare.com/ips-v4 y ips-v6) y `client_ip_headers`.
+  - `trusted_proxies_strict: 1`: `X-Forwarded-For` se lee de derecha a izquierda, así cuenta la IP que vio Cloudflare y no una que el cliente puso adelante. Solo importa si falta `CF-Connecting-IP`. Verificado con `caddy validate` en `caddy:2-alpine`.
+  - **Sin placeholders en los ajustes:** Caddy expande placeholders en el `email` del emisor `acme` (verificado: `a{x}@b.cl` da "unrecognized placeholder {x}" y el `/load` falla entero) y caddy-dns/cloudflare los expande en `api_token` (un `{file.…}` leería un archivo). Por eso `Render` devuelve `service.ErrPlaceholderInSettings` si el email o el token tienen `{` o `}`, sin mandar nada. Así se mantiene el invariante "el único placeholder es `{http.vars.client_ip}`". `validate.Email` acepta llaves (son legales en RFC 5322), y el token de admin también (`[\x21-\x7e]`).
+  - Se serializa con `jsonv2.Deterministic(true)`: `encoding/json/v2` no ordena las claves de un mapa sin esa opción (`go doc encoding/json/v2 Deterministic`), y los golden dependen del orden.
   - La ruta del panel va primero y siempre como `subroute`: la del `403` solo si hay `panel_allowed_cidrs`. Las de los dominios van ordenadas por hostname; cada ruta es `terminal`.
   - TLS en dos políticas con `subjects` explícitos y ordenados: primero `cloudflare` (si hay token y hosts), después `http`. No hay política sin `subjects`.
   - `email` va solo si no está vacío.
@@ -182,7 +197,7 @@ Lo que el contrato no fija y este plan decide. Cada una con su porqué.
 - **D21. `target_service`** se valida con `validate.VolumeName("target_service", s)`: es la regla de un servicio compose, y su comentario lo dice. No hace falta una función nueva en `shared/domain/validate`.
 - **D22.** En un `PATCH`, `proxied` presente sobre un dominio sin `cf_record_id` es `422`, aunque el valor sea el mismo. Es lo literal del contrato, y el panel no lo manda.
 - **D23. `retry` decide en este orden:**
-  1. `error` con `cloudflare` o `record_exists`: rehace el DNS.
+  1. `error` con `cloudflare` o `record_exists`: rehace el DNS. Si el registro ajeno sigue, queda en `record_exists` con su zona y `tls_mode: cloudflare` (D7).
   2. Si no, sin zona y sin registros propios: busca la zona y, si la encuentra, crea los registros.
   3. Si no: verifica el certificado.
   - Después de los pasos 1 y 2, agenda la verificación de los 30 s.
@@ -190,11 +205,21 @@ Lo que el contrato no fija y este plan decide. Cada una con su porqué.
 - **D25. `cftest` y `caddytest`** son paquetes (no archivos `_test`), porque los usan los tests de varios paquetes de ingress.
 - **D26. `proxied` sin zona:** se guarda `false` si no hay token o no hay zona. Si no se pudieron listar las zonas, se guarda el pedido, para que `retry` lo use.
 - **D27. El registro del panel:**
-  - Se crea solo si no hay ningún `A`, `AAAA` ni `CNAME` de ese nombre. Va con `proxied: false` y el comentario `muelle`.
+  - Se crea solo si no hay ningún `A`, `AAAA` ni `CNAME` de ese nombre que muelle no maneje. Va con `proxied: false` y el comentario `muelle`.
   - Su `AAAA` se crea solo si muelle maneja el `A`.
   - Nunca se cambia su `proxied`.
   - Un id guardado que ya no existe, o que es de otro nombre, se olvida y no se borra (contrato §3.4).
+  - Excepción (D29): si el `A` guardado ya no existe y el `AAAA` guardado sí, y es de ese nombre, el `AAAA` se borra. Si no, ese `AAAA` contaría como "otro registro", y el panel quedaría sin `A`.
 - **D28. `cloudflare_zones`** se actualiza dentro de `EnsurePanelDNS`, que ya listó las zonas. Se guarda con `SaveZones(token, n)`, un compare-and-set en una transacción: si el token guardado ya no es el que se usó, no se guarda (contrato §3.6).
+- **D29. Si desaparece el `A` propio, muelle tampoco maneja más el `AAAA`.**
+  - Pasa cuando Cloudflare da `404` al actualizar o leer el `A` guardado. Entonces muelle borra en Cloudflare el `AAAA` propio (un `404` ahí no es error) y olvida los dos ids. Después sigue la regla de cada caso: `error` + `cloudflare` en `UpdateManagedRecords` y `setProxied`, y crear de nuevo en `ensure` y `retry`.
+  - Si el borrado del `AAAA` falla, igual se olvidan los dos ids, y el mensaje lo dice. Ese `AAAA` pasa a ser ajeno, y el reintento lo muestra como `record_exists` (→ Adoptar).
+  - Vale igual para el registro del panel (`panel_cf_record_id` y `panel_cf_record_id_aaaa`).
+  - *Por qué:* el `CHECK` de D19 (`cf_record_id_aaaa` ⇒ `cf_record_id`) haría fallar el `repo.Update`, y el error del dominio no se guardaría. Si el `AAAA` solo se olvidara, el reintento lo vería como ajeno y nunca volvería a crear los registros.
+- **D30. Los ajustes se leen dentro del lock** en cada `Ops.Do` de `UpdateManagedRecords` y en `EnsurePanelDNS`, junto con el dominio (uno que ya no está se salta).
+  - Los registros van a los ajustes guardados en ese momento, no al `next` que recibió el hook. Así, de dos `PATCH /settings` seguidos, el hook que termina último nunca deja la IP del primero.
+  - `old`/`next` solo deciden si hay algo que hacer.
+- **D31. `VerifyToken` mira `result.status`.** `GET /user/tokens/verify` responde `200` también con un token `disabled` o `expired` (verificado en la documentación de la API de Cloudflare). Un estado que no es `active` es un `*DNSError` (rechazado), como un `401`.
 
 ## Mapa de archivos
 
@@ -205,13 +230,14 @@ src/
 │   └── infra/
 │       ├── out/sqlite/migrations/0003_ingress.sql  (T1) + CHECK (D19); test en migrations_test.go
 │       └── container/
-│           ├── container.go                        (T5) WithIngress, Options a ingress.New
+│           ├── container.go                        (T2) WithIngress, Options a ingress.New
+│           ├── ports_test.go                       (T2) TestContractProxySettings con cftest
 │           └── ingress_test.go                     (T5) contratos de ingress con el contenedor
 └── internal/ingress/
     ├── module.go                                   (T2…T5) Deps.Options, cableado, Run, hooks
     ├── options.go                                  (T2) Options, Timing, withDefaults
-    ├── ingresstest/ingresstest.go                  (T1) siembra de apps, settings, registries
-    ├── integration_env_test.go                     (T2) //go:build integration: itEnv (redes, volúmenes, puente, backend)
+    ├── ingresstest/ingresstest.go                  (T1) siembra de stages, apps, settings, registries
+    ├── integration_env_test.go                     (T2) //go:build integration: itEnv (redes, volúmenes, puente, backend, run)
     ├── integration_test.go                         (T2…T4) //go:build integration
     ├── domain/
     │   ├── entity/domain.go                        (T1) Domain, Status, ErrorCode, TLSMode, transiciones
@@ -559,6 +585,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
   func (s *Server) URL() string                  // la base, para Options.CloudflareURL y cloudflare.New
   func (s *Server) AddToken(token string)        // /user/tokens/verify lo da "active"
   func (s *Server) AddAccountToken(token string) // /user/tokens/verify responde 401, pero lista zonas
+  func (s *Server) SetTokenStatus(token, status string) // "disabled" o "expired": verify responde 200 con ese status, y lo demás 401
   func (s *Server) AddZone(id, name string)
   func (s *Server) PutRecord(zoneID string, r service.Record) string // devuelve el id (r.ID vacío: uno nuevo)
   func (s *Server) Records(zoneID string) []service.Record          // copia, ordenada por nombre y tipo
@@ -578,6 +605,7 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
   - `TestVerifyToken`:
     - un token activo da `nil`;
     - uno rechazado da `*service.DNSError` con `Status 401`;
+    - uno con `SetTokenStatus(t, "disabled")` o `"expired"` da `*service.DNSError` (`Status 200`), con el estado en el mensaje (D31);
     - el header es `Authorization: Bearer <token>`;
     - el texto de ningún error contiene el token.
   - `TestUnavailable`: dan `errors.Is(err, entity.ErrCloudflareUnavailable)`:
@@ -613,11 +641,14 @@ No cambia ningún comportamiento visible: el módulo sigue siendo esqueleto.
   ```
   Usa `encoding/json/v2`, que ignora los campos desconocidos por defecto. Los mensajes de error nombran la operación y nunca el token.
 
+  `VerifyToken` lee `result.status`: si no es `active`, devuelve `&service.DNSError{Status: 200, Message: "el token está desactivado"}` (o "vencido", o el estado tal cual si es otro) (D31).
+
   **Commit** (dos): `test(ingress): Cloudflare falso para los tests (cftest)` y `feat(ingress): cliente mínimo de Cloudflare (token, zonas y registros DNS)`
 
 - [ ] **Step 8: `ingresstest`.** Helpers para los tests de varios paquetes de ingress (`testing.TB`, con `t.Fatal` ante cualquier error):
   ```go
-  func App(t testing.TB, db *sqlite.DB, project, stage, app, kind string) int64 // crea el proyecto y el stage si faltan; spec '{}' o compose_yaml 'services: {}'
+  func Stage(t testing.TB, db *sqlite.DB, project, stage string)               // crea el proyecto y el stage si faltan (sin apps)
+  func App(t testing.TB, db *sqlite.DB, project, stage, app, kind string) int64 // usa Stage; spec '{}' o compose_yaml 'services: {}'
   func SetProxySettings(t testing.TB, db *sqlite.DB, c cipher.Cipher, p entity.ProxySettings) // Encode() + el token cifrado (o lo borra)
   func Registry(t testing.TB, db *sqlite.DB, c cipher.Cipher, host, user, pass string)
   ```
@@ -644,6 +675,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 - Create: `src/internal/ingress/app/usecases/{proxy_state,sync}.go` + tests
 - Create: `src/internal/ingress/options.go` + `options_test.go`
 - Modify: `src/internal/ingress/module.go`, `module_test.go`
+- Modify: `src/shared/infra/container/container.go` (`WithIngress`), `ports_test.go` (solo `TestContractProxySettings`)
 - Create: `src/internal/ingress/integration_env_test.go`, `integration_test.go` (`//go:build integration`)
 
 - [ ] **Step 1: `BuildProxyConfig`.**
@@ -702,6 +734,9 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   // CaddyRejected: Caddy no aceptó la configuración. Message ya viene sin el
   // token (***) y cortado a 500 caracteres.
   type CaddyRejected struct{ Message string }
+  // ErrPlaceholderInSettings: el email ACME o el token de Cloudflare tienen { o },
+  // que Caddy expandiría como placeholders (D16). No se manda nada.
+  var ErrPlaceholderInSettings = errors.New("el email ACME o el token de Cloudflare tienen { o }, que Caddy tomaría como placeholders")
   ```
 
   **Commit:** `feat(ingress): BuildProxyConfig, la configuración del proxy como datos`
@@ -725,7 +760,9 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - el único placeholder es `{http.vars.client_ip}`: con la regexp `\{[^}]*\}`, todo match es exactamente ese, así no queda ningún atajo del Caddyfile (`{client_ip}`, `{host}`, `{remote_host}`…);
     - el token aparece exactamente una vez por política `cloudflare`, dentro de `api_token`;
     - cada ruta de primer nivel es `terminal`;
-    - `trusted_proxies.ranges == CloudflareRanges`.
+    - `trusted_proxies.ranges == CloudflareRanges` y `trusted_proxies_strict == 1`.
+  - `TestRenderRejectsPlaceholders`: el email `a{x}@b.cl`, y un token con `{file./etc/passwd}` (y otro con solo `}`), dan `errors.Is(err, service.ErrPlaceholderInSettings)`, sin bytes. El texto del error no contiene el token.
+  - `TestRenderDeterministic`: 50 `Render` del caso `full` dan los mismos bytes.
   - `TestCloudflareRanges`: todos parsean con `netip.ParsePrefix` y están en forma canónica (`p.Masked().String() == s`). Son 15 IPv4 y 7 IPv6.
 
   **Implementar:**
@@ -742,7 +779,9 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   	"2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
   }
   ```
-  - `config.go`: `func Render(cfg service.ProxyConfig) ([]byte, error)`, con structs propios que tienen tags JSON y `jsonv2.Marshal`. La forma (verificada con `caddy validate` en `caddy:2-alpine`; el `acme` con `dns` falla ahí solo porque esa imagen no trae el módulo):
+  - `config.go`: `func Render(cfg service.ProxyConfig) ([]byte, error)`, con structs propios que tienen tags JSON y `jsonv2.Marshal(v, jsonv2.Deterministic(true))` (D16).
+    - Antes de armar nada: si `cfg.ACMEEmail` o `cfg.CloudflareToken` tienen `{` o `}` (`strings.ContainsAny`), devuelve `service.ErrPlaceholderInSettings`.
+    - La forma (verificada con `caddy validate` en `caddy:2-alpine`; el `acme` con `dns` falla ahí solo porque esa imagen no trae el módulo):
   ```json
   {"admin": {"listen": "unix//run/caddy-admin/admin.sock"},
    "apps": {
@@ -750,6 +789,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
       "listen": [":443"],
       "trusted_proxies": {"source": "static", "ranges": ["…CloudflareRanges"]},
       "client_ip_headers": ["CF-Connecting-IP", "X-Forwarded-For"],
+      "trusted_proxies_strict": 1,
       "routes": [
         {"match": [{"host": ["panel…"]}], "handle": [{"handler": "subroute", "routes": [
           {"match": [{"not": [{"client_ip": {"ranges": ["…"]}}]}], "handle": [{"handler": "static_response", "status_code": 403}]},
@@ -830,6 +870,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - `onFail` se llamó una vez;
     - el log (un `slog` sobre un buffer) no contiene el token ni la configuración (busca `"routes"`).
   - `TestSyncRecovers`: después de un rechazo, `Accept` y `Sync` dan `synced` y el error se limpia.
+  - `TestSyncPlaceholder`: con `acme_email` `a{x}@b.cl`, `Sync` devuelve un error con `ErrPlaceholderInSettings`, `Loads()` queda vacío y el estado da `out_of_sync` con el mensaje de abajo.
   - `TestSyncForce`: `Sync(ctx, true)` llega con `Forced() == [true]`.
   - `TestSyncSerialized`:
     - 20 goroutines `Sync` con `Delay(5 ms)` dan `MaxInFlight() == 1`;
@@ -862,6 +903,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   El mensaje del estado:
   - un `CaddyRejected` deja su `Message`;
   - un `ErrCaddyUnreachable` deja "muelle no pudo conectarse con la admin API de Caddy; se reintenta solo";
+  - un `ErrPlaceholderInSettings` deja "el email ACME o el token de Cloudflare tienen { o }, que Caddy tomaría como placeholders; corrígelo en Ajustes" (sin el token ni el email);
   - otro error (de la base) deja "error interno armando la configuración" y queda en el log completo.
 
   **Commit:** `feat(ingress): Syncer manda la configuración de a una, con el estado del proxy`
@@ -872,11 +914,17 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `options_test.go`, `TestOptionsDefaults`:
     - `Options{}.withDefaults()` da los nombres de `naming`, `CaddyTLSAddr == "muelle-caddy:443"`, `CloudflareURL == cloudflare.DefaultBaseURL` y los plazos de `Timing` de abajo;
     - un `CaddyContainer` propio cambia también el `CaddyTLSAddr` por defecto (`<nombre>:443`).
-  - `module_test.go`, cambiar `TestModuleStubs` → `TestModuleSyncRoutes`:
-    - con los ajustes vacíos (desarrollo), `SyncRoutes` devuelve `nil` y no llama a la admin API;
-    - con `Enabled` y `caddytest` en `Options.CaddyAdminDial`, devuelve `nil` y llegó un `Load`;
-    - con `Reject`, devuelve error.
+  - `module_test.go`:
+    - `newTestModule` recibe `Options` (o un `func(*Options)`) y **siempre** pone `CloudflareURL` en un `cftest.New(t)` nuevo, que devuelve para que el test lo siembre. Ningún test del módulo puede llegar a la API real cuando T5 cablee los hooks.
+    - Cambiar `TestModuleStubs` → `TestModuleSyncRoutes`:
+      - con los ajustes vacíos (desarrollo), `SyncRoutes` devuelve `nil` y no llama a la admin API;
+      - con `Enabled` y `caddytest` en `Options.CaddyAdminDial`, devuelve `nil` y llegó un `Load`;
+      - con `Reject`, devuelve error.
     - El resto de `TestModuleStubs` (`CheckCloudflareToken`, `ProxySettingsChanged`, `Jobs`, `Run`) queda como está.
+  - `src/shared/infra/container/ports_test.go`, solo `TestContractProxySettings`:
+    - arma un `cf := cftest.New(t)` con `cf.AddToken("cf-token-1234567890abcdef")` y **una zona** (`cf.AddZone("z1", "otra.cl")`, fuera de `panel.test`). Con cero zonas, `CheckCloudflareToken` responde `422` desde T5;
+    - pasa `WithIngress(ingress.Options{CloudflareURL: cf.URL()})` a `New`.
+    - Ahora el hook todavía es esqueleto y el test pasa igual. Desde T5, sin esto, el `PATCH` del token iría a `https://api.cloudflare.com` y fallaría (`422` o `502`).
 
   **Implementar** `options.go`:
   ```go
@@ -898,7 +946,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   	RecreateDelay      time.Duration // 2 s: la recreación después del PATCH
   	FirstCheck         time.Duration // 30 s: la verificación después de crear, adoptar o reintentar
   	PendingEvery       time.Duration // 1 min: el barrido de los pending
-  	DomainOp           time.Duration // 30 s: crear, editar, borrar o adoptar
+  	DomainOp           time.Duration // 30 s: crear, editar, borrar, adoptar, EnsurePanelDNS y cada registro del hook (D6)
   	DomainRetry        time.Duration // 20 s: retry
   	Hook               time.Duration // 2 min: ProxySettingsChanged
   }
@@ -909,7 +957,20 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - Arma el `ProxySettingsReader`, el `CatalogReader`, el repositorio de dominios, `caddy.NewAdmin(o.CaddyAdminDial)`, `NewProxyState()` y `NewSyncer(…, naming.CaddyImageFor(d.Version), o.InternalCA, func() {}, …)`. El `onFail` real llega en T3.
   - `SyncRoutes(ctx)` pasa a ser `m.syncer.Sync(ctx, false)`, con el doc actualizado: disabled → nil; si Caddy no acepta o no responde, un error que deploy registra como advertencia.
 
-  **Commit:** `feat(ingress): SyncRoutes manda la configuración a Caddy (Options para los tests)`
+  `src/shared/infra/container/container.go`, en las líneas de ingress:
+  ```go
+  type options struct {
+  	docker  docker.Engine
+  	ingress ingress.Options
+  }
+  // WithIngress cambia cómo ingress llega a Docker, Caddy y Cloudflare (los
+  // nombres, la admin API, la URL de Cloudflare). Solo para tests: el cero es producción.
+  func WithIngress(o ingress.Options) Option { return func(op *options) { op.ingress = o } }
+  ```
+  - `build` recibe `o.ingress` (un parámetro más) y lo pasa como `ingress.Deps{…, Options: io}`.
+  - Revisa con `git grep -n 'cloudflare_token\|CloudflareToken' -- 'src/shared/infra/container/*_test.go'` que ningún otro test del contenedor mande un token sin `WithIngress`.
+
+  **Commit:** `feat(ingress): SyncRoutes manda la configuración a Caddy, y Options (WithIngress en el contenedor) para que los tests usen fakes`
 
 - [ ] **Step 6: Integración — Caddy real acepta la configuración y enruta.**
 
@@ -931,18 +992,23 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   func newITEnv(t *testing.T, slotN int) *itEnv // salta sin Swarm manager o sin caddy:2-alpine / alpine/socat:latest; registra la limpieza
   func (e *itEnv) startAdminBridge()           // alpine/socat "it3-<id>-admin": monta el volumen admin en /run/caddy-admin, Cmd ["TCP-LISTEN:<admin>,fork,reuseaddr", "UNIX-CONNECT:/run/caddy-admin/admin.sock"], publica 127.0.0.1:<admin>
   func (e *itEnv) startBackend(stage, app string) // caddy:2-alpine "it3-<id>-<app>" en la red del stage, alias naming.Service(project, stage, app, app), Cmd ["caddy","respond","--listen",":8080","--body","hola "+app]
+  func (e *itEnv) startBackendCmd(stage, app string, cmd []string) // igual, con otro Cmd (la sonda de aislamiento de T3)
   func (e *itEnv) startCaddyManually(stages ...string) // solo T2: muelle-caddy de prueba con naming.CaddyCommand()/CaddyEnv(), los volúmenes y puertos de prueba, en la red panel y las de los stages
+  // run corre m.Run en segundo plano. Registra su t.Cleanup (cancelar y esperar
+  // a que Run vuelva, hasta 30 s) DESPUÉS de la limpieza de newITEnv: t.Cleanup
+  // es LIFO, así Run ya terminó cuando se borran contenedores y redes.
+  func (e *itEnv) run(m *Module)
   func (e *itEnv) settings(p shared.ProxySettings) // panel.it3<id>.test, caddy_image "caddy:2-alpine" y los puertos de la ranura
   func (e *itEnv) get(host, path string) (status int, body string, err error) // HTTPS a 127.0.0.1:<https> con ServerName y Host = host (InsecureSkipVerify: el TLS se prueba en T4)
   func (e *itEnv) eventually(timeout time.Duration, what string, check func() (bool, error))
   ```
-  **Limpieza** (`t.Cleanup`, siempre):
+  **Limpieza** (`t.Cleanup`, siempre; la registra `newITEnv`, antes que cualquier `run`):
   1. `RemoveContainer(force)` de los contenedores que creó el test (los anota al crearlos), y también de `opts.CaddyContainer`;
   2. las redes con el prefijo `it3`+id (`ListNetworks(nil)`), reintentando durante 30 s mientras estén en uso;
   3. los volúmenes con ese prefijo (`ListVolumes(nil)` + `RemoveVolume(force)`).
 
   **Test** `TestIntegrationCaddyAcceptsConfig` (ranura 1):
-  1. Arranca el puente; crea la red del stage `s1` con `m.EnsureStageNetwork`; arranca el backend `web`; arranca Caddy a mano.
+  1. Arranca el puente; siembra el stage `s1` y crea su red con `m.EnsureStageNetwork`; arranca el backend `web`; arranca Caddy a mano.
   2. Siembra el dominio `web.it3<id>.test` → `web:8080`.
   3. `eventually(30 s)`: `m.SyncRoutes(ctx) == nil` (Caddy está arrancando).
   4. `eventually(30 s)`: `get("web.it3<id>.test")` da `200 "hola web"`.
@@ -970,7 +1036,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 - responde `GET /api/v1/proxy`.
 
 **Files:**
-- Modify: `src/internal/ingress/domain/service/ports.go` (`Network.Labels`, `Networks.List`, `CaddyRuntime`, `CaddyWant`), `errors.go` (`ErrPortInUse`)
+- Modify: `src/internal/ingress/domain/service/ports.go` (`Network.Labels`, `Networks.List`, `CaddyRuntime`, `CaddyWant`), `errors.go` (`ErrPortInUse`, `ErrCaddyImagePull`)
 - Modify: `src/internal/ingress/infra/out/service/networks.go` + `networks_test.go` (nuevo)
 - Create: `src/internal/ingress/infra/out/service/caddy/container.go` + `container_test.go`
 - Modify: `src/internal/ingress/app/usecases/stage_network.go` + `stage_network_test.go`
@@ -1003,6 +1069,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - crea el contenedor con `Name`, `Image`, `Cmd == naming.CaddyCommand()`, `Env == naming.CaddyEnv()`, `RestartPolicy "unless-stopped"`, `Network` panel y los tres `Mounts` (data → `/data`, config → `/config`, admin → `/run/caddy-admin`);
     - `Ports` son `{http,80,tcp}`, `{https,443,tcp}` y `{https,443,udp}`;
     - lo conecta a las redes de stage de `want.Networks` **antes** de `StartContainer` (el orden de `Calls()`);
+    - una red de `want.Networks` que no existe se salta: el contenedor se crea, arranca y queda en las demás (D11);
     - devuelve `recreated == true`.
   - `TestEnsureIdempotent`: la segunda llamada no tiene `CreateContainer`, `RemoveContainer` ni `StopContainer` en `Calls()`, y devuelve `recreated == false`.
   - `TestEnsureConnectsNewNetwork`:
@@ -1016,6 +1083,8 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - detenido (`StopContainer`);
     - corriendo sin `PublishedPorts` (el truco del fake: `BusyHostPort`, el `Start` falla, `FreeHostPort` y `StartContainer` otra vez).
     - En cada caso: aparece `StopContainer` antes de `RemoveContainer` cuando corría, el id es nuevo y está corriendo con `PublishedPorts`.
+    - En el caso de otra imagen, sin la imagen nueva en el nodo: `PullImage` aparece en `Calls()` **antes** de `StopContainer`.
+    - **La imagen nueva no baja** (`FailNext("PullImage", docker.ErrDenied)`, sin la imagen en el nodo): `Ensure` devuelve un error con `service.ErrCaddyImagePull` y `docker.ErrDenied`, y el contenedor anterior sigue corriendo con el mismo id y la imagen vieja. `Calls()` no tiene `StopContainer`, `RemoveContainer` ni `CreateContainer` (D11).
   - `TestEnsurePullsImage`:
     - sin la imagen en el nodo, `PullImage` una vez;
     - con `want.Auth`, la credencial llega al pull (un tipo del test envuelve el fake y anota el `auth` de `PullImage`, D20);
@@ -1038,12 +1107,15 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   // CaddyRuntime es el contenedor muelle-caddy (adaptador: caddy.Runtime, D2).
   type CaddyRuntime interface {
   	// Ensure lo deja como pide want (contrato §3.4) y devuelve si lo creó de
-  	// nuevo. ErrPortInUse (el contenedor queda borrado) o Docker caído.
+  	// nuevo. Errores: la imagen que no baja (el contenedor anterior sigue
+  	// intacto), ErrPortInUse (el contenedor queda borrado) o Docker caído.
   	Ensure(ctx context.Context, want CaddyWant) (recreated bool, err error)
   	Status(ctx context.Context) (image string, running, found bool, err error)
   }
   // errors.go
   var ErrPortInUse = errors.New("un puerto del host que publica muelle-caddy ya está en uso")
+  // ErrCaddyImagePull: la imagen de Caddy no bajó; el contenedor anterior sigue (D11).
+  var ErrCaddyImagePull = errors.New("no se pudo bajar la imagen de Caddy")
 
   // caddy/container.go
   type Names struct{ Container, PanelNetwork, DataVolume, ConfigVolume, AdminVolume string }
@@ -1059,12 +1131,12 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   1. Asegura la red panel.
   2. Arma el `docker.ContainerSpec` deseado e inspecciona el contenedor.
   3. Si existe y `matches(c, spec)` (misma imagen, `Cmd`, puertos y volúmenes como conjunto, `Running`, y si tiene `Ports` también `PublishedPorts`), conecta las redes que falten (`ErrConflict`, ya conectado, no es error; una red que no existe se registra y se salta) y vuelve.
-  4. Si no:
-     1. `StopContainer(10 s)`, ignorando su error con un log;
-     2. `RemoveContainer(force)`;
-     3. `InspectImage`, y `PullImage(image, auth)` si da `ErrNotFound`;
+  4. Si no (D11):
+     1. `InspectImage`, y `PullImage(image, auth)` si da `ErrNotFound`. Si el pull falla, vuelve con `fmt.Errorf("%w %s: %w", service.ErrCaddyImagePull, image, err)` **sin tocar el contenedor que existe**. Si el error es de Docker caído, se devuelve tal cual (`ErrDockerUnavailable`, sin `ErrCaddyImagePull`), así `EnsureCaddy` muestra "Docker no responde…";
+     2. `StopContainer(10 s)`, ignorando su error con un log;
+     3. `RemoveContainer(force)`;
      4. `CreateContainer`;
-     5. `ConnectNetwork` a cada red;
+     5. `ConnectNetwork` a cada red. Igual que en el paso 3: `ErrConflict` no es error, y una red que no existe se registra y se salta;
      6. `StartContainer`. Con `docker.ErrPortInUse`: `RemoveContainer(force)` y `fmt.Errorf("%w: %w", service.ErrPortInUse, err)`.
 
   **Commit:** `feat(ingress): el ciclo de vida de muelle-caddy, que se recrea y nunca se rearranca`
@@ -1080,6 +1152,9 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - sin registry, va nil.
   - `TestEnsureCaddyNetworks`: `want.Networks` son las de todos los stages (`naming.Network`).
   - `TestEnsureCaddyPortInUse`: el estado da `out_of_sync` con un mensaje que nombra los dos puertos ("los puertos 8080 o 8443 del host ya están en uso…"). Después de liberarlo y otro `Execute`, el error del contenedor se limpia.
+  - `TestEnsureCaddyPullFails`: con muelle-caddy corriendo y `caddy_image` cambiada a una que `DenyImage` no deja bajar:
+    - el estado da `out_of_sync` con "muelle no pudo bajar la imagen <imagen> de Caddy (…); muelle-caddy sigue con la anterior";
+    - el contenedor sigue corriendo con el mismo id.
   - `TestEnsureCaddySerialized`: dos `Execute` a la vez crean un solo contenedor (`CreateContainer` una vez).
   - `TestOrphanNetworks`:
     - una red `auditfy_viejo` con las etiquetas de un stage que no existe queda en la primera pasada y se borra en la segunda (antes, se desconecta muelle-caddy);
@@ -1106,7 +1181,8 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   // (CaddyImageOr), la credencial del host (reference.Domain de
   // reference.ParseNormalizedNamed; si no parsea, anónima), las redes de todos
   // los stages y runtime.Ensure. El resultado va al estado (ContainerOK o
-  // ContainerFailed con un mensaje en español).
+  // ContainerFailed con un mensaje en español: el puerto ocupado, la imagen que
+  // no baja y Docker caído tienen su texto propio).
   func (u *EnsureCaddy) Execute(ctx context.Context) (recreated bool, err error)
   ```
   - `orphans.go`: `RemoveOrphanNetworks{networks, catalog, caddyContainer, prefix, mu, seen map[string]bool}.Execute(ctx) error`, según D13.
@@ -1220,21 +1296,27 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   1. **Primera pasada:** arranca el puente, siembra el stage `s1` y la app `web` con su dominio, y arranca el backend.
      - `job()` (`m.Jobs()[0].Run`) da `nil`: crea muelle-caddy con los nombres `it3` y lo conecta a `it3<id>_s1`.
      - `eventually`: el estado da `synced` y `get("web.it3<id>.test")` da `200 "hola web"`.
-  2. **Red nueva en caliente:** con el id y `StartedAt` del contenedor guardados, `m.EnsureStageNetwork(ctx, project, "s2")` deja el mismo id y `StartedAt`, y `Networks` incluye `it3<id>_s2` (spec §15).
-  3. **Recreación:** los ajustes cambian a los puertos de repuesto (`HTTP2`/`HTTPS2`); `m.scheduleRecreate()` con `m.Run` corriendo y `Timing.RecreateDelay: 50ms`.
+  2. **Red nueva en caliente:** con el id y `StartedAt` del contenedor guardados, `ingresstest.Stage(…, project, "s2")` y después `m.EnsureStageNetwork(ctx, project, "s2")`. El stage va en la base **antes**: si no, el `job()` de los pasos siguientes borraría `it3<id>_s2` por huérfana. Queda el mismo id y `StartedAt`, y `Networks` incluye `it3<id>_s2` (spec §15).
+  3. **Aislamiento entre stages** (spec §15: "un contenedor de un stage no resuelve ni alcanza servicios de otro stage"):
+     - arranca el backend `web2` en `s2`;
+     - arranca la sonda `probe` en `s1` con `startBackendCmd` y `Cmd ["sh", "-c", "wget -T 3 -q -O /dev/null http://<alias de web en s1>:8080 || exit 1; wget -T 3 -q -O /dev/null http://<alias de web2 en s2>:8080 && exit 1; exec caddy respond --listen :8080 --body aislado"]`, con los alias de `naming.Service`;
+     - siembra la app `probe` en `s1` con el dominio `probe.it3<id>.test` → `probe:8080`, y corre `job()`;
+     - `eventually(30 s)`: `get("probe.it3<id>.test")` da `200 "aislado"`.
+     - La sonda solo sirve si alcanzó su propio stage y **no** alcanzó el otro; si no, sale, y el `get` da `502` hasta que vence el `eventually`. El caso de control (el `web` de `s1`) prueba que el `wget` funciona. Así no hace falta `exec` ni el código de salida, que el cliente de Docker no tiene.
+  4. **Recreación:** los ajustes cambian a los puertos de repuesto (`HTTP2`/`HTTPS2`); `m.scheduleRecreate()` con `e.run(m)` (nunca `go m.Run` a mano) y `Timing.RecreateDelay: 50ms`.
      - `eventually`: hay un id nuevo, con `PublishedPorts` en los puertos nuevos;
      - el estado da `synced`;
      - `get` por el puerto nuevo da `200` (`e.ports.HTTPS = HTTPS2` para el helper).
-  4. **Puerto ocupado:** `net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", Busy))`, como `TestIntegrationPortInUse` del paquete docker, y los ajustes cambian el HTTP a `Busy`.
+  5. **Puerto ocupado:** `net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", Busy))`, como `TestIntegrationPortInUse` del paquete docker, y los ajustes cambian el HTTP a `Busy`.
      - `job()` devuelve un error con `ErrPortInUse`;
      - `GET /api/v1/proxy` (con `httptestutil` y el módulo) da `out_of_sync` con un `error` que nombra el puerto;
      - el contenedor no existe.
      - Se cierra el listener y `job()` lo crea de nuevo: queda `synced`.
-  5. **Huérfana:** una red `it3<id>_viejo`, overlay attachable con las etiquetas `{project: "it3<id>", stage: "viejo"}`, sigue después del primer `job()` y no existe después del segundo.
+  6. **Huérfana:** una red `it3<id>_viejo`, overlay attachable con las etiquetas `{project: "it3<id>", stage: "viejo"}`, sigue después del primer `job()` y no existe después del segundo.
 
   **Correr:** el comando de integración. Expected: PASS. Después, `docker ps -a --filter name=it3-` no muestra nada.
 
-  **Commit:** `test(ingress): integración del ciclo de vida de muelle-caddy (redes en caliente, recreación, puerto ocupado, huérfanas)`
+  **Commit:** `test(ingress): integración del ciclo de vida de muelle-caddy (redes en caliente, aislamiento entre stages, recreación, puerto ocupado, huérfanas)`
 
 - [ ] **Step 8: Cierre de T3.** Las verificaciones de "Convenciones" pasan, y los tests de integración de T2 y T3 también.
 
@@ -1339,10 +1421,19 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `TestEnsureNoZone`: el host `api.otro.com` da `tls http`, `pending`, `proxied false` y `CFZoneID ""`.
   - `TestEnsureCreates`: crea el `A` y el `AAAA` con el `proxied` pedido y `comment "muelle"`, y queda `pending`, `tls cloudflare`, con `CFZoneID`, `CFRecordID` y `CFRecordIDAAAA`.
   - `TestEnsureNoPublicIP`: `error` + `cloudflare` con el mensaje "configura la IP pública en Ajustes", `tls cloudflare` y la zona guardada.
-  - `TestEnsureForeign`, uno por tipo (`A`, `AAAA` y `CNAME` ajenos): `error` + `record_exists` sin ids; `cftest` no recibió `POST`/`PATCH`/`DELETE`.
+  - `TestEnsureForeign`, uno por tipo (`A`, `AAAA` y `CNAME` ajenos), con `proxied: true` pedido:
+    - `error` + `record_exists`, con `tls cloudflare` y `CFZoneID == "z1"` (D5, D7);
+    - `CFRecordID` y `CFRecordIDAAAA` vacíos;
+    - `Proxied == true`, el pedido;
+    - `cftest` no recibió `POST`/`PATCH`/`DELETE`.
   - `TestEnsureZonesFail`: con `SetDown`, `error` + `cloudflare`, `tls http` y el `proxied` pedido se conserva (D26).
   - `TestEnsureAAAAFails`: con `FailNext("POST", "dns_records", 400, …)` después de crear el `A`, queda `CFRecordID` sin `AAAA` y `error` + `cloudflare`.
   - `TestEnsureManaged`: con el `A` propio, actualiza su contenido y su `proxied`, crea el `AAAA` que falta y queda `pending`. Sin `public_ipv6` y con el `AAAA` propio, lo borra y limpia el id.
+  - `TestEnsureManagedAGone` (D29): con los ids de un `A` que ya no está en `cftest` y de un `AAAA` que sí está:
+    - el `AAAA` se borra en `cftest`;
+    - se crean un `A` y un `AAAA` nuevos, con ids nuevos, y queda `pending`;
+    - `repo.Update` del dominio pasa: el `CHECK` de D19 se cumple.
+    - Con `FailNext("DELETE", …, 403)` en el `AAAA`: los dos ids se olvidan, ese `AAAA` queda en `cftest` y el dominio da `record_exists`.
   - `TestEnsureManagedNoToken`: `error` + `cloudflare`, con el mensaje del token (D18).
 
   **Implementar:**
@@ -1350,10 +1441,16 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   ```go
   // Ops serializa lo que escribe dominios o registros DNS (D6).
   type Ops struct{ mu sync.Mutex }
-  // Do corre fn con el lock tomado: opCtx para Cloudflare, Caddy y TLS (con
-  // limit) y dbCtx (sin cancelar) para la base.
+  // Do arma opCtx = WithTimeout(WithoutCancel(ctx), limit) ANTES de esperar el
+  // lock (si ctx tiene un plazo más corto, usa ese), y corre fn con el lock
+  // tomado: opCtx para Cloudflare, Caddy y TLS, y dbCtx (sin cancelar) para la base.
   func (o *Ops) Do(ctx context.Context, limit time.Duration, fn func(opCtx, dbCtx context.Context) error) error
   ```
+  Tests de `Ops` (`ops_test.go`):
+  - `TestOpsSerializes`: dos `Do` a la vez nunca corren juntos.
+  - `TestOpsDeadlineIncludesWait`: con un `Do` que tiene el lock 40 ms, otro `Do` con `limit` 50 ms recibe un `opCtx` al que le quedan 10 ms o menos.
+  - `TestOpsShorterParent`: con un `ctx` que vence en 20 ms y `limit` 1 min, `opCtx` vence cerca de los 20 ms, y `dbCtx` no.
+  - `TestOpsCanceledParent`: un `ctx` ya cancelado corre fn igual; `opCtx` y `dbCtx` no están cancelados.
   - `messages.go`: los textos en español en un solo lugar (`msgNoPublicIP`, `msgNoToken`, `msgRecordExists(typ, host)`, `msgMultiple(typ, host)`, `cloudflareMsg(err)` → "Cloudflare no responde; reintenta en unos minutos" o el texto de `*DNSError`).
   - `dns.go`:
   ```go
@@ -1362,13 +1459,18 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   	clock clock.Clock
   }
   // ensure aplica a d las reglas de crear (contrato §3.1) con los ajustes p.
-  // No guarda: el que llama guarda d. Con registros propios, los actualiza; si
-  // no, busca la zona, revisa los registros ajenos y crea los suyos.
+  // No guarda: el que llama guarda d. Con registros propios, los actualiza (si
+  // el A ya no está, D29, sigue como sin registros). Si no, busca la zona y, al
+  // encontrarla, fija CFZoneID y TLSCloudflare (D5) antes de revisar los
+  // registros ajenos y crear los suyos.
   func (o dnsOps) ensure(ctx context.Context, d *entity.Domain, p shared.ProxySettings)
   // findZone: solo busca la zona y, si la encuentra, hace ensure. Es para retry
   // "sin zona" (D23). found false: no tocó d.
   func (o dnsOps) findZone(ctx context.Context, d *entity.Domain, p shared.ProxySettings) (found bool)
+  // adopt usa d.CFZoneID, que record_exists siempre trae (D7): no vuelve a
+  // buscar la zona. Deja TLSCloudflare.
   func (o dnsOps) adopt(ctx context.Context, d *entity.Domain, p shared.ProxySettings)
+  // setProxied: si el A ya no está, D29 y error + cloudflare.
   func (o dnsOps) setProxied(ctx context.Context, d *entity.Domain, p shared.ProxySettings, proxied bool)
   // remove borra los registros propios; un 404 no es error. Devuelve kept si
   // había registros propios y no hay token. Cualquier otro fallo es un error
@@ -1402,12 +1504,13 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
       - en la compose, cualquier slug válido pasa;
       - un hostname que ya usa otra app: `ErrHostnameTaken`;
       - una app que no existe: `repository.ErrNotFound`;
-    - **el cliente se va:** un ctx ya cancelado igual crea los registros y guarda (D6);
+    - **el cliente se va:** un ctx ya cancelado igual crea los registros y guarda (D6), y el `Sync` de después igual llega a `caddytest`: el estado queda `synced`, no `out_of_sync`;
     - **plazo:** con `cftest.Hang(200ms)` y `Timing.DomainOp: 50ms`, el dominio queda guardado en `error` + `cloudflare`, y `Execute` no tarda mucho más que el plazo.
   - **Listar:** solo los de la app, ordenados por hostname, `[]` sin dominios y `records` con los ajustes **actuales** (cambia `public_ip` y se ve).
   - **Editar:**
     - `{}` no cambia nada: el mismo `UpdatedAt` y sin auditoría;
     - un destino nuevo guarda, manda un `Load` con el upstream nuevo y audita `domain.update`;
+    - en la app de formulario, un `target_service` que no es su slug: `422` en `target_service`, sin guardar ni auditar (la validación del contrato §3.2 vale también en el `PATCH`); en la compose, otro slug válido pasa;
     - `proxied` sobre un dominio sin `cf_record_id`: `422` en `proxied` con "muelle no maneja el registro DNS de este dominio";
     - `proxied` con registros propios cambia el `A` y el `AAAA` en `cftest`, y un `error` + `cloudflare` vuelve a `pending`;
     - si Cloudflare falla (o no hay token), el valor se guarda, queda `error` + `cloudflare` y no se devuelve error;
@@ -1417,7 +1520,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - un registro que ya no está (404) no es error;
     - si `cftest` está caído o rechaza (`FailNext DELETE 403`), es un error con `entity.ErrCloudflareUnavailable` y la fila queda;
     - sin token y con registros propios, se borra solo en muelle, con details `{"app":…,"dns":"kept"}`.
-  - **Adoptar:** cada caso de D17 y del contrato §3.2:
+  - **Adoptar:** cada caso de D17 y del contrato §3.2. En todos los que adoptan o crean, el dominio queda con `tls_mode: cloudflare` y la misma `cf_zone_id` que tenía en `record_exists`, y `cftest` no recibió un `GET /zones` (D7):
     - un `A` ajeno con `proxied: true` pasa a la IP, conserva `proxied: true`, queda `cf_record_id` y `pending`;
     - un `CNAME` pasa a `A` (un `PATCH` con `type` y `content`);
     - dos `A`: `error` + `cloudflare` con "deja uno solo", sin tocar nada;
@@ -1490,8 +1593,9 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
       2. `entity.NewDomain` (422);
       3. el dominio del panel y la regla de la app de formulario (422);
       4. `Ops.Do(DomainOp)`: `repo.Create` (409), `ensure`, `repo.Update`;
-      5. fuera del lock: `syncer.Sync(ctx, false)`, ignorando su error (queda en el estado), y después `certs.ScheduleFirst(host)`;
+      5. fuera del lock: `syncer.Sync(context.WithoutCancel(ctx), false)`, ignorando su error (queda en el estado), y después `certs.ScheduleFirst(host)` (D6);
       6. la auditoría.
+    - **Editar** sigue el mismo orden: el dominio (404), `ValidateTarget` y la regla de la app de formulario sobre el destino que queda (422), `Ops.Do`, y el `Sync` con `context.WithoutCancel`. Borrar, adoptar y reintentar también hacen su `Sync` así.
     - `Delete` responde el error de `remove` tal cual: el `502` sale de `ErrCloudflareUnavailable`, que ya está registrado en `cmd/http`.
 
   **Commit** (dos): `feat(ingress): crear, listar, editar y borrar dominios con su DNS y su ruta` y `feat(ingress): adoptar y reintentar un dominio`
@@ -1543,6 +1647,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - `{}` da `200`;
     - `{"hostname":"x"}` da `400 invalid_json`;
     - `proxied` sin registro: `422` con `"proxied: muelle no maneja el registro DNS de este dominio"`;
+    - en una app de formulario, `{"target_service":"otro"}`: `422` con un mensaje que empieza en `"target_service: "`;
     - un host de otra app: `404 not_found`.
   - `DELETE`:
     - `204` sin cuerpo;
@@ -1611,14 +1716,13 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 **Objetivo:**
 - `CheckCloudflareToken` y `ProxySettingsChanged` reales (contrato §3.5): verificar el token, actualizar los registros cuando cambia la IP pública, recrear muelle-caddy después del `PATCH` y regenerar la configuración.
 - El registro DNS del panel y `cloudflare_zones` en el job `"proxy"` (§3.4, §3.6).
-- El contenedor puede inyectar `Options` (`WithIngress`), y sus tests nunca llegan a la API real.
+- Los contratos de ingress con el contenedor completo, que nunca llegan a la API real (`WithIngress`, desde T2).
 - La documentación queda al día.
 
 **Files:**
 - Create: `src/internal/ingress/app/usecases/{token,panel_dns,records_update,settings_changed}.go` + tests
 - Modify: `src/internal/ingress/app/usecases/proxy_job.go` + test
 - Modify: `src/internal/ingress/module.go`, `module_test.go`
-- Modify: `src/shared/infra/container/container.go`, `ports_test.go` (solo `TestContractProxySettings`)
 - Create: `src/shared/infra/container/ingress_test.go`
 - Modify: `README.md`, el contrato (§1.1, §1.2, §3 y §7 de ingress) y el diseño (§3.1, §3.2, §8 y §9), si hace falta
 
@@ -1628,6 +1732,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - Un token válido con 120 zonas (3 páginas) da `*zones == 120`.
   - Uno rechazado (ni verifica ni lista) da un `*validate.Error` con `Field == "cloudflare_token"`.
   - Uno de cuenta (`AddAccountToken`: no verifica, pero lista dos zonas) se acepta con `2`.
+  - Uno `disabled` o `expired` (`SetTokenStatus`: `verify` da `200` con ese estado, y `/zones` da `401`) es `422` en `cloudflare_token`, con el estado en el mensaje (D31).
   - Uno válido sin zonas da `422` en `cloudflare_token`, con un mensaje que pide Zone:Read y DNS:Edit.
   - Uno válido al que `/zones` le da `403` es `422`.
   - Con `SetDown`, un `500` o un `429` en `/user/tokens/verify`: `errors.Is(err, entity.ErrCloudflareUnavailable)`.
@@ -1654,6 +1759,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `TestPanelDNSForeign`: con un `A` ajeno, no crea nada y guarda la zona igual (decide el TLS del panel).
   - `TestPanelDNSForgets`:
     - un id guardado que ya no está en `cftest` se olvida y se crea uno nuevo;
+    - un `A` guardado que ya no está, con el `AAAA` propio que sí está: el `AAAA` se borra, y se crean un `A` y un `AAAA` nuevos. El `AAAA` propio no cuenta como "otro registro de ese nombre" (D29);
     - uno de otro nombre (`viejo.tudominio.cl`, como si cambiara `MUELLE_PANEL_ORIGIN`) se olvida, **no se borra** (sigue en `cftest`), y se crea el del nombre nuevo.
   - `TestPanelDNSUpdatesContent`:
     - con otra `public_ip`, actualiza el contenido del `A` propio;
@@ -1661,9 +1767,14 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `TestPanelDNSDropsAAAA`: sin `public_ipv6`, borra el `AAAA` propio y su clave.
   - `TestPanelDNSOutOfZone`: un `panel_domain` fuera de las zonas borra `panel_cf_zone_id`.
   - `TestPanelDNSNoToken`: no llama a `cftest`.
-  - `TestPanelDNSZonesCAS`: con el token `t2` guardado en la base y `Execute` llamado con unos ajustes que traen `t1` (como si el token cambiara mientras corría), `cloudflare_zones` no se escribe.
+  - `TestPanelDNSReadsCurrent` (D30): con `public_ip` `203.0.113.99` guardado, `Execute` usa esa IP en el `A`.
+  - `TestPanelDNSZonesCAS`: el token cambia mientras corre. Un `service.Settings` del test devuelve el token `t1` en `ProxySettings`, y delega lo demás (`PanelDNS`, `SavePanelDNS` y `SaveZones`) en el adaptador real, que tiene `t2` guardado. Entonces `cloudflare_zones` no se escribe.
+  - `TestPanelDNSDeadline`: con `cftest.Hang(200ms)`, `Timing.DomainOp: 50ms` y un `ctx` sin plazo (como el del job), `Execute` vuelve con error en poco más de 50 ms, y libera el lock de `Ops` (un `Do` después no espera).
 
-  **Implementar** `panel_dns.go`: `EnsurePanelDNS.Execute(ctx, p shared.ProxySettings) (zoneChanged bool, err error)`, según D27 y D28, con el lock de `Ops`. Los ids guardados se validan con `Record(store.ZoneID, id)` antes de cambiar la zona.
+  **Implementar** `panel_dns.go`: `EnsurePanelDNS.Execute(ctx) (zoneChanged bool, err error)`, según D27, D28, D29 y D30.
+  - Corre en `Ops.Do(ctx, Timing.DomainOp, …)` (D6): el `ctx` del job no tiene plazo, y sin eso podría tener el lock por minutos.
+  - Dentro del lock, lee los ajustes actuales; sin token, vuelve sin llamar a Cloudflare.
+  - Los ids guardados se validan con `Record(store.ZoneID, id)` antes de cambiar la zona.
 
   En `proxy_job.go`, después del `Sync` (D12): si hay token, `EnsurePanelDNS`; si `zoneChanged`, `Sync` otra vez. Su test `TestProxyJobCloudflare` cubre las dos cosas (dos `Load` cuando aparece la zona del panel; uno en la pasada siguiente).
 
@@ -1675,18 +1786,31 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - Un `public_ip` nuevo actualiza el `A` de los dos; el que estaba en error vuelve a `pending`; el que no tiene registros no se toca.
   - Si uno falla (`FailNext PATCH 400`), ese queda `error` + `cloudflare` y el otro se actualiza igual.
   - Un `A` propio que ya no está (404) limpia el id y deja `error` + `cloudflare` (así `retry` lo crea).
+  - Lo mismo con un `AAAA` propio presente (D29): el `AAAA` se borra en `cftest`, **los dos ids** quedan vacíos, y el `error` + `cloudflare` se guarda (el `repo.Update` no choca con el `CHECK` de D19).
   - Borrar `public_ip` no hace ninguna llamada a `cftest`.
+  - **Los ajustes de ese momento** (D30): el hook se llama con un `next` que trae `203.0.113.50`, pero la base ya tiene `203.0.113.60` (otro `PATCH` llegó entretanto). Los `A` quedan en `.60`.
+  - **Plazos:** con `cftest.Hang(200ms)`, `Timing.DomainOp: 50ms` y dos dominios, cada uno queda `error` + `cloudflare`, y `Execute` vuelve en poco más de 100 ms. Con un `ctx` que vence en 60 ms (como el plazo del hook), el segundo dominio no espera otros 50 ms: su `opCtx` usa lo que queda del plazo del hook (D6).
   - Un `public_ipv6` nuevo crea el `AAAA` (con el `proxied` del dominio) de los que tienen `A` propio. Si ya hay un `AAAA` ajeno, `error` + `cloudflare`.
   - Borrar `public_ipv6` borra los `AAAA` propios y limpia los ids.
   - Sin token, los dominios con registros propios quedan `error` + `cloudflare` con el mensaje del token (D18).
 
-  **Implementar** `records_update.go`: `UpdateManagedRecords.Execute(ctx, old, next shared.ProxySettings)`. Cada dominio va en su propio `Ops.Do` (así un hook largo no bloquea todo de una vez), y se guarda con `dbCtx`.
+  **Implementar** `records_update.go`: `UpdateManagedRecords.Execute(ctx, old, next shared.ProxySettings)`.
+  - `old`/`next` solo deciden si hay algo que hacer: si no cambió `public_ip` ni `public_ipv6`, vuelve.
+  - Lista los dominios con `cf_record_id`. Cada uno va en su propio `Ops.Do(ctx, Timing.DomainOp, …)`, así un hook largo no bloquea todo de una vez.
+  - Dentro de cada `Do`, vuelve a leer el dominio (uno que ya no está se salta) y los ajustes actuales (D30), y lleva sus registros a esos ajustes:
+    - el `A`, a `public_ip` si hay (sin `public_ip` no se toca);
+    - el `AAAA`, a `public_ipv6` si hay (lo crea si falta); sin `public_ipv6`, se borra el propio;
+    - si el `A` ya no está, D29;
+    - sin token en los ajustes actuales, `error` + `cloudflare` con el mensaje del token, sin llamar a Cloudflare (D18).
+  - Se guarda con `dbCtx`.
 
   **Commit:** `feat(ingress): los registros que maneja muelle siguen a la IP pública`
 
 - [ ] **Step 4: `ProxySettingsChanged`.**
 
-  **Tests primero** (`usecases/settings_changed_test.go`, con el módulo armado y fakes):
+  **Antes de cablear:** `TestContractProxySettings` ya usa un `cftest` con su token y una zona, y `newTestModule` ya pasa `Options.CloudflareURL` (los dos desde T2 Step 5). Confírmalo con `git grep -n 'CloudflareURL\|WithIngress' -- '*_test.go'`. Si falta alguno, agrégalo en este mismo commit: si no, el `go test -race ./...` de antes del commit llamaría a la API real.
+
+  **Tests primero** (`usecases/settings_changed_test.go`, con el módulo armado y fakes, y `cftest` en `Options.CloudflareURL`):
   - Cambian los puertos: el estado queda `recreating` y no hay un `Load` nuevo antes de volver. Con `Run` corriendo (`RecreateDelay 20ms`), aparece un contenedor nuevo con los puertos nuevos y un `Load`.
   - Cambia `caddy_image`: igual.
   - Cambia `acme_email`: un `Load` enseguida, con el email nuevo en la política.
@@ -1701,8 +1825,10 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   ```go
   // Execute aplica lo que cambió (next.ChangedKeys(old)), en este orden:
   //  1. puertos o imagen → recreator.Schedule() (no recrea acá);
-  //  2. public_ip o public_ipv6 → UpdateManagedRecords;
-  //  3. public_ip, public_ipv6 o un token nuevo (no vacío) → EnsurePanelDNS;
+  //  2. public_ip o public_ipv6 → UpdateManagedRecords (cada dominio con
+  //     DomainOp, dentro del plazo del hook: D6);
+  //  3. public_ip, public_ipv6 o un token nuevo (no vacío) → EnsurePanelDNS
+  //     (lee los ajustes actuales: D30);
   //  4. si no hubo 1 y cambió public_ip, public_ipv6, acme_email, el token o
   //     panel_allowed_cidrs → syncer.Sync(ctx, false).
   func (u *ProxySettingsChanged) Execute(ctx context.Context, old, next shared.ProxySettings)
@@ -1726,22 +1852,11 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - borrar la app da `409 not_empty` (el contrato con catalog);
     - borrar el dominio y después la app da `204`.
 
-  Cambia `ports_test.go`, solo `TestContractProxySettings`: agrega `WithIngress(ingress.Options{CloudflareURL: cf.URL()})` con un `cftest` que acepta su token. Sin eso, el `PATCH` iría a la API real.
+  `WithIngress` y el `cftest` de `TestContractProxySettings` ya están desde T2 Step 5. Revisa otra vez con `git grep -n 'cloudflare_token\|CloudflareToken' -- 'src/shared/infra/container/*_test.go'` que ningún test del contenedor mande un token sin `WithIngress`.
 
-  **Implementar** en `container.go`, en las líneas de ingress:
-  ```go
-  type options struct {
-  	docker  docker.Engine
-  	ingress ingress.Options
-  }
-  // WithIngress cambia cómo ingress llega a Docker, Caddy y Cloudflare (los
-  // nombres, la admin API, la URL de Cloudflare). Solo para tests: el cero es producción.
-  func WithIngress(o ingress.Options) Option { return func(op *options) { op.ingress = o } }
-  ```
-  - `build` recibe `o.ingress` (un parámetro más) y lo pasa como `ingress.Deps{…, Options: io}`.
-  - Revisa con `grep -rn 'cloudflare_token' src/shared/infra/container/` que ningún otro test mande un token sin `WithIngress`.
+  No hay código nuevo en el contenedor: si un test de estos falla, el arreglo va en ingress. Si de verdad hiciera falta tocar `container.go`, detente y repórtalo (`NEEDS_CONTEXT`).
 
-  **Commit:** `feat(container): WithIngress para los tests, que nunca llaman a la API real de Cloudflare`
+  **Commit:** `test(container): los contratos de ingress con el contenedor completo, con Cloudflare falso`
 
 - [ ] **Step 6: La documentación.**
 
@@ -1752,7 +1867,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     - **El bloque "Fase 3" de las notas:** tachar con `~~…~~` lo cumplido (`client_ip`, sin atajos, `CaddyCommand`/`CaddyEnv`, recrear y no rearrancar), y agregar lo que queda para el futuro:
       - la lista de rangos de Cloudflare se actualiza con cada versión (`caddy/ranges.go`);
       - la prueba manual de DNS-01 contra una zona de prueba;
-      - el aislamiento entre stages queda para la integración de la Fase 2;
+      - el aislamiento entre stages por nombre lo prueba `TestIntegrationCaddyLifecycle` (T3); por IP (sin el nombre) no hay un test automático, y queda para la prueba manual;
       - verificar `Network.Subnets` de `muelle_panel` lo hace install.
   - **"Manual antes de migrar" (spec §15),** en el README como pasos:
     1. un token de una zona de prueba en Ajustes;
@@ -1761,6 +1876,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
     4. adoptar un registro existente;
     5. borrar el dominio y ver que el registro se va de Cloudflare.
   - **Contrato:**
+    - Lo de la revisión del plan ya está (`2249ccc`): no lo repitas.
     - §1.1: "(hecho)" en las filas de ingress (`SyncRoutes`, `ProxyHook`, las lecturas de catalog y registries).
     - Si la implementación cambió algo visible para el panel, una fila en §7 y un aviso en el resumen de la tarea.
   - **Diseño:** §3.1, §3.2, §8 y §9, solo si algo quedó distinto de lo que dicen.
@@ -1774,7 +1890,8 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   4. **Prueba de punta a punta con el binario** (manual, como en la Fase 1):
      - `go run . serve` con el `MUELLE_PANEL_ORIGIN` de desarrollo (una IP): `GET /api/v1/proxy` da `disabled`;
      - `POST …/domains` sin token da `201`, con `tls_mode: http` y `records`;
-     - `PATCH /settings` con un token cualquiera da `422` o `502` (llega a la API real: **no lo hagas con un token de verdad**; basta con ver que responde).
+     - `PATCH /settings` con `{"cloudflare_token":"corto"}` da `422` en `cloudflare_token` ("no parece un token…"). admin rechaza el formato antes de llamar al hook, así que no sale nada a la red.
+     - **Nunca** mandes un token bien formado (de 20 caracteres o más) al binario: iría a la API real de Cloudflare. La verificación del token ya la cubren los tests con `cftest`.
   5. El resumen para la revisión final lista:
      - los commits;
      - los cambios de contrato (con lo que el panel tiene que saber);
