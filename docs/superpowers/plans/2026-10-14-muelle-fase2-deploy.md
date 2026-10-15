@@ -727,7 +727,7 @@ func Render(cfg Config, in RenderInput) (Rendered, error)
   Además de comparar, `TestRenderGolden` decodifica cada golden y verifica que **todo** servicio lleva `logging.driver` en `json-file`, `local` o `none`, y que con `json-file` o `local` tiene `max-size` y `max-file`.
 
   `TestRenderErrors` (tabla): destino de dominio que no existe (el mensaje tiene el hostname y el servicio), una variable de 130 KiB, un total de 1,6 MiB, falta la imagen de un servicio, `StorageNodeID` vacío con volúmenes, destino distinto del slug en un formulario.
-- [ ] **Step 7: `convergence.go` (tests primero).**
+- [x] **Step 7: `convergence.go` (tests primero).**
 
 ```go
 // Verdict es el resultado de mirar los servicios una vez (§7 paso 6).
@@ -755,7 +755,7 @@ func AppliedState(expected []string, services []SwarmService, deployID int64) Ap
 
   `TestEvaluate` (tabla): nuevo y todas corriendo → listo; nuevo a medias → espera; update de este deploy `completed` → listo; `updating` → espera; `rollback_started`, `rollback_completed`, `rollback_paused` y `paused` → falla (con `Message`); update viejo `completed` antes del margen → espera, y después del margen con las deseadas corriendo → listo; `Update` nil en uno que ya existía → igual que el viejo; **el CLI tardó más que el margen** (`appliedAt = t0`, `settleFrom = t0+8s`, `settle = 5s`, un servicio que ya existía, sin `UpdateStatus` y con las deseadas corriendo): a `now = t0+9s` espera (contado desde `appliedAt` ya habría pasado), y a `now = t0+13s` → listo; `replicas: 0` → listo; global usa `DesiredTasks`; un servicio que todavía no aparece → espera; dos servicios, uno falla → falla con el primero por nombre. `TestAppliedState`: ninguno, algunos, todos.
 - [x] **Step 8: Integración (`render_integration_test.go`, `//go:build integration`, sin crear nada):** `TestRenderGoldensAcceptedByDockerCLI` corre `docker stack config -c -` con cada `*.golden.json` por stdin (mismo entorno mínimo que en T1) y espera código 0; en `form-command-dollar`, la salida trae `$HOME` (un solo `$`).
-- [ ] **Step 9: Verificar y commits** (uno por grupo, cada uno verde):
+- [x] **Step 9: Verificar y commits** (uno por grupo, cada uno verde):
 
 ```bash
 go test -race ./src/internal/deploy/...
