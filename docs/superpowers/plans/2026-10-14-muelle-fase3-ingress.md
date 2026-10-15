@@ -1254,7 +1254,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `feat(ingress): la credencial de un registry nunca muestra su contraseña` (`credential.go` y su test, con `CaddyWant`, `CaddyRuntime` y los errores de `ports.go`/`errors.go`, que el test ya usa);
   - `feat(ingress): el ciclo de vida de muelle-caddy, que se recrea y nunca se rearranca`.
 
-- [ ] **Step 3: `EnsureCaddy`, las redes huérfanas, el `Retrier` y el `Recreator`.**
+- [x] **Step 3: `EnsureCaddy`, las redes huérfanas, el `Retrier` y el `Recreator`.**
 
   **Tests primero** (usecases, con `dockertest`, sqlite, `caddytest` y `clock.Manual`):
   - `TestEnsureCaddyDisabled`: sin `panel_domain`, `Calls()` del fake queda vacío.
@@ -1339,6 +1339,13 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   func (r *Recreator) Run(ctx context.Context)
   ```
   El `onFail` del `Syncer` pasa a ser `func() { m.retrier.Kick() }` (closure en `module.New`).
+
+  Hecho así, con lo que sumó la implementación:
+  - `ProxyState.Generation()` es la generación que toma el `Recreator` antes de recrear (sin agendar otra, como haría `BeginRecreate`).
+  - **El `Recreator` espera al Caddy nuevo:** si `EnsureCaddy` lo creó de nuevo, el `Sync` que sigue reintenta con el backoff de `Timing` (`NewRecreator(…, delay, retryMin, retryMax, log)`) mientras dé `ErrCaddyUnreachable`, hasta 30 s. Un Caddy recién creado tarda un momento en abrir la admin API: sin eso, `GET /proxy` pasaba de `recreating` a `out_of_sync` ("se reintenta solo") y recién después a `synced`. Lo prueba `TestRecreatorWaitsForCaddy`.
+  - **El mensaje de la imagen que no baja** termina en "muelle-caddy sigue con la anterior" solo si el contenedor anterior corre (`runtime.Status`); si no (el primer arranque), "muelle-caddy no está corriendo" (`TestEnsureCaddyPullFailsFirstTime`). La causa es "el registry no dio acceso" (`ErrDenied`), "el registry no la encontró" (`ErrNotFound`) o el error de Docker, cortado a 300 caracteres.
+  - El error de `Execute` y el log pasan por `hideSecret` con la contraseña del registry (Docker no la repite, pero por las dudas); un error leyendo la base no cambia el estado.
+  - `RemoveOrphanNetworks` borra la huérfana la segunda pasada **seguida**: una que dejó de estar huérfana vuelve a contar desde cero (`TestOrphanNetworksConsecutive`), y una en uso queda anotada para la pasada siguiente (`TestOrphanNetworksInUse`).
 
   **Commit** (dos):
   - `feat(ingress): EnsureCaddy y el borrado de las redes de stage huérfanas a la segunda pasada`

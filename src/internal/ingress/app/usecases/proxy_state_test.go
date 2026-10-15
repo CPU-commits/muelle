@@ -67,6 +67,9 @@ func TestProxyStateRecreateGenerations(t *testing.T) {
 	s.Loaded(time.Now())
 	g1 := s.BeginRecreate()
 	g2 := s.BeginRecreate()
+	if got := s.Generation(); got != g2 {
+		t.Fatalf("Generation = %d, la última agendada es %d", got, g2)
+	}
 	s.EndRecreate(g1)
 	if !s.Recreating() {
 		t.Fatal("terminó g1, pero g2 sigue pendiente")

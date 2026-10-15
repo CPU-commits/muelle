@@ -73,6 +73,15 @@ func (s *ProxyState) BeginRecreate() uint64 {
 	return s.gen
 }
 
+// Generation es la última recreación agendada. El Recreator la toma antes de
+// recrear y termina con EndRecreate(gen): lo que se agende mientras recrea
+// sigue pendiente.
+func (s *ProxyState) Generation() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gen
+}
+
 // EndRecreate marca terminadas las recreaciones hasta gen. Una que se agendó
 // después sigue pendiente, así un cambio que llegó durante la recreación no
 // se pierde.
