@@ -896,7 +896,7 @@ type RegistryRepository interface {
 
   Tests: `TestDeployCreateAndSupersede` (dos queued → el viejo superseded con `superseded_by` y `finished_at`, sin `started_at`, y `SupersedeQueued` devuelve su id; un running no se toca; sin queued → `[]`), `TestDeployCreateAppGone` (`Create` con un `app_id` que no existe → `repository.ErrNotFound`, no el error de la FK), `TestCurrentAndPrevious` (ignora failed y superseded), `TestClaim` (solo un queued; dos `Claim` a la vez: uno gana), `TestAppendLogCap` (líneas hasta pasar 252 KiB: marca una sola vez, normales descartadas, de cierre en la reserva; reabrir el repositorio mantiene `log_truncated`), `TestReadLog` (offsets en bytes con `ñ` y `…`, solo líneas completas, máximo 64 KiB, `ErrOffsetBeyond` más allá del largo, `""` al final), `TestRetention` (25 deploys, varios failed: quedan los 20 nuevos + el actual + el anterior + queued/running; `superseded_by` de un borrado queda en NULL), `TestFailQueued` (devuelve los ids que cerró), `TestActiveApps`, `TestRegistriesRoundTrip` (la columna guarda el cifrado, no la contraseña; descifra con su AAD; `Credentials` solo de los hosts pedidos; `ErrConflict` con host repetido; `Update`; `Delete`; `ErrNotFound`).
   Commit: `feat(deploy): repositorios SQLite de deploys y registries, con el log acotado y la retención`.
-- [ ] **Step 4: El log persistido y el aviso a los streams** (`logwriter.go`, `hub.go`; tests primero):
+- [x] **Step 4: El log persistido y el aviso a los streams** (`logwriter.go`, `hub.go`; tests primero):
 
 ```go
 // Hub avisa a los streams que un deploy cambió (líneas nuevas o estado).
@@ -917,7 +917,7 @@ func (l *DeployLog) Final(format string, args ...any) error
 ```
 
   Tests: `TestHubNotify` (un `Wait` antes de `Notify` se despierta; uno después espera el siguiente), `TestLogWriterMasksAndNotifies` (un secreto del masker no llega a la base; `Notify` después de guardar).
-- [ ] **Step 5: Puertos y errores.** En `ports.go`:
+- [x] **Step 5: Puertos y errores.** En `ports.go`:
 
 ```go
 // Queue es la cola de deploys (la implementa el despachador de T4).

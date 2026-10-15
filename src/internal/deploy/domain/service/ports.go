@@ -99,6 +99,25 @@ type Stacks interface {
 	Remove(ctx context.Context, stack string) error
 }
 
+// Queue es la cola de deploys: un worker por app (§7 paso 1). La implementa
+// el despachador (T4); hasta entonces, module.go usa una que siempre acepta y
+// no corre nada.
+type Queue interface {
+	// Wake avisa que la app tiene un deploy queued nuevo.
+	Wake(appID int64)
+	// Accepting es false mientras la app se está borrando (contrato §1.1):
+	// un deploy o un rollback nuevo es 409 conflict.
+	Accepting(appID int64) bool
+}
+
+// Marks son marcas de una sola vez en la tabla settings (de admin, §4.1
+// regla 1): deploy guarda init_registry_applied (contrato §1.1).
+type Marks interface {
+	// MarkOnce guarda la marca key si no estaba y dice si la guardó. Usa la
+	// transacción del ctx.
+	MarkOnce(ctx context.Context, key string) (bool, error)
+}
+
 // Estados de una actualización de un servicio de Swarm (UpdateStatus.State,
 // §7 paso 6): los mismos de shared/infra/out/docker, que el adaptador copia tal cual.
 const (
