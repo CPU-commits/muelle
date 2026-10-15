@@ -7,3 +7,4 @@
 .env
 *.key
 muelle_master_key
+/src/cmd/http/panel/build/

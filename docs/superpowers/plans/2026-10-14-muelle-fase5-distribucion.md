@@ -229,7 +229,7 @@ Un paquete que sirve el build de SvelteKit (`web/build`, en `fase-4-panel`) con 
 - Create: `src/shared/infra/container/panel_dist_test.go` (`//go:build !panel`)
 - Modify: `.gitignore`, `.github/workflows/ci.yaml`, `README.md`
 
-- [ ] **Step 1: Tests del handler** (`src/cmd/http/panel/panel_test.go`, `package panel`). Un helper `testBuild()` devuelve un `fstest.MapFS` con:
+- [x] **Step 1: Tests del handler** (`src/cmd/http/panel/panel_test.go`, `package panel`). Un helper `testBuild()` devuelve un `fstest.MapFS` con:
   - `200.html` (`<!doctype html><title>muelle</title>`), `csp-header.txt` (`default-src 'self'; script-src 'self' 'sha256-abc='; frame-ancestors 'none'` + `"\n"`);
   - `_app/immutable/entry/start.Bx1.js`, `_app/immutable/assets/geist.Cq2.woff2`, `_app/immutable/assets/app.D3.css`, `_app/version.json`, `favicon.svg`, `robots.txt`.
 
@@ -245,7 +245,7 @@ Un paquete que sirve el build de SvelteKit (`web/build`, en `fase-4-panel`) con 
 
   Run: `go test ./src/cmd/http/panel/` → no compila (el paquete no existe). Es la falla esperada.
 
-- [ ] **Step 2: Implementar `panel.go`.** Esqueleto (el comportamiento es el del contrato §5.5):
+- [x] **Step 2: Implementar `panel.go`.** Esqueleto (el comportamiento es el del contrato §5.5):
 
   ```go
   // Package panel sirve el build del panel (web/, SvelteKit con adapter-static):
@@ -302,7 +302,7 @@ Un paquete que sirve el build de SvelteKit (`web/build`, en `fase-4-panel`) con 
   - `serveFile`: si el `fs.File` no es `io.ReadSeeker` (los de `embed` y `fstest` lo son), lo lee entero en un `bytes.Reader`. `http.ServeContent` con `time.Time{}` (sin `Last-Modified`).
   - `cmd/http/panel` puede importar `cmd/http/utils` (el JSON del 405 tiene que ser el mismo de toda la API).
 
-- [ ] **Step 3: Los dos `Embedded()`.**
+- [x] **Step 3: Los dos `Embedded()`.**
   - `embed_none.go` (`//go:build !panel`): `func Embedded() (http.Handler, error)` devuelve un handler que, para cualquier método y ruta, responde `404` con `Content-Type: text/html; charset=utf-8`, `Content-Security-Policy: default-src 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `Cache-Control: no-cache` y una página corta en español que diga que este binario se compiló sin `-tags panel` y que la API está en `/api/v1` (sin cuerpo en `HEAD`).
   - `embed_panel.go` (`//go:build panel`):
     ```go
