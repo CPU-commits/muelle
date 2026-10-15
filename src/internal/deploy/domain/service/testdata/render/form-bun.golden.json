@@ -1,0 +1,64 @@
+{
+  "networks": {
+    "it2g_staging": {
+      "external": true,
+      "name": "it2g_staging"
+    }
+  },
+  "services": {
+    "web": {
+      "command": [
+        "bun",
+        "run",
+        "start"
+      ],
+      "deploy": {
+        "labels": {
+          "muelle.app": "web",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "replicas": 1,
+        "rollback_config": {
+          "order": "start-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 1
+        }
+      },
+      "healthcheck": {
+        "interval": "10s",
+        "retries": 3,
+        "start_period": "20s",
+        "test": [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:8080/up?probe=1').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "timeout": "5s"
+      },
+      "image": "oven/bun:1@sha256:5e3c1d0b8f211111111111111111111111111111111111111111111111111111",
+      "labels": {
+        "muelle.app": "web",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ]
+    }
+  }
+}

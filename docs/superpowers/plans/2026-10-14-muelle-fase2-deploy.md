@@ -655,7 +655,7 @@ func ErrorLine(m Masker, msg string) string
   - `TestAppendPlan`: entra la normal que cabe; la primera que no cabe agrega la marca una sola vez; las siguientes normales se descartan; una de cierre entra en la reserva aunque el log esté truncado; una de cierre que pasa `LogCap` no entra.
   - `TestJoinPieces`: dos pedazos se unen a su línea; uno sin línea anterior queda solo; un stream distinto no se mezcla; el tope de 64 KiB.
   - `TestErrorLine`: 600 runas → 500; `\n` → espacio; enmascarado, también un secreto de varias líneas.
-- [ ] **Step 5: `formspec.go` y `config.go` (tests primero).**
+- [x] **Step 5: `formspec.go` y `config.go` (tests primero).**
 
 ```go
 // FormSpec es apps.spec (§6.1) como lo lee deploy: catalog ya lo validó y
@@ -680,7 +680,7 @@ func ReadConfig(ctx context.Context, app App, env map[string]string) (Config, er
 ```
 
   El healthcheck de un formulario (§6.1): `http` → `["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:<port><path>"]`; `bun-http` → `["CMD", "bun", "-e", "fetch('http://127.0.0.1:<port><path>').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]`; `command` → `["CMD", …command]`; `none` → sin `healthcheck`. Tiempos como `"10s"`, `retries` tal cual. `memory_mb` → bytes (`MB << 20`) como string decimal (`Resource.Memory`, T1), `cpus` (un `float64` del JSON) → `strconv.FormatFloat(x, 'f', -1, 64)` (`0.1` → `"0.1"`).
-- [ ] **Step 6: `render.go` (tests primero, con golden files).**
+- [x] **Step 6: `render.go` (tests primero, con golden files).**
 
 ```go
 type RenderInput struct {
@@ -754,7 +754,7 @@ func AppliedState(expected []string, services []SwarmService, deployID int64) Ap
 ```
 
   `TestEvaluate` (tabla): nuevo y todas corriendo → listo; nuevo a medias → espera; update de este deploy `completed` → listo; `updating` → espera; `rollback_started`, `rollback_completed`, `rollback_paused` y `paused` → falla (con `Message`); update viejo `completed` antes del margen → espera, y después del margen con las deseadas corriendo → listo; `Update` nil en uno que ya existía → igual que el viejo; **el CLI tardó más que el margen** (`appliedAt = t0`, `settleFrom = t0+8s`, `settle = 5s`, un servicio que ya existía, sin `UpdateStatus` y con las deseadas corriendo): a `now = t0+9s` espera (contado desde `appliedAt` ya habría pasado), y a `now = t0+13s` → listo; `replicas: 0` → listo; global usa `DesiredTasks`; un servicio que todavía no aparece → espera; dos servicios, uno falla → falla con el primero por nombre. `TestAppliedState`: ninguno, algunos, todos.
-- [ ] **Step 8: Integración (`render_integration_test.go`, `//go:build integration`, sin crear nada):** `TestRenderGoldensAcceptedByDockerCLI` corre `docker stack config -c -` con cada `*.golden.json` por stdin (mismo entorno mínimo que en T1) y espera código 0; en `form-command-dollar`, la salida trae `$HOME` (un solo `$`).
+- [x] **Step 8: Integración (`render_integration_test.go`, `//go:build integration`, sin crear nada):** `TestRenderGoldensAcceptedByDockerCLI` corre `docker stack config -c -` con cada `*.golden.json` por stdin (mismo entorno mínimo que en T1) y espera código 0; en `form-command-dollar`, la salida trae `$HOME` (un solo `$`).
 - [ ] **Step 9: Verificar y commits** (uno por grupo, cada uno verde):
 
 ```bash

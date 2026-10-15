@@ -1,0 +1,52 @@
+{
+  "networks": {
+    "it2g_staging": {
+      "external": true,
+      "name": "it2g_staging"
+    }
+  },
+  "services": {
+    "echo": {
+      "command": [
+        "sh",
+        "-c",
+        "echo $$HOME && sleep 3600"
+      ],
+      "deploy": {
+        "labels": {
+          "muelle.app": "echo",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "replicas": 1,
+        "rollback_config": {
+          "order": "start-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 1
+        }
+      },
+      "image": "alpine:3@sha256:c0ffee0000002222222222222222222222222222222222222222222222222222",
+      "labels": {
+        "muelle.app": "echo",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ]
+    }
+  }
+}

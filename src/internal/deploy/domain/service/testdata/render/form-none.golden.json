@@ -1,0 +1,47 @@
+{
+  "networks": {
+    "it2g_staging": {
+      "external": true,
+      "name": "it2g_staging"
+    }
+  },
+  "services": {
+    "redis": {
+      "deploy": {
+        "labels": {
+          "muelle.app": "redis",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "replicas": 0,
+        "rollback_config": {
+          "order": "start-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 1
+        }
+      },
+      "image": "redis:7@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000",
+      "labels": {
+        "muelle.app": "redis",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ]
+    }
+  }
+}

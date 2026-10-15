@@ -1,0 +1,29 @@
+{
+  "kind": "service",
+  "slug": "worker",
+  "spec": {
+    "image": "ghcr.io/x/worker:sha-1",
+    "port": 9000,
+    "replicas": 3,
+    "command": [
+      "./worker",
+      "--queue",
+      "default"
+    ],
+    "healthcheck": {
+      "type": "command",
+      "command": [
+        "./worker",
+        "health"
+      ],
+      "interval_s": 30,
+      "timeout_s": 10,
+      "retries": 5,
+      "start_period_s": 90
+    },
+    "volumes": []
+  },
+  "images": {
+    "worker": "ghcr.io/x/worker:sha-1@sha256:c0ffee0000002222222222222222222222222222222222222222222222222222"
+  }
+}
