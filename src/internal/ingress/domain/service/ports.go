@@ -17,7 +17,10 @@ type Network struct {
 	// driver puede venir vacío unos milisegundos; el adaptador la cuenta igual.
 	Overlay    bool
 	Attachable bool
-	// Containers son los contenedores del nodo local conectados.
+	// Labels son sus etiquetas (las de un stage: naming.StageLabels).
+	Labels map[string]string
+	// Containers son los contenedores del nodo local conectados. List no los
+	// trae: solo Inspect.
 	Containers []string
 }
 
@@ -28,6 +31,8 @@ type Network struct {
 type Networks interface {
 	// Inspect devuelve la red y si existe.
 	Inspect(ctx context.Context, name string) (n Network, found bool, err error)
+	// List devuelve todas las redes, con sus etiquetas y sin los contenedores.
+	List(ctx context.Context) ([]Network, error)
 	// CreateOverlay crea una red overlay attachable con esas etiquetas. Si ya
 	// existe (otra petición la creó a la vez) no es un error.
 	CreateOverlay(ctx context.Context, name string, labels map[string]string) error

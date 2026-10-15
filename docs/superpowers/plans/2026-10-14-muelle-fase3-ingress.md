@@ -1145,7 +1145,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 - Modify: `src/shared/infra/container/container_test.go` (solo la línea de jobs de `TestNew`)
 - Modify: `src/internal/ingress/integration_test.go`
 
-- [ ] **Step 1: Las redes se listan con sus etiquetas.** (El nombre de muelle-caddy en las redes de stage ya lo hizo T2 Step 5.)
+- [x] **Step 1: Las redes se listan con sus etiquetas.** (El nombre de muelle-caddy en las redes de stage ya lo hizo T2 Step 5.)
 
   **Tests primero:**
   - `networks_test.go`, `TestDockerNetworksList`: con `dockertest`, devuelve las redes con sus `Labels` y `Overlay`; `Inspect` también trae `Labels`.
