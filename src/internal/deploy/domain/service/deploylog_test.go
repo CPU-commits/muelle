@@ -156,6 +156,11 @@ func TestAppendPlan(t *testing.T) {
 	if add != closing {
 		t.Fatalf("cierre justo: add=%q", add)
 	}
+	// Si las de cierre ya llenaron la reserva, la marca tampoco pasa de LogCap.
+	add, tr = AppendPlan(LogCap-10, false, []string{line}, false, marker)
+	if add != "" || !tr {
+		t.Fatalf("marca sin lugar: add=%q truncated=%v", add, tr)
+	}
 	// Sin líneas no cambia nada.
 	if add, tr := AppendPlan(10, false, nil, false, marker); add != "" || tr {
 		t.Fatalf("add=%q truncated=%v", add, tr)

@@ -93,7 +93,8 @@ func CutLine(s string, n int) string {
 // AppendPlan decide qué se agrega a un log de cur bytes (contrato §2.5). lines
 // ya están formateadas; marker es TruncatedMarker formateada. Las normales
 // entran mientras cur+len ≤ LogCap−LogReserve; la primera que no entra agrega
-// marker (si truncated era false) y las siguientes se descartan. Las de cierre
+// marker (si truncated era false y cabe en LogCap) y las siguientes se
+// descartan. Las de cierre
 // (final) entran mientras cur+len ≤ LogCap; si una no entra, ni ella ni las
 // que siguen se escriben, y el log queda truncado.
 func AppendPlan(cur int, truncated bool, lines []string, final bool, marker string) (add string, nowTruncated bool) {
@@ -110,8 +111,9 @@ func AppendPlan(cur int, truncated bool, lines []string, final bool, marker stri
 			b.WriteString(line)
 			continue
 		}
-		if !final {
-			// La marca va en la reserva: cur+b.Len() ≤ LogCap−LogReserve.
+		// La marca va en la reserva, si queda lugar (las de cierre pueden
+		// haberla usado antes): el log nunca pasa de LogCap.
+		if !final && cur+b.Len()+len(marker) <= LogCap {
 			b.WriteString(marker)
 		}
 		truncated = true
