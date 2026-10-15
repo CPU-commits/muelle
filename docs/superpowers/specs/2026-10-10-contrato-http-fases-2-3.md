@@ -545,7 +545,7 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
 - **Crear:**
   - Con token, y el hostname cae en una zona visible (el sufijo más largo):
     - Se crean `A` (y `AAAA` si hay `public_ipv6`) con el `proxied` pedido, y queda `pending` con `tls_mode: cloudflare`.
-    - Si ya hay un registro de ese nombre que muelle no creó (un `A`, un `AAAA` o un `CNAME`), no se toca: `error` con `record_exists`, sin `cf_record_id`.
+    - Si ya hay un registro de ese nombre que muelle no creó (un `A`, un `AAAA` o un `CNAME`), no se toca: `error` con `record_exists`, sin `cf_record_id`. La zona sí se encontró: el dominio queda con `cf_zone_id` y `tls_mode: cloudflare`, así el certificado sale por DNS-01 aunque el registro apunte a otro lado (§16 del diseño, con Dokploy todavía en 80/443), y adoptar usa esa zona.
     - Los registros que crea muelle llevan el comentario `muelle` en Cloudflare, para reconocerlos en el panel de Cloudflare.
     - Si Cloudflare falla: `error` con `cloudflare`. No se responde `502`: un error de DNS deja el dominio en error, y el `POST` igual responde `201`.
     - Si no hay `public_ip`: `error` con `cloudflare`, y el mensaje "configura la IP pública en Ajustes".
@@ -643,6 +643,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
       "listen": [":443"],
       "trusted_proxies": { "source": "static", "ranges": ["173.245.48.0/20", "…los rangos de Cloudflare"] },
       "client_ip_headers": ["CF-Connecting-IP", "X-Forwarded-For"],
+      "trusted_proxies_strict": 1,
       "routes": [{
         "match": [{ "host": ["panel.tudominio.cl"] }],
         "handle": [{ "handler": "subroute", "routes": [
@@ -660,7 +661,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
 
 - **IPs permitidas en el panel:** el matcher es **`client_ip`** (`{"client_ip": {"ranges": […]}}`), no `remote_ip`. Sin `panel_allowed_cidrs`, no va la ruta del `403`.
   - `remote_ip` mira el peer directo, que con el panel `proxied` es el edge de Cloudflare.
-  - `client_ip` usa la IP real que resuelve `trusted_proxies` del servidor: los rangos de Cloudflare (`{"source": "static", "ranges": […]}`), con `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`. Esos headers solo cuentan si el peer está en esos rangos: un cliente que llega directo no puede poner su IP.
+  - `client_ip` usa la IP real que resuelve `trusted_proxies` del servidor: los rangos de Cloudflare (`{"source": "static", "ranges": […]}`), con `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`. Esos headers solo cuentan si el peer está en esos rangos: un cliente que llega directo no puede poner su IP. Con `trusted_proxies_strict: 1`, `X-Forwarded-For` se lee de derecha a izquierda: cuenta la IP que vio Cloudflare, no una que el cliente puso adelante (solo importa si falta `CF-Connecting-IP`).
   - Es la misma IP que muelle recibe en `X-Real-IP` (`set` la pisa, nunca se reenvía la del cliente) y muestra como `client_ip` en `GET /settings`.
   - Una IP fuera de la lista recibe `403`, y la ruta del panel no se rompe.
 - **Configuración siempre completa**, con `admin.listen` = `naming.CaddyAdminListen` (`unix//run/caddy-admin/admin.sock`).
@@ -675,13 +676,14 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - **Volúmenes:** `muelle_caddy_data:/data`, `muelle_caddy_config:/config` y `muelle_caddy_admin:/run/caddy-admin` (`naming.CaddyDataDir`, `CaddyConfigDir` y `CaddyAdminDir`).
   - **Redes:** se crea en `muelle_panel` y se conecta a cada red de stage.
   - **Cuándo se recrea:** si cambian la imagen, los puertos, el comando (`Container.Cmd`) o los volúmenes, si no está corriendo, o si corre sin publicar sus puertos (`len(PublishedPorts) == 0` con `Ports` no vacío).
-  - **Recrear es** detenerlo (`StopContainer`, 10 s: Caddy cierra bien y suelta el socket), borrarlo y crear uno nuevo, **nunca rearrancar el mismo.** Docker 29 arranca sin puertos un contenedor cuyo arranque falló con `ErrPortInUse` (el fake lo imita). Uno detenido o caído también se recrea, en vez de arrancarlo.
+  - **Recrear es** bajar la imagen si falta, y recién entonces detenerlo (`StopContainer`, 10 s: Caddy cierra bien y suelta el socket), borrarlo y crear uno nuevo, **nunca rearrancar el mismo.** Si la imagen no baja, el contenedor anterior sigue sirviendo los sitios y el panel, y el error queda en `GET /proxy`. Docker 29 arranca sin puertos un contenedor cuyo arranque falló con `ErrPortInUse` (el fake lo imita). Uno detenido o caído también se recrea, en vez de arrancarlo.
   - **Puerto ocupado** (`docker.ErrPortInUse`): el contenedor anterior ya no existe. Se reintenta con los mismos ajustes en el job `"proxy"` y el error queda en `GET /proxy`. No se vuelve solo a los puertos viejos.
 - **Imagen:** `caddy_image` si está, o `naming.CaddyImageFor(version)`. Se baja con `PullImage` si `InspectImage` da `ErrNotFound`: con la credencial de `registries` de su host si hay una (§1.1), y si no, anónima.
 - **TLS** (§8 del diseño), en `apps.tls.automation.policies`, una política por modo:
   - `cloudflare`: el emisor `acme` con `challenges.dns.provider` = `{"name": "cloudflare", "api_token": …}` y `resolvers: ["1.1.1.1:53", "1.0.0.1:53"]` (la propagación se mira en Cloudflare, no en el DNS del host). Un dominio con `tls_mode: cloudflare` va por `http` si ya no hay token.
   - `http`: el emisor `acme`, sin desafío DNS (Let's Encrypt, HTTP-01 o TLS-ALPN-01).
   - `email` es `acme_email`, y no va si está vacío.
+- **Sin placeholders en los ajustes:** Caddy expande placeholders en el email del emisor `acme` y en `api_token` (`a{x}@b.cl` hace fallar el `POST /load` entero). Si `acme_email` o el token tienen `{` o `}`, muelle no manda la configuración, y `GET /proxy` dice `out_of_sync` con el motivo.
 - **Errores de Caddy:** el mensaje de un `POST /load` rechazado se guarda (y se registra en el log) con el token de Cloudflare reemplazado por `***`, cortado a 500 caracteres. La configuración misma nunca va al log.
 - **Ruta del panel:** `panel_domain → naming.MuelleService:naming.MuellePort` (`muelle_muelle:8080`), con `X-Real-IP` = `{http.vars.client_ip}` en `headers.request.set` del `reverse_proxy` (el JSON de arriba).
 - **TLS del panel:**
