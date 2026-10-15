@@ -853,11 +853,12 @@ El subcomando que vacía `panel_allowed_cidrs` desde dentro del contenedor y rei
 
   Implementación: `case "settings"` en `run`, con `signal.NotifyContext` y `settingscli.Run(ctx, extra, settingscli.Deps{…}, stdout, stderr)`: `DataDir` llama a `settings.Load()` y devuelve `s.DataDir`; `Hostname: os.Hostname`; `Docker` arma `docker.New(docker.Options{})`; `Log` es un `slog` de texto a stderr. Agrega `settings` al `usage`. (El error de `settings.Load` ya dice qué variable falta; `settingscli` le agrega la pista de `docker exec`.)
 
-- [ ] **Step 7: README**, sección **"Recuperar el acceso"** (nueva, después de "Solo detrás de Caddy"):
+- [x] **Step 7: README**, sección **"Recuperar el acceso"** (nueva, después de "Solo detrás de Caddy"):
   - si la lista de IPs permitidas te deja fuera: el `docker exec … muelle settings reset-panel-ips` del contrato §5.4, qué hace (vacía la lista, reinicia muelle, unos segundos sin panel) y `--no-restart`;
-  - si el problema son los puertos del proxy (muelle-caddy no arranca en los nuevos): el `docker run --rm -v muelle_data:/data alpine …sqlite3 … UPDATE settings …` del contrato §4.1 con los puertos anteriores, y después `muelle settings reset-panel-ips` (o esperar el job `"proxy"`).
+  - si el problema son los puertos del proxy (muelle-caddy no arranca en los nuevos): el `docker run --rm -v muelle_data:/data alpine …sqlite3 … UPDATE settings …` del contrato §4.1 con los puertos anteriores (probado sobre un volumen `it5`), y después `docker service update --force muelle_muelle` (o esperar el job `"proxy"`). `muelle settings reset-panel-ips` también reinicia, pero de paso vacía la lista de IPs: el README lo ofrece solo si la lista también te dejó fuera;
+  - en "Estructura", `settings` en la línea de `main.go` y `cmd/settingscli/`.
 
-- [ ] **Step 8: Verificar y commits.**
+- [x] **Step 8: Verificar y commits.**
   - `feat(docker): reiniciar un servicio como docker service update --force (ServiceRestarter)`
   - `feat(admin): vaciar la lista de IPs permitidas del panel desde la línea de comandos`
   - `feat: muelle settings reset-panel-ips recupera el acceso al panel y reinicia muelle`

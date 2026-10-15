@@ -21,11 +21,12 @@ Todavía no despliega nada.
 ## Estructura (spec §4.1)
 
 ```
-main.go             subcomandos serve, genkey y version
+main.go             subcomandos serve, genkey, settings y version
 Dockerfile          la imagen de muelle (ver "Imágenes"); deploy/caddy/, la de muelle-caddy
 src/
 ├── cmd/http/       ServeMux, middleware y errores → HTTP
 ├── cmd/cron/       ejecuta las tareas periódicas de los módulos
+├── cmd/settingscli/ muelle settings reset-panel-ips (ver "Recuperar el acceso")
 ├── internal/
 │   ├── identity/   usuarios, sesiones, 2FA, invitaciones, tokens de API
 │   ├── catalog/    proyectos, stages y apps
@@ -122,6 +123,29 @@ Crear y borrar un stage crea y borra su red overlay, y borrar una app hace `dock
 - El `MUELLE_LISTEN=:8080` por defecto escucha en todas las interfaces: **no publiques ese puerto** (ni con `-p`/`ports:` de Docker ni en el firewall del host). En producción muelle está en la red `muelle_panel`, a la que solo llega Caddy.
 - El proxy tiene que **pisar** `X-Real-IP` con la IP real del cliente, nunca reenviar la que mande el cliente. En un Caddyfile es `header_up X-Real-IP {client_ip}`; en la configuración JSON que manda muelle a muelle-caddy, `{http.vars.client_ip}` (el atajo `{client_ip}` no existe en JSON; contrato §3.4).
 - En desarrollo, escucha en `127.0.0.1`, como en el ejemplo de arriba.
+
+## Recuperar el acceso
+
+Si guardaste una lista de IPs permitidas del panel (`panel_allowed_cidrs`, en Ajustes) que te deja fuera, por ejemplo porque cambió tu IP, vacíala desde el servidor, dentro del contenedor de muelle:
+
+```bash
+docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle | head -n1)" muelle settings reset-panel-ips
+```
+
+- Deja la lista en `[]` (cualquier IP) y reinicia muelle, como `docker service update --force muelle_muelle`: al arrancar, muelle le manda a Caddy la configuración sin la lista. El panel y los streams se cortan unos segundos; un deploy en curso se resuelve con la reconciliación del arranque.
+- El cambio queda en la auditoría como `settings.update`, con actor `system` y `"via": "cli"`. No necesita la clave maestra.
+- Si la lista ya estaba vacía, no cambia nada y lo dice (el problema es otro: mira los puertos del proxy, abajo), pero reinicia igual: ese arranque le reenvía la configuración a Caddy.
+- `--no-restart` solo cambia la base e imprime el comando para reiniciar a mano. Mientras tanto, Caddy sigue filtrando con la lista anterior, hasta que muelle le reenvíe la configuración (el job `"proxy"`, cada 5 min).
+- Si no puede reiniciar (Docker no responde, o el contenedor no es una tarea de Swarm), lo dice, imprime el comando para reiniciar a mano y termina con código 1: la base ya quedó cambiada. Fuera del contenedor de muelle (sin su entorno o sin `muelle.db` en `MUELLE_DATA_DIR`) no toca nada, termina con 1 y muestra el `docker exec` de arriba. Con argumentos que no sirven, termina con 2.
+
+**Si el problema son los puertos del proxy.** Si cambiaste `proxy_http_port` o `proxy_https_port` a unos que estaban ocupados, muelle-caddy no arranca en los nuevos ni vuelve solo a los anteriores, y sin Caddy no se llega al panel. Vuelve a poner los de antes directo en la base. La imagen de muelle no trae `sqlite3`, así que se usa un contenedor aparte sobre el mismo volumen (SQLite en modo WAL admite la escritura con muelle corriendo). Cambia `80` y `443` por los puertos que tenías:
+
+```bash
+docker run --rm -v muelle_data:/data alpine sh -c \
+  "apk add -q sqlite && sqlite3 /data/muelle.db \"UPDATE settings SET value='80' WHERE key='proxy_http_port'; UPDATE settings SET value='443' WHERE key='proxy_https_port'\""
+```
+
+Después reinicia muelle desde el host (`docker service update --force muelle_muelle`), y al arrancar recrea muelle-caddy con esos puertos. También puedes esperar al job `"proxy"` (a lo más 5 min). `muelle settings reset-panel-ips` también reinicia, pero además vacía la lista de IPs permitidas: úsalo si también te dejó fuera.
 
 ## Tests
 
