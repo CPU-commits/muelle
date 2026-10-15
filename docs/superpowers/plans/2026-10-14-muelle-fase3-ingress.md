@@ -2037,7 +2037,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 
   **Commit:** `feat(ingress): ProxySettingsChanged aplica los ajustes y agenda la recreación (contrato §3.5)`
 
-- [ ] **Step 5: El contenedor completo, sin la API real de Cloudflare.**
+- [x] **Step 5: El contenedor completo, sin la API real de Cloudflare.**
 
   **Tests primero** (`src/shared/infra/container/ingress_test.go`, nuevo, `package container`):
   - `TestContractCloudflareTokenThroughSettings`:
