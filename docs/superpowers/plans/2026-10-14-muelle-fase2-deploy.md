@@ -24,8 +24,8 @@
 | Tarea | Qué deja | Depende de |
 |---|---|---|
 | T1 | `shared/domain/compose` y la validación de catalog al guardar (más `services` en la respuesta de una app) | — |
-| T2 | El dominio de deploy: entidades, render con golden files, qué imagen se despliega, enmascarado, formato del log, regla de convergencia | T1 |
-| T3 | La base y la API sin el worker: 0002, repositorios, registries (§2.10), encolar deploys y rollbacks, leerlos (§2.1–§2.5, §2.7), y el ocultamiento de secretos en los tipos de Docker | T2 |
+| T2 | El dominio de deploy: entidades, las reglas de un registry (en `shared/domain/validate`), render con golden files, qué imagen se despliega, enmascarado, formato del log, regla de convergencia | T1 |
+| T3 | La base y la API sin el worker: 0002, repositorios, registries (§2.10), encolar deploys y rollbacks, leerlos (§2.1–§2.5, §2.7), el ocultamiento de secretos en los tipos de Docker, y el registry inicial de install (`MUELLE_INIT_REGISTRY_FILE`, solo en el primer arranque de la base) | T2 |
 | T4 | El worker: los pasos de §7, la cola por app, la reconciliación al arrancar, `RemoveApp`, y la integración con Swarm real | T3 |
 | T5 | Los streams (log del deploy por SSE, logs de las apps con `since`), `GET …/status`, `Revalidate`, los contratos con el contenedor completo, el README y la prueba de punta a punta | T4 |
 
@@ -33,8 +33,10 @@ Las cinco tareas corren **en orden**, en la rama `fase-2-deploy` (worktree `/hom
 
 **En paralelo con otras líneas:** las Fases 3 (ingress, rama `fase-3-ingress`) y 5 (distribución, rama `fase-5-dist`) corren al mismo tiempo, cada una en su rama desde `fase-23-base`, y se mergean después. Por eso:
 - solo se tocan los archivos que lista cada tarea;
-- lo que haga falta en un paquete compartido va en un **archivo nuevo** con el nombre de la línea (`redact_deploy.go`, `fake_deploy.go`, `revalidate_deploy.go`). Nunca se editan `docker.go`, `client.go`, `fake.go`, `kit.go`, `server.go` ni `container.go` (salvo lo que una tarea diga explícitamente);
-- **no se tocan**: `src/internal/ingress/**`, `web/`, `0003_ingress.sql`, los Dockerfiles, `action/`, `main.go`, los subcomandos de install y settings, ni el workflow de releases;
+- lo que haga falta en un paquete compartido va en un **archivo nuevo** con el nombre de la línea (`redact_deploy.go`, `fake_deploy.go`, `revalidate_deploy.go`, `registry_deploy.go`). Nunca se editan `docker.go`, `client.go`, `fake.go`, `kit.go`, `server.go` ni `container.go` (salvo lo que una tarea diga explícitamente);
+- **`container.go`:** solo T3 lo edita, en dos lugares (la llamada a `deploy.New` y una llamada después de `ApplyStartupSettings`, T3 Step 8). La Fase 5 cambia la firma de `build` (suma `panelHandler`) y la `Config` del servidor: esas líneas no se tocan;
+- **`src/settings`:** solo lo que dice T3 Step 8 (`MUELLE_INIT_REGISTRY_FILE`);
+- **no se tocan**: `src/internal/ingress/**`, `web/`, `0003_ingress.sql`, los Dockerfiles, `action/`, `main.go`, los subcomandos `install` y `settings` de `main` (el paquete `src/settings` es otra cosa: ver arriba), ni el workflow de releases;
 - en el README, el contrato y el diseño, solo las secciones de deploy (T5 dice cuáles).
 
 ## Convenciones (todas las tareas)
@@ -95,15 +97,18 @@ src/internal/catalog/                             (T1) solo la validación del c
 ├── app/usecases/app.go             llama a checkServiceNames al crear y editar
 ├── app/usecases/service_names.go   (nuevo) nombres de servicio únicos por stage
 └── app/dto/dto.go                  AppOutput.Services
+src/shared/domain/validate/registry_deploy.go            (T2) RegistryHost, RegistryUsername, RegistryPassword (contrato §2.10)
 src/shared/infra/out/sqlite/migrations/0002_deploy.sql   (T3) + requested_images, log_truncated
 src/shared/infra/out/sqlite/migrations_test.go           (T3) sus defaults y CHECK
 src/shared/infra/out/docker/redact_deploy.go             (T3) String/GoString/LogValue/MarshalJSON
+src/settings/settings.go, settings_test.go               (T3) MUELLE_INIT_REGISTRY_FILE → Init.Registry (oculta la contraseña)
+src/shared/infra/container/container.go                  (T3) solo deploy.New (InitRegistry) y la llamada a SeedInitRegistry
 src/shared/infra/out/docker/dockertest/fake_deploy.go    (T5) PutContainer (health en los tests)
 src/cmd/http/utils/revalidate_deploy.go                  (T5) Kit.Revalidate (contrato §0.3)
-src/shared/infra/container/deploy_test.go                (T5) contratos con el contenedor completo
+src/shared/infra/container/deploy_test.go                (T3–T5) el registry inicial (T3) y los contratos con el contenedor completo (T5)
 src/internal/deploy/
-├── module.go                                     (T3–T5) Deps (sin cambios), New, RegisterRoutes, Run, RemoveApp
-├── domain/entity/deploy.go, registry.go          (T2) Deploy, Status, Trigger; Registry y su validación
+├── module.go                                     (T3–T5) Deps (+ InitRegistry), New, RegisterRoutes, SeedInitRegistry, Run, RemoveApp
+├── domain/entity/deploy.go, registry.go          (T2) Deploy, Status, Trigger; Registry (las reglas están en shared/domain/validate)
 ├── domain/repository/repository.go               (T3) DeployRepository, RegistryRepository
 ├── domain/service/
 │   ├── ports.go          (existente; T3–T5 suman) Queue, Images, Cluster, ManagerNode; Stacks.Deploy
@@ -116,17 +121,18 @@ src/internal/deploy/
 │   ├── deploylog.go      (T2) FormatLine, Sanitize, AppendPlan, JoinPieces, CutLine, ErrorLine
 │   ├── convergence.go    (T2) Evaluate, AppliedState
 │   └── testdata/render/*.input.json, *.golden.json
-├── app/dto/                                      (T3–T5)
+├── app/dto/                                      (T3–T5) (T3: InitRegistry, que oculta la contraseña)
 ├── app/usecases/
 │   ├── remove_app.go     (existente; T4) bloquea, detiene el worker, marca failed, stack rm
 │   ├── create_deploy.go, rollback.go, queries.go, registries.go   (T3)
+│   ├── seed_registry.go                                           (T3) el registry inicial de install, una sola vez
 │   ├── logwriter.go, hub.go                                       (T3) el log persistido y el aviso a los streams
 │   ├── run_deploy.go, resume.go, dispatcher.go, manager_node.go   (T4)
 │   └── status.go, app_logs.go                                     (T5)
 ├── infra/in/http/        (T3–T5) handler.go, deploys.go, registries.go, sse.go, streams.go, status.go, mapper_errors.go, res.go
 ├── infra/in/form/        (T3) deploy.go, registry.go (los cuerpos)
 ├── infra/out/repository/sqlite/deploys.go, registries.go    (T3)
-├── infra/out/service/    apps.go, stacks.go (existentes); docker.go, settings.go (T4–T5)
+├── infra/out/service/    apps.go, stacks.go (existentes); settings.go (T3: la marca init_registry_applied; T4: manager_node_id); docker.go (T4–T5)
 ├── integration_test.go   (T4–T5) //go:build integration, prefijo it2
 └── integration_main_test.go (T4) TestMain: barre lo it2 de corridas anteriores
 docs: README (T5, solo las notas de deploy)
@@ -142,7 +148,7 @@ Lo que el plan decide y la tarea no vuelve a discutir:
 3. **Al guardar no se interpola** (catalog todavía no tiene las variables): se valida el modelo con `LoadModelWithContext` y `SkipInterpolation`, y las reglas por valor saltan los strings con `${`. El render repite todo ya interpolado y con el modelo tipado (`ModelToProject`).
 4. **El compose final va en JSON** indentado con claves ordenadas: es YAML 1.2, `docker stack deploy` lo lee (verificado con `docker stack config -c -` en Docker 29.6.1, sin `version`), no tiene ambigüedades de tipos de YAML y el golden es estable. `$` → `$$` en todos los valores (no en las claves) al serializar.
 5. **`dns_opt` se rechaza y `platform` se descarta:** el esquema del CLI de `docker stack deploy` no tiene ninguna de las dos (probado). Los jobs (`deploy.mode: *-job`) se rechazan: la v1 no tiene comandos de release.
-6. **`muelle.deploy` solo en las etiquetas del servicio**, no en las de los contenedores: si no, cada deploy cambiaría la plantilla de las tareas y Swarm reiniciaría todos los servicios de la app (un `redis` con volumen se cortaría al desplegar el `api`). Para la convergencia de un servicio que ya existía y no cambió, se espera un margen de 5 s (`Timing.Settle`) sin `UpdateStatus` nuevo (§7 paso 6). Pregunta 2 al dueño.
+6. **`muelle.deploy` solo en las etiquetas del servicio**, no en las de los contenedores: si no, cada deploy cambiaría la plantilla de las tareas y Swarm reiniciaría todos los servicios de la app (un `redis` con volumen se cortaría al desplegar el `api`). Para la convergencia de un servicio que ya existía y no cambió, se espera un margen de 5 s (`Timing.Settle`) sin `UpdateStatus` nuevo (§7 paso 6). El margen se cuenta desde que `docker stack deploy` **volvió**, no desde antes de llamarlo: con muchos servicios o un daemon lento el CLI puede tardar más de 5 s, y un servicio que sí cambió, cuyo `UpdateStatus` Swarm todavía no puso, se daría por convergido antes de que empiece el rollout. Pregunta 2 al dueño.
 7. **Reconciliación por etiquetas** (contrato §1.2): un `running` que quedó del arranque anterior se resuelve en el worker de su app, mirando qué servicios llevan su `muelle.deploy`. Con Docker caído queda `running` y se reintenta cada 15 s; el apagado nunca cierra un deploy.
 8. **Borrar una app bloquea sus deploys 2 min** (`409 conflict`), cancela el que corre (`failed`) y marca `failed` los `queued`, antes del `docker stack rm`. Si el `stack rm` falla, desbloquea enseguida. Sin el bloqueo, un deploy encolado entre el `stack rm` y el `DELETE` de la fila dejaría un stack huérfano.
    **El bloqueo lo cumple el despachador, no solo `CreateDeploy`:** `CreateDeploy` y `Rollback` miran `Accepting` antes de su `InTx`, así que un `POST` que pasó esa mirada puede insertar su `queued` después del `Block` (y después de `FailQueued`). Por eso, mientras una app está bloqueada: `Wake` no arranca un worker (solo marca `failed` sus `queued`, con "la app se borró"), y un worker nunca reclama (`Claim`) ni retoma: marca `failed` los `queued` y termina. Además, `RunDeploy` vuelve a mirar `Accepting(app.ID)` justo antes del paso 5 y, si es `false`, cierra `failed` sin tocar Swarm.
@@ -156,6 +162,7 @@ Lo que el plan decide y la tarea no vuelve a discutir:
 16. **Las notas de la etapa de contratos** (`notes_phase2.md` y `contract_concerns.md` del scratchpad) ya no existían al escribir este plan. Lo que pedían está en el README ("Notas para las fases siguientes", Fase 2), en el texto de la tarea (los pendientes (a), el ocultamiento en `RegistryAuth`/`StackDeploy`, y (b), la regla de §2.2) y en el contrato; este plan los cubre todos.
 17. **La sustitución estricta es propia, no envuelve `template.Substitute`** (T1). compose-go resuelve sin error dos casos que §5.2 regla 3 prohíbe: las variables dentro de un valor por defecto (`${A:-${B}}` llama al `Substitute` no estricto) y las que siguen en el mismo string a una con modificador (`${A:-x}-${B}`: el resto del string también va al no estricto). En los dos, una `B` sin definir sale `""` en silencio. `strictSubstitute` es un escáner propio, chico y con tests, que compose-go usa por `Interpolate.Substitute`; un `$` dentro de un valor por defecto es un error (al guardar y al renderizar).
 18. **Los errores del worker nunca van crudos a `slog`** (§12). `RunDeploy.Execute` y `Resume` devuelven errores que pueden traer valores: compose-go pone el valor interpolado en sus errores de conversión (`parsing "<secreto>": invalid syntax`), `RenderError.Msg` puede llevar valores de variables, y la salida del CLI va sin enmascarar. El despachador registra solo la app, el id del deploy y el estado final, o el `error` ya guardado (`ErrorLine`, enmascarado); nunca `err.Error()` ni la salida del CLI. Lo mismo para los errores de la base dentro del worker (pueden envolver un error de render).
+19. **El registry inicial de install se aplica solo en el primer arranque de la base** (cambio de requisito del dueño, 2026-10-15: las imágenes de muelle son privadas; contrato §2.10 y §5.2). Install deja montado el secreto `muelle_init_registry` y la variable `MUELLE_INIT_REGISTRY_FILE` en el servicio, igual que el del token de Cloudflare. Con una regla "si no hay un registry para ese host", un admin que borra en el panel la credencial de `ghcr.io` (porque se filtró) la vería volver con el próximo `docker service update` o reinicio del nodo. Por eso deploy guarda su propia marca, `init_registry_applied` en `settings`, en la misma transacción que crea el registry, y **siempre** la inserta en el primer arranque, haya o no archivo: una reinstalación sobre el mismo `muelle_data` no cambia las credenciales (como los demás `MUELLE_INIT_*`). No usa `init_applied` de admin: cuando deploy corre, admin ya la guardó en ese mismo arranque. Las reglas del host, el usuario y la contraseña pasan a `shared/domain/validate` (T2) para que `settings.Load` valide el archivo en cada arranque, como el del token, sin importar el dominio de un módulo.
 
 ---
 
@@ -243,9 +250,12 @@ func Marshal(f *File) ([]byte, error)
   - archivos de muelle: `secrets` y `configs` (de primer nivel y de servicio), `env_file`, `label_file`, `extends`, `include`;
   - red y nombres: `container_name`, `network_mode`, `links`, `external_links`, `networks` (de primer nivel y de servicio), `name` de primer nivel;
   - logging: `driver: syslog`, `gelf`, `fluentd`;
-  - etiquetas: `muelle.app` en `labels`, en `deploy.labels` y en las de un volumen; `com.docker.stack.namespace` igual;
-  - lo que el CLI no soporta o la v1 no tiene: `dns_opt`, `deploy.mode: replicated-job` y `global-job`, `deploy.resources.limits.pids`, `deploy.resources.reservations.devices`, `use_api_socket`, `models`, `gpus`, `develop`, `pre_start`, `jobs` (de primer nivel), y una clave inventada (`foo`) en el servicio y en el primer nivel;
+  - etiquetas: `muelle.app` en `labels`, en `deploy.labels` y en las de un volumen; `com.docker.stack.namespace` igual. Cada una como mapa (`muelle.app: x`), como lista con valor (`- muelle.app=x`) y como lista **sin `=`** (`- muelle.app`, `- com.docker.stack.namespace`): compose-go lee esa última como la clave con valor `""` (`Labels.DecodeMapstructure`), así que también es una etiqueta reservada;
+  - lo que el CLI no soporta o la v1 no tiene: `dns_opt`, `deploy.mode: replicated-job` y `global-job`, `deploy.resources.limits.pids`, `deploy.resources.reservations.devices`, `use_api_socket`, `models`, `gpus`, `develop`, `pre_start`, `jobs` (de primer nivel);
+  - una clave inventada: `foo` en el servicio, en el primer nivel y en `deploy` (`deploy.foo`). Estas no llegan a la lista de permitidos: las rechaza antes el esquema de compose-go (Step 9, `schemaMessage`), y el mensaje esperado es el genérico de `allowlist.go` con su ruta: `compose_yaml: services.web.foo: no está soportado…`, `compose_yaml: foo: …` y `compose_yaml: services.web.deploy.foo: …`. Todas las demás claves de esta lista existen en el esquema de v2.16.1 (verificado), así que sí llegan a la lista de permitidos;
   - `x-cualquier` en el servicio y en el primer nivel **sí** pasa.
+
+  Lo que el esquema o `validation.Validate` de compose-go rechazan por la **combinación** de claves (por ejemplo `external` y `driver` juntos en un volumen: `volumes.data: conflicting parameters "external" and "driver" specified`) sale con el texto de compose-go detrás de `compose_yaml: el compose no es válido: `. Por eso cada fila de la tabla prueba **una** clave sola.
 
 - [ ] **Step 5: `interpolate_test.go`** (`TestStrictInterpolation`, con `Load`; y `TestStrictSubstitute`, tabla directa sobre `strictSubstitute` con un `Mapping` de mapa):
   - `${A}` y `$A` sin definir → error que nombra `A`; `${A:-x}` y `${A-x}` → `x`; `${A:-x}` con `A=""` → `x` y `${A-x}` con `A=""` → `""`; `${A:+y}` sin definir → `""` y definida → `y`; `${A:?falta A}` → error con "falta A"; `${A?}` con `A=""` → `""`;
@@ -253,6 +263,7 @@ func Marshal(f *File) ([]byte, error)
   - **lo que compose-go deja pasar** (decisión 17): `${A:-x}-${B}` con `B` sin definir → error que nombra `B`; `${A:-${B}}` y `${A:-$B}` → error de `$` en un valor por defecto, **aunque `B` esté definida**; `${A}${B}` con `B` sin definir → error;
   - `${}`, `${A B}`, `${1A}` y un `${A` sin cerrar → error de formato;
   - un valor por defecto con llaves (`${A:-{"x":1}}`) → `{"x":1}`, igual que compose-go (el cierre se busca contando llaves);
+  - **la ruta en el mensaje** (con `Load`): `labels: {com.example.v: ${UNDEF}}` → `compose_yaml: services.web.labels.com.example.v: la variable UNDEF no está definida…` (compose-go guarda el `.` de una clave como `👻` en su `tree.Path`, y `Path.String()` lo devuelve: el mensaje nunca trae `👻`); con dos variables sin definir en servicios distintos, el mensaje es **uno** solo, el de la primera ruta en orden (compose-go los junta con `errors.Join`, ordenados por ruta); un `${UNDEF}` en `deploy.replicas` nombra `services.web.deploy.replicas`;
   - ningún caso escribe en logrus (no hay `WARN … variable is not set` en stderr).
 
 - [ ] **Step 6: `marshal_test.go` y `services_test.go`:**
@@ -318,9 +329,13 @@ func options(d *types.ConfigDetails, project string, interpolate bool, found *[]
   `LoadModelWithContext` recibe `ConfigDetails` por valor, pero el mapa `Environment` es el mismo: `d.LookupEnv` ve lo que ve compose-go. `o.Interpolate` ya viene armado por `loader.ToOptions` (con su `TypeCastMapping`); solo se cambian `LookupValue` y `Substitute`.
 
 - **`Validate`:** tamaño → `d := details(src, "compose", nil)` → `loader.LoadModelWithContext(ctx, d, options(&d, "compose", false, &found)...)` → el primer hallazgo de `found` (vienen ordenados por ruta) da el error, con el motivo de `allowlist.go` → `check(dict, false)`.
+- **El orden dentro de compose-go** (v2.16.1, `loader.go`): `loadYamlFile` interpola, después corre el esquema (`schema.Validate`, que tiene `additionalProperties: false` en el primer nivel y `unevaluatedProperties: false` en los servicios) y `transform.Canonical`; `load` corre `validation.Validate` y **recién después** la lista de permitidos (`check.Report`). Un error del esquema vuelve antes y `found` queda vacío. La validación del esquema **queda prendida** (`SkipValidation = false`: es la que revisa los tipos al guardar, y sin ella `transform.Canonical` hace `panic` con formas inválidas, por ejemplo `networks: [1]`). Lo que hace `schemaMessage(err)`:
+  - un error de clave desconocida del esquema sale con el mismo formato que un hallazgo: `compose_yaml: <ruta>: <motivo>`, con el motivo de `reasons` por el último segmento o el genérico. compose-go no exporta el error del esquema (`validationError`), así que se reconocen sus dos textos, verificados en v2.16.1: `validating compose.yaml: <ruta> false schema` (una clave de un servicio: `services.web.foo false schema`) y `validating compose.yaml: <ruta> additional properties '<k>'[, '<k2>'…] not allowed` (la ruta del padre, vacía en el primer nivel: `validating compose.yaml:  additional properties 'bar', 'foo' not allowed`; se usa la primera clave, `<ruta>.<k>` o solo `<k>`);
+  - cualquier otro error (un tipo, `validation.Validate`, YAML roto) va tal cual: `compose_yaml: el compose no es válido: <texto de compose-go>`, con los saltos de línea como espacios;
+  - un test de `schemaMessage` fija los dos textos de compose-go (si cambian al subir la versión, el test lo dice).
 - **`Load`:** igual, con `d := details(src, project, env)` y `interpolate = true` siempre (un `env` nil cuenta como vacío); después `check(dict, true)`, `loader.ModelToProject(dict, loader.ToOptions(&d, opts), d)` (con `SkipResolveEnvironment` y `SkipResolveLabels`, no lee archivos; `SkipConsistencyCheck` queda en `false`: verifica que cada volumen usado esté declarado) y `convert(project)`.
 - **`allowlist.go`:** `allowed []tree.Path` con las rutas del modelo **canónico** (el que ve la lista de permitidos, después de `transform.Canonical`). `*` vale para cualquier clave y también para los ítems de una lista. Cada mapa de claves libres necesita su `.*` (`labels.*`, `environment.*`, `logging.options.*`, `ulimits.*`, `volumes.*.labels.*`) y cada lista su `.*`; si no, cada clave del mapa sale como hallazgo. El kitchen sink del Step 3 es lo que prueba que la lista está completa. `reasons` asocia la clave rechazada (el último segmento con nombre de la ruta) a su motivo de §6.3 (por ejemplo `ports` → "publicar puertos no está soportado en la v1: los dominios van por Caddy"); lo que no está en `reasons`: "no está soportado: muelle solo acepta las claves de compose que conoce (§6.3)". El mensaje es `compose_yaml: <ruta>: <motivo>`, con la ruta del hallazgo sin los segmentos `[]` (por ejemplo `compose_yaml: services.web.ports: publicar puertos…`).
-- **`check.go`** (sobre el `map[string]any` canónico): de 1 a 32 servicios; nombres de servicio y de volumen con `validate.VolumeName`; `image` obligatoria y, si ya no tiene `$`, `validate.ImageRef`; cada montaje es `type: volume` con un `source` declarado arriba, o `type: tmpfs`; `logging.driver` en `json-file`, `local` o `none` (vacío vale porque el render lo completa con `json-file`, T2 Step 6: el compose final siempre lleva un driver); ninguna etiqueta (`labels`, `deploy.labels`, las de un volumen; como mapa o como lista `k=v`) empieza con `muelle.` o `com.docker.stack.`; `deploy.mode` vacío, `replicated` o `global`. Con `interpolated=false`, las reglas sobre un valor que contiene `${` se saltan, pero cada string con `$` pasa por `checkTemplate` (la sintaxis de `interpolate.go`, sin buscar valores): así un `${A:-${B}}` o un `${}` fallan al guardar.
+- **`check.go`** (sobre el `map[string]any` canónico): de 1 a 32 servicios; nombres de servicio y de volumen con `validate.VolumeName`; `image` obligatoria y, si ya no tiene `$`, `validate.ImageRef`; cada montaje es `type: volume` con un `source` declarado arriba, o `type: tmpfs`; `logging.driver` en `json-file`, `local` o `none` (vacío vale porque el render lo completa con `json-file`, T2 Step 6: el compose final siempre lleva un driver); ninguna etiqueta (`labels`, `deploy.labels`, las de un volumen) empieza con `muelle.` o `com.docker.stack.`. Las etiquetas no pasan por `transform.Canonical`: en el modelo pueden venir como mapa o como lista. En una lista, la clave de cada ítem es lo que va antes del **primer** `=`, o el string entero si no tiene `=` (`- muelle.app` es la clave `muelle.app` con valor `""`, como la lee `Labels.DecodeMapstructure`); `deploy.mode` vacío, `replicated` o `global`. Con `interpolated=false`, las reglas sobre un valor que contiene `${` se saltan, pero cada string con `$` pasa por `checkTemplate` (la sintaxis de `interpolate.go`, sin buscar valores): así un `${A:-${B}}` o un `${}` fallan al guardar.
 - **`interpolate.go`** (decisión 17: propio, no envuelve `template.Substitute`):
 
 ```go
@@ -344,10 +359,17 @@ func strictSubstitute(s string, m template.Mapping) (string, error)
 func checkTemplate(s string) error
 ```
 
-  El error de compose-go envuelve el nuestro con la ruta (`pathError` tiene `Unwrap`); `Load` lo traduce con `errors.As`:
+  **Cómo se saca la ruta.** compose-go envuelve nuestro error en `interpolation.pathError`, que **no es exportado** (ni él ni su campo `path`): la ruta solo está en su mensaje, `error while interpolating <ruta>: <nuestro error>` (`newPathError`; `<ruta>` es `tree.Path.String()`, con los `👻` vueltos a `.`). Además, `interpolation.Interpolate` junta todos los errores con `errors.Join`, anidados (un `Join` por nivel del árbol: el de `services` adentro del de primer nivel) y ordenados por ruta. Por eso `Load` no usa `errors.As` para la ruta, sino `interpolationError(err) (path string, inner error, ok bool)`:
+  - recorre el árbol de `err` en profundidad y en orden (`Unwrap() error` y `Unwrap() []error`), y se queda con el **primer** nodo `e` cuyo `errors.Unwrap(e)` (el directo) es uno de nuestros tres tipos;
+  - `path = strings.TrimSuffix(strings.TrimPrefix(e.Error(), "error while interpolating "), ": "+inner.Error())`, y `ok` solo si las dos partes coincidieron (así una ruta con `: `, por ejemplo la clave de una etiqueta, no se corta mal);
+  - nuestros tres tipos **no** envuelven `*template.InvalidTemplateError`: si lo hicieran, compose-go usaría su otro mensaje (`invalid interpolation format for <ruta>.\nYou may need to escape…`) y el prefijo no coincidiría;
+  - el mensaje es uno solo, el del primer error: los demás se descartan (el usuario corrige y vuelve a guardar).
+
+  Con eso:
   - `*UndefinedError` → `compose_yaml: <ruta>: la variable X no está definida: agrégala en las variables de la app o del stage, o usa ${X:-valor}`;
   - `*RequiredError` (`${X:?…}`) → `compose_yaml: <ruta>: falta la variable X: <motivo>`;
   - `*TemplateError` → `compose_yaml: <ruta>: <motivo>` (por ejemplo `un valor por defecto no puede tener $: ${A:-…}`; nunca el valor de una variable).
+  - Si `interpolationError` no encuentra ninguno (`ok == false`), el error sigue a la regla de abajo.
   - Los demás errores de compose-go (los de conversión: `replicas: ${N}` con `N=abc` da `error while interpolating …: failed to cast to expected type: … parsing "abc"`) van tal cual detrás de `compose_yaml: `, con sus saltos de línea como espacios. Traen el **valor** interpolado: por eso un `RenderError` se enmascara antes de escribirse (como todo `Msg`) y nunca va crudo a `slog` (decisión 18).
 - **`model.go`:** el compose final, solo con las claves de §6.3 y las que agrega §6.2, con tags `json` y `omitempty`/`omitzero`:
 
@@ -403,7 +425,7 @@ type Service struct {
 
   Las duraciones van como `time.Duration.String()` (`"30s"`), la memoria en bytes y los `cpus` (compose-go los da como `types.NanoCPUs`, un `float32`) con `strconv.FormatFloat(float64(x), 'f', -1, 32)`: con 64 bits, `cpus: 0.1` saldría `"0.10000000149011612"`. (El `cpus` de un formulario es un `float64` del JSON: ahí va con 64, T2 Step 5.)
 - **`marshal.go`:** `json.Marshal` → decodificar a `any` con `UseNumber` → recorrer y reemplazar `$` por `$$` en cada string **valor** (no en las claves de los mapas) → `json.MarshalIndent` con dos espacios y `\n` final.
-- **`Services`:** `LoadModelWithContext` con `SkipValidation` y sin interpolar (las mismas opciones de lectura, sin lista de permitidos); los nombres y los puertos enteros de `expose` (`80`, `"8080"`, `"9000/tcp"`; los rangos y los `${…}` se omiten). Ante cualquier error, `nil`.
+- **`Services`:** `LoadModelWithContext` sin interpolar, con las mismas opciones de lectura, sin lista de permitidos y **con** la validación del esquema (no `SkipValidation`: sin ella, `transform.Canonical` hace `panic` con una forma inválida, verificado con `networks: [1]`, y las filas que guardó la Fase 1 solo pasaron por el chequeo de vacío y de tamaño). Devuelve los nombres y los puertos enteros de `expose` (`80`, `"8080"`, `"9000/tcp"`; los rangos y los `${…}` se omiten). Ante cualquier error, `nil`. `TestServices` suma un compose que el esquema rechaza (`networks: [1]`, `a: 1`) → `nil`, sin `panic`.
 - compose-go puede escribir advertencias con logrus en stderr (por ejemplo, `version` obsoleta). No llevan valores de variables; no se cambia la configuración global de logrus.
 
 - [ ] **Step 10: Verificar y commit**
@@ -465,6 +487,7 @@ Las entidades, el spec de formulario, el render con sus golden files, la regla d
 
 **Files:**
 - Create: `src/internal/deploy/domain/entity/{deploy,registry}.go` y sus tests
+- Create: `src/shared/domain/validate/registry_deploy.go`, `registry_deploy_test.go` (las reglas de un registry: las usan deploy y `settings.Load`, T3 Step 8)
 - Create: `src/internal/deploy/domain/service/{errors,formspec,config,render,images,masker,deploylog,convergence}.go` y sus tests
 - Create: `src/internal/deploy/domain/service/testdata/render/*.input.json`, `*.golden.json`
 - Create: `src/internal/deploy/domain/service/render_integration_test.go` (`//go:build integration`)
@@ -495,8 +518,9 @@ type Deploy struct {
 }
 ```
 
-  - `registry.go`: `Registry{ID, Host, Username, Password, CreatedAt, UpdatedAt}` y `ValidateHost(host)`, `ValidateUsername(u)`, `ValidatePassword(p)` con los mensajes de contrato §2.10. Host canónico: `^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$`, puerto de 1 a 65535, hasta 255 caracteres; `index.docker.io`, `registry-1.docker.io` y `registry.hub.docker.com` → `host: para Docker Hub usa docker.io`. `Registry` tiene `String`, `GoString`, `LogValue` y `MarshalJSON` que ocultan `Password` (la entidad lleva la contraseña en claro en memoria).
-  - Tests: `TestValidateHost` (aceptados: `ghcr.io`, `docker.io`, `registry.example.com:5000`, `localhost:5000`; rechazados: `GHCR.io`, `https://ghcr.io`, `ghcr.io/`, `ghcr.io/x`, `ghcr.io:0`, `ghcr.io:70000`, `-x.io`, los tres alias con su mensaje), `TestValidateUsername` (vacío, 256 caracteres, `\x00`), `TestValidatePassword` (vacío, 4097 bytes, con `\n` o `\r`; 4096 pasa), `TestRegistryNeverPrintsPassword` (`%v`, `%+v`, `%#v`, `slog` JSON, `json.Marshal`: ninguno contiene la contraseña).
+  - `registry.go`: `Registry{ID, Host, Username, Password, CreatedAt, UpdatedAt}`, con `String`, `GoString`, `LogValue` y `MarshalJSON` que ocultan `Password` (la entidad lleva la contraseña en claro en memoria). Sin las reglas de validación: van en `shared/domain/validate` (abajo).
+  - `src/shared/domain/validate/registry_deploy.go` (archivo nuevo del paquete compartido; decisión 19: `settings.Load` también las usa, y `src/settings` no puede importar el dominio de un módulo): `RegistryHost(field, s)`, `RegistryUsername(field, s)` y `RegistryPassword(field, s)`, con la convención del paquete (`*validate.Error` en `field`, como `ImageRef(field, s)`) y los mensajes de contrato §2.10. Deploy las llama con `"host"`, `"username"` y `"password"`. Host canónico: `^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$`, puerto de 1 a 65535, hasta 255 caracteres; `index.docker.io`, `registry-1.docker.io` y `registry.hub.docker.com` → `<field>: para Docker Hub usa docker.io`. Usuario de 1 a 255 caracteres, sin caracteres de control. Contraseña de 1 a 4096 bytes, sin `\n` ni `\r`. **Ningún mensaje incluye el valor** (tampoco el usuario: un mensaje de `settings.Load` no debe dar pistas de la credencial).
+  - Tests: en `registry_deploy_test.go`, `TestRegistryHost` (aceptados: `ghcr.io`, `docker.io`, `registry.example.com:5000`, `localhost:5000`; rechazados: `GHCR.io`, `https://ghcr.io`, `ghcr.io/`, `ghcr.io/x`, `ghcr.io:0`, `ghcr.io:70000`, `-x.io`, los tres alias con su mensaje), `TestRegistryUsername` (vacío, 256 caracteres, `\x00`), `TestRegistryPassword` (vacío, 4097 bytes, con `\n` o `\r`; 4096 pasa; ningún mensaje contiene la contraseña probada); en `entity_test.go`, `TestRegistryNeverPrintsPassword` (`%v`, `%+v`, `%#v`, `slog` JSON, `json.Marshal`: ninguno contiene la contraseña).
 - [ ] **Step 2: Tipos de Swarm en `ports.go`** (para `Evaluate`; los usa T4):
 
 ```go
@@ -712,18 +736,20 @@ type Verdict struct {
 }
 
 // Evaluate aplica la regla del paso 6 a los servicios esperados (nombres de
-// Swarm) con lo que devolvió Swarm. appliedAt es cuando se ejecutó docker
-// stack deploy; un UpdateStatus de este deploy es uno con StartedAt ≥
-// appliedAt−2s. Un servicio que ya existía y no tiene UpdateStatus de este
-// deploy converge cuando pasó settle desde appliedAt y corren las deseadas.
-func Evaluate(expected []string, services []SwarmService, appliedAt, now time.Time, settle time.Duration) Verdict
+// Swarm) con lo que devolvió Swarm. appliedAt es la hora de justo antes de
+// ejecutar docker stack deploy: un UpdateStatus de este deploy es uno con
+// StartedAt ≥ appliedAt−2s. settleFrom es cuando docker stack deploy volvió
+// (decisión 6): un servicio que ya existía y no tiene UpdateStatus de este
+// deploy converge cuando pasó settle desde settleFrom (no desde appliedAt: el
+// CLI puede tardar más que settle) y corren las deseadas.
+func Evaluate(expected []string, services []SwarmService, appliedAt, settleFrom, now time.Time, settle time.Duration) Verdict
 
 // AppliedState dice cuántos de los servicios esperados llevan muelle.deploy =
 // deployID (contrato §1.2): AppliedNone, AppliedPartial o AppliedAll.
 func AppliedState(expected []string, services []SwarmService, deployID int64) Applied
 ```
 
-  `TestEvaluate` (tabla): nuevo y todas corriendo → listo; nuevo a medias → espera; update de este deploy `completed` → listo; `updating` → espera; `rollback_started`, `rollback_completed`, `rollback_paused` y `paused` → falla (con `Message`); update viejo `completed` antes del margen → espera, y después del margen con las deseadas corriendo → listo; `Update` nil en uno que ya existía → igual que el viejo; `replicas: 0` → listo; global usa `DesiredTasks`; un servicio que todavía no aparece → espera; dos servicios, uno falla → falla con el primero por nombre. `TestAppliedState`: ninguno, algunos, todos.
+  `TestEvaluate` (tabla): nuevo y todas corriendo → listo; nuevo a medias → espera; update de este deploy `completed` → listo; `updating` → espera; `rollback_started`, `rollback_completed`, `rollback_paused` y `paused` → falla (con `Message`); update viejo `completed` antes del margen → espera, y después del margen con las deseadas corriendo → listo; `Update` nil en uno que ya existía → igual que el viejo; **el CLI tardó más que el margen** (`appliedAt = t0`, `settleFrom = t0+8s`, `settle = 5s`, un servicio que ya existía, sin `UpdateStatus` y con las deseadas corriendo): a `now = t0+9s` espera (contado desde `appliedAt` ya habría pasado), y a `now = t0+13s` → listo; `replicas: 0` → listo; global usa `DesiredTasks`; un servicio que todavía no aparece → espera; dos servicios, uno falla → falla con el primero por nombre. `TestAppliedState`: ninguno, algunos, todos.
 - [ ] **Step 8: Integración (`render_integration_test.go`, `//go:build integration`, sin crear nada):** `TestRenderGoldensAcceptedByDockerCLI` corre `docker stack config -c -` con cada `*.golden.json` por stdin (mismo entorno mínimo que en T1) y espera código 0; en `form-command-dollar`, la salida trae `$HOME` (un solo `$`).
 - [ ] **Step 9: Verificar y commits** (uno por grupo, cada uno verde):
 
@@ -732,7 +758,7 @@ go test -race ./src/internal/deploy/...
 go test -tags integration -run TestRenderGoldensAcceptedByDockerCLI -count=1 ./src/internal/deploy/domain/service/
 ```
 
-  1. `feat(deploy): entidades de deploy y registry, con la contraseña oculta al imprimirla`
+  1. `feat(deploy): entidades de deploy y registry, con la contraseña oculta al imprimirla, y las reglas de un registry en shared/domain/validate`
   2. `feat(deploy): qué imagen se despliega con la ref pedida (contrato §2.2), enmascarado y formato del log`
   3. `feat(deploy): render del compose final con las inyecciones de §6.2 y golden files`
   4. `feat(deploy): la regla de convergencia del paso 6 y el estado aplicado de un deploy`
@@ -743,26 +769,24 @@ go test -tags integration -run TestRenderGoldensAcceptedByDockerCLI -count=1 ./s
 
 ### Task T3: La base, los registries y la API de los deploys (sin el worker)
 
-> **Cambio de requisito del dueño (2026-10-15): las imágenes de muelle son privadas.** Install (Fase 5) le pasa a muelle una credencial de registry para `ghcr.io` en un secreto de Swarm, y esta tarea la guarda. Detalles:
-> - **Settings:** `src/settings` gana `InitRegistryFile`, leído de `MUELLE_INIT_REGISTRY_FILE`. Edita lo mínimo y copia cómo se valida `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE`.
-> - **El archivo:** es un JSON `{"host","username","password"}` con decoding estricto. Se valida con `ValidateHost`, `ValidateUsername` y `ValidatePassword`.
-> - **Al arrancar:** después de migrar, una vez, si no hay ningún registry para ese host, se crea cifrado como en `Create`. La auditoría es `registry.create`, con target `registry:<host>` y actor el sistema (`install`). Si ya existe uno, no se toca: manda lo que se editó en el panel.
-> - **Errores:** un archivo ilegible o inválido hace lo mismo que un archivo de token inválido, y el mensaje nunca incluye la contraseña.
-> - **Tests:** el registry se crea una sola vez; uno existente no se pisa; con un JSON inválido el mensaje no tiene la contraseña.
-> - **Contrato:** anota en tu §2.10 que install puede sembrar un registry con `MUELLE_INIT_REGISTRY_FILE` (la Fase 5 lo documenta en §5.2), y súmalo a `contract_changes`.
+La migración, los repositorios, el ocultamiento en los tipos de Docker, el CRUD de registries, los endpoints que encolan y leen deploys, y el registry inicial de install. Al terminar, `POST …/deploys` deja deploys `queued` que todavía nadie corre (el worker es T4): es un estado intermedio de la rama, con todo verde.
 
-La migración, los repositorios, el ocultamiento en los tipos de Docker, el CRUD de registries y los endpoints que encolan y leen deploys. Al terminar, `POST …/deploys` deja deploys `queued` que todavía nadie corre (el worker es T4): es un estado intermedio de la rama, con todo verde.
+> **Cambio de requisito del dueño (2026-10-15): las imágenes de muelle son privadas.** Install (Fase 5) crea el secreto `muelle_init_registry` con un JSON `{"host","username","password"}` (la credencial de `ghcr.io`), lo monta en el servicio y pasa su ruta en `MUELLE_INIT_REGISTRY_FILE`. Esta tarea lo lee (`src/settings`) y lo guarda como un registry **solo en el primer arranque de la base** (decisión 19). Todo está en el Step 8.
 
 **Files:**
 - Modify: `src/shared/infra/out/sqlite/migrations/0002_deploy.sql`, `migrations_test.go`
 - Create: `src/shared/infra/out/docker/redact_deploy.go`, `redact_deploy_test.go`
 - Create: `src/internal/deploy/domain/repository/repository.go`
 - Create: `src/internal/deploy/infra/out/repository/sqlite/{deploys,registries}.go` y tests
+- Create: `src/internal/deploy/infra/out/service/settings.go`, `settings_test.go` (Step 8: la marca; T4 le suma `manager_node_id`)
 - Modify: `src/internal/deploy/domain/service/{ports,errors}.go`
 - Create: `src/internal/deploy/app/dto/{deploy,registry}.go` (o en `dto.go`)
-- Create: `src/internal/deploy/app/usecases/{create_deploy,rollback,queries,registries,logwriter,hub}.go` y tests
+- Create: `src/internal/deploy/app/usecases/{create_deploy,rollback,queries,registries,logwriter,hub,seed_registry}.go` y tests
 - Create: `src/internal/deploy/infra/in/http/{handler,deploys,registries,mapper_errors,res}.go`, `src/internal/deploy/infra/in/form/{deploy,registry}.go`
 - Modify: `src/internal/deploy/module.go`, `module_test.go`
+- Modify (Step 8, lo mínimo): `src/settings/settings.go`, `src/settings/settings_test.go`
+- Modify (Step 8, solo dos lugares): `src/shared/infra/container/container.go`
+- Create (Step 8): `src/shared/infra/container/deploy_test.go` (T5 le suma los contratos)
 
 - [ ] **Step 1: La migración (test primero).** En `migrations_test.go`, `TestDeploysSchema` suma: los defaults `requested_images = '{}'` y `log_truncated = 0`, y que `log_truncated = 2` falla. En `0002_deploy.sql`, en `deploys`:
 
@@ -799,10 +823,13 @@ func (d StackDeploy) MarshalJSON() ([]byte, error)
 ```go
 type DeployRepository interface {
 	// Create inserta d como queued (ID, CreatedAt); Images son los overrides.
+	// repository.ErrNotFound si la app ya no existe (sqlite.IsForeignKey: un
+	// DELETE de catalog entre la lectura de la app y este INSERT), no un 500.
 	Create(ctx context.Context, d *entity.Deploy) error
 	// SupersedeQueued pasa a superseded los queued de la app salvo by, con
-	// superseded_by = by y finished_at = at (contrato §2.2). Devuelve cuántos.
-	SupersedeQueued(ctx context.Context, appID, by int64, at time.Time) (int, error)
+	// superseded_by = by y finished_at = at (contrato §2.2). Devuelve sus ids,
+	// para avisarles a los streams después del commit (Hub.Notify); nunca nil.
+	SupersedeQueued(ctx context.Context, appID, by int64, at time.Time) ([]int64, error)
 	Get(ctx context.Context, appID, id int64) (entity.Deploy, error) // ErrNotFound si no es de esa app
 	GetByID(ctx context.Context, id int64) (entity.Deploy, error)
 	List(ctx context.Context, appID int64) ([]entity.Deploy, error) // del más nuevo al más viejo; nunca nil
@@ -824,7 +851,8 @@ type DeployRepository interface {
 	// Finish cierra un running (o un queued, con failed): status, error y finished_at.
 	Finish(ctx context.Context, id int64, status entity.Status, errMsg *string, at time.Time) error
 	// FailQueued pasa a failed los queued de la app, con el motivo como error.
-	FailQueued(ctx context.Context, appID int64, reason string, at time.Time) error
+	// Devuelve sus ids, como SupersedeQueued, para el Hub.Notify; nunca nil.
+	FailQueued(ctx context.Context, appID int64, reason string, at time.Time) ([]int64, error)
 	// ApplyRetention borra lo que no guarda la retención (contrato §2.3) y dice cuántos.
 	ApplyRetention(ctx context.Context, appID int64) (int, error)
 }
@@ -853,7 +881,7 @@ type RegistryRepository interface {
   - Retención (contrato §2.3): borra los de la app que no son `queued` ni `running`, no están entre los 20 de id más alto, y no son el actual ni el `succeeded` anterior al actual.
   - `Create` de registry: `INSERT … RETURNING id` con la contraseña vacía y después `UPDATE` con `Cipher.Encrypt(password, "registries:password:<id>")`, en la misma transacción.
 
-  Tests: `TestDeployCreateAndSupersede` (dos queued → el viejo superseded con `superseded_by` y `finished_at`, sin `started_at`; un running no se toca), `TestCurrentAndPrevious` (ignora failed y superseded), `TestClaim` (solo un queued; dos `Claim` a la vez: uno gana), `TestAppendLogCap` (líneas hasta pasar 252 KiB: marca una sola vez, normales descartadas, de cierre en la reserva; reabrir el repositorio mantiene `log_truncated`), `TestReadLog` (offsets en bytes con `ñ` y `…`, solo líneas completas, máximo 64 KiB, `ErrOffsetBeyond` más allá del largo, `""` al final), `TestRetention` (25 deploys, varios failed: quedan los 20 nuevos + el actual + el anterior + queued/running; `superseded_by` de un borrado queda en NULL), `TestFailQueued`, `TestActiveApps`, `TestRegistriesRoundTrip` (la columna guarda el cifrado, no la contraseña; descifra con su AAD; `Credentials` solo de los hosts pedidos; `ErrConflict` con host repetido; `Update`; `Delete`; `ErrNotFound`).
+  Tests: `TestDeployCreateAndSupersede` (dos queued → el viejo superseded con `superseded_by` y `finished_at`, sin `started_at`, y `SupersedeQueued` devuelve su id; un running no se toca; sin queued → `[]`), `TestDeployCreateAppGone` (`Create` con un `app_id` que no existe → `repository.ErrNotFound`, no el error de la FK), `TestCurrentAndPrevious` (ignora failed y superseded), `TestClaim` (solo un queued; dos `Claim` a la vez: uno gana), `TestAppendLogCap` (líneas hasta pasar 252 KiB: marca una sola vez, normales descartadas, de cierre en la reserva; reabrir el repositorio mantiene `log_truncated`), `TestReadLog` (offsets en bytes con `ñ` y `…`, solo líneas completas, máximo 64 KiB, `ErrOffsetBeyond` más allá del largo, `""` al final), `TestRetention` (25 deploys, varios failed: quedan los 20 nuevos + el actual + el anterior + queued/running; `superseded_by` de un borrado queda en NULL), `TestFailQueued` (devuelve los ids que cerró), `TestActiveApps`, `TestRegistriesRoundTrip` (la columna guarda el cifrado, no la contraseña; descifra con su AAD; `Credentials` solo de los hosts pedidos; `ErrConflict` con host repetido; `Update`; `Delete`; `ErrNotFound`).
   Commit: `feat(deploy): repositorios SQLite de deploys y registries, con el log acotado y la retención`.
 - [ ] **Step 4: El log persistido y el aviso a los streams** (`logwriter.go`, `hub.go`; tests primero):
 
@@ -893,14 +921,15 @@ type Queue interface {
     2. `!Queue.Accepting` → `ErrAppRemoving`;
     3. validación (contrato §2.2): los dos → `image: manda image o images, no los dos`; compose con `image` → `image: una app compose recibe images, por servicio`; cada ref con `validate.ImageRef(field, ref)` (`image` o `images.<servicio>`); un servicio que no está en la configuración actual (formulario: el slug; compose: `compose.Services`) → `images.<servicio>: el servicio no existe en la app`;
     4. el principal del ctx: sesión → `trigger: panel`, `actor_type: user`, `actor_name` = username; token → `api`, `token`, el nombre del token;
-    5. `InTx`: `Create` (queued, `Images` = overrides) y `SupersedeQueued`;
+    5. `InTx`: `Create` (queued, `Images` = overrides; `ErrNotFound` si la app se borró entre medio: 404) y `SupersedeQueued`; **después del commit**, `Hub.Notify` de cada id que devolvió `SupersedeQueued` (contrato §2.6: el stream de un deploy manda `status` "cada vez que cambia", no al próximo heartbeat);
     6. auditoría `deploy.create`, target `app:<p>/<s>/<a>`, details `{"deploy": id, "trigger": t, "images": {…}}`;
     7. `Queue.Wake`. Devuelve `{id, status: "queued", status_url}`. **No llama a Docker** (contrato §2.2).
     - `CheckApp(ctx, dto.AppRef) error`: solo el paso 1 (`Apps.Get`), para que el handler responda el 404 antes de leer el cuerpo (Step 7).
-  - `Rollback.Execute`: app; `Accepting`; `InTx`: `Current` y `PreviousSucceeded(current.ID)` (sin alguno → `ErrNoPreviousDeploy`), `Create` con `trigger: rollback` e `Images` = las del anterior, `SupersedeQueued`; auditoría con `trigger: rollback`; `Wake`. También tiene `CheckApp`.
+  - `Rollback.Execute`: app; `Accepting`; `InTx`: `Current` y `PreviousSucceeded(current.ID)` (sin alguno → `ErrNoPreviousDeploy`), `Create` con `trigger: rollback` e `Images` = las del anterior, `SupersedeQueued`; después del commit, `Hub.Notify` de los reemplazados; auditoría con `trigger: rollback`; `Wake`. También tiene `CheckApp`.
+  - **La regla del aviso**, para todo lo que cambia el estado de un deploy (aquí, en T4 y en T5): lo que pasa dentro de un `InTx` se avisa con `Hub.Notify` recién después del commit, a cada id que cambió (`SupersedeQueued` y `FailQueued` devuelven los suyos). Nunca se avisa de algo que todavía no está en la base.
   - `ListDeploys`, `GetDeploy`, `ReadLog` (64 KiB).
   - Registries: `List`, `Create`, `Update`, `Delete`, con auditoría `registry.create|update|delete`, target `registry:<host>`, details `{"username": …}` en create y update (nunca la contraseña).
-  - Tests: `TestCreateDeployValidation` (tabla con los mensajes exactos), `TestCreateDeploySupersedes`, `TestCreateDeployActor` (sesión y token), `TestCreateDeployAudit`, `TestCreateDeployRejectedWhileRemoving`, `TestRollback` (0 y 1 succeeded → 409; con 2 → las imágenes del anterior), `TestRegistryAuditNoPassword`.
+  - Tests: `TestCreateDeployValidation` (tabla con los mensajes exactos), `TestCreateDeploySupersedes` (además, un `Hub.Wait(<id del viejo>)` tomado antes del `POST` se cierra, y el del nuevo no), `TestCreateDeployActor` (sesión y token), `TestCreateDeployAudit`, `TestCreateDeployRejectedWhileRemoving`, `TestRollback` (0 y 1 succeeded → 409; con 2 → las imágenes del anterior), `TestRegistryAuditNoPassword`.
 - [ ] **Step 7: HTTP (tests primero, `httptestutil` con `FakeAuth` con una sesión y dos tokens: uno del proyecto y uno de otro proyecto).** Rutas, todas `AccessToken` salvo las de registries:
 
 | Ruta | Handler |
@@ -913,15 +942,95 @@ type Queue interface {
 | `GET/POST /api/v1/registries`, `PATCH/DELETE /api/v1/registries/{host}` | `AccessSession` |
 
   - El orden de los errores (contrato §2.2): app (404) → cuerpo (400) → validación (422). `utils.DecodeJSON` escribe el 400 él mismo, así que el handler **resuelve la app antes de leer el cuerpo**: `CreateDeploy.CheckApp(ctx, dto.AppRef)` (`Apps.Get`: 404) → leer y decodificar el cuerpo (400) → `Execute` (que vuelve a leer la app dentro: es barato y cubre un borrado entre medio). El rollback igual (`Rollback.CheckApp`).
-  - El cuerpo de `POST …/deploys` es opcional: el handler lee hasta 1 MiB y, si está vacío (o solo espacios), es `{}`; si no, `utils.DecodeJSON` sobre esos bytes. El rollback acepta vacío o `{}` (un struct vacío con `DecodeJSON`; otra cosa es 400).
+  - El cuerpo de `POST …/deploys` es opcional: el handler lee hasta 1 MiB y, si está vacío (o solo espacios), es `{}`; si no, `utils.DecodeJSON` sobre esos bytes (con `r.Body` vuelto a armar con `io.NopCloser(bytes.NewReader(b))`).
+  - **El rollback igual** (contrato §2.7: "sin cuerpo, o `{}`"): `DecodeJSON` solo **no** sirve, porque con un cuerpo vacío responde `400` ("el cuerpo está vacío o incompleto"), y el panel (`deployHttpDataSource.rollback`, rama `fase-4-deploy-ingress`) hace el `POST` **sin cuerpo**. El handler lee hasta 1 MiB; vacío o solo espacios → sigue; si no, `DecodeJSON` en un `struct{}` sobre el `r.Body` vuelto a armar (`{}` pasa; un campo, `[]` o JSON roto → `400`). Un helper común (`readOptionalBody`) sirve a los dos.
   - `offset` (contrato §2.5): ausente es 0; no entero o negativo → `422` `offset: tiene que ser un entero ≥ 0`; más allá del largo → `422` `offset: pasa el largo del log`.
   - Las respuestas (`res.go`) tienen **todos** los campos de contrato §2.1, con `null` cuando corresponde, fechas truncadas al milisegundo e `images` nunca `null`. El registry: `{host, username, created_at, updated_at}`, nunca la contraseña.
   - `mapper_errors.go`: `ErrNoPreviousDeploy` → `409 no_previous_deploy` ("no hay un deploy exitoso anterior al actual"); `ErrAppRemoving` → `409 conflict` ("la app se está borrando").
-  - Tests: `TestCreateDeployHTTP` (202, `Location`, cuerpo; vacío y `{}` iguales; `400` con un campo desconocido o `[]`; los 422 con su texto; 404 de una app que no existe, también con un cuerpo roto (`{"x":`) o con `[]`: el 404 gana al 400), `TestRollbackHTTPOrder` (app que no existe con cuerpo `[]` → 404), `TestDeploysListAndGet` (forma de cada campo; un id de otra app → 404), `TestLogPolling` (los casos de `offset`, `chunk`, `next_offset`, `status`, `superseded_by`; fin con `chunk: ""`), `TestRollbackHTTP` (409 `no_previous_deploy`), `TestTokenScopes` (el token del proyecto crea deploys y lee; el de otro proyecto → 403 `out_of_scope`; un token en `/registries` → 403 `token_not_allowed`), `TestRegistriesHTTP` (201, 200, 204, 404, 409, los 422 de §2.10 con `host: para Docker Hub usa docker.io`, `registry.example.com%3A5000` en la ruta, ordenados por host, sin contraseña en ninguna respuesta).
+  - Tests: `TestCreateDeployHTTP` (202, `Location`, cuerpo; vacío y `{}` iguales; `400` con un campo desconocido o `[]`; los 422 con su texto; 404 de una app que no existe, también con un cuerpo roto (`{"x":`) o con `[]`: el 404 gana al 400), `TestRollbackHTTPOrder` (app que no existe con cuerpo `[]` → 404), `TestDeploysListAndGet` (forma de cada campo; un id de otra app → 404), `TestLogPolling` (los casos de `offset`, `chunk`, `next_offset`, `status`, `superseded_by`; fin con `chunk: ""`), `TestRollbackHTTP` (409 `no_previous_deploy`; con dos `succeeded`: **sin cuerpo** → 202, como lo manda el panel; `{}` → 202; `"  \n"` → 202; `{"x":1}` y `[]` → 400 `invalid_json`), `TestTokenScopes` (el token del proyecto crea deploys y lee; el de otro proyecto → 403 `out_of_scope`; un token en `/registries` → 403 `token_not_allowed`), `TestRegistriesHTTP` (201, 200, 204, 404, 409, los 422 de §2.10 con `host: para Docker Hub usa docker.io`, `registry.example.com%3A5000` en la ruta, ordenados por host, sin contraseña en ninguna respuesta).
   - `module_test.go`: `TestModuleRoutesAndStubs` deja de esperar `no_route` en `/deploys`, `/deploys/1`, `/deploys/1/log` y `/registries`; siguen sin existir `…/status`, `…/logs` y `…/log/stream` (T5).
-- [ ] **Step 8: Verificar y commits:**
+- [ ] **Step 8: El registry inicial de install** (decisión 19; el contrato ya lo dice en §1.1, §1.2 y §2.10; la Fase 5 documenta la variable, el secreto y el JSON en §5.2 y §5.3; tests primero en cada parte).
+
+  **8a. `src/settings`** (lo mínimo; copia cómo se lee `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE`):
+
+```go
+// En Init, un campo nuevo:
+	// Registry es el registry inicial de install: el contenido de
+	// MUELLE_INIT_REGISTRY_FILE (un secreto Swarm). nil si no está. deploy lo
+	// guarda solo en el primer arranque de la base (SeedInitRegistry).
+	Registry *InitRegistry
+
+// InitRegistry es la credencial de un registry que install le pasa a muelle
+// (las imágenes de muelle son privadas). La contraseña va en claro: String,
+// GoString, LogValue y MarshalJSON la ocultan, también dentro de Init y de
+// Settings.
+type InitRegistry struct{ Host, Username, Password string }
+```
+
+  - `loadInit`, después del token: si `MUELLE_INIT_REGISTRY_FILE` no está vacía, lee el archivo (más de 16 KiB es un error) y lo decodifica con json/v2 estricto en un struct con `json:"host"`, `json:"username"` y `json:"password"`: `jsonv2.Unmarshal(b, &v, jsonv2.RejectUnknownMembers(true))` rechaza los campos desconocidos y repetidos y lo que sigue al objeto; un valor que no es un objeto (`[]`) también es error, y `null` deja los campos vacíos, que rechazan las reglas. Después, `validate.RegistryHost`, `RegistryUsername` y `RegistryPassword` (T2) con los campos `MUELLE_INIT_REGISTRY_FILE.host`, `.username` y `.password`. Como el token, se lee y valida **en cada arranque** (contrato §5.2): un archivo roto no deja arrancar, aunque deploy ya no lo use.
+  - **Ningún error trae la contraseña ni el contenido del archivo.** El de lectura nombra la variable y la ruta. El de decodificación **no** incluye el error de json/v2, que puede citar un pedazo del archivo: `MUELLE_INIT_REGISTRY_FILE: <ruta> no es un JSON {"host", "username", "password"} (sin otros campos)`. Los de las reglas son los de `validate`, que no incluyen el valor (T2).
+  - `Init.String` no cambia: el `%+v` de su copia sin métodos llama a `InitRegistry.String` en el campo (fmt usa los métodos de un campo exportado, también de un puntero), y `%#v` a `GoString`. `InitRegistry.String` → `{Host:ghcr.io Username:bot Password:***}`; `MarshalJSON` serializa un struct anónimo con `"password": "***"` (`""` si está vacía).
+  - Tests (`settings_test.go`; `clearEnv` suma la variable):
+    - `TestLoadInitRegistry`: un archivo válido → `Init.Registry` con los tres valores; sin la variable → `nil`;
+    - en `TestLoadRejectsBadInit`, con la contraseña `s3cr3t-pass`: un archivo que no existe, un JSON sin cerrar que la trae (`{"host":"ghcr.io","username":"bot","password":"s3cr3t-pass"`), un campo de más, `[]`, `host` `GHCR.io` y `index.docker.io`, un usuario vacío y una contraseña con `\n`. Cada uno da un error que nombra `MUELLE_INIT_REGISTRY_FILE` y **nunca** contiene `s3cr3t-pass`;
+    - `TestInitDoesNotPrintToken` suma `Registry` con esa contraseña al `Init` de prueba: `%v`, `%+v`, `%#v`, `fmt.Sprint` y `slog` (JSON y texto) de `Init`, `&Init`, `Settings` y `&Settings` no la contienen; aparte (el token no tiene `MarshalJSON`, y ese test lo busca en todas las salidas), `json.Marshal(s.Init.Registry)` y `json.Marshal(s)` tampoco.
+
+  **8b. deploy:**
+  - `app/dto/registry.go`: `InitRegistry{Host, Username, Password}`, con `String`, `GoString`, `LogValue` y `MarshalJSON` que ocultan la contraseña (con su test, como `TestRegistryNeverPrintsPassword`). En `module.go`, `type InitRegistry = dto.InitRegistry` (como `admin.InitialSettings`) y `Deps.InitRegistry *InitRegistry`, opcional: `nil` es "no hay nada que sembrar".
+  - La clave: `SettingInitRegistryApplied = "init_registry_applied"` en `domain/entity/registry.go` (solo la usa deploy; contrato §1.1). El puerto, en `ports.go`: `Marks interface{ MarkOnce(ctx context.Context, key string) (bool, error) }`.
+  - `infra/out/service/settings.go`: `NewDeploySettings(db)` implementa `Marks` con `INSERT INTO settings (key, value, encrypted) VALUES (?, 'true', 0) ON CONFLICT (key) DO NOTHING` y `RowsAffected() == 1`, con la transacción del ctx (`db.Conn(ctx)`). Test: el primero inserta, el segundo no. T4 suma aquí `manager_node_id`.
+  - `app/usecases/seed_registry.go`:
+
+```go
+// SeedInitRegistry guarda el registry inicial de install solo en el primer
+// arranque de la base (decisión 19, contrato §2.10). En un InTx:
+// Marks.MarkOnce(SettingInitRegistryApplied), siempre, haya o no un registry
+// inicial. Si la marca ya estaba, no hace nada más: un registry que el admin
+// borró en el panel no vuelve. Si la insertó y r no es nil, lo crea como
+// Registries.Create (cifrado con registries:password:<id>), con la auditoría
+// registry.create, target registry:<host>, details {"username": …, "source":
+// "install"} y actor system (el ctx del arranque no trae un principal). Si
+// ese host ya tiene un registry (ErrConflict), no lo toca. r ya viene
+// validado (settings.Load). Si algo falla, el InTx deshace la marca y el
+// próximo arranque reintenta. Sus errores son de la base: la contraseña va
+// cifrada antes del UPDATE, así que nunca la traen.
+func (u *SeedInitRegistry) Execute(ctx context.Context, r *dto.InitRegistry) error
+```
+
+  - `module.go`: `func (m *Module) SeedInitRegistry(ctx context.Context) error`, con `Deps.InitRegistry`.
+  - Tests (`seed_registry_test.go`, con la base real):
+    - primer arranque con un registry → se crea (la columna tiene el cifrado, `Credentials` lo descifra), la marca queda, y hay un `registry.create` con actor `system` y sin la contraseña en `details`;
+    - **después de un `Registries.Delete` (lo que hace el panel), otro `Execute` con el mismo registry no lo vuelve a crear**;
+    - un segundo `Execute` con otra contraseña para el mismo host no cambia nada;
+    - primer arranque **sin** registry → la marca igual queda, y un `Execute` posterior con uno no lo crea (una reinstalación sobre la misma base);
+    - un `Registries` del test que envuelve al real y falla en `Create` → `Execute` devuelve el error, la marca no quedó, y el error no trae la contraseña.
+
+  **8c. `container.go`** (solo estos dos lugares: la firma de `build` y la `Config` del servidor son de la Fase 5):
+
+```go
+	var initRegistry *deploy.InitRegistry
+	if r := s.Init.Registry; r != nil {
+		initRegistry = &deploy.InitRegistry{Host: r.Host, Username: r.Username, Password: r.Password}
+	}
+	c.Deploy = deploy.New(deploy.Deps{
+		DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log, Docker: engine,
+		Env: c.Secrets, Ingress: c.Ingress, InitRegistry: initRegistry,
+	})
+	…
+	// Justo después de ApplyStartupSettings, y por eso después de
+	// VerifyMasterKey: nunca se cifra con una clave que no se verificó.
+	if err := c.Deploy.SeedInitRegistry(ctx); err != nil {
+		return nil, fmt.Errorf("container: guardando el registry inicial: %w", err)
+	}
+```
+
+  Test en `src/shared/infra/container/deploy_test.go` (archivo nuevo; T5 le suma los contratos): `TestInitRegistrySeededOnce`, con `testSettings(t)` más `s.Init.Registry`: el primer `New` deja el registry (`SELECT` por `c.DB`: está, y `password` no es la contraseña en claro); se borra como lo haría el panel (el caso de uso `Delete` de registries o un `DELETE` por SQL); `Close` y otro `New` sobre el mismo `DataDir` con el mismo `s` → la tabla sigue vacía.
+
+- [ ] **Step 9: Verificar y commits:**
   1. `feat(deploy): registries por HTTP (contrato §2.10)`
   2. `feat(deploy): encolar deploys y rollbacks y leerlos por HTTP (contrato §2.1–§2.5 y §2.7)`
+  3. `feat(settings): MUELLE_INIT_REGISTRY_FILE, el registry inicial de install, con la contraseña oculta`
+  4. `feat(deploy): el registry inicial de install se guarda solo en el primer arranque de la base`
 
 **Integración en T3:** ninguna (no usa Docker real).
 
@@ -931,7 +1040,7 @@ type Queue interface {
 
 **Files:**
 - Modify: `src/internal/deploy/domain/service/ports.go` (`Images`, `Credential`, `Cluster`, `ManagerNode`; `Stacks.Deploy`)
-- Create: `src/internal/deploy/infra/out/service/{docker,settings}.go` y tests; Modify: `stacks.go`
+- Create: `src/internal/deploy/infra/out/service/docker.go` y tests; Modify: `stacks.go`, `settings.go` (de T3: suma `manager_node_id`)
 - Create: `src/internal/deploy/app/usecases/{run_deploy,resume,dispatcher,manager_node}.go`, `timing.go`, y sus tests con `swarmsim_test.go`
 - Modify: `src/internal/deploy/app/usecases/remove_app.go`, `src/internal/deploy/module.go`, `module_test.go`
 - Create: `src/internal/deploy/integration_test.go` y `integration_main_test.go` (los dos `//go:build integration`)
@@ -968,13 +1077,13 @@ type ManagerNode interface {
 }
 ```
 
-  `ErrImageNotFound`, `ErrImageDenied`, `ErrSwarmNotFound` y `ErrAppRemoved` (la causa con que `RemoveApp` cancela un worker) van en `errors.go`. `infra/out/service/docker.go` implementa `Images`, `Cluster` y `Stacks.Deploy` con `docker.Engine`: traduce `docker.ErrNotFound` → `ErrImageNotFound` (en `Digest`) o `ErrSwarmNotFound`, `docker.ErrDenied` → `ErrImageDenied`, y deja pasar `ErrUnavailable` (es `entity.ErrDockerUnavailable`). `settings.go`: `SELECT value FROM settings WHERE key = ?` y `INSERT … ON CONFLICT(key) DO NOTHING` + lectura, con `encrypted = 0`. Tests: los mapeos de error con `FailNext`/`DenyImage`, `AppServices` filtra por etiquetas, `TaskLogs` con `tail`, `SetIfMissing` no pisa.
+  `ErrImageNotFound`, `ErrImageDenied`, `ErrSwarmNotFound` y `ErrAppRemoved` (la causa con que `RemoveApp` cancela un worker) van en `errors.go`. `infra/out/service/docker.go` implementa `Images`, `Cluster` y `Stacks.Deploy` con `docker.Engine`: traduce `docker.ErrNotFound` → `ErrImageNotFound` (en `Digest`) o `ErrSwarmNotFound`, `docker.ErrDenied` → `ErrImageDenied`, y deja pasar `ErrUnavailable` (es `entity.ErrDockerUnavailable`). `settings.go` (el adaptador de T3, que ya tiene `MarkOnce`) suma `ManagerNode`: `SELECT value FROM settings WHERE key = ?` y `INSERT … ON CONFLICT(key) DO NOTHING` + lectura, con `encrypted = 0`. Tests: los mapeos de error con `FailNext`/`DenyImage`, `AppServices` filtra por etiquetas, `TaskLogs` con `tail`, `SetIfMissing` no pisa.
 - [ ] **Step 2: El simulador de Swarm para los tests** (`swarmsim_test.go`, solo test): `simulate(f *dockertest.Fake, o simOpts)` pone `f.OnDeployStack`, que lee el JSON del compose y, por cada servicio, hace `f.PutStackService(stack, docker.Service{…})` con el nombre `<stack>_<servicio>`, `Labels` = sus `deploy.labels`, `Image`, `Replicas`, `RunningTasks`/`DesiredTasks`, `CreatedAt` (el anterior si ya existía) y `Update`:
   - si el servicio ya existía y su plantilla cambió (imagen, env, command… cualquier cosa fuera de `deploy.labels`): `{State: o.state (completed por defecto), StartedAt: ahora}`;
   - si solo cambió `deploy.labels`: el `Update` anterior, sin tocar las tareas;
   - si es nuevo: `nil`.
 
-  `simOpts` permite: `state` (`rollback_completed` con `Message`), `running` (cuántas corren), una tarea fallida con `Err` y N líneas de log (`AppendTaskLogs`), y un `block chan struct{}` para retener el deploy.
+  `simOpts` permite: `state` (`rollback_completed` con `Message`), `running` (cuántas corren), una tarea fallida con `Err` y N líneas de log (`AppendTaskLogs`), un `block chan struct{}` para retener el deploy, `delay` (cuánto tarda el CLI simulado) y `noUpdate` (un servicio cambiado queda sin `UpdateStatus`, como en Swarm antes de que empiece el rollout).
 
   **Dónde se retiene un deploy:** `block` lo retiene **dentro** de `OnDeployStack`, que no recibe el ctx: cancelar el worker no lo suelta (`Stop` esperaría sus 15 s) y, al soltarlo, el stack igual queda aplicado. Sirve solo para los tests que no cancelan (`TestDispatcherOneAtATimePerApp`, `TestDispatcherSupersede`, que cierran `block` al final). Los que cancelan (`RemoveApp`, el apagado) retienen el deploy en el **paso 6**: `running: 0` y un `deploy_timeout_s` largo, así la convergencia espera y el ctx sí la corta.
 - [ ] **Step 3: `RunDeploy` (tests primero).**
@@ -1002,8 +1111,8 @@ func (u *RunDeploy) Execute(ctx context.Context, d entity.Deploy) error
   2. `Line("resolviendo imágenes")`; `cfg := ReadConfig(ctx, app, vars)` (error → `fail("render: " + msg)`); los overrides de un rollback que no están en `cfg` se omiten con una línea; `requested := ChooseImages(cfg.Images, d.Images, Deploys.Current(app))`; credenciales con `Registries.Credentials(hosts)`; por servicio, en orden, **siempre** `Images.Digest(ref, cred)` con `ResolveTimeout`, también si la ref ya trae digest (decisión 1: verifica que exista y que la credencial llegue). Los errores, los mismos para una ref con tag o con digest: no existe → `la imagen <ref> no existe en el registry`; sin acceso → `sin acceso a <ref>: revisa la credencial de <host> en Ajustes → Registries`; Docker caído → `Docker no responde`. Con una ref fijada (`PinnedDigest(ref) != ""`) se conserva ese digest, y si `Digest` devolvió otro → `fail("el registry devolvió otro digest para <ref>")` (no debería pasar: Docker la busca por su digest). Después, `Line("  %s: %s → %s", svc, ref, digest[:19]+"…")`; `SetImages(requested, cfg.Images, resolved)`.
   3. El nodo del manager (contrato §1.2: si `Run` no pudo guardarlo, "lo reintenta en el primer deploy"): en **todo** deploy, si `Manager.Get` da `""`, `Cluster.LocalNodeID` y `Manager.SetIfMissing` (gana el que quedó). En una app sin volúmenes, un error ahí es solo una línea (`advertencia: no se pudo guardar el nodo del manager: Docker no responde`) y se sigue; con volúmenes es `fail`. Si `cfg.HasVolumes` y `app.StorageNodeID == ""`: `Apps.SetStorageNode` con ese id (gana el que quedó). `Render(cfg, …)` con `Domains.ByApp` (error → `fail("render: …")`); `Line("render: 1 servicio")` o `"render: N servicios"`.
   4. `Ingress.EnsureStageNetwork` con `NetworkTimeout` (error → `fail`); `Line("red %s lista")`.
-  5. Si `!Gate.Accepting(app.ID)` (la app se empezó a borrar mientras corrían los pasos 2 a 4; decisión 8) → `fail("la app se borró durante el deploy")`, sin tocar Swarm. `appliedAt := Clock.Now()`; `Line("docker stack deploy %s")`; `out, err := Stacks.Deploy(…, credenciales de rendered.Hosts)` con `StackTimeout`; `Lines(SplitOutput(out))`; error → `fail("docker stack deploy falló: …")`.
-  6. `Line("esperando convergencia (hasta %d s)")`; cada `Poll`, `Cluster.AppServices` y `Evaluate(expected, …, Settle)`; una línea cada vez que cambia el progreso de un servicio; Docker caído: una línea "Docker no responde; reintentando" y se sigue. Falla → `Status.Err` de la última tarea fallida del servicio (`Tasks`: la primera `failed`/`rejected`, o con `Err`) y sus últimas 50 líneas (`TaskLogs` → `JoinPieces` → `Lines` con `"    | "`), y `fail("<servicio>: Swarm hizo rollback: <Message>")` (o `paused`…). Timeout (`app.DeployTimeoutS`) → por cada servicio sin converger, su progreso y el `Err` de su última tarea fallida, y `fail("timeout esperando convergencia")`.
+  5. Si `!Gate.Accepting(app.ID)` (la app se empezó a borrar mientras corrían los pasos 2 a 4; decisión 8) → `fail("la app se borró durante el deploy")`, sin tocar Swarm. `appliedAt := Clock.Now()` (justo antes del CLI: el umbral de "un `UpdateStatus` de este deploy"); `Line("docker stack deploy %s")`; `out, err := Stacks.Deploy(…, credenciales de rendered.Hosts)` con `StackTimeout`; `settleFrom := Clock.Now()` (cuando el CLI volvió: desde aquí corre el margen, decisión 6); `Lines(SplitOutput(m.Mask(out)))`: la salida **entera** se enmascara antes de partirla en líneas, porque un secreto de varias líneas cuyas líneas miden menos de 8 bytes solo se reconoce entero, con sus `\n` (`FormatLine` vuelve a enmascarar cada línea, y no hace daño); error → `fail("docker stack deploy falló: …")`.
+  6. `Line("esperando convergencia (hasta %d s)")`; cada `Poll`, `Cluster.AppServices` y `Evaluate(expected, …, appliedAt, settleFrom, Clock.Now(), Settle)`; una línea cada vez que cambia el progreso de un servicio; Docker caído: una línea "Docker no responde; reintentando" y se sigue. Falla → `Status.Err` de la última tarea fallida del servicio (`Tasks`: la primera `failed`/`rejected`, o con `Err`) y sus últimas 50 líneas (`TaskLogs` → `JoinPieces` → `Lines` con `"    | "`), y `fail("<servicio>: Swarm hizo rollback: <Message>")` (o `paused`…). Timeout (`app.DeployTimeoutS`) → por cada servicio sin converger, su progreso y el `Err` de su última tarea fallida, y `fail("timeout esperando convergencia")`.
   7. `Ingress.SyncRoutes` con `RoutesTimeout`: `Line("rutas de Caddy actualizadas")` o `Line("advertencia: no se pudo actualizar Caddy: %v")` (también con `ErrNotImplemented`).
   8. `InTx`: `Deploys.AppendLog` de `succeeded en N s` (`final = true`), `Finish(succeeded)` y `Apps.MarkDeployed(app.ID, *d.StartedAt)`; después del commit, `Hub.Notify`; al final, `ApplyRetention`.
 
@@ -1011,7 +1120,8 @@ func (u *RunDeploy) Execute(ctx context.Context, d entity.Deploy) error
 
   Tests (con el simulador, `fakeEnv` con un secreto, `fakeIngress` que cuenta llamadas y cuyo `SyncRoutes` devuelve `entity.ErrNotImplemented`, `clock` del sistema y `Timing` corto; las apps sembradas por SQL con `deploy_timeout_s` chico):
   - `TestRunDeployFormApp`: `succeeded`; el log trae las líneas de contrato §2.11 en orden, con la advertencia de Caddy; `images` = `x:1@sha256:…`; `requested_images` y `config_images` guardados; `last_deployed_at` = `started_at`; el compose de `StackDeploys()` lleva `muelle.deploy=<id>` en `deploy.labels` y no en `labels`; ninguna columna de la base contiene el compose.
-  - `TestRunDeployMasks`: un secreto en la salida del CLI (`OnDeployStack` que falla con un mensaje que lo trae) y en el error → `***` en el log y en `error`.
+  - `TestRunDeployMasks`: un secreto en la salida del CLI (`OnDeployStack` que falla con un mensaje que lo trae) y en el error → `***` en el log y en `error`. Otro caso con un secreto **de varias líneas, cada una de menos de 8 bytes** (`"abc\ndefg\nhij"`, 12 bytes) que aparece entero en la salida del CLI: el log no trae `defg` (con `SplitOutput` antes de `Mask` saldría a la vista).
+  - `TestRunDeploySlowCLI` (decisión 6): un segundo deploy con otra imagen y un `OnDeployStack` que tarda el doble de `Settle` y deja el servicio cambiado **sin** `UpdateStatus` (como Swarm justo antes de empezar el rollout; `simOpts` suma `delay` y `noUpdate`). El test anota cuándo volvió `OnDeployStack` (`t1`): el deploy cierra `succeeded` con `finished_at ≥ t1 + Settle`, nunca antes.
   - `TestRunDeployImageErrors`: no existe, sin acceso, Docker caído → `failed` con su motivo; `DeployStack` nunca se llamó; `images` siguen siendo los overrides. Cada caso, con una ref con tag y con una ref con digest (`x@sha256:…` sin `SetDigest`, y con `DenyImage`): los mismos mensajes.
   - `TestRunDeployPinnedDigestVerified`: un override `x:1@sha256:A` con `SetDigest("x:1@sha256:A", "sha256:A")` → `DistributionCalls()` trae esa ref (con la credencial de su host) y `images` = `x:1@sha256:A`; un digest fijado que ya no existe en el registry (sin `SetDigest`) → `failed` "la imagen … no existe en el registry" y `DeployStack` nunca se llamó; `SetDigest` con otro digest → `failed` "el registry devolvió otro digest…".
   - `TestRunDeployStopsIfRemoving`: con un `Gate` que deja de aceptar la app después del paso 4 → `failed` "la app se borró durante el deploy" y `DeployStack` nunca se llamó.
@@ -1034,23 +1144,25 @@ type Dispatcher struct{ /* mu, workers, blocked map[int64]time.Time, pending, st
 
 func (d *Dispatcher) Start(ctx context.Context, apps []int64) // los de ActiveApps más los Wake previos
 // Wake: antes de Start, solo lo anota. Con la app bloqueada no arranca un
-// worker: marca failed sus queued ("la app se borró"; decisión 8), en una
-// goroutine del wg con el ctx de Start.
+// worker: marca failed sus queued ("la app se borró"; decisión 8) y avisa
+// (Hub.Notify) a cada id que devolvió FailQueued, en una goroutine del wg con
+// el ctx de Start.
 func (d *Dispatcher) Wake(appID int64)
 func (d *Dispatcher) Accepting(appID int64) bool               // false mientras está bloqueada
 func (d *Dispatcher) Block(appID int64, dur time.Duration)
 func (d *Dispatcher) Unblock(appID int64)
 // Stop cancela el worker de la app con la causa ErrAppRemoved y espera a que
-// termine (a lo más 15 s).
+// termine, a lo más 15 s: si no terminó, devuelve ErrWorkerBusy (el worker
+// sigue cancelado y cierra solo; Stop no lo abandona en el mapa).
 func (d *Dispatcher) Stop(ctx context.Context, appID int64) error
 func (d *Dispatcher) Wait()                                    // después de cancelar el ctx de Start
 ```
 
-  El worker: `for { si la app está bloqueada → FailQueued(app, "la app se borró") y termina; si hay un running (Running) → Resume; si no, NextQueued → Claim → RunDeploy; si no hay nada y no hubo Wake mientras trabajaba → termina }`. La mirada a `blocked` va **antes de cada** `Claim` y de cada `Resume`, bajo el mismo `mu` que `Block`, así un `queued` que un `POST` insertó después del `Block` nunca se reclama (decisión 8).
+  El worker: `for { si la app está bloqueada → FailQueued(app, "la app se borró"), Hub.Notify de sus ids, y termina; si hay un running (Running) → Resume; si no, NextQueued → Claim → RunDeploy; si no hay nada y no hubo Wake mientras trabajaba → termina }`. La mirada a `blocked` va **antes de cada** `Claim` y de cada `Resume`, bajo el mismo `mu` que `Block`, así un `queued` que un `POST` insertó después del `Block` nunca se reclama (decisión 8).
 
   `Resume` (contrato §1.2): `Line("muelle se reinició durante el deploy")` (una vez); sin `requested_images` → `failed` "muelle se reinició antes de aplicar el deploy; Swarm no cambió". Si no, con los servicios esperados (las claves de `requested_images`, con `naming.Service`) y `Cluster.AppServices`:
   1. **Primero, un rollback de Swarm:** si algún servicio esperado tiene un `UpdateStatus` en `rollback_started`, `rollback_completed`, `rollback_paused` o `paused` con `StartedAt ≥ started_at − 2 s` (es de este deploy), se cierra como la falla del paso 6 (el `Err` y las 50 líneas de su última tarea fallida; `failed` "<servicio>: Swarm hizo rollback: <Message>"). Un rollback de Swarm vuelve a la `PreviousSpec`, etiquetas incluidas: si muelle se reinició mientras Swarm volvía atrás, los servicios llevan otra vez el `muelle.deploy` anterior, y sin esta mirada `AppliedState` diría `AppliedNone` y el deploy se cerraría con "Swarm no cambió", que es falso.
-  2. Si no, `AppliedState`: `AppliedNone` → `failed` "muelle se reinició antes de aplicar el deploy; Swarm no cambió"; `AppliedPartial` → `failed` "muelle se reinició a mitad de docker stack deploy"; `AppliedAll` → el paso 6 con `appliedAt = started_at` y el resto como un deploy normal.
+  2. Si no, `AppliedState`: `AppliedNone` → `failed` "muelle se reinició antes de aplicar el deploy; Swarm no cambió"; `AppliedPartial` → `failed` "muelle se reinició a mitad de docker stack deploy"; `AppliedAll` → el paso 6 con `appliedAt = started_at`, `settleFrom` = la hora en que `Resume` empieza a esperar (no se sabe cuándo volvió el CLI cortado: contar desde ahí es lo conservador) y el resto como un deploy normal.
   3. Docker caído (en cualquiera de las dos lecturas) → queda `running`, el worker espera `RetryEvery` y reintenta.
 
   **Qué registra el despachador en `slog`** (decisión 18): `deploy cerrado` con `app` (el id), `deploy` (el id) y `status`; si falló, `error` = el `deploys.error` guardado (ya pasó por `ErrorLine`: enmascarado). Un error que devuelven `Execute`, `Resume` o la base se registra solo como `deploy: error interno` con `app` y `deploy`, **nunca** con `err.Error()` ni con la salida del CLI: pueden traer valores de variables.
@@ -1060,18 +1172,20 @@ func (d *Dispatcher) Wait()                                    // después de ca
   `module.go`: `Run(ctx)` = `StoreManagerNode` → `ActiveApps` → `Dispatcher.Start` → `<-ctx.Done()` → `Dispatcher.Wait()`.
 
   Tests: `TestDispatcherOneAtATimePerApp` (dos apps a la vez sí, la misma app nunca: con `block`), `TestDispatcherSupersede` (tres `POST` mientras uno corre: corre solo el último), `TestDispatcherWakeBeforeStart`, `TestDispatcherBlockedApp` (con la app bloqueada, un `queued` insertado por el repositorio, como lo haría un `CreateDeploy` que pasó `Accepting` antes del `Block`, y un `Wake` → el deploy queda `failed` "la app se borró", nunca `running`, y `StackDeploys()` está vacío; después de `Unblock`, un deploy nuevo sí corre), `TestRunShutdownLeavesRunning` (cancelar `Run` durante el paso 6: queda `running`, `Run` vuelve; otro módulo sobre la misma base con los servicios ya etiquetados lo cierra `succeeded` con "muelle se reinició durante el deploy"), `TestResumeNeverApplied`, `TestResumePartial`, `TestResumeAfterSwarmRollback` (un `running` cuyos servicios llevan el `muelle.deploy` **anterior** y un `UpdateStatus` `rollback_completed` con `StartedAt` después de su `started_at` → `failed` "…Swarm hizo rollback…", no "Swarm no cambió"; con un `rollback_completed` de **antes** de `started_at` → sí "Swarm no cambió"), `TestResumeDockerDown` (queda `running` y lo cierra cuando `SetUnavailable(false)`), `TestManagerNodeStored` (después de `Run`, `settings.manager_node_id = node-1`; con Docker caído no se guarda y `Run` igual corre), `TestRetentionAfterClose`, `TestDispatcherNeverLogsSecrets` (un `slog.NewJSONHandler` sobre un buffer; un deploy que falla en el render con `replicas: ${N}` y `N` secreta de valor `no-es-un-numero-secreto`, y otro con `OnDeployStack` que falla con un mensaje que trae el secreto → el buffer tiene `app`, `deploy` y `status`, y nunca el secreto).
-- [ ] **Step 5: `RemoveApp` (test primero).** `RemoveApp.Execute`: `Apps.Get` (si no existe, solo el `stack rm`); `Block(app.ID, 2*time.Minute)`; `Stop`; `FailQueued(app.ID, "la app se borró")`; `Stacks.Remove` (si falla: `Unblock` y devuelve el error). Un `queued` que llega después de `FailQueued` lo cierra el despachador (Step 4, decisión 8).
+- [ ] **Step 5: `RemoveApp` (test primero).** `RemoveApp.Execute`: `Apps.Get` (si no existe, solo el `stack rm`); `Block(app.ID, 2*time.Minute)`; `Stop`; `FailQueued(app.ID, "la app se borró")` y `Hub.Notify` de sus ids; `Stacks.Remove` (si falla: `Unblock` y devuelve el error). Un `queued` que llega después de `FailQueued` lo cierra el despachador (Step 4, decisión 8).
+  - **Si `Stop` vence sus 15 s** (`ErrWorkerBusy`: el worker sigue vivo, por ejemplo en una escritura a la base), `RemoveApp` **no sigue**: `Unblock` y devuelve el error, sin `FailQueued` ni `stack rm`. Seguir con un worker vivo podría dejar un stack huérfano (el worker aplicaría el stack después del `stack rm`). La app no se borra (catalog no borra la fila si `RemoveApp` falla) y el usuario reintenta. `ErrWorkerBusy` va en `errors.go` y en `mapper_errors.go`: `409 conflict` "un deploy de la app todavía no se detiene; vuelve a intentar en unos segundos" (el `Kit` es uno solo, así que el `DELETE` de catalog lo responde igual). El deploy de ese worker cierra después como cualquiera cancelado con `ErrAppRemoved` ("la app se borró durante el deploy"), aunque al final la app no se borró: es raro y se acepta.
   - `TestRemoveAppStopsWorker`: con un deploy retenido en el **paso 6** (`running: 0`, no con `block`: ver Step 2) y otro `queued`, `RemoveApp` deja el primero `failed` ("la app se borró durante el deploy") y el segundo `failed`; `POST …/deploys` → 409 `conflict`; con `FailNext("RemoveStack", docker.ErrUnavailable)`, vuelve a aceptar deploys enseguida.
   - `TestRemoveAppRaceWithCreate` (el orden que deja un stack huérfano sin la decisión 8): un `CreateDeploy` que pasó `Accepting` y todavía no insertó (el test lo parte en dos: primero `RemoveApp` completo, con su `Block`, `Stop`, `FailQueued` y `stack rm`; después el `InTx` del `Create` y el `Wake`) → el deploy termina `failed` "la app se borró" y `StackDeploys()` no tiene ningún deploy de esa app después del `RemoveStack` (`Calls()` lo muestra en orden).
+  - `TestRemoveAppStopTimeout`: con un `Dispatcher` cuyo plazo de `Stop` el test acorta (un campo, 15 s por defecto) y un worker retenido donde el ctx no llega (`block` en `OnDeployStack`, Step 2) → `RemoveApp` devuelve `ErrWorkerBusy`, la app vuelve a aceptar deploys (`Accepting` true), `RemovedStacks()` está vacío y el `queued` de la app sigue `queued`. Al soltar `block`, el worker termina.
   - Los tests de `TestRemoveApp` y `TestRemoveAppDockerDown` existentes siguen pasando.
 - [ ] **Step 6: Integración con Swarm real** (`integration_test.go`, `//go:build integration`, paquete `deploy`):
   - **Helpers:**
     - `itClient(t)`: el cliente real, o `t.Skip` si no hay un Swarm activo con este nodo como manager;
-    - `requireImage(t, ref)`: `t.Skip` si falta `nginx:alpine` o `alpine/socat:latest`;
+    - `requireImage(t, ref)`: `t.Skip` si falta `nginx:alpine` o `alpine/socat:latest`, **o si no tiene `RepoDigests`** (una imagen construida o cargada con `docker load` no tiene digest de registry, y `localDigests` no tendría qué devolver);
     - `itProject(t)`: `it2` + 4 hex;
     - `itModule(t, …)`: la base (`sqlitetest`), el proyecto, el stage `staging` y la app sembrados por SQL, un `fakeEnv`, un `itIngress` que crea la red `naming.Network(p, "staging")` overlay attachable con `muelle.test=it2` y cuyo `SyncRoutes` no hace nada, y un `localDigests` que envuelve al cliente real y en `DistributionDigest` devuelve el digest de `InspectImage(ref).RepoDigests` (así no sale a internet, y como `--resolve-image=never` deja la ref con digest, Swarm no baja la imagen porque ya está en el nodo). Una ref que ya trae digest (un redeploy, un rollback) también pasa por ahí, como en producción (decisión 1): el wrapper la busca sin el tag (`InspectImage("<repo>@sha256:…")`, la forma de `RepoDigests`) y devuelve ese mismo digest; si no está en el nodo, `docker.ErrNotFound`;
     - `t.Cleanup` (también si el test falla): `docker stack rm` de cada stack `it2…` del test, esperar hasta 90 s a que no quede ningún servicio con `muelle.project=<p>`, borrar la red (reintentando hasta 60 s mientras `ErrConflict`) y los volúmenes `<p>_…` (reintentando hasta 60 s).
-    - **`TestMain` (en `integration_main_test.go`, con el mismo `//go:build integration`; el paquete no tiene otro `TestMain`):** un `-timeout` que vence hace `panic` y no corre los `t.Cleanup`, así que antes de `m.Run()` barre lo que dejó una corrida anterior. Solo toca lo que es de esta línea **y** tiene más de 30 min (más que el `-timeout` de 25 min: nunca lo de una corrida que sigue viva):
+    - **`TestMain` (en `integration_main_test.go`, con el mismo `//go:build integration`; el paquete no tiene otro `TestMain`):** un `-timeout` que vence hace `panic` y no corre los `t.Cleanup`, así que antes de `m.Run()` barre lo que dejó una corrida anterior. Solo toca lo que es de esta línea **y** tiene más de 30 min (más que el `-timeout` de 25 min: nunca lo de una corrida que sigue viva). La edad: la de un servicio sale de `docker.Service.CreatedAt` (`ListServices`); `docker.Network` y `docker.Volume` **no** traen la hora de creación, así que el `TestMain` la lee con el CLI, con `exec` en el test: `docker network inspect --format '{{json .Created}}' <nombre>` (con `json`: `{{.Created}}` solo sale en el formato de `time.Time.String()`, `2026-10-15 18:32:47.3 -0300 -03`) y `docker volume inspect --format '{{.CreatedAt}}' <nombre>` (ya es RFC 3339); verificado con Docker 29. Uno que no se puede leer o parsear no se toca. No se agrega un método al cliente compartido para esto:
       - los stacks cuyos servicios se llaman `it2…` y llevan `muelle.project` con valor `it2…` (los pone el render): `docker stack rm`, y esperar a que se vayan sus contenedores;
       - las redes `it2…` con la etiqueta `muelle.test=it2` (las crea `itIngress`);
       - los volúmenes `it2…` cuya `com.docker.stack.namespace` empieza con `it2`.
@@ -1081,7 +1195,7 @@ func (d *Dispatcher) Wait()                                    // después de ca
     - `TestIntegrationFormAppDeploy`: `nginx:alpine`, puerto 80, healthcheck `http` en `/`, 1 réplica → `succeeded`; el servicio corre 1/1, y un redeploy sin cambios → `succeeded` con el mismo id de tarea (no reinició).
     - `TestIntegrationComposePrune`: `web` (`nginx:alpine`) + `side` (`alpine/socat` con `socat TCP-LISTEN:9000,fork SYSTEM:echo`) → `succeeded`; el mismo compose sin `side` → `succeeded` y `side` ya no existe (`--prune`).
     - `TestIntegrationFailingHealthcheckRollsBack`: v1 con healthcheck `["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]`, `interval: 1s`, `retries: 2`, `start_period: 1s` y `update_config: {monitor: 5s}` → `succeeded`; v2 con `/no-existe` → `failed` con el rollback detectado y el `Err` de la tarea en el log; el servicio vuelve a llevar `muelle.deploy` de v1.
-    - `TestIntegrationVolumeStopFirst`: formulario con un volumen → `docker service inspect --format '{{.Spec.UpdateConfig.Order}} {{.Spec.TaskTemplate.Placement.Constraints}}'` (exec en el test) da `stop-first` y `node.id==<id>`, y el volumen `<stack>_data` existe.
+    - `TestIntegrationVolumeStopFirst`: formulario con un volumen → `docker service inspect --format '{{.Spec.UpdateConfig.Order}} {{.Spec.TaskTemplate.Placement.Constraints}}'` (exec en el test) da `stop-first` y la restricción **tal como la escribe el render**, `node.id == <id>` (con espacios: Swarm guarda las restricciones textuales; si se prefiere, comparar sin espacios en los dos lados), y el volumen `<stack>_data` existe.
     - `TestIntegrationResumeAfterRestart`: arranca un deploy con un healthcheck de `interval: 5s` (así la convergencia tarda), cancela `Run` cuando el log dice "esperando convergencia", verifica que quedó `running`, y un `Run` nuevo sobre la misma base lo cierra `succeeded` con "muelle se reinició durante el deploy".
 
 ```bash
@@ -1120,7 +1234,7 @@ docker volume ls --format "{{.Name}}" | grep "^it2" | xargs -r docker volume rm'
 - Create: `src/internal/deploy/app/usecases/{status,app_logs}.go` y tests
 - Create: `src/internal/deploy/infra/in/http/{sse,streams,status}.go` y tests
 - Modify: `src/internal/deploy/module.go` (rutas, el ctx de los streams), `module_test.go`
-- Create: `src/shared/infra/container/deploy_test.go`
+- Modify: `src/shared/infra/container/deploy_test.go` (lo creó T3 con `TestInitRegistrySeededOnce`)
 - Modify: `src/internal/deploy/integration_test.go`, `README.md` (solo las partes de deploy)
 
 - [ ] **Step 1: `Kit.Revalidate` (contrato §0.3; test primero).**
@@ -1166,9 +1280,9 @@ func (s *sse) comment(text string) error         // ": ping"
   Cada escritura hace `SetWriteDeadline(now + WriteTimeout)` (si devuelve `http.ErrNotSupported`, se ignora) y `Flush`. El ctx de cada stream se cancela con el de la petición, con el de `Module.Run` (el módulo guarda un ctx que `Run` cancela al terminar) y con `MaxDuration`. `ErrTooManyStreams` → `429 rate_limited` (con `Retry-After`, lo pone el `Kit`), antes de abrir.
 
   Tests (`httptest.NewServer` sobre `httpserver.NewServer` con el `FakeAuth`): `TestSSEHeaders`; `TestSSEHeartbeat` (`: ping`); `TestSSESurvivesReadTimeout` (un `http.Server` con `ReadTimeout: 200ms` y el stream sigue vivo 1 s después); `TestSSERevalidate` (con un `Authenticator` **propio del test**, `lockedAuth`: los mapas de sesiones y tokens detrás de un `sync.Mutex`, con `Revoke(token)`. `httptestutil.FakeAuth` tiene mapas sin candado, y borrar una sesión mientras la goroutine del stream llama a `AuthenticateSession` es una carrera que `-race` detecta: nunca se modifica un `FakeAuth` con un servidor corriendo. Se revoca la sesión y el stream se cierra al próximo chequeo; igual con un token); `TestSSELimitPerPrincipal` (8 abiertos con la misma sesión; el noveno → 429 `rate_limited` con `Retry-After`; otra sesión sí abre); `TestSSEClosesOnModuleStop`.
-- [ ] **Step 4: El log del deploy en vivo** (`GET …/deploys/{id}/log/stream`, contrato §2.6; tests primero). Desde dónde: `Last-Event-ID`, si no `?offset`, si no 0, con la misma validación que el polling (422 antes de abrir), y 404 si el deploy no es de la app. Después: `status` si no terminó; el bucle es `wait := Hub.Wait(id)` (antes de leer) → `ReadLog` → un `log` por línea con `id` = el offset después de esa línea → un `status` si cambió → si es final y no quedan líneas, el `status` final y cerrar; si no, esperar `wait`, el heartbeat (que manda `: ping` y **también vuelve a leer**: es la red de seguridad si se perdiera un aviso) o el fin del ctx. Tests: `TestDeployLogStreamLive` (las líneas llegan a medida que el `LogWriter` escribe, y el `status` final va después de la última); `TestDeployLogStreamFinished` (un deploy terminado: las líneas que faltan, el `status` final y cierra, sin `status` al conectar); `TestDeployLogStreamResume` (`Last-Event-ID` gana sobre `?offset`); los 404 y 422 en JSON.
-- [ ] **Step 5: `GET …/status`** (contrato §2.8; tests primero, con el fake: servicios con etiquetas de la app, tareas en `node-1` y en otro nodo, `PutContainer` con `Health`, `SetStats`). `GetStatus.Execute`: la app (404); `AppServices`; por servicio: nombre corto (sin el prefijo `<stack>_`), `image`, `replicas_desired` (`Replicas` o `DesiredTasks`), `replicas_running`, `memory_limit_bytes` (null si 0), `update_state` (null si no hay), `tasks` (orden de §2.8; `slot` null en uno global; `health` con `ContainerHealth` solo si la tarea corre en el nodo local; `node` con `NodeHostname` en caché por 5 min; `since` truncada al milisegundo; `error` null si vacío); medidas con `ContainerStats` en paralelo (hasta 8 a la vez) con un plazo total de 2 s, solo para las tareas que corren en el nodo local; sumas del servicio (null si no se midió ninguna). Caché por app: lo estructural 2 s y las medidas 5 s; una tarea que no estaba en la medición guardada sale con medidas null. **Una sola medición a la vez por app** ("comparten la misma medición", contrato §2.8): con la caché vencida, el primer `GET` mide y los que llegan mientras tanto esperan su resultado (un `inflight` por app: un canal que se cierra al terminar, bajo el mismo `mu` de la caché; cada uno espera también su propio ctx). Igual para lo estructural. Así, cinco pestañas que piden a la vez con la caché fría hacen una sola ronda de `ContainerStats`, no cinco. Con Docker caído, 503 (y el error no queda en la caché). Tests: `TestStatusShape` (todos los campos con su tipo y sus null), `TestStatusOrder`, `TestStatusCaches` (con `clock.NewManual` y `Calls()` del fake: dos `GET` seguidos llaman una sola vez a `ContainerStats`; pasados 2 s se vuelven a leer los servicios pero no las medidas; pasados 5 s, también las medidas), `TestStatusConcurrentColdRequests` (con un `Cluster` del test que envuelve al adaptador y retiene `ContainerStats` en un canal: cinco `Execute` a la vez con la caché fría → una sola llamada por tarea; al soltarlo, los cinco tienen las mismas medidas), `TestStatusNeverDeployed` (`services: []`), `TestStatusDockerDown`.
-- [ ] **Step 6: Los logs de una app** (`GET …/logs`, contrato §2.9; tests primero). En orden: la app (404); la query (`service` obligatorio y slug con `validate.VolumeName("service", …)`; si viene `since`, `time.Parse(time.RFC3339Nano, …)` y entonces `LogOptions{Since, Tail: 5000}`, y `tail` **no se valida** (contrato §2.9, "tail no se mira": `since=…&tail=abc` abre el stream); si no, `tail` de 0 a 5000 con 200 por defecto; `follow` vacío, `0` o `1`); el servicio con `Cluster.Service(naming.Service(p, s, a, service))` y todas las `naming.AppLabels` (si no, 404); `ServiceLogs` con su `ID` (503 con Docker caído); los slots de las tareas con `Tasks`. Ya abierto: una goroutine lee `Next()`; los pedazos se unen (`JoinPieces`, con un pendiente que sale cuando llega la línea siguiente o a los 200 ms sin nada); cada línea sale como `log` con `{"time", "task", "stream", "line"}` (`time` truncada al milisegundo; `task` `<servicio>.<slot>` o `<servicio>.<7 del id>`; `line` enmascarada con los secretos de `ResolveEnv` y cortada con `CutLine(…, AppLineBytes)`); `io.EOF` → `end` `eof`; `MaxDuration` → `end` `timeout`; `Close` del stream siempre. Tests: `TestAppLogsQuery` (cada 422 con su campo; `since` y `tail` juntos → manda `since`, y `LogOptions.Tail` es 5000; `since` válido con `tail=abc` y con `tail=99999` → 200, el stream abre; sin `since`, `tail=abc` → 422 `tail`; `since=ayer` → 422 `since`), `TestAppLogsLookup` (un servicio con ese nombre sin las etiquetas → 404; nunca se llama a Docker con el parámetro tal cual: `Calls()` muestra el nombre completo), `TestAppLogsSinceInclusive` (líneas con la misma hora que `since` llegan), `TestAppLogsMasksAndJoins` (un secreto partido en dos pedazos de 16 KiB sale enmascarado), `TestAppLogsFollowEnd` (sin `follow`: las líneas, `end` `eof` y cierra; con `follow`, quitar el servicio termina con `end` `eof`).
+- [ ] **Step 4: El log del deploy en vivo** (`GET …/deploys/{id}/log/stream`, contrato §2.6; tests primero). Desde dónde: `Last-Event-ID`, si no `?offset`, si no 0, con la misma validación que el polling (422 antes de abrir), y 404 si el deploy no es de la app. Después: `status` si no terminó; el bucle es `wait := Hub.Wait(id)` (antes de leer) → `ReadLog` → un `log` por línea con `id` = el offset después de esa línea → un `status` si cambió → si es final y no quedan líneas, el `status` final y cerrar; si no, esperar `wait`, el heartbeat (que manda `: ping` y **también vuelve a leer**: es la red de seguridad si se perdiera un aviso) o el fin del ctx. Tests: `TestDeployLogStreamLive` (las líneas llegan a medida que el `LogWriter` escribe, y el `status` final va después de la última); `TestDeployLogStreamFinished` (un deploy terminado: las líneas que faltan, el `status` final y cierra, sin `status` al conectar); `TestDeployLogStreamResume` (`Last-Event-ID` gana sobre `?offset`); `TestDeployLogStreamSuperseded` (con el heartbeat del test en 1 min, así solo el aviso puede despertarlo: un stream abierto sobre un `queued`, y otro `POST …/deploys` de la misma app → el stream manda `status` `superseded` y cierra enseguida, por el `Hub.Notify` de `CreateDeploy`, T3 Step 6; igual con un `queued` que cierra `RemoveApp` como `failed`); los 404 y 422 en JSON.
+- [ ] **Step 5: `GET …/status`** (contrato §2.8; tests primero, con el fake: servicios con etiquetas de la app, tareas en `node-1` y en otro nodo, `PutContainer` con `Health`, `SetStats`). `GetStatus.Execute`: la app (404); `AppServices`; por servicio: nombre corto (sin el prefijo `<stack>_`), `image`, `replicas_desired` (`Replicas` o `DesiredTasks`), `replicas_running`, `memory_limit_bytes` (null si 0), `update_state` (null si no hay), `tasks` (orden de §2.8; `slot` null en uno global; `health` con `ContainerHealth` solo si la tarea corre en el nodo local; `node` con `NodeHostname` en caché por 5 min; `since` truncada al milisegundo; `error` null si vacío y, si no, **enmascarado** con los secretos de `Env.ResolveEnv` de la app, como el log (contrato §2.8): `Task.Err` puede traer un argumento de `command` ya interpolado, y el endpoint acepta tokens. `GetStatus` recibe el `EnvResolver`; lo que se guarda en la caché ya va enmascarado); medidas con `ContainerStats` en paralelo (hasta 8 a la vez) con un plazo total de 2 s, solo para las tareas que corren en el nodo local; sumas del servicio (null si no se midió ninguna). Caché por app: lo estructural 2 s y las medidas 5 s; una tarea que no estaba en la medición guardada sale con medidas null. **Una sola medición a la vez por app** ("comparten la misma medición", contrato §2.8): con la caché vencida, el primer `GET` mide y los que llegan mientras tanto esperan su resultado (un `inflight` por app: un canal que se cierra al terminar, bajo el mismo `mu` de la caché; cada uno espera también su propio ctx). Igual para lo estructural. Así, cinco pestañas que piden a la vez con la caché fría hacen una sola ronda de `ContainerStats`, no cinco. Con Docker caído, 503 (y el error no queda en la caché). Tests: `TestStatusShape` (todos los campos con su tipo y sus null), `TestStatusMasksTaskError` (una tarea con `Err` que trae un secreto de la app → `***` en `tasks[].error`), `TestStatusOrder`, `TestStatusCaches` (con `clock.NewManual` y `Calls()` del fake: dos `GET` seguidos llaman una sola vez a `ContainerStats`; pasados 2 s se vuelven a leer los servicios pero no las medidas; pasados 5 s, también las medidas), `TestStatusConcurrentColdRequests` (con un `Cluster` del test que envuelve al adaptador y retiene `ContainerStats` en un canal: cinco `Execute` a la vez con la caché fría → una sola llamada por tarea; al soltarlo, los cinco tienen las mismas medidas), `TestStatusNeverDeployed` (`services: []`), `TestStatusDockerDown`.
+- [ ] **Step 6: Los logs de una app** (`GET …/logs`, contrato §2.9; tests primero). En orden: la app (404); la query (`service` obligatorio y slug con `validate.VolumeName("service", …)`; si viene `since`, `time.Parse(time.RFC3339Nano, …)` y entonces `LogOptions{Since, Tail: 5000}`, y `tail` **no se valida** (contrato §2.9, "tail no se mira": `since=…&tail=abc` abre el stream); si no, `tail` de 0 a 5000 con 200 por defecto; `follow` vacío, `0` o `1`); el servicio con `Cluster.Service(naming.Service(p, s, a, service))` y todas las `naming.AppLabels` (si no, 404); `ServiceLogs` con su `ID` (503 con Docker caído); los slots de las tareas con `Tasks`. **El mapa de slots se renueva:** un stream con `follow` dura hasta 1 h, y un deploy en ese rato crea tareas nuevas. Una línea con un `TaskID` que no está en el mapa vuelve a llamar a `Tasks` (una vez por id desconocido: un id que sigue sin aparecer, o un `Tasks` que falla, queda anotado y sale como `<servicio>.<7 del id>` sin volver a preguntar). Ya abierto: una goroutine lee `Next()`; los pedazos se unen (`JoinPieces`, con un pendiente que sale cuando llega la línea siguiente o a los 200 ms sin nada); cada línea sale como `log` con `{"time", "task", "stream", "line"}` (`time` truncada al milisegundo; `task` `<servicio>.<slot>` o `<servicio>.<7 del id>`; `line` enmascarada con los secretos de `ResolveEnv` y cortada con `CutLine(…, AppLineBytes)`); `io.EOF` → `end` `eof`; `MaxDuration` → `end` `timeout`; `Close` del stream siempre. Tests: `TestAppLogsQuery` (cada 422 con su campo; `since` y `tail` juntos → manda `since`, y `LogOptions.Tail` es 5000; `since` válido con `tail=abc` y con `tail=99999` → 200, el stream abre; sin `since`, `tail=abc` → 422 `tail`; `since=ayer` → 422 `since`), `TestAppLogsLookup` (un servicio con ese nombre sin las etiquetas → 404; nunca se llama a Docker con el parámetro tal cual: `Calls()` muestra el nombre completo), `TestAppLogsSinceInclusive` (líneas con la misma hora que `since` llegan), `TestAppLogsMasksAndJoins` (un secreto partido en dos pedazos de 16 KiB sale enmascarado), `TestAppLogsNewTaskSlot` (con `follow`: después de abrir, `SetTasks` suma una tarea de slot 2 y `AppendServiceLogs` una línea suya → sale como `<servicio>.2`, no con el id; `Calls()` muestra un `ListTasks` más, y una segunda línea de esa tarea no lo repite), `TestAppLogsFollowEnd` (sin `follow`: las líneas, `end` `eof` y cierra; con `follow`, quitar el servicio termina con `end` `eof`).
 - [ ] **Step 7: El módulo completo.** `RegisterRoutes` registra todas las rutas de contrato §1 y los errores (`RegisterErrors`). `module_test.go`: `TestModuleRoutesAndStubs` se reemplaza por `TestModuleRoutes`, que verifica que ninguna ruta **de deploy** de contrato §1 (las tres primeras filas: deploys, log, log/stream, rollback, status, logs y registries, con cada método) responde `no_route` ni `method_not_allowed`. Las de ingress (dominios, `/proxy`) no se miran: son de la Fase 3 y en esta rama responden `no_route`. Y `TestRun` (vuelve al cancelar). Commit: `feat(deploy): el log del deploy y los logs de las apps en vivo (SSE), y el estado de las apps (contrato §2.6, §2.8 y §2.9)`.
 - [ ] **Step 8: Contratos con el contenedor completo** (`src/shared/infra/container/deploy_test.go`, con `newTestContainer`, un simulador mínimo propio en el `OnDeployStack` del `dockertest.Fake` del contenedor (el de T4 es de otro paquete de test y no se importa), digests con `SetDigest`, y `c.Run(ctx)` en una goroutine que el test cancela y espera):
   - `TestContractDeployFlow`: proyecto, stage y app de formulario por HTTP; un token del proyecto; `POST …/deploys` con el Bearer → 202; el polling de `…/log` hasta `succeeded`, con **una de las dos** líneas del paso 7: `rutas de Caddy actualizadas` o `advertencia: no se pudo actualizar Caddy:` (hoy sale la segunda; cuando se mergee la Fase 3 y `SyncRoutes` exista, puede salir la primera, y el test no se rompe); `GET …/deploys` con `images` resueltas; `GET` de la app (catalog) con `last_deployed_at` y `pending_changes: false`; `GET …/status`; `POST …/rollback` → 409 `no_previous_deploy`; un segundo deploy y el rollback → 202 y `succeeded` (con `SetDigest` también para la ref con digest a la que vuelve el rollback: el paso 2 la verifica, decisión 1).
