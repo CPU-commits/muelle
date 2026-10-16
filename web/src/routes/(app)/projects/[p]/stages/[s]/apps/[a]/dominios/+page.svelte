@@ -2,7 +2,7 @@
 	import { DomainsScreen } from '@/modules/ingress'
 	import type { PageProps } from './$types'
 
-	// Los destinos posibles (`targets`, "servicio:puerto") salen del catálogo: los conecta F2.
+	// Los destinos posibles ("servicio:puerto") los pide DomainsScreen al catálogo (§2.12).
 	let { params }: PageProps = $props()
 </script>
 

@@ -1,6 +1,7 @@
 import { http } from 'msw'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { api, apiError } from '@/mocks/api'
+import { adminDb } from '@/mocks/db/admin'
 import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { ingressDb } from '@/mocks/db/ingress'
 import { server } from '@/mocks/server'
@@ -28,6 +29,8 @@ beforeEach(() => {
 	authDb.reset({ session: { username: MOCK_USERNAME, mfaPending: false, badCodes: 0 } })
 	// Los certificados se "emiten" en 30 ms en vez de 3 s.
 	ingressDb.reset({ provisionMs: 30 })
+	// El token de Cloudflare y las IP públicas salen de los ajustes del mock (contrato §3.1).
+	adminDb.reset()
 })
 afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
@@ -327,7 +330,80 @@ describe('contrato de la Fase 3', () => {
 	})
 })
 
+describe('el mock sigue a los ajustes, como el backend', () => {
+	it('records se calcula con las IP públicas de ahora: sin IPv6 no hay AAAA, y sin IP nada', async () => {
+		adminDb.state.publicIpv6 = ''
+		const [, manual] = await ingressUseCases.listDomains(APP)
+		expect(manual?.records).toEqual([
+			{ type: 'A', name: 'api.staging.otro-dominio.com', content: '203.0.113.24' },
+		])
+
+		adminDb.state.publicIp = '198.51.100.9'
+		const [, moved] = await ingressUseCases.listDomains(APP)
+		expect(moved?.records[0]?.content).toBe('198.51.100.9')
+
+		adminDb.state.publicIp = ''
+		const [, none] = await ingressUseCases.listDomains(APP)
+		expect(none?.records).toEqual([])
+	})
+
+	it('sin token de Cloudflare, un hostname de la zona queda manual y sin Proxied', async () => {
+		adminDb.state.cloudflareToken = null
+		const created = await ingressUseCases.addDomain({
+			app: APP,
+			hostname: 'sin-token.tudominio.cl',
+			target: 'api:3000',
+			proxied: true,
+		})
+		expect(dnsMode(created)).toBe('manual')
+		expect(created.proxied).toBe(false)
+		expect(domainState(created)).toBe('waiting_dns')
+	})
+
+	it('Proxied que sale bien saca un error de Cloudflare: vuelve a pending', async () => {
+		const created = await ingressUseCases.addDomain({
+			app: APP,
+			hostname: 'arregla.tudominio.cl',
+			target: 'api:3000',
+			proxied: false,
+		})
+		ingressDb.save({
+			...ingressDb.find('auditfy/staging/api', created.hostname)!,
+			status: 'error',
+			lastError: 'Cloudflare respondió 500',
+			lastErrorCode: 'cloudflare',
+			activeAt: null,
+		})
+		const toggled = await ingressUseCases.setProxied({
+			app: APP,
+			hostname: created.hostname,
+			proxied: true,
+		})
+		expect(toggled.status).toBe('pending')
+		expect(toggled.errorKind).toBeNull()
+	})
+
+	it('adoptar sin IP pública deja el dominio en error de Cloudflare, con qué falta (200)', async () => {
+		await ingressUseCases.listDomains(APP)
+		adminDb.state.publicIp = ''
+		const adopted = await ingressUseCases.adoptRecord({
+			app: APP,
+			hostname: asHostname('webhooks-staging.tudominio.cl'),
+		})
+		expect(adopted.errorKind).toBe('cloudflare')
+		expect(adopted.lastError).toMatch(/IP pública/)
+	})
+})
+
 describe('GET /proxy', () => {
+	it('sin dominio del panel está apagado, sin contenedor (image null) y sin error', async () => {
+		adminDb.state.panelDomain = ''
+		const proxy = await ingressUseCases.getProxyStatus()
+		expect(proxy.status).toBe('disabled')
+		expect(proxy.caddy).toMatchObject({ image: null, running: false })
+		expect(proxy.error).toBeNull()
+	})
+
 	it('sincronizado, con muelle-caddy corriendo', async () => {
 		const proxy = await ingressUseCases.getProxyStatus()
 		expect(proxy.status).toBe('synced')

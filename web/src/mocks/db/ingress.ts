@@ -1,3 +1,4 @@
+import { adminDb } from './admin'
 import { loadPersisted, savePersisted } from './persist'
 
 // Dominios (Fase 3) del backend simulado, con el contrato de
@@ -17,14 +18,14 @@ import { loadPersisted, savePersisted } from './persist'
 // - un hostname con `caddy-rechaza` en la primera etiqueta hace que Caddy no acepte la
 //   configuración: `GET /proxy` dice `out_of_sync` (el aviso "proxy desincronizado");
 // - cualquier otro hostname está fuera de Cloudflare (`tls_mode: http`): queda `pending`
-//   ("Esperando DNS") hasta que se toca Verificar (retry), que lo pasa a `active`.
+//   ("Esperando DNS") hasta que se toca Verificar (retry), que lo pasa a `active`;
+// - lo de Cloudflare y las IP públicas salen de los ajustes del mock (`db/admin.ts`), como
+//   en el backend: sin token, todo hostname queda fuera de Cloudflare; `records` se calcula
+//   con las IP de ahora (`[]` sin `public_ip`); adoptar sin token o sin IP deja el dominio en
+//   `error` + `cloudflare`; y sin dominio del panel, `GET /proxy` dice `disabled`.
 // Como los deploys, un `pending` con `activeAt` se resuelve solo con la hora.
 
 export const MOCK_ZONE = 'tudominio.cl'
-export const MOCK_PUBLIC_IP = '203.0.113.24'
-/** La IPv6 pública del nodo: con ella, el dominio lleva también un AAAA. */
-export const MOCK_PUBLIC_IPV6 = '2001:db8::24'
-
 const STORAGE_KEY = 'ingress'
 const DAY = 24 * 60 * 60 * 1000
 /** Lo que tarda en emitirse un certificado en el mock. */
@@ -73,8 +74,19 @@ export function appKey(project: string, stage: string, app: string): string {
 	return `${project}/${stage}/${app}`
 }
 
+/** Sin token, muelle no ve ninguna zona (contrato §3.1: `tls_mode: http`). */
 function inZone(hostname: string): boolean {
+	if (adminDb.state.cloudflareToken === null) return false
 	return hostname === MOCK_ZONE || hostname.endsWith(`.${MOCK_ZONE}`)
+}
+
+/** Lo que falta para adoptar (el token y la IP pública), con el mensaje del backend. */
+function adoptBlocker(): string | null {
+	if (adminDb.state.cloudflareToken === null) {
+		return 'adoptar necesita el token de Cloudflare: agrégalo en Ajustes'
+	}
+	if (adminDb.state.publicIp === '') return 'configura la IP pública en Ajustes'
+	return null
 }
 
 function firstLabel(hostname: string): string {
@@ -218,8 +230,6 @@ export const ingressDb = {
 
 	commit,
 
-	publicIp: MOCK_PUBLIC_IP,
-
 	/** Los dominios de la app (sembrados la primera vez), resueltos a la hora `now`. */
 	list(project: string, stage: string, app: string, now = Date.now()): MockDomain[] {
 		const key = appKey(project, stage, app)
@@ -272,6 +282,19 @@ export const ingressDb = {
 	 * Proxied del registro y lo copia al dominio (adoptar no cambia hacia dónde va el tráfico).
 	 */
 	adopt(domain: MockDomain, now = Date.now()): MockDomain {
+		const blocker = adoptBlocker()
+		if (blocker) {
+			return this.save(
+				{
+					...domain,
+					status: 'error',
+					lastError: blocker,
+					lastErrorCode: 'cloudflare',
+					activeAt: null,
+				},
+				now,
+			)
+		}
 		return this.save(
 			{
 				...domain,
@@ -308,13 +331,30 @@ export const ingressDb = {
 		)
 	},
 
-	/** `GET /proxy`: sincronizado, salvo que algún dominio tenga `caddy-rechaza`. */
+	/**
+	 * `GET /proxy`: sincronizado, salvo que algún dominio tenga `caddy-rechaza`. Sin dominio
+	 * del panel, `disabled`: no hay contenedor (`image: null`) y no se consulta Docker.
+	 */
 	proxy(now = Date.now()) {
+		const settings = adminDb.state
+		if (settings.panelDomain === '') {
+			return {
+				status: 'disabled' as const,
+				error: null,
+				synced_at: null,
+				caddy: {
+					image: null,
+					running: false,
+					http_port: settings.proxyHttpPort,
+					https_port: settings.proxyHttpsPort,
+				},
+			}
+		}
 		const caddy = {
 			image: 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0',
 			running: true,
-			http_port: 80,
-			https_port: 443,
+			http_port: settings.proxyHttpPort,
+			https_port: settings.proxyHttpsPort,
 		}
 		const rejected = state.domains.find((domain) =>
 			firstLabel(domain.hostname).includes('caddy-rechaza'),
@@ -338,6 +378,26 @@ export const ingressDb = {
 	/** Cloudflare falla al escribir (`cf-intermitente`): el dominio queda en error. */
 	cloudflareFlaky(domain: MockDomain): boolean {
 		return firstLabel(domain.hostname).includes('cf-intermitente')
+	},
+
+	/**
+	 * Cloudflare actualizó los registros (un `PATCH` de Proxied que salió bien): un dominio
+	 * que estaba en `error` + `cloudflare` vuelve a `pending` (contrato §3.2).
+	 */
+	recoverCloudflare(domain: MockDomain, now = Date.now()): MockDomain {
+		if (domain.status !== 'error' || domain.lastErrorCode !== 'cloudflare') {
+			return this.save(domain, now)
+		}
+		return this.save(
+			{
+				...domain,
+				status: 'pending',
+				lastError: null,
+				lastErrorCode: null,
+				activeAt: now + state.provisionMs,
+			},
+			now,
+		)
 	},
 
 	failCloudflare(domain: MockDomain, now = Date.now()): MockDomain {

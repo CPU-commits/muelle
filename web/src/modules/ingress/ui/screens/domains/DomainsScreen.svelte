@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths'
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import {
 		Banner,
@@ -9,6 +10,7 @@
 		ErrorState,
 		Field,
 		Input,
+		LinkButton,
 		LoadingState,
 		Modal,
 		PageHeader,
@@ -56,13 +58,21 @@
 		/>
 	{:else}
 		{#if vm.proxyNotice === 'out_of_sync'}
+			<!-- Lo que lo arregla está en Ajustes: los puertos, el registry de la imagen de
+			     Caddy, el email o el token (contrato §3.3 y §3.4). -->
 			<Banner
 				tone="warn"
 				title={m.ingress_proxy_out_of_sync_title()}
 				body={vm.proxyError
 					? m.ingress_proxy_out_of_sync_body({ error: vm.proxyError })
 					: m.ingress_proxy_out_of_sync_generic()}
-			/>
+			>
+				{#snippet action()}
+					<LinkButton variant="secondary" size="sm" href={resolve('/(app)/ajustes')}>
+						{m.ingress_proxy_open_settings()}
+					</LinkButton>
+				{/snippet}
+			</Banner>
 		{:else if vm.proxyNotice === 'stopped'}
 			<Banner
 				tone="warn"

@@ -95,11 +95,18 @@ export function domainState(domain: AppDomain): DomainState {
 
 /**
  * Hay algo que se resuelve solo en el backend (muelle creando el registro o emitiendo el
- * certificado): la lista se refresca hasta que termine. Uno que espera un registro manual
- * no: ese se resuelve con "Verificar".
+ * certificado): la lista se refresca seguido hasta que termine.
  */
 export function hasProvisioning(domains: readonly AppDomain[]): boolean {
 	return domains.some((domain) => domainState(domain) === 'provisioning')
+}
+
+/**
+ * Hay uno que espera un registro manual. muelle lo verifica cada minuto mientras siga
+ * `pending` (contrato §3.1), así que también cambia solo, aunque más despacio.
+ */
+export function hasWaitingDns(domains: readonly AppDomain[]): boolean {
+	return domains.some((domain) => domainState(domain) === 'waiting_dns')
 }
 
 /** Los que están en `error` (con o sin "Adoptar"), por hostname. */

@@ -10,4 +10,5 @@ export {
 	removeDomainMutation,
 	retryDomainMutation,
 	setProxiedMutation,
+	WAITING_DNS_REFRESH_MS,
 } from './queries/domainQueries'

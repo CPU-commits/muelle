@@ -1,7 +1,8 @@
 import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent } from '../api'
 import { deployDb } from '../db/deploy'
-import { appKey, ingressDb, type MockDomain, MOCK_PUBLIC_IP, MOCK_PUBLIC_IPV6 } from '../db/ingress'
+import { adminDb } from '../db/admin'
+import { appKey, ingressDb, type MockDomain } from '../db/ingress'
 import { requireSession } from '../session'
 
 // Dominios (Fase 3) del backend simulado, con el contrato de
@@ -24,6 +25,19 @@ function iso(ms: number | null): string | null {
 	return ms === null ? null : new Date(ms).toISOString()
 }
 
+/**
+ * Calculados, no guardados (contrato §3.1): un A con `public_ip` y un AAAA con
+ * `public_ipv6`, con los ajustes de ahora; `[]` sin IP pública.
+ */
+function records(hostname: string) {
+	const { publicIp, publicIpv6 } = adminDb.state
+	if (publicIp === '') return []
+	return [
+		{ type: 'A', name: hostname, content: publicIp },
+		...(publicIpv6 ? [{ type: 'AAAA', name: hostname, content: publicIpv6 }] : []),
+	]
+}
+
 function domainDto(domain: MockDomain) {
 	return {
 		hostname: domain.hostname,
@@ -38,11 +52,7 @@ function domainDto(domain: MockDomain) {
 		last_error_code: domain.lastErrorCode,
 		cert_issuer: domain.certIssuer,
 		cert_expires_at: iso(domain.certExpiresAt),
-		// El A y, con IPv6, el AAAA: los dos los maneja muelle (o hay que crearlos a mano).
-		records: [
-			{ type: 'A', name: domain.hostname, content: MOCK_PUBLIC_IP },
-			{ type: 'AAAA', name: domain.hostname, content: MOCK_PUBLIC_IPV6 },
-		],
+		records: records(domain.hostname),
 		created_at: iso(domain.createdAt),
 		updated_at: iso(domain.updatedAt ?? domain.createdAt),
 	}
@@ -180,10 +190,13 @@ export const ingressHandlers: RequestHandler[] = [
 		}
 		// Si Cloudflare falla al cambiar Proxied, se guarda lo pedido y el dominio queda en
 		// `error` + `cloudflare`: igual responde 200.
+		// Si sale bien y estaba en `error` + `cloudflare`, vuelve a `pending`.
 		const updated =
-			typeof body.proxied === 'boolean' && ingressDb.cloudflareFlaky(domain)
-				? ingressDb.failCloudflare(changed)
-				: ingressDb.save(changed)
+			typeof body.proxied !== 'boolean'
+				? ingressDb.save(changed)
+				: ingressDb.cloudflareFlaky(domain)
+					? ingressDb.failCloudflare(changed)
+					: ingressDb.recoverCloudflare(changed)
 		return HttpResponse.json(domainDto(updated))
 	}),
 

@@ -7,6 +7,7 @@ import {
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
 import { pendingPhase, type RoadmapPhase, ValidationError } from '@/shared/domain'
+import { appRefFrom, appTargetsQuery } from '@/modules/catalog'
 import {
 	addDomainMutation,
 	adoptRecordMutation,
@@ -44,9 +45,9 @@ export interface DomainsProps {
 	readonly stage: string
 	readonly app: string
 	/**
-	 * Del catálogo (lo conecta F2): los destinos posibles ("api:3000" de una app de
-	 * formulario; un "servicio:puerto" por servicio de una compose). Sin ellos, el
-	 * formulario sugiere los que ya usan los dominios de la app.
+	 * Los destinos posibles ("api:3000"). Sin esta prop salen del catálogo: los servicios
+	 * de la app con los puertos que declaran (contrato §2.12). Siempre se suman los que ya
+	 * usan los dominios de la app.
 	 */
 	readonly targets?: readonly string[]
 }
@@ -78,6 +79,8 @@ export class DomainsViewModel {
 	#targetTouched = $state(false)
 
 	readonly domains: CreateQueryResult<readonly AppDomain[], Error>
+	/** `servicio:puerto` de cada servicio de la app, del catálogo. */
+	readonly #catalogTargets: CreateQueryResult<string[], Error>
 	/** El estado de muelle-caddy: no lee props, va en el campo. */
 	readonly proxy: CreateQueryResult<ProxyStatus, Error> = createQuery(() => proxyQuery())
 	readonly #add = createMutation(() => addDomainMutation(this.#client))
@@ -91,6 +94,13 @@ export class DomainsViewModel {
 		this.#props = props
 		// Se crea acá: sus opciones leen `#props`, que un inicializador de campo no tendría.
 		this.domains = createQuery(() => domainsQuery(this.ref))
+		this.#catalogTargets = createQuery(() => {
+			const { project, stage, app, targets } = this.#props()
+			return {
+				...appTargetsQuery(appRefFrom(project, stage, app)),
+				enabled: targets === undefined,
+			}
+		})
 	}
 
 	get ref(): AppRef {
@@ -133,7 +143,8 @@ export class DomainsViewModel {
 	}
 
 	get suggestions(): string[] {
-		return suggestedTargets(this.list, this.#props().targets ?? [])
+		const known = this.#props().targets ?? this.#catalogTargets.data ?? []
+		return suggestedTargets(this.list, known)
 	}
 
 	/** Lo que se ve en el campo de destino: lo escrito, o la primera sugerencia. */

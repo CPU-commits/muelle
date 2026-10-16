@@ -15,6 +15,7 @@ export {
 	domainState,
 	failingDomains,
 	hasProvisioning,
+	hasWaitingDns,
 	isReachable,
 	manualRecords,
 	publicAddress,

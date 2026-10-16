@@ -7,6 +7,7 @@ import {
 	type ChangeTargetInput,
 	type DomainRef,
 	hasProvisioning,
+	hasWaitingDns,
 	proxySettling,
 	replaceDomain,
 	type SetProxiedInput,
@@ -37,15 +38,24 @@ export function proxyQuery() {
 /** Mientras muelle esté resolviendo un dominio (registro, certificado), la lista se refresca sola. */
 export const PENDING_REFRESH_MS = 5_000
 
+/**
+ * Un `pending` que espera un registro manual: muelle lo verifica cada minuto (contrato
+ * §3.1) y lo pasa a `active` cuando el certificado sale, o a `error` a los 10 min. La
+ * lista lo sigue, más despacio; Verificar lo mira ahora.
+ */
+export const WAITING_DNS_REFRESH_MS = 30_000
+
 export function domainsQuery(app: AppRef) {
 	return queryOptions({
 		queryKey: ingressKeys.domains(app),
 		queryFn: ({ signal }) => ingressUseCases.listDomains(app, signal),
 		staleTime: 10_000,
-		// Un `pending` que espera un registro manual no cambia solo: no se refresca por él.
-		// Con la pestaña oculta tampoco (refetchIntervalInBackground: false).
-		refetchInterval: (query) =>
-			hasProvisioning(query.state.data ?? []) ? PENDING_REFRESH_MS : false,
+		// Con la pestaña oculta no se refresca (refetchIntervalInBackground: false).
+		refetchInterval: (query) => {
+			const domains = query.state.data ?? []
+			if (hasProvisioning(domains)) return PENDING_REFRESH_MS
+			return hasWaitingDns(domains) ? WAITING_DNS_REFRESH_MS : false
+		},
 		refetchIntervalInBackground: false,
 	})
 }

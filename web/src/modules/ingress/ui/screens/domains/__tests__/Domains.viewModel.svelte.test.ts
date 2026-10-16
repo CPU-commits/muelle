@@ -16,7 +16,7 @@ import {
 } from '../../../../domain/repositories/__fakes__/domainFixtures'
 import { makeProxyStatus } from '../../../../domain/repositories/__fakes__/inMemoryProxyRepository'
 import { mountViewModel } from '../../../__tests__/mountViewModel'
-import { domainsQuery, PENDING_REFRESH_MS } from '../../../../data'
+import { domainsQuery, PENDING_REFRESH_MS, WAITING_DNS_REFRESH_MS } from '../../../../data'
 import { DomainsViewModel } from '../Domains.viewModel.svelte.ts'
 
 const mocks = vi.hoisted(() => ({
@@ -31,6 +31,10 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/modules/ingress/container', () => ({ ingressUseCases: mocks }))
+
+// Los destinos salen del catálogo (contrato §2.12): se mockea su container, no la red.
+const catalog = vi.hoisted(() => ({ getApp: vi.fn() }))
+vi.mock('@/modules/catalog/container', () => ({ catalogUseCases: catalog }))
 
 const ACTIVE = makeDomain('api-staging.tudominio.cl')
 const EXISTING = recordExists('webhooks-staging.tudominio.cl')
@@ -53,6 +57,8 @@ describe('DomainsViewModel', () => {
 		vi.clearAllMocks()
 		mocks.listDomains.mockResolvedValue([ACTIVE, MANUAL, EXISTING])
 		mocks.getProxyStatus.mockResolvedValue(makeProxyStatus())
+		// Un backend sin la Fase 2 no manda los servicios: sin sugerencias del catálogo.
+		catalog.getApp.mockResolvedValue({ services: null })
 	})
 
 	it('lista los dominios y sugiere destinos (los del catálogo primero)', async () => {
@@ -62,6 +68,37 @@ describe('DomainsViewModel', () => {
 		expect(vm.suggestions).toEqual(['web:8080', 'api:3000'])
 		expect(vm.targetValue).toBe('web:8080')
 		expect(vm.targetPlaceholder).toBe(m.ingress_target_placeholder({ service: 'api' }))
+	})
+
+	it('sin destinos por props, sugiere los servicios del catálogo con sus puertos', async () => {
+		catalog.getApp.mockResolvedValue({
+			services: [
+				{ name: 'api', ports: [3000] },
+				{ name: 'worker', ports: [8080] },
+				{ name: 'cron', ports: [] },
+			],
+		})
+		const vm = await mounted()
+
+		await vi.waitFor(() => expect(vm.suggestions).toEqual(['api:3000', 'worker:8080']))
+		expect(catalog.getApp).toHaveBeenCalledWith(
+			{ project: APP.project, stage: APP.stage, app: APP.app },
+			expect.anything(),
+		)
+		expect(vm.targetValue).toBe('api:3000')
+	})
+
+	it('si el catálogo falla, sugiere los destinos que ya usan los dominios', async () => {
+		catalog.getApp.mockRejectedValue(new UnavailableError('caído'))
+		const vm = await mounted()
+
+		await vi.waitFor(() => expect(catalog.getApp).toHaveBeenCalled())
+		expect(vm.suggestions).toEqual(['api:3000'])
+	})
+
+	it('con destinos por props no le pregunta al catálogo', async () => {
+		await mounted(['web:8080'])
+		expect(catalog.getApp).not.toHaveBeenCalled()
 	})
 
 	it('valida el formulario antes de llamar al backend', async () => {
@@ -260,14 +297,17 @@ describe('DomainsViewModel', () => {
 		expect(vm.failingAnnouncement).toBe(announcement)
 	})
 
-	it('se refresca sola mientras muelle provisiona, no por un registro manual', () => {
+	it('se refresca sola mientras muelle provisiona, y más despacio esperando un registro manual', () => {
 		const interval = domainsQuery(APP).refetchInterval
 		if (typeof interval !== 'function') throw new Error('sin refetchInterval')
 		const withData = (data: readonly AppDomain[]) =>
 			interval({ state: { data } } as Parameters<typeof interval>[0])
 
-		expect(withData([ACTIVE, MANUAL])).toBe(false)
-		expect(withData([ACTIVE, makeDomain('nuevo.tudominio.cl', { status: 'pending' })])).toBe(
+		expect(withData([ACTIVE, EXISTING])).toBe(false)
+		// muelle verifica un `pending` cada minuto (contrato §3.1): el panel ve cuando pasa a
+		// `active`, o a `error` a los 10 min, sin que nadie toque Verificar.
+		expect(withData([ACTIVE, MANUAL])).toBe(WAITING_DNS_REFRESH_MS)
+		expect(withData([MANUAL, makeDomain('nuevo.tudominio.cl', { status: 'pending' })])).toBe(
 			PENDING_REFRESH_MS,
 		)
 	})
