@@ -943,7 +943,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 		Action  string `json:"action"`
 		Details any    `json:"details"`
 	}](t, audit)
-	for i := len(events) - 1; i >= 0; i-- { // del más nuevo al más viejo
+	for i := len(events) - 1; i >= 0; i-- { // la API los da del más nuevo al más viejo: acá, en orden
 		actions = append(actions, events[i].Action)
 		if a := events[i].Action; a == "env.replace" && strings.Contains(fmt.Sprint(events[i].Details), secret) {
 			t.Fatalf("la auditoría de %s trae el valor: %v", a, events[i].Details)
