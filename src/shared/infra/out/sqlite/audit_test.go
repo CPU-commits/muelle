@@ -22,6 +22,7 @@ var _ audit.Recorder = (*AuditRecorder)(nil)
 type auditRow struct {
 	ActorType string
 	ActorID   sql.NullInt64
+	ActorName string
 	Action    string
 	Target    string
 	Details   string
@@ -32,8 +33,8 @@ func lastAudit(t *testing.T, d *DB) auditRow {
 	t.Helper()
 	var r auditRow
 	err := d.Conn(context.Background()).QueryRowContext(context.Background(),
-		`SELECT actor_type, actor_id, action, target, details, at FROM audit_events ORDER BY id DESC LIMIT 1`).
-		Scan(&r.ActorType, &r.ActorID, &r.Action, &r.Target, &r.Details, &r.At)
+		`SELECT actor_type, actor_id, actor_name, action, target, details, at FROM audit_events ORDER BY id DESC LIMIT 1`).
+		Scan(&r.ActorType, &r.ActorID, &r.ActorName, &r.Action, &r.Target, &r.Details, &r.At)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,20 +63,26 @@ func TestAuditActors(t *testing.T) {
 	ctx := context.Background()
 
 	rec.Record(ctx, "user.create", "user:ana", nil)
-	if r := lastAudit(t, d); r.ActorType != "system" || r.ActorID.Valid || r.Action != "user.create" || r.Target != "user:ana" {
+	if r := lastAudit(t, d); r.ActorType != "system" || r.ActorID.Valid || r.ActorName != "system" || r.Action != "user.create" || r.Target != "user:ana" {
 		t.Fatalf("sin Principal: %+v", r)
 	}
 
 	userCtx := entity.WithPrincipal(ctx, entity.Principal{UserID: 4, Username: "ana"})
 	rec.Record(userCtx, "project.create", "project:auditfy", nil)
-	if r := lastAudit(t, d); r.ActorType != "user" || !r.ActorID.Valid || r.ActorID.Int64 != 4 {
+	if r := lastAudit(t, d); r.ActorType != "user" || !r.ActorID.Valid || r.ActorID.Int64 != 4 || r.ActorName != "ana" {
 		t.Fatalf("usuario: %+v", r)
 	}
 
-	tokenCtx := entity.WithPrincipal(ctx, entity.Principal{Token: &entity.TokenScope{ID: 9, ProjectSlug: "auditfy"}})
+	tokenCtx := entity.WithPrincipal(ctx, entity.Principal{Token: &entity.TokenScope{ID: 9, Name: "ci", ProjectSlug: "auditfy"}})
 	rec.Record(tokenCtx, "env.replace", "stage:auditfy/staging", nil)
-	if r := lastAudit(t, d); r.ActorType != "token" || !r.ActorID.Valid || r.ActorID.Int64 != 9 {
+	if r := lastAudit(t, d); r.ActorType != "token" || !r.ActorID.Valid || r.ActorID.Int64 != 9 || r.ActorName != "ci" {
 		t.Fatalf("token: %+v", r)
+	}
+
+	// Un Principal sin usuario ni token es el sistema.
+	rec.Record(entity.WithPrincipal(ctx, entity.Principal{}), "settings.update", "settings", nil)
+	if r := lastAudit(t, d); r.ActorType != "system" || r.ActorID.Valid || r.ActorName != "system" {
+		t.Fatalf("Principal vacío: %+v", r)
 	}
 }
 
@@ -166,5 +173,18 @@ func TestAuditFailureIsLogged(t *testing.T) {
 	rec.Record(context.Background(), "project.create", "project:a", nil) // no hace panic
 	if out := buf.String(); !strings.Contains(out, "auditoría") || !strings.Contains(out, "action=project.create") {
 		t.Fatalf("log=%q", out)
+	}
+}
+
+// El nombre se copia al escribir: el evento lo conserva aunque después se
+// borre el usuario o el token (no se lee de users ni de api_tokens).
+func TestAuditActorNameIsCopied(t *testing.T) {
+	d, rec, _ := newTestRecorder(t)
+	ctx := context.Background()
+	mustExec(t, d, `INSERT INTO users (id, username, password_hash, created_at) VALUES (4, 'ana', 'x', 0)`)
+	rec.Record(entity.WithPrincipal(ctx, entity.Principal{UserID: 4, Username: "ana"}), "project.create", "project:a", nil)
+	mustExec(t, d, `DELETE FROM users WHERE id = 4`)
+	if r := lastAudit(t, d); r.ActorName != "ana" {
+		t.Fatalf("después de borrar el usuario: %+v", r)
 	}
 }

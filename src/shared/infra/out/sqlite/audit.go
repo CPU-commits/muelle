@@ -29,13 +29,16 @@ func NewAuditRecorder(db *DB, c clock.Clock, log *slog.Logger) *AuditRecorder {
 }
 
 // Record guarda el evento con Conn(ctx), así que dentro de un InTx que hace
-// rollback el evento tampoco queda. details se guarda como JSON con las claves
+// rollback el evento tampoco queda. El nombre del actor se copia del Principal
+// (Principal.ActorName): el evento lo conserva aunque se borre el usuario o el
+// token. details se guarda como JSON con las claves
 // de los map ordenadas; nil (o un valor que da null) se guarda como {}. Los
 // bytes de UTF-8 inválido en un string se guardan como U+FFFD.
 func (r *AuditRecorder) Record(ctx context.Context, action, target string, details any) {
-	actorType, actorID := entity.ActorSystem, (*int64)(nil)
+	actorType, actorID, actorName := entity.ActorSystem, (*int64)(nil), entity.ActorSystemName
 	if p, ok := entity.PrincipalFrom(ctx); ok {
 		actorType, actorID = p.Actor()
+		actorName = p.ActorName()
 	}
 
 	raw := "{}"
@@ -57,8 +60,8 @@ func (r *AuditRecorder) Record(ctx context.Context, action, target string, detai
 	// el cliente corte la conexión. El ctx conserva la transacción en curso.
 	ctx = context.WithoutCancel(ctx)
 	_, err := r.db.Conn(ctx).ExecContext(ctx,
-		`INSERT INTO audit_events (actor_type, actor_id, action, target, details, at) VALUES (?, ?, ?, ?, ?, ?)`,
-		string(actorType), id, action, target, raw, Millis(r.clock.Now()))
+		`INSERT INTO audit_events (actor_type, actor_id, actor_name, action, target, details, at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		string(actorType), id, actorName, action, target, raw, Millis(r.clock.Now()))
 	if err != nil {
 		r.log.Error("auditoría", "action", action, "err", err)
 	}
