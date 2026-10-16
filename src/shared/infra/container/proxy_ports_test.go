@@ -113,9 +113,9 @@ func TestContractProxyPortsRollback(t *testing.T) {
 		t.Fatalf("los ajustes vuelven: %v", got)
 	}
 	e.expectWrites([]string{before}, []string{after})
-	var actor, details string
-	if err := c.DB.Conn(ctx).QueryRowContext(ctx, `SELECT actor_type, details FROM audit_events WHERE action = 'settings.ports_rollback'`).Scan(&actor, &details); err != nil ||
-		actor != "system" || !strings.Contains(details, `"proxy_https_port":8443`) {
-		t.Fatalf("auditoría: %q %q %v", actor, details, err)
+	var actor, actorName, details string
+	if err := c.DB.Conn(ctx).QueryRowContext(ctx, `SELECT actor_type, actor_name, details FROM audit_events WHERE action = 'settings.ports_rollback'`).Scan(&actor, &actorName, &details); err != nil ||
+		actor != "system" || actorName != "system" || !strings.Contains(details, `"proxy_https_port":8443`) {
+		t.Fatalf("auditoría: %q %q %q %v", actor, actorName, details, err)
 	}
 }
