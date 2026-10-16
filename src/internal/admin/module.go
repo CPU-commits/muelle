@@ -74,7 +74,8 @@ func New(d Deps) *Module {
 	backups := adminsvc.NewBackupStore(d.DB, filepath.Join(d.DataDir, "backups"))
 
 	getSettings := usecases.NewGetSettings(settings, d.Cipher)
-	patchSettings := usecases.NewPatchSettings(settings, totp, d.Cipher, d.ProxyHook, d.Audit, d.DB)
+	panelOrigin := usecases.NewGetPanelOrigin(settings, d.Clock)
+	patchSettings := usecases.NewPatchSettings(settings, totp, d.Cipher, d.ProxyHook, panelOrigin, d.Audit, d.DB)
 	listAudit := usecases.NewListAudit(auditRepo)
 	purge := usecases.NewPurgeAudit(auditRepo, d.Clock)
 	backup := usecases.NewBackup(backups, d.Clock)
@@ -84,7 +85,7 @@ func New(d Deps) *Module {
 		jobs:        incron.Jobs(purge, backup, d.Log),
 		verify:      usecases.NewVerifyMasterKey(settings, d.Cipher, d.DB),
 		startup:     usecases.NewApplyStartupSettings(settings, d.Cipher, d.Audit, d.DB),
-		panelOrigin: usecases.NewGetPanelOrigin(settings),
+		panelOrigin: panelOrigin,
 		log:         d.Log,
 	}
 }
@@ -107,6 +108,7 @@ func (m *Module) VerifyMasterKey(ctx context.Context) error { return m.verify.Ex
 // un dominio, si no "") y, solo en el primer arranque de la base (la clave
 // init_applied), guarda la configuración inicial de install (MUELLE_INIT_*).
 func (m *Module) ApplyStartupSettings(ctx context.Context, panelDomain string, init InitialSettings) error {
+	defer m.panelOrigin.Invalidate()
 	return m.startup.Execute(ctx, dto.StartupSettings{PanelDomain: panelDomain, Init: init})
 }
 
@@ -115,7 +117,9 @@ func (m *Module) ApplyStartupSettings(ctx context.Context, panelDomain string, i
 // sin dominio del panel, o si no se pudo leer (queda en el log). El
 // contenedor lo pasa a cmd/http (Config.ProxyOrigin), que lo acepta como
 // Origin además de MUELLE_PANEL_ORIGIN: así cambiar los puertos del proxy no
-// deja fuera del panel (spec §16).
+// deja fuera del panel (spec §16). Va en memoria (usecases.GetPanelOrigin):
+// PATCH /settings lo invalida, y si no, se vuelve a leer cada
+// usecases.PanelOriginTTL.
 func (m *Module) PanelOrigin(ctx context.Context) string {
 	o, err := m.panelOrigin.Execute(ctx)
 	if err != nil {

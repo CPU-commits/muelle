@@ -36,7 +36,7 @@ func newEnv(t *testing.T) *env {
 }
 
 func (e *env) patch() *PatchSettings {
-	return NewPatchSettings(adminrepo.NewSettingsRepository(e.db), adminsvc.NewTOTPStatus(e.db), testCipher(), nil, e.rec, e.db)
+	return NewPatchSettings(adminrepo.NewSettingsRepository(e.db), adminsvc.NewTOTPStatus(e.db), testCipher(), nil, nil, e.rec, e.db)
 }
 
 // testCipher es el cifrador con la clave de prueba de todo el paquete.

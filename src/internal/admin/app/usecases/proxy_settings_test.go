@@ -47,6 +47,7 @@ type proxyEnv struct {
 	cipher *crypto.Cipher
 	hook   *fakeHook
 	get    *GetSettings
+	origin *GetPanelOrigin
 	patch  *PatchSettings
 	user   int64
 }
@@ -61,10 +62,11 @@ func newProxyEnv(t *testing.T) *proxyEnv {
 	repo := adminrepo.NewSettingsRepository(e.db)
 	two := 2
 	hook := &fakeHook{zones: &two}
+	origin := NewGetPanelOrigin(repo, e.clk)
 	return &proxyEnv{
-		env: e, repo: repo, cipher: c, hook: hook,
+		env: e, repo: repo, cipher: c, hook: hook, origin: origin,
 		get:   NewGetSettings(repo, c),
-		patch: NewPatchSettings(repo, adminsvc.NewTOTPStatus(e.db), c, hook, e.rec, e.db),
+		patch: NewPatchSettings(repo, adminsvc.NewTOTPStatus(e.db), c, hook, origin, e.rec, e.db),
 		user:  admintest.InsertUser(t, e.db, "admin", true),
 	}
 }
@@ -309,7 +311,7 @@ func TestPatchPanelAllowedCIDRsLockout(t *testing.T) {
 // Sin ingress conectado (Hook nil), los ajustes solo se guardan.
 func TestPatchProxySettingsWithoutHook(t *testing.T) {
 	e := newProxyEnv(t)
-	patch := NewPatchSettings(e.repo, adminsvc.NewTOTPStatus(e.db), e.cipher, nil, e.rec, e.db)
+	patch := NewPatchSettings(e.repo, adminsvc.NewTOTPStatus(e.db), e.cipher, nil, nil, e.rec, e.db)
 	out, err := patch.Execute(asUser(e.user), dto.PatchSettingsInput{PublicIP: ptr("203.0.113.7"), CloudflareToken: ptr("cf-token-1234567890abcdef")})
 	if err != nil || out.PublicIP != "203.0.113.7" || !out.CloudflareTokenSet || out.CloudflareZones != nil {
 		t.Fatalf("sin hook: %+v %v", out, err)
@@ -433,45 +435,5 @@ func TestApplyStartupSettingsLateInitIsIgnored(t *testing.T) {
 	}
 	if n := len(admintestEvents(t, e)); n != 0 {
 		t.Fatalf("eventos: %d", n)
-	}
-}
-
-// El origen en que muelle-caddy sirve el panel sigue a los ajustes: install
-// con --https-port 8443 (spec §16 paso 2) y después 443 en el panel (paso 5).
-func TestGetPanelOrigin(t *testing.T) {
-	e := newProxyEnv(t)
-	ctx := context.Background()
-	get := NewGetPanelOrigin(e.repo)
-	origin := func() string {
-		t.Helper()
-		o, err := get.Execute(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return o
-	}
-	if o := origin(); o != "" {
-		t.Fatalf("sin dominio del panel: %q", o)
-	}
-	apply := NewApplyStartupSettings(e.repo, e.cipher, e.rec, e.db)
-	init := dto.InitialSettings{ProxyHTTPPort: 8080, ProxyHTTPSPort: 8443}
-	if err := apply.Execute(ctx, dto.StartupSettings{PanelDomain: "panel.tudominio.cl", Init: init}); err != nil {
-		t.Fatal(err)
-	}
-	if o := origin(); o != "https://panel.tudominio.cl:8443" {
-		t.Fatalf("después de install: %q", o)
-	}
-	if _, err := e.do(t, dto.PatchSettingsInput{ProxyHTTPPort: ptr(80), ProxyHTTPSPort: ptr(443)}); err != nil {
-		t.Fatal(err)
-	}
-	if o := origin(); o != "https://panel.tudominio.cl" {
-		t.Fatalf("después de cambiar los puertos: %q", o)
-	}
-	// Un valor guardado que no se entiende es un error, no un origen inventado.
-	if err := e.repo.Set(ctx, entity.SettingProxyHTTPSPort, []byte("x"), false); err != nil {
-		t.Fatal(err)
-	}
-	if o, err := get.Execute(ctx); err == nil || o != "" {
-		t.Fatalf("puerto inválido: %q %v", o, err)
 	}
 }
