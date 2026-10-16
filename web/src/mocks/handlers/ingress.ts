@@ -1,6 +1,6 @@
 import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent } from '../api'
-import { deployDb } from '../db/deploy'
+import { catalogDb } from '../db/catalog'
 import { adminDb } from '../db/admin'
 import { appKey, ingressDb, type MockDomain } from '../db/ingress'
 import { requireSession } from '../session'
@@ -81,16 +81,14 @@ async function readBody(request: Request): Promise<Record<string, unknown> | Res
 }
 
 /**
- * En una app de formulario el destino es su único servicio, que se llama como la app. En
- * una compose no se verifica al guardar (lo verifica el render del deploy). El mock de
- * deploy no tiene apps compose: se verifica solo en las que ya desplegó, que son de
- * formulario (las nunca desplegadas, como `agents`, pueden ser compose en el catálogo).
+ * En una app de formulario (según el catálogo) el destino es su único servicio, que se
+ * llama como la app. En una compose no se verifica al guardar: lo verifica el render del
+ * deploy (contrato §3.2).
  */
 function formAppSlug(params: Params): string | null {
 	const slug = param(params, 'a')
-	const app = deployDb.app(param(params, 'p'), param(params, 's'), slug)
-	if (app.deploys.length === 0) return null
-	return app.services.length === 1 && app.services[0] === slug ? slug : null
+	const config = catalogDb.configured(param(params, 'p'), param(params, 's'), slug)
+	return config?.kind === 'service' ? slug : null
 }
 
 function checkTarget(

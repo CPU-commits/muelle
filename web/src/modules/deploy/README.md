@@ -350,8 +350,20 @@ se abre una app se siembra el historial del diseño (#139–#143) y un #144 que 
 - "Desplegar" con una imagen que contenga `fail` o `broken` termina `failed` por
   healthcheck; con `missing`, por imagen inexistente.
 - Desplegar dos veces seguidas deja el primero `superseded` (con `superseded_by`).
+- El tipo y los servicios salen del catálogo (`db/catalog.ts`, `catalogDb.configured`),
+  como en el backend: `image` solo en una app de formulario (en una compose,
+  `422 image: una app compose recibe images, por servicio`) e `images.<servicio>` solo con
+  un servicio de la configuración de ahora (`422 images.<s>: el servicio no existe en la
+app`), aunque la app no se haya desplegado nunca.
+- Sin override, cada servicio de la configuración repite la ref del deploy actual, salvo
+  que la de la configuración cambió desde ese deploy, y uno que el deploy actual no tiene
+  (primer deploy, servicio nuevo del compose) usa la de la configuración (§2.2).
+- El estado y los logs son de lo que corre en Swarm: los servicios del deploy actual. Una
+  app sin deploys no tiene ninguno (`404` en los logs).
 - Apps `nats` y `redis`: un solo deploy (el rollback responde `409 no_previous_deploy`).
-  Apps que empiezan con `nueva`/`new` o `agents`: nunca desplegadas.
+  Nunca desplegadas: las del catálogo sin `last_deployed_at` (`aumi-agents/staging/agents`)
+  y, fuera del catálogo, las que empiezan con `nueva`/`new` o se llaman `agents`. Una compose
+  desplegada (`aumi-agents/production/agents`) siembra el historial con un tag por servicio.
 - Las réplicas del slot 2 corren en `worker-1`: su CPU y memoria vienen en null.
 - Los logs en vivo son una línea cada ~1,1 s, la misma para la misma hora en cada stream:
   `since` devuelve exactamente lo escrito desde ahí. A los 15 min, `end` con `timeout`.

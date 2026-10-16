@@ -219,8 +219,9 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
     - Con `cf-caido`: Cloudflare no responde al borrarlo (`502`, no se borra).
     - Con `caddy-rechaza`: Caddy no acepta la configuración y `GET /proxy` dice
       `out_of_sync`.
-- En una app ya desplegada (todas las del mock de deploy son de formulario), el destino
-  tiene que ser el servicio de la app: otro es `422 target_service`.
+- En una app de formulario (según el catálogo del mock, aunque nunca se haya desplegado),
+  el destino tiene que ser el servicio de la app: otro es `422 target_service`. En una
+  compose no se verifica al guardar.
 - Cualquier otro hostname queda fuera de Cloudflare (y su `proxied` en `false`) hasta que se
   toca Verificar.
 - El token de Cloudflare, las IP públicas y el dominio del panel son los de Ajustes del mock

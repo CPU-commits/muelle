@@ -1,3 +1,4 @@
+import { catalogDb, type ConfiguredApp } from './catalog'
 import { loadPersisted, savePersisted } from './persist'
 
 // Estado, deploys y logs (Fase 2) del backend simulado.
@@ -13,6 +14,12 @@ import { loadPersisted, savePersisted } from './persist'
 //
 // Para probar desde el panel: "Desplegar" con una imagen que contenga `fail` o `broken`
 // termina `failed` por healthcheck; con `missing`, por imagen inexistente.
+//
+// El tipo y los servicios de una app salen del catálogo (db/catalog.ts), como en el backend
+// (contrato §2.2): contra esos se valida `images`, y de ahí sale la ref de un servicio que
+// el deploy actual no tiene. Lo que corre en Swarm (el estado, los logs) son los servicios
+// del deploy actual. Una app que no está en el catálogo (un test que no lo siembra) es de
+// formulario, con un servicio que se llama como ella.
 
 export type MockScenario = 'success' | 'healthcheck' | 'image_missing'
 export type MockTrigger = 'panel' | 'api' | 'rollback'
@@ -30,6 +37,11 @@ export interface MockDeploy {
 	images: Record<string, string>
 	/** Lo que pidió el cuerpo (contrato §2.1: es lo que muestra `images` hasta resolver). */
 	overrides?: Record<string, string>
+	/**
+	 * La ref de la configuración de cada servicio cuando se creó (`deploys.config_images`,
+	 * contrato §2.2): si cambió desde entonces, un deploy sin override usa la de ahora.
+	 */
+	configImages?: Record<string, string>
 	trigger: MockTrigger
 	actorType: 'user' | 'token'
 	actorName: string
@@ -42,7 +54,6 @@ export interface MockApp {
 	project: string
 	stage: string
 	app: string
-	services: string[]
 	replicas: number
 	deploys: MockDeploy[]
 }
@@ -228,7 +239,7 @@ function scriptFor(app: MockApp, deploy: MockDeploy): Script {
 		steps.push({ at: s(7900), text: `${first}.2 healthy · 2 de ${total} actualizadas` })
 	}
 	steps.push({ at: s(8500), text: 'UpdateStatus: completed' })
-	steps.push({ at: s(8800), text: 'rutas de Caddy enviadas · 3 dominios' })
+	steps.push({ at: s(8800), text: 'rutas de Caddy actualizadas' })
 	steps.push({ at: s(9100), text: `deploy exitoso en ${secondsLabel(s(9100))}` })
 	return { steps, status: 'succeeded', error: null, resolvedAt: s(700), newTaskAt: s(3100) }
 }
@@ -390,9 +401,45 @@ function neverDeployed(slug: string): boolean {
 	return slug.startsWith('nueva') || slug.startsWith('new') || slug === 'agents'
 }
 
+/** La configuración de la app según el catálogo; sin ella, una de formulario. */
+function configOf(app: Pick<MockApp, 'project' | 'stage' | 'app'>): ConfiguredApp {
+	return (
+		catalogDb.configured(app.project, app.stage, app.app) ?? {
+			kind: 'service',
+			images: { [app.app]: `ghcr.io/${app.project}/${app.app}:latest` },
+			lastDeployedAt: null,
+		}
+	)
+}
+
+/** El repositorio de una ref, sin el tag ni el digest. */
+function repositoryOf(ref: string): string {
+	const name = ref.split('@')[0] ?? ref
+	const slash = name.lastIndexOf('/')
+	const colon = name.lastIndexOf(':')
+	return colon > slash ? name.slice(0, colon) : name
+}
+
+/** Las imágenes de un deploy del historial sembrado, con ese tag. */
+function seededImages(app: MockApp, config: ConfiguredApp, tag: string): Record<string, string> {
+	if (config.kind === 'service') {
+		return { [app.app]: `ghcr.io/${app.project}/${app.app}:${tag}` }
+	}
+	return Object.fromEntries(
+		Object.entries(config.images).map(([service, ref]) => [
+			service,
+			`${repositoryOf(ref)}:${tag}`,
+		]),
+	)
+}
+
 function seedApp(project: string, stage: string, slug: string, now: number): MockApp {
-	const app: MockApp = { project, stage, app: slug, services: [slug], replicas: 2, deploys: [] }
-	if (neverDeployed(slug)) return app
+	const app: MockApp = { project, stage, app: slug, replicas: 2, deploys: [] }
+	// En el catálogo, la que no tiene `last_deployed_at`; si no está, por el nombre.
+	const inCatalog = catalogDb.configured(project, stage, slug)
+	if (inCatalog ? inCatalog.lastDeployedAt === null : neverDeployed(slug)) return app
+	const config = configOf(app)
+	const configImages = { ...config.images }
 
 	const single = SINGLE_DEPLOY[slug]
 	if (single) {
@@ -405,6 +452,7 @@ function seedApp(project: string, stage: string, slug: string, now: number): Moc
 			scale: HISTORY_SCALE,
 			scenario: 'success',
 			images: { [slug]: single },
+			configImages,
 			trigger: 'panel',
 			actorType: 'user',
 			actorName: 'felipe',
@@ -412,7 +460,6 @@ function seedApp(project: string, stage: string, slug: string, now: number): Moc
 		return app
 	}
 
-	const image = `ghcr.io/${project}/${slug}`
 	for (const entry of RICH_HISTORY) {
 		const createdAt = now - entry.ago
 		app.deploys.push({
@@ -421,7 +468,8 @@ function seedApp(project: string, stage: string, slug: string, now: number): Moc
 			startAt: createdAt + 800 * HISTORY_SCALE,
 			scale: HISTORY_SCALE,
 			scenario: entry.scenario,
-			images: { [slug]: `${image}:${entry.tag}` },
+			images: seededImages(app, config, entry.tag),
+			configImages,
 			trigger: entry.trigger,
 			actorType: entry.actor[0],
 			actorName: entry.actor[1],
@@ -441,7 +489,8 @@ function seedApp(project: string, stage: string, slug: string, now: number): Moc
 			startAt: now + QUEUE_MS * state.liveScale,
 			scale: state.liveScale,
 			scenario: 'success',
-			images: { [slug]: `${image}:sha-3f9c2e1` },
+			images: seededImages(app, config, 'sha-3f9c2e1'),
+			configImages,
 			trigger: 'panel',
 			actorType: 'user',
 			actorName: 'felipe',
@@ -524,6 +573,33 @@ export const deployDb = {
 			.find((deploy) => view(app, deploy, now).status === 'succeeded')
 	},
 
+	/** El tipo y la ref de cada servicio según la configuración de ahora (el catálogo). */
+	config: configOf,
+
+	/** Los servicios que corren en Swarm: los del deploy actual, por nombre ([] sin uno). */
+	swarmServices(app: MockApp, now: number): string[] {
+		const current = this.current(app, now)
+		return current ? Object.keys(current.images).sort((a, b) => a.localeCompare(b)) : []
+	},
+
+	/**
+	 * Las refs de un deploy sin override (contrato §2.2), para cada servicio de la
+	 * configuración: la del deploy actual, salvo que la de la configuración cambió desde ese
+	 * deploy; si el deploy actual no lo tiene (primer deploy, un servicio nuevo del compose),
+	 * la de la configuración.
+	 */
+	baseImages(app: MockApp, now: number): Record<string, string> {
+		const current = this.current(app, now)
+		return Object.fromEntries(
+			Object.entries(configOf(app).images).map(([service, configRef]) => {
+				const deployed = current?.images[service]
+				const readConfig = current?.configImages?.[service]
+				const configChanged = readConfig !== undefined && readConfig !== configRef
+				return [service, deployed !== undefined && !configChanged ? deployed : configRef]
+			}),
+		)
+	},
+
 	/** Encola un deploy: reemplaza al que está en cola y espera al que está corriendo. */
 	create(app: MockApp, input: CreateInput, now = Date.now()): MockDeploy {
 		const id = Math.max(0, ...app.deploys.map((deploy) => deploy.id)) + 1
@@ -545,6 +621,7 @@ export const deployDb = {
 			scenario: input.scenario ?? scenarioFor(input.images),
 			images: input.images,
 			overrides: input.overrides ?? {},
+			configImages: { ...configOf(app).images },
 			trigger: input.trigger,
 			actorType: 'user',
 			actorName: input.actorName,

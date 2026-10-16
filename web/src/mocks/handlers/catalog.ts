@@ -1,6 +1,13 @@
 import { http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent, notFound } from '../api'
-import { catalogDb, type MockApp, type MockHealthcheck, type MockSpec } from '../db/catalog'
+import {
+	catalogDb,
+	composeServices,
+	type MockApp,
+	type MockHealthcheck,
+	type MockSpec,
+	servicesOf,
+} from '../db/catalog'
 import { ingressDb } from '../db/ingress'
 import { requireSession } from '../session'
 
@@ -232,62 +239,6 @@ function checkSpec(raw: unknown): MockSpec {
 	}
 }
 
-/** Un puerto de `expose`: un entero o `N/tcp`; los rangos y los `${VAR}` no cuentan. */
-function exposedPort(value: string): number | null {
-	const match = /^(\d+)(\/tcp)?$/.exec(value.trim().replace(/^["']|["']$/g, ''))
-	const port = match ? Number(match[1]) : Number.NaN
-	return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null
-}
-
-/**
- * Los servicios de un compose y los puertos de su `expose`, como `compose.Services` del
- * backend (contrato §2.12): por nombre, con los puertos ordenados. Un parser de líneas
- * alcanza para los compose del mock (`expose: [..]` o una lista con `- `).
- */
-function composeServices(yaml: string): { name: string; ports: number[] }[] {
-	const services = new Map<string, Set<number>>()
-	let inServices = false
-	let serviceIndent = -1
-	let current: Set<number> | null = null
-	let exposeIndent = -1
-	const add = (value: string) => {
-		const port = exposedPort(value)
-		if (port !== null) current?.add(port)
-	}
-	for (const raw of yaml.split('\n')) {
-		const text = raw.trim()
-		if (text === '' || text.startsWith('#')) continue
-		const indent = raw.length - raw.trimStart().length
-		if (indent === 0) {
-			inServices = /^services:\s*$/.test(text)
-			serviceIndent = -1
-			current = null
-			continue
-		}
-		if (!inServices) continue
-		if (serviceIndent === -1) serviceIndent = indent
-		if (indent === serviceIndent) {
-			current = new Set()
-			services.set(text.replace(/:.*$/, ''), current)
-			exposeIndent = -1
-			continue
-		}
-		if (exposeIndent !== -1 && indent > exposeIndent && text.startsWith('- ')) {
-			add(text.slice(2))
-			continue
-		}
-		exposeIndent = -1
-		const expose = /^expose:\s*(.*)$/.exec(text)
-		if (!expose) continue
-		const inline = expose[1] ?? ''
-		if (inline.startsWith('[')) inline.slice(1, -1).split(',').forEach(add)
-		else exposeIndent = indent
-	}
-	return [...services]
-		.map(([name, ports]) => ({ name, ports: [...ports].sort((a, b) => a - b) }))
-		.sort((a, b) => a.name.localeCompare(b.name))
-}
-
 /** Los motivos del backend para las dos claves de servicio que el mock rechaza. */
 const REJECTED_KEYS: Readonly<Record<string, string>> = {
 	ports: 'publicar puertos no está soportado en la v1: los dominios van por Caddy',
@@ -359,13 +310,6 @@ function checkServiceSlug(project: string, stage: string, slug: string): void {
 			`"${slug}" ya es un servicio de la app compose "${owner.slug}" del stage`,
 		)
 	}
-}
-
-/** `services` del `AppOutput` (contrato §2.12): de la configuración guardada, no de Swarm. */
-function servicesOf(app: MockApp): { name: string; ports: number[] }[] {
-	if (app.kind === 'compose') return composeServices(app.compose_yaml ?? '')
-	const port = app.spec?.port ?? 0
-	return [{ name: app.slug, ports: port > 0 ? [port] : [] }]
 }
 
 /** El `AppOutput` del backend: `spec` u `compose_yaml` según el tipo, y `pending_changes`. */

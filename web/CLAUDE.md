@@ -578,7 +578,12 @@ desconocidos): mientras no existan, no se mandan.
   `ingressDb.list` (una app con dominios es `409 not_empty`). `list` siembra los tres
   dominios del diseño la primera vez que se piden los de una app, así que una app del mock
   los tiene aunque nadie haya abierto Dominios; una app creada en el mock empieza sin
-  ninguno (`ingressDb.startEmpty`). Un test de integración que toque uno de esos resetea
+  ninguno (`ingressDb.startEmpty`). Los mocks de deploy e ingress leen el tipo y los
+  servicios de una app del catálogo (`catalogDb.configured`, en `db/catalog.ts` junto a
+  `servicesOf` y `composeServices`): deploy valida `image`/`images` contra la configuración
+  y saca de ahí la ref de un servicio que el deploy actual no tiene (§2.2), e ingress exige
+  el slug como destino solo en una app de formulario. Lo que corre en Swarm (estado, logs)
+  son los servicios del deploy actual. Un test de integración que toque uno de esos resetea
   también el otro.
 
 ### Sesión y `auth`

@@ -72,7 +72,8 @@ function statusDto(app: MockApp, now: number) {
 	const seedPhase = Number.parseInt(hashHex(app.app, 4), 16) / 0xffff
 
 	return {
-		services: app.services.map((service, index) => {
+		// Lo que corre en Swarm: los servicios del deploy actual.
+		services: deployDb.swarmServices(app, now).map((service, index) => {
 			const tasks: Record<string, unknown>[] = []
 			for (let slot = 1; slot <= app.replicas; slot += 1) {
 				// La réplica 2 corre en otro nodo: el backend no la mide (solo el nodo de muelle).
@@ -169,14 +170,16 @@ function statusDto(app: MockApp, now: number) {
 
 type DeployBody = { image?: unknown; images?: unknown }
 
-function currentImages(app: MockApp, now: number): Record<string, string> {
-	const current = deployDb.current(app, now) ?? [...app.deploys].sort((a, b) => b.id - a.id)[0]
-	if (current) return { ...current.images }
-	return Object.fromEntries(
-		app.services.map((service) => [service, `ghcr.io/${app.project}/${service}:latest`]),
-	)
+/** Una ref sin digest: el mock lo calcula de la ref al resolver. */
+function withoutDigest(ref: string): string {
+	return ref.split('@')[0] ?? ref
 }
 
+/**
+ * Las imágenes del deploy nuevo (contrato §2.2): el override de cada servicio que lo trae
+ * y, para el resto, `baseImages`. Valida contra la configuración de ahora (el catálogo):
+ * `image` solo en una app de formulario, e `images.<servicio>` con un servicio que existe.
+ */
 function imagesFromBody(
 	app: MockApp,
 	body: DeployBody,
@@ -184,32 +187,32 @@ function imagesFromBody(
 ): Record<string, string> | Response {
 	const unknownKey = Object.keys(body).find((key) => key !== 'image' && key !== 'images')
 	if (unknownKey) return apiError(400, 'invalid_json', `campo desconocido "${unknownKey}"`)
-	const images = currentImages(app, now)
 	if (body.image !== undefined && body.images !== undefined) {
 		return invalid('image', 'manda image o images, no los dos')
 	}
+	const config = deployDb.config(app)
+	const images = deployDb.baseImages(app, now)
 	if (body.image !== undefined) {
-		if (app.services.length !== 1 || app.services[0] !== app.app) {
+		if (config.kind !== 'service') {
 			return invalid('image', 'una app compose recibe images, por servicio')
 		}
 		if (typeof body.image !== 'string' || !isValidImageRef(body.image)) {
 			return invalid('image', 'no es una referencia de imagen válida')
 		}
-		// Se guarda sin digest: el mock lo calcula de la ref al resolver.
-		return { [app.app]: body.image.split('@')[0] ?? body.image }
+		return { ...images, [app.app]: withoutDigest(body.image) }
 	}
 	if (body.images !== undefined) {
 		if (typeof body.images !== 'object' || body.images === null) {
 			return invalid('images', 'tiene que ser un objeto servicio → imagen')
 		}
 		for (const [service, ref] of Object.entries(body.images as Record<string, unknown>)) {
-			if (!app.services.includes(service)) {
+			if (!(service in config.images)) {
 				return invalid(`images.${service}`, 'el servicio no existe en la app')
 			}
 			if (typeof ref !== 'string' || !isValidImageRef(ref)) {
 				return invalid(`images.${service}`, 'no es una referencia de imagen válida')
 			}
-			images[service] = ref.split('@')[0] ?? ref
+			images[service] = withoutDigest(ref)
 		}
 	}
 	return images
@@ -616,7 +619,7 @@ export const deployHandlers: RequestHandler[] = [
 		const followParam = url.searchParams.get('follow') ?? ''
 		if (!['', '0', '1'].includes(followParam)) return invalid('follow', 'tiene que ser 0 o 1')
 		const follow = followParam === '1'
-		if (!app.services.includes(service)) {
+		if (!deployDb.swarmServices(app, Date.now()).includes(service)) {
 			return apiError(404, 'not_found', `no existe el servicio "${service}"`)
 		}
 		return since === null

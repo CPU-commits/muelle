@@ -2,6 +2,7 @@ import { http, HttpResponse } from 'msw'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, apiError } from '@/mocks/api'
 import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
+import { catalogDb } from '@/mocks/db/catalog'
 import { deployDb } from '@/mocks/db/deploy'
 import { server } from '@/mocks/server'
 import { http as client } from '@/shared/data/http/client'
@@ -39,6 +40,8 @@ const APP_PATH = '/projects/:p/stages/:s/apps/:a'
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 beforeEach(() => {
 	authDb.reset({ session: { username: MOCK_USERNAME, mfaPending: false, badCodes: 0 } })
+	// El mock de deploy lee el kind y los servicios de cada app del catálogo (contrato §2.2).
+	catalogDb.reset()
 	// Los deploys nuevos duran ~100 ms en vez de ~9 s; sin el #144 en curso de la siembra.
 	deployDb.reset({ liveScale: 0.01, seedLive: false })
 	vi.stubGlobal('EventSource', FetchEventSource)
@@ -248,6 +251,134 @@ describe('desplegar y seguir el log', () => {
 		})
 		await expect(result).rejects.toBeInstanceOf(ValidationError)
 		await expect(result).rejects.toMatchObject({ field: 'images.worker' })
+	})
+})
+
+describe('una app compose del catálogo (contrato §2.2 y §2.12)', () => {
+	// aumi-agents/staging/agents: gateway, runner y scheduler, y nunca se desplegó.
+	const COMPOSE: AppRef = { project: 'aumi-agents', stage: 'staging', app: 'agents' }
+	const SERVICES = ['gateway', 'runner', 'scheduler']
+
+	async function finish(app: AppRef, id: Parameters<typeof deployUseCases.getDeploy>[1]) {
+		const events = await collect(
+			deployUseCases.followDeployLog({ app, id, live: true }, new AbortController().signal),
+		)
+		return statusesOf(events).at(-1)
+	}
+
+	it('acepta images de un servicio del compose aunque nunca se desplegó', async () => {
+		const { id } = await deployUseCases.createDeploy({
+			app: COMPOSE,
+			kind: 'compose',
+			services: SERVICES,
+			overrides: { gateway: 'ghcr.io/aumi-app/agents-gateway:v2' },
+		})
+
+		expect(await finish(COMPOSE, id)).toBe('succeeded')
+		// El override para gateway; los otros, la ref del compose (primer deploy).
+		const deploy = await deployUseCases.getDeploy(COMPOSE, id)
+		expect(deploy.images.map((image) => [image.service, image.ref])).toEqual([
+			['gateway', 'ghcr.io/aumi-app/agents-gateway:v2'],
+			['runner', 'ghcr.io/aumi-app/agents-runner:staging'],
+			['scheduler', 'ghcr.io/aumi-app/agents-scheduler:staging'],
+		])
+		// Swarm corre lo que se desplegó: el estado tiene los tres servicios.
+		const status = await deployUseCases.getAppStatus(COMPOSE)
+		expect(status.services.map((service) => service.name)).toEqual(SERVICES)
+	})
+
+	it('un servicio que no está en el compose es 422 images.<servicio>', async () => {
+		const result = deployUseCases.createDeploy({
+			app: COMPOSE,
+			kind: 'compose',
+			services: SERVICES,
+			overrides: { web: 'ghcr.io/aumi-app/web:v1' },
+		})
+		await expect(result).rejects.toBeInstanceOf(ValidationError)
+		await expect(result).rejects.toMatchObject({ field: 'images.web' })
+	})
+
+	it('image (el de una app de formulario) es 422 image', async () => {
+		const response = await fetch(
+			'http://localhost/api/v1/projects/aumi-agents/stages/staging/apps/agents/deploys',
+			{
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ image: 'ghcr.io/aumi-app/agents-gateway:v2' }),
+			},
+		)
+		expect(response.status).toBe(422)
+		expect(await response.json()).toEqual({
+			error: {
+				code: 'invalid',
+				message: 'image: una app compose recibe images, por servicio',
+			},
+		})
+	})
+
+	it('una compose ya desplegada tiene en el estado los servicios del compose', async () => {
+		const status = await deployUseCases.getAppStatus({ ...COMPOSE, stage: 'production' })
+		expect(status.services.map((service) => service.name)).toEqual(SERVICES)
+	})
+
+	it('los logs son de un servicio que corre en Swarm: uno de la compose, sí; el slug de la app, no', async () => {
+		const production = { ...COMPOSE, stage: 'production' }
+		const controller = new AbortController()
+		const events = await collect(
+			deployUseCases.streamAppLogs(
+				{ app: production, service: 'runner', tail: 100 },
+				controller.signal,
+			),
+			101,
+		)
+		controller.abort()
+		const tasks = events.flatMap((event) => (event.kind === 'line' ? [event.line.task] : []))
+		expect(new Set(tasks)).toEqual(new Set(['runner.1', 'runner.2']))
+
+		const missing = collect(
+			deployUseCases.streamAppLogs(
+				{ app: production, service: 'agents', tail: 100 },
+				new AbortController().signal,
+			),
+		)
+		await expect(missing).rejects.toMatchObject({ opened: false })
+	})
+})
+
+describe('qué imagen se despliega sin override (contrato §2.2)', () => {
+	it('la del deploy actual, salvo que la configuración cambió desde ese deploy', async () => {
+		const { id } = await deployUseCases.createDeploy({
+			app: APP,
+			services: ['api'],
+			overrides: {},
+		})
+		await collect(
+			deployUseCases.followDeployLog(
+				{ app: APP, id, live: true },
+				new AbortController().signal,
+			),
+		)
+		expect((await deployUseCases.getDeploy(APP, id)).images[0]?.ref).toBe(
+			'ghcr.io/auditfy/api:sha-3f9c2e1',
+		)
+
+		// Editar spec.image en Configuración: el próximo deploy sin override usa la nueva.
+		const app = catalogDb.findApp('auditfy', 'staging', 'api')
+		if (app?.spec) app.spec = { ...app.spec, image: 'ghcr.io/aumi-app/backend-app:v9' }
+		const next = await deployUseCases.createDeploy({
+			app: APP,
+			services: ['api'],
+			overrides: {},
+		})
+		await collect(
+			deployUseCases.followDeployLog(
+				{ app: APP, id: next.id, live: true },
+				new AbortController().signal,
+			),
+		)
+		expect((await deployUseCases.getDeploy(APP, next.id)).images[0]?.ref).toBe(
+			'ghcr.io/aumi-app/backend-app:v9',
+		)
 	})
 })
 

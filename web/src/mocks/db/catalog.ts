@@ -249,6 +249,121 @@ function seed(): CatalogState {
 
 let state: CatalogState = loadPersisted<CatalogState>(STORAGE_KEY) ?? seed()
 
+// --- Los servicios de la configuración (contrato §2.12) ------------------------
+//
+// Viven acá y no en handlers/catalog.ts porque los usan también los mocks de deploy (contra
+// esos valida `images` y de ahí salen las refs de un primer deploy, §2.2) y de ingress.
+
+/** Un puerto de `expose`: un entero o `N/tcp`; los rangos y los `${VAR}` no cuentan. */
+function exposedPort(value: string): number | null {
+	const match = /^(\d+)(\/tcp)?$/.exec(value.trim().replace(/^["']|["']$/g, ''))
+	const port = match ? Number(match[1]) : Number.NaN
+	return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null
+}
+
+function unquote(value: string): string {
+	return value.trim().replace(/^["']|["']$/g, '')
+}
+
+/** Un servicio del compose: su nombre, los puertos de `expose` y su `image:` (o `''`). */
+interface ComposeService {
+	readonly name: string
+	readonly ports: number[]
+	readonly image: string
+}
+
+/**
+ * Los servicios de un compose, como `compose.Services` del backend (contrato §2.12): por
+ * nombre, con los puertos ordenados, y la `image:` de cada uno. Un parser de líneas alcanza
+ * para los compose del mock (`expose: [..]` o una lista con `- `).
+ */
+function parseCompose(yaml: string): ComposeService[] {
+	const services = new Map<string, { ports: Set<number>; image: string }>()
+	let inServices = false
+	let serviceIndent = -1
+	let current: { ports: Set<number>; image: string } | null = null
+	let keyIndent = -1
+	let exposeIndent = -1
+	const add = (value: string) => {
+		const port = exposedPort(value)
+		if (port !== null) current?.ports.add(port)
+	}
+	for (const raw of yaml.split('\n')) {
+		const text = raw.trim()
+		if (text === '' || text.startsWith('#')) continue
+		const indent = raw.length - raw.trimStart().length
+		if (indent === 0) {
+			inServices = /^services:\s*$/.test(text)
+			serviceIndent = -1
+			current = null
+			continue
+		}
+		if (!inServices) continue
+		if (serviceIndent === -1) serviceIndent = indent
+		if (indent === serviceIndent) {
+			current = { ports: new Set(), image: '' }
+			services.set(text.replace(/:.*$/, ''), current)
+			keyIndent = -1
+			exposeIndent = -1
+			continue
+		}
+		if (exposeIndent !== -1 && indent > exposeIndent && text.startsWith('- ')) {
+			add(text.slice(2))
+			continue
+		}
+		exposeIndent = -1
+		if (keyIndent === -1) keyIndent = indent
+		if (indent !== keyIndent || !current) continue
+		const image = /^image:\s*(.+)$/.exec(text)
+		if (image) current.image = unquote(image[1] ?? '')
+		const expose = /^expose:\s*(.*)$/.exec(text)
+		if (!expose) continue
+		const inline = expose[1] ?? ''
+		if (inline.startsWith('[')) inline.slice(1, -1).split(',').forEach(add)
+		else exposeIndent = indent
+	}
+	return [...services]
+		.map(([name, { ports, image }]) => ({
+			name,
+			ports: [...ports].sort((a, b) => a - b),
+			image,
+		}))
+		.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** Los servicios de un compose y los puertos de su `expose` (el `services` de §2.12). */
+export function composeServices(yaml: string): { name: string; ports: number[] }[] {
+	return parseCompose(yaml).map(({ name, ports }) => ({ name, ports }))
+}
+
+/** `services` del `AppOutput` (contrato §2.12): de la configuración guardada, no de Swarm. */
+export function servicesOf(app: MockApp): { name: string; ports: number[] }[] {
+	if (app.kind === 'compose') return composeServices(app.compose_yaml ?? '')
+	const port = app.spec?.port ?? 0
+	return [{ name: app.slug, ports: port > 0 ? [port] : [] }]
+}
+
+/** Lo que el deploy lee de la configuración de una app: su tipo y la ref de cada servicio. */
+export interface ConfiguredApp {
+	readonly kind: MockApp['kind']
+	/** servicio → ref de la configuración (`spec.image` o el `image:` del compose), por nombre. */
+	readonly images: Readonly<Record<string, string>>
+	readonly lastDeployedAt: string | null
+}
+
+export function configuredApp(app: MockApp): ConfiguredApp {
+	const images =
+		app.kind === 'compose'
+			? Object.fromEntries(
+					parseCompose(app.compose_yaml ?? '').map((service) => [
+						service.name,
+						service.image,
+					]),
+				)
+			: { [app.slug]: app.spec?.image ?? '' }
+	return { kind: app.kind, images, lastDeployedAt: app.last_deployed_at }
+}
+
 function sameApp(app: MockApp, project: string, stage: string, slug: string): boolean {
 	return app.project === project && app.stage === stage && app.slug === slug
 }
@@ -279,6 +394,12 @@ export const catalogDb = {
 
 	findApp(project: string, stage: string, slug: string): MockApp | undefined {
 		return state.apps.find((app) => sameApp(app, project, stage, slug))
+	},
+
+	/** El tipo y las refs de la configuración de una app, o undefined si no existe. */
+	configured(project: string, stage: string, slug: string): ConfiguredApp | undefined {
+		const app = this.findApp(project, stage, slug)
+		return app ? configuredApp(app) : undefined
 	},
 
 	stagesOf(project: string): MockStage[] {

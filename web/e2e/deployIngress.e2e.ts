@@ -68,6 +68,29 @@ test('Resumen → Desplegar con otra imagen → Deploys sigue el log en vivo', a
 	expect(problems).toEqual([])
 })
 
+test('Desplegar una compose que nunca se desplegó: una imagen para un servicio del catálogo', async ({
+	page,
+}) => {
+	const problems = await watch(page)
+	await login(page)
+
+	// aumi-agents/staging/agents: Swarm no tiene nada; los servicios salen del catálogo.
+	await page.goto('/projects/aumi-agents/stages/staging/apps/agents')
+	await expect(page.getByRole('heading', { level: 1, name: 'agents' })).toBeVisible()
+	await page.getByRole('button', { name: 'Desplegar' }).first().click()
+	const dialog = page.getByRole('dialog', { name: 'Desplegar agents' })
+	await expect(dialog.getByLabel(/^Imagen de runner/)).toBeVisible()
+	await expect(dialog.getByLabel(/^Imagen de scheduler/)).toBeVisible()
+
+	await dialog.getByLabel(/^Imagen de gateway/).fill('ghcr.io/aumi-app/agents-gateway:e2e')
+	await dialog.getByRole('button', { name: 'Desplegar' }).click()
+	await expect(page).toHaveURL(/\/apps\/agents\/deploys$/)
+	const panel = page.getByRole('region', { name: /^Log del deploy #\d+$/ })
+	await expect(panel.getByText(/agents-gateway:e2e/).first()).toBeVisible({ timeout: 15_000 })
+
+	expect(problems).toEqual([])
+})
+
 test('Deploys: ?deploy= abre ese deploy, y uno que no existe avisa', async ({ page }) => {
 	const problems = await watch(page)
 	await login(page)
