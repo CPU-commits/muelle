@@ -3,6 +3,8 @@ package usecases
 import (
 	"sync"
 	"time"
+
+	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
 )
 
 // NotSyncedYet es el error de GET /proxy desde que arranca muelle hasta el
@@ -31,6 +33,17 @@ type ProxyState struct {
 	// gen es la última recreación agendada y endedGen la última terminada:
 	// hay una pendiente mientras gen > endedGen (D15 del plan de la Fase 3).
 	gen, endedGen uint64
+	rollback      *PortsRollback
+}
+
+// PortsRollback es la última vez que muelle volvió a los puertos anteriores
+// del proxy porque muelle-caddy no arrancó con los nuevos (contrato §3.3 y
+// §3.5): los que fallaron, a los que volvió, el motivo (el mensaje de GET
+// /proxy, sin secretos) y cuándo.
+type PortsRollback struct {
+	Attempted, Restored service.ProxyPorts
+	Error               string
+	At                  time.Time
 }
 
 func NewProxyState() *ProxyState { return &ProxyState{} }
@@ -131,4 +144,32 @@ func (s *ProxyState) Snapshot(enabled bool) (status ProxyStatus, errMsg string, 
 		return ProxyOutOfSync, NotSyncedYet, nil
 	}
 	return ProxySynced, "", syncedAt
+}
+
+// PortsRolledBack registra una vuelta a los puertos anteriores (reemplaza la
+// anterior).
+func (s *ProxyState) PortsRolledBack(r PortsRollback) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rollback = &r
+}
+
+// ClearPortsRollback la olvida: un PATCH /settings volvió a cambiar los puertos.
+func (s *ProxyState) ClearPortsRollback() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rollback = nil
+}
+
+// LastPortsRollback es una copia de la última vuelta a los puertos
+// anteriores; nil si no hubo desde que arrancó muelle, o desde el último
+// cambio de puertos.
+func (s *ProxyState) LastPortsRollback() *PortsRollback {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rollback == nil {
+		return nil
+	}
+	r := *s.rollback
+	return &r
 }

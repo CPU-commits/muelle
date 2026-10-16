@@ -84,7 +84,7 @@ func TestProxyStatusInitial(t *testing.T) {
 	f := newProxyFixture(t)
 	f.enable(t, nil)
 	want := map[string]any{
-		"status": "out_of_sync", "error": "muelle todavía no le mandó la configuración a Caddy", "synced_at": nil,
+		"status": "out_of_sync", "error": "muelle todavía no le mandó la configuración a Caddy", "synced_at": nil, "ports_rollback": nil,
 		"caddy": map[string]any{"image": nil, "running": false, "http_port": 80.0, "https_port": 443.0},
 	}
 	if got := f.get(t); !reflect.DeepEqual(got, want) {
@@ -103,7 +103,7 @@ func TestProxyStatusSynced(t *testing.T) {
 	f.state.Loaded(time.Date(2026, 10, 14, 9, 20, 41, 123456789, time.FixedZone("CLT", -3*3600)))
 
 	want := map[string]any{
-		"status": "synced", "error": nil, "synced_at": "2026-10-14T12:20:41.123Z",
+		"status": "synced", "error": nil, "synced_at": "2026-10-14T12:20:41.123Z", "ports_rollback": nil,
 		"caddy": map[string]any{"image": testImage, "running": true, "http_port": 8080.0, "https_port": 8443.0},
 	}
 	if got := f.get(t); !reflect.DeepEqual(got, want) {
@@ -116,7 +116,7 @@ func TestProxyStatusDisabled(t *testing.T) {
 	f := newProxyFixture(t)
 	f.docker.SetUnavailable(true)
 	want := map[string]any{
-		"status": "disabled", "error": nil, "synced_at": nil,
+		"status": "disabled", "error": nil, "synced_at": nil, "ports_rollback": nil,
 		"caddy": map[string]any{"image": nil, "running": false, "http_port": 80.0, "https_port": 443.0},
 	}
 	if got := f.get(t); !reflect.DeepEqual(got, want) {
@@ -124,6 +124,37 @@ func TestProxyStatusDisabled(t *testing.T) {
 	}
 	if slices.ContainsFunc(f.docker.Calls(), func(c string) bool { return strings.HasPrefix(c, "InspectContainer") }) {
 		t.Fatalf("no debería consultar Docker: %v", f.docker.Calls())
+	}
+}
+
+// Si muelle-caddy no arrancó con los puertos nuevos y muelle volvió a los
+// anteriores (contrato §3.5), ports_rollback lo dice: los que fallaron, a los
+// que volvió, por qué y cuándo (en UTC, con a lo más ms). caddy trae los
+// puertos de los ajustes, ya vueltos.
+func TestProxyStatusPortsRollback(t *testing.T) {
+	f := newProxyFixture(t)
+	f.enable(t, func(p *entity.ProxySettings) { p.HTTPPort, p.HTTPSPort = 8080, 8443 })
+	f.state.ContainerOK()
+	f.state.Loaded(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
+	f.state.PortsRolledBack(usecases.PortsRollback{
+		Attempted: service.ProxyPorts{HTTPPort: 80, HTTPSPort: 443},
+		Restored:  service.ProxyPorts{HTTPPort: 8080, HTTPSPort: 8443},
+		Error:     "los puertos 80 o 443 del host ya están en uso",
+		At:        time.Date(2026, 10, 14, 9, 20, 41, 123456789, time.FixedZone("CLT", -3*3600)),
+	})
+	got := f.get(t)
+	want := map[string]any{
+		"attempted": map[string]any{"http_port": 80.0, "https_port": 443.0},
+		"restored":  map[string]any{"http_port": 8080.0, "https_port": 8443.0},
+		"error":     "los puertos 80 o 443 del host ya están en uso",
+		"at":        "2026-10-14T12:20:41.123Z",
+	}
+	if !reflect.DeepEqual(got["ports_rollback"], want) || got["status"] != "synced" {
+		t.Fatalf("GET /proxy: %v", got)
+	}
+	f.state.ClearPortsRollback()
+	if got := f.get(t); got["ports_rollback"] != nil {
+		t.Fatalf("limpio: %v", got)
 	}
 }
 
