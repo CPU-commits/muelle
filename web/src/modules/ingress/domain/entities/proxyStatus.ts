@@ -4,7 +4,8 @@
 /**
  * - `synced`: la última configuración se aplicó.
  * - `out_of_sync`: la última falló, y se reintenta con backoff.
- * - `recreating`: muelle-caddy se está recreando (cambió la imagen o los puertos).
+ * - `recreating`: muelle-caddy se está recreando porque cambiaron los puertos en un
+ *   `PATCH /settings` (la imagen nunca cambia por un PATCH, contrato §3.5).
  * - `disabled`: sin dominio del panel o sin imagen de Caddy (en desarrollo).
  */
 export const PROXY_SYNC_STATUSES = ['synced', 'out_of_sync', 'recreating', 'disabled'] as const

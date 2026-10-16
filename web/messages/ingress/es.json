@@ -91,7 +91,7 @@
 	"ingress_proxy_stopped_title": "muelle-caddy no está corriendo.",
 	"ingress_proxy_stopped_body": "Los dominios no reciben tráfico hasta que vuelva.",
 	"ingress_proxy_recreating_title": "Se está recreando el proxy.",
-	"ingress_proxy_recreating_body": "Cambió la imagen o los puertos de muelle-caddy: vuelve en unos segundos.",
+	"ingress_proxy_recreating_body": "Cambiaron los puertos de muelle-caddy en Ajustes: vuelve en unos segundos.",
 	"ingress_proxy_disabled_title": "El proxy de muelle está apagado.",
 	"ingress_proxy_disabled_body": "Falta el dominio del panel o la imagen de Caddy: los dominios no reciben tráfico.",
 	"ingress_toast_added_error": "{hostname} se agregó, pero con un error",

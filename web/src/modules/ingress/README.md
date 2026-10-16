@@ -163,7 +163,7 @@ Dominios, arriba del formulario.
 | `synced`, corriendo          | Ninguno                                                                                   |
 | `synced`, `running: false`   | "muelle-caddy no está corriendo"                                                          |
 | `out_of_sync`                | "El proxy está desincronizado", con el `error` y un link a Ajustes; muelle reintenta solo |
-| `recreating`                 | "Se está recreando el proxy": cambió la imagen o los puertos                              |
+| `recreating`                 | "Se está recreando el proxy": cambiaron los puertos en Ajustes (nunca la imagen, §3.5)    |
 | `disabled`                   | "El proxy de muelle está apagado": falta el dominio del panel o la imagen de Caddy        |
 
 - `error` viene solo con `out_of_sync`: el último fallo del contenedor (un puerto ocupado, la
