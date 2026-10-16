@@ -100,11 +100,11 @@ func WithIngress(o ingress.Options) Option { return func(op *options) { op.ingre
 // con el Authenticator de identity y registra las rutas de todos los módulos.
 // Nada de esto llama a Docker: lo que corre en segundo plano arranca con Run.
 //
-// Sin PanelOrigin ni Domain, o sin DataDir, devuelve un error sin tocar nada. La clave y el
-// panel embebido se leen antes de tocar DataDir, así una clave que falta (o
-// un panel roto) no deja una base vacía; si la clave falta o no sirve, el
-// error nombra MUELLE_MASTER_KEY_FILE y `muelle genkey`. Si algo falla,
-// cierra lo que alcanzó a abrir.
+// Sin PanelOrigin ni Domain, o sin DataDir, devuelve un error sin tocar
+// nada. La clave y el panel embebido se leen antes de tocar DataDir, así una
+// clave que falta (o un panel roto) no deja una base vacía; si la clave falta
+// o no sirve, el error nombra MUELLE_MASTER_KEY_FILE y `muelle genkey`. Si
+// algo falla, cierra lo que alcanzó a abrir.
 func New(ctx context.Context, s settings.Settings, log *slog.Logger, opts ...Option) (*Container, error) {
 	// Sin estos valores un módulo haría panic (identity y admin los exigen).
 	switch {
