@@ -60,6 +60,31 @@ func TestActor(t *testing.T) {
 	}
 }
 
+// ActorName sigue a Actor: el nombre del token aunque haya usuario, el
+// username de una sesión y "system" sin ninguno de los dos.
+func TestActorName(t *testing.T) {
+	cases := []struct {
+		name string
+		p    Principal
+		want string
+	}{
+		{"token", Principal{UserID: 3, Username: "felipe", Token: &TokenScope{ID: 9, Name: "ci"}}, "ci"},
+		{"usuario", Principal{UserID: 3, Username: "felipe"}, "felipe"},
+		{"usuario con 2FA a medias", Principal{UserID: 3, Username: "felipe", MFAPending: true}, "felipe"},
+		{"sistema", Principal{}, "system"},
+		// Sin UserID es el sistema, aunque traiga un username.
+		{"sistema con username", Principal{Username: "felipe"}, "system"},
+	}
+	for _, c := range cases {
+		if got := c.p.ActorName(); got != c.want {
+			t.Errorf("%s: ActorName() = %q, esperaba %q", c.name, got, c.want)
+		}
+	}
+	if ActorSystemName != string(ActorSystem) {
+		t.Errorf("ActorSystemName = %q", ActorSystemName)
+	}
+}
+
 func TestIsToken(t *testing.T) {
 	if (Principal{UserID: 1}).IsToken() || !(Principal{Token: &TokenScope{ID: 1}}).IsToken() {
 		t.Error("IsToken")

@@ -45,6 +45,25 @@ func (p Principal) Actor() (ActorType, *int64) {
 	return ActorUser, &id
 }
 
+// ActorSystemName es el actor_name de un evento del sistema (sin Principal, o
+// con uno sin usuario ni token): los jobs, el arranque y la CLI.
+const ActorSystemName = string(ActorSystem)
+
+// ActorName es el nombre del autor que Actor identifica, para copiarlo en la
+// auditoría al escribir el evento (sigue aunque se borre el usuario o el
+// token): el nombre del token, el username de una sesión, o ActorSystemName.
+// Un Principal armado a mano tiene que traer Username o Token.Name.
+func (p Principal) ActorName() string {
+	switch typ, _ := p.Actor(); typ {
+	case ActorToken:
+		return p.Token.Name
+	case ActorUser:
+		return p.Username
+	default:
+		return ActorSystemName
+	}
+}
+
 // Allows dice si el principal puede operar sobre project/stage.
 // Una sesión puede todo. Un token tiene que ser de ese proyecto; si está
 // limitado a un stage, solo puede tocar ese stage, y sobre recursos del
