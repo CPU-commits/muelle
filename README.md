@@ -341,7 +341,7 @@ ingress crea muelle-caddy y lo mantiene: el job `"proxy"`, al arrancar y cada 5 
 go test -tags integration -count=1 -run Integration -v ./src/internal/ingress/...
 ```
 
-Solo crean contenedores, redes y volúmenes con el prefijo `it3`, en los puertos 21000–21999, y los borran al terminar; nunca usan 80, 443 ni 2019, ni la API real de Cloudflare. No se corren a la vez que la integración de la Fase 5: su test de install falla si mientras corre desaparece una red con la etiqueta `muelle.project`, y estos crean y borran redes de stage.
+Solo crean contenedores, redes y volúmenes con el prefijo `it3`, en los puertos 21000–21999, y los borran al terminar; nunca usan 80, 443 ni 2019, ni la API real de Cloudflare. No corren a la vez que los otros paquetes de integración que usan el Swarm (ver "Tests").
 
 ## Solo detrás de Caddy (o de otro proxy)
 
@@ -382,6 +382,14 @@ go mod tidy -diff
 go vet ./...
 go test -race ./...
 ```
+
+Los de integración (build tag `integration`) usan el Docker real: necesitan un Swarm activo en el que este nodo es manager y se saltan si no lo hay. Todos juntos:
+
+```bash
+go test -tags integration -race -count=1 -timeout 40m ./...
+```
+
+Cada paquete usa su prefijo (`it2` deploy, `it3` ingress, `it5` distribución e install, `ctr23` el cliente de Docker) y borra lo suyo. Los que usan el Swarm (deploy, ingress, el cliente de Docker e install) corren de a uno aunque `go test` los lance a la vez: los serializa un candado en el directorio temporal (`dockertest/swarmlock`), porque con varios creando y borrando overlays a la vez, Swarm deja de conectar contenedores a una overlay attachable ("attaching to network failed … context deadline exceeded"). La espera cuenta para el `-timeout` de cada paquete. Los de install necesitan además la imagen `it5-muelle:test` de este árbol (ver `src/cmd/install/integration_test.go`).
 
 Los tests de `action/` corren el `deploy.sh` de la GitHub Action con bash, `curl` y `jq` contra un muelle falso (se saltan si falta alguno); CI corre además `shellcheck action/deploy.sh`.
 
