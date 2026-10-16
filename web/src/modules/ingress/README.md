@@ -234,4 +234,13 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
 
 ## Diferencias con el contrato
 
-Ninguna: lo de arriba es lo que dice el contrato.
+Ninguna en estos endpoints: lo de arriba es lo que dice el contrato. Dos cosas de ingress
+que el panel sigue del código porque el contrato no las dice (propuestas como cambios):
+
+- `409 network_conflict` al crear un stage (ya hay una red de Docker con su nombre que no
+  creó muelle; `ErrNotStageNetwork` en `ingress/infra/in/http/errors.go`): catalog lo
+  muestra como `StageNetworkConflict`. Falta en la tabla de §0.2.
+- Un email ACME o un token de Cloudflare con `{` o `}`: §3.4 dice que muelle lo guarda y
+  deja de mandarle la configuración a Caddy (`out_of_sync`). Ajustes los frena antes de
+  mandarlos (`InvalidAcmeEmail('placeholder')`, `InvalidCloudflareToken('placeholder')`);
+  lo propuesto es que `PATCH /settings` responda `422` con su campo.

@@ -371,4 +371,7 @@ app`), aunque la app no se haya desplegado nunca.
 
 ## Diferencias con el contrato
 
-Ninguna: lo de arriba es lo que dice el contrato (`since` ya está en §2.9).
+Ninguna: lo de arriba es lo que dice el contrato (`since` ya está en §2.9). Lo único que el
+panel deduce es `rollbackPin`, porque el deploy de §2.1 no trae la ref pedida
+(`requested_images`, ver "Qué imagen sale sin override"). Se propuso sumarla a §2.1 (o un
+`pinned` por servicio); hasta que esté en el contrato, el panel no la lee.
