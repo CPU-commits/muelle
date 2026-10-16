@@ -102,16 +102,24 @@ func TestRemoveAppDockerDown(t *testing.T) {
 	}
 }
 
-// Las rutas que todavía no están no existen (404 no_route): el panel muestra
-// "Llega con la Fase 2".
-func TestModuleRoutesAndStubs(t *testing.T) {
+// Todas las rutas de deploy de contrato §1 (las tres primeras filas) están
+// registradas con su método: ninguna responde no_route ni
+// method_not_allowed. Las de ingress (dominios, /proxy) son de la Fase 3.
+func TestModuleRoutes(t *testing.T) {
 	m, _ := newTestModule(t)
 	c := httptestutil.New(t, httptestutil.FakeAuth{Sessions: map[string]entity.Principal{"s": {UserID: 1, Username: "felipe"}}}, m.RegisterRoutes)
 	app := "/api/v1/projects/auditfy/stages/staging/apps/api"
-	for _, path := range []string{app + "/logs"} {
-		w := c.Do("GET", path, nil, httptestutil.WithSession("s"))
-		if w.Code != http.StatusNotFound || !bytes.Contains(w.Body.Bytes(), []byte(`"no_route"`)) {
-			t.Errorf("GET %s: %d %s", path, w.Code, w.Body)
+	for _, r := range []struct{ method, path string }{
+		{"POST", app + "/deploys"}, {"GET", app + "/deploys"},
+		{"GET", app + "/deploys/1"}, {"GET", app + "/deploys/1/log"}, {"GET", app + "/deploys/1/log/stream"},
+		{"POST", app + "/rollback"},
+		{"GET", app + "/status"}, {"GET", app + "/logs"},
+		{"GET", "/api/v1/registries"}, {"POST", "/api/v1/registries"},
+		{"PATCH", "/api/v1/registries/ghcr.io"}, {"DELETE", "/api/v1/registries/ghcr.io"},
+	} {
+		w := c.Do(r.method, r.path, map[string]string{}, httptestutil.WithSession("s"))
+		if bytes.Contains(w.Body.Bytes(), []byte(`"no_route"`)) || bytes.Contains(w.Body.Bytes(), []byte(`"method_not_allowed"`)) {
+			t.Errorf("%s %s: %d %s", r.method, r.path, w.Code, w.Body)
 		}
 	}
 	if jobs := m.Jobs(); len(jobs) != 0 {

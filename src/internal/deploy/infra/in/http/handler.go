@@ -23,6 +23,7 @@ type UseCases struct {
 	ReadLog      *usecases.ReadLog
 	FollowLog    *usecases.FollowLog
 	GetStatus    *usecases.GetStatus
+	AppLogs      *usecases.AppLogs
 }
 
 type Handler struct {
@@ -55,4 +56,5 @@ func Register(k *utils.Kit, uc UseCases, s Streams) {
 	k.Handle("GET "+app+"/deploys/{id}/log/stream", utils.AccessToken, h.streamLog)
 	k.Handle("POST "+app+"/rollback", utils.AccessToken, h.rollback)
 	k.Handle("GET "+app+"/status", utils.AccessToken, h.status)
+	k.Handle("GET "+app+"/logs", utils.AccessToken, h.appLogs)
 }

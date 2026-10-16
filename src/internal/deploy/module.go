@@ -4,11 +4,12 @@
 // los registries con sus credenciales (§5.1, §6, §7 y §10 del spec). module.go
 // es el único lugar que conoce todas sus piezas.
 //
-// Hasta ahora: los registries (CRUD y el registry inicial de install);
-// encolar y leer deploys y rollbacks por HTTP; el worker (una cola por app
-// que corre los pasos de §7, con la reconciliación al arrancar); y RemoveApp,
-// que detiene el worker de la app y hace docker stack rm (lo usa catalog al
-// borrar una app). El contrato está en
+// Tiene: los registries (CRUD y el registry inicial de install); encolar y
+// leer deploys y rollbacks por HTTP, con el log por polling y en vivo (SSE);
+// el worker (una cola por app que corre los pasos de §7, con la
+// reconciliación al arrancar); el estado de las apps en Swarm y los logs de
+// sus servicios en vivo; y RemoveApp, que detiene el worker de la app y hace
+// docker stack rm (lo usa catalog al borrar una app). El contrato está en
 // docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md.
 package deploy
 
@@ -145,15 +146,16 @@ func New(d Deps) *Module {
 			ReadLog:      usecases.NewReadLog(ud),
 			FollowLog:    usecases.NewFollowLog(ud),
 			GetStatus:    usecases.NewGetStatus(apps, dk, d.Env, d.Clock),
+			AppLogs:      usecases.NewAppLogs(apps, dk, d.Env),
 		},
 		log: d.Log,
 	}
 }
 
-// RegisterRoutes registra los errores y las rutas del módulo (contrato §2):
-// POST/GET …/apps/{a}/deploys, GET …/deploys/{id}, …/log y …/log/stream,
-// POST …/apps/{a}/rollback, GET …/apps/{a}/status (AccessToken) y
-// /api/v1/registries (AccessSession). Falta GET …/apps/{a}/logs (AccessToken).
+// RegisterRoutes registra los errores y todas las rutas del módulo
+// (contrato §1 y §2): POST/GET …/apps/{a}/deploys, GET …/deploys/{id}, …/log
+// y …/log/stream, POST …/apps/{a}/rollback, GET …/apps/{a}/status y
+// …/logs (AccessToken), y /api/v1/registries (AccessSession).
 func (m *Module) RegisterRoutes(k *utils.Kit) {
 	dephttp.Register(k, m.uc, dephttp.Streams{Ctx: m.streamCtx, Config: m.sse})
 }

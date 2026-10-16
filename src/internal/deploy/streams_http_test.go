@@ -21,6 +21,8 @@ import (
 	dephttp "github.com/CPU-commits/muelle/src/internal/deploy/infra/in/http"
 	depsqlite "github.com/CPU-commits/muelle/src/internal/deploy/infra/out/repository/sqlite"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
+	"github.com/CPU-commits/muelle/src/shared/domain/naming"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
 )
 
 // Los streams (contrato §0.3, §2.6 y §2.9) necesitan un servidor de verdad:
@@ -384,19 +386,31 @@ func TestSSERevalidate(t *testing.T) {
 func TestSSELimitPerPrincipal(t *testing.T) {
 	h := newStreamTest(t, testSSE())
 	h.seed(t)
+	h.putAPIService()
 	id := h.queuedDeploy(t)
 	for range 10 {
-		resp := h.get(t, logStreamPath(id+100), sessionOf("s"))
-		if resp.StatusCode != http.StatusNotFound {
-			t.Fatalf("deploy que no existe: %d", resp.StatusCode)
+		for _, path := range []string{logStreamPath(id + 100), apiPath + "/logs?service=web"} {
+			resp := h.get(t, path, sessionOf("s"))
+			if resp.StatusCode != http.StatusNotFound {
+				t.Fatalf("%s: %d", path, resp.StatusCode)
+			}
+			resp.Body.Close()
 		}
-		resp.Body.Close()
 	}
 	var open []*sseReader
-	for range 8 {
-		r := h.stream(t, logStreamPath(id), sessionOf("s"))
-		r.expect(t, "status", "queued")
-		open = append(open, r)
+	for i := range 8 {
+		if i%2 == 0 {
+			r := h.stream(t, logStreamPath(id), sessionOf("s"))
+			r.expect(t, "status", "queued")
+			open = append(open, r)
+			continue
+		}
+		open = append(open, h.stream(t, logsPath("service=api&follow=1"), sessionOf("s")))
+	}
+	// Los streams de logs abiertos sin líneas no mandan nada: se espera a
+	// que el servidor los cuente (el 200 ya llegó, así que ya están contados).
+	if resp := h.get(t, logsPath("service=api&follow=1"), sessionOf("s")); resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("el noveno (logs): %d", resp.StatusCode)
 	}
 	resp := h.get(t, logStreamPath(id), sessionOf("s"))
 	if resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") == "" {
@@ -673,4 +687,84 @@ func TestDeployLogStreamErrors(t *testing.T) {
 		}
 		expectError(t, w, c.status, c.code, c.message)
 	}
+}
+
+// --- Los logs de una app (contrato §2.9) --------------------------------------------------
+
+// secretEnv son variables con valores secretos para todas las apps.
+type secretEnv []string
+
+func (e secretEnv) ResolveEnv(ctx context.Context, appID int64) (map[string]string, []string, error) {
+	return map[string]string{}, e, nil
+}
+
+const appService = "auditfy_staging_api_api"
+
+// putAPIService deja en Swarm el servicio api de la app, con su tarea del slot 1.
+func (h *streamTest) putAPIService() {
+	one := uint64(1)
+	h.f.PutStackService(naming.Stack("auditfy", "staging", "api"), docker.Service{
+		Name: appService, Labels: naming.Labels("auditfy", "staging", "api", 1), Replicas: &one,
+	}, docker.Task{ID: "t1aaaaaaaaaa", Slot: 1, State: "running", DesiredState: "running"})
+}
+
+func logsPath(query string) string { return apiPath + "/logs?" + query }
+
+// Cada línea es un evento log con un JSON compacto (time truncada al
+// milisegundo, task, stream y line enmascarada); sin follow, end eof y se
+// cierra.
+func TestAppLogsHTTP(t *testing.T) {
+	const secret = "s3cr3t-de-la-app-1234"
+	h := newStreamTestOn(t, newModuleTest(t, secretEnv{secret}), testSSE())
+	h.seed(t)
+	h.putAPIService()
+	at := time.Date(2026, 10, 10, 14, 31, 40, 118_999_999, time.UTC)
+	h.f.AppendServiceLogs(appService,
+		docker.LogLine{Time: at, Stream: "stdout", TaskID: "t1aaaaaaaaaa", Text: "WARN consulta lenta · 812 ms"},
+		docker.LogLine{Time: at.Add(time.Second), Stream: "stderr", TaskID: "t1aaaaaaaaaa", Text: "token=" + secret + " \"x\""},
+	)
+	r := h.stream(t, logsPath("service=api&tail=10"), bearer("tp"))
+	r.expect(t, "log", `{"time":"2026-10-10T14:31:40.118Z","task":"api.1","stream":"stdout","line":"WARN consulta lenta · 812 ms"}`)
+	r.expect(t, "log", `{"time":"2026-10-10T14:31:41.118Z","task":"api.1","stream":"stderr","line":"token=*** \"x\""}`)
+	r.expect(t, "end", "eof")
+	r.expectClosed(t, 2*time.Second)
+
+	// Con follow sigue abierto y entrega lo nuevo; a la hora (MaxDuration),
+	// end timeout.
+	h.m.sse.MaxDuration = 500 * time.Millisecond
+	h2 := newStreamTestOn(t, h.httpTest, h.m.sse)
+	r = h2.stream(t, logsPath("service=api&tail=0&follow=1"), sessionOf("s"))
+	h.f.AppendServiceLogs(appService, docker.LogLine{Time: at.Add(2 * time.Second), Stream: "stdout", TaskID: "t1aaaaaaaaaa", Text: "nueva"})
+	ev := r.expect(t, "log", "")
+	if !strings.Contains(ev.Data, `"line":"nueva"`) {
+		t.Fatalf("línea nueva: %s", ev.Data)
+	}
+	r.expect(t, "end", "timeout")
+	r.expectClosed(t, 2*time.Second)
+}
+
+// Los errores van en JSON antes de abrir, en el orden del contrato: la app
+// (404), la query (422) y el servicio en Swarm (404, 503).
+func TestAppLogsHTTPErrors(t *testing.T) {
+	h := newStreamTest(t, testSSE())
+	h.seed(t)
+	for _, c := range []struct {
+		path    string
+		status  int
+		code    string
+		message string
+	}{
+		{nadaPath + "/logs?tail=abc", 404, "not_found", ""},
+		{logsPath("tail=10"), 422, "invalid", "service: es obligatorio"},
+		{logsPath("service=api&tail=abc"), 422, "invalid", "tail: "},
+		{logsPath("service=api&since=ayer"), 422, "invalid", "since: "},
+		{logsPath("service=api&follow=si"), 422, "invalid", "follow: "},
+		{logsPath("service=api"), 404, "not_found", ""},
+	} {
+		expectError(t, h.c.Do("GET", c.path, nil, sessionOf("s")), c.status, c.code, c.message)
+	}
+	h.putAPIService()
+	expectError(t, h.c.Do("GET", logsPath("service=api"), nil, bearer("tx")), 403, "out_of_scope", "")
+	h.f.SetUnavailable(true)
+	expectError(t, h.c.Do("GET", logsPath("service=api"), nil, sessionOf("s")), 503, "docker_unavailable", "")
 }

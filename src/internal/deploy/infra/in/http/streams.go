@@ -1,8 +1,13 @@
 package http
 
 import (
+	jsonv2 "encoding/json/v2"
+	"errors"
+	"io"
 	"net/http"
+	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/deploy/app/dto"
 )
@@ -98,5 +103,77 @@ func (h *Handler) streamLog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		unsubscribe()
+	}
+}
+
+// appLogRes es el data de un evento log de GET …/logs (contrato §2.9), en
+// JSON compacto.
+type appLogRes struct {
+	Time   *time.Time `json:"time"`
+	Task   *string    `json:"task"`
+	Stream string     `json:"stream"`
+	Line   string     `json:"line"`
+}
+
+// optional es el valor de key en la query, o nil si no viene.
+func optional(q url.Values, key string) *string {
+	if !q.Has(key) {
+		return nil
+	}
+	v := q.Get(key)
+	return &v
+}
+
+// appLogs es GET …/apps/{a}/logs (contrato §2.9): los logs de un servicio en
+// vivo. Los 404, 422 y 503 van como JSON, antes de abrir. Después: un evento
+// log por línea; end con data eof cuando el log termina (sin follow, o el
+// servicio se borró) y end con data timeout a la hora (MaxDuration), y se
+// cierra. Si el log de Docker se corta por otra cosa, se cierra sin end: el
+// panel reconecta con since.
+func (h *Handler) appLogs(w http.ResponseWriter, r *http.Request) {
+	release, ok := h.acquire(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	in := dto.AppLogsRequest{
+		AppRef: appRef(r), Service: q.Get("service"),
+		Tail: optional(q, "tail"), Since: optional(q, "since"), Follow: optional(q, "follow"),
+	}
+	logs, err := h.uc.AppLogs.Open(r.Context(), in)
+	if err != nil {
+		release()
+		h.k.Fail(w, r, err)
+		return
+	}
+	defer logs.Close()
+	ls, err := h.open(w, r, release)
+	if err != nil {
+		return
+	}
+	defer ls.close()
+	for {
+		select {
+		case l, ok := <-logs.Lines():
+			if !ok {
+				if errors.Is(logs.Err(), io.EOF) {
+					_ = ls.event("end", "", "eof")
+				}
+				return
+			}
+			data, err := jsonv2.Marshal(appLogRes{Time: l.Time, Task: l.Task, Stream: l.Stream, Line: l.Line})
+			if err != nil || ls.event("log", "", string(data)) != nil {
+				return
+			}
+		case <-ls.tick():
+			if ls.beat() != nil {
+				return
+			}
+		case <-ls.ctx.Done():
+			if ls.timedOut() {
+				_ = ls.event("end", "", "timeout")
+			}
+			return
+		}
 	}
 }
