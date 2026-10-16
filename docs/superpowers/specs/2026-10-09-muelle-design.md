@@ -74,7 +74,7 @@ Ambos viven en el nodo manager.
 - Redes: `muelle_panel` y todas las redes de stage.
 - Arranca con `caddy run --resume` y `CADDY_ADMIN=unix//run/caddy-admin/admin.sock`, que pone ingress al crear el contenedor (`naming.CaddyCommand` y `naming.CaddyEnv`), sin depender del CMD de la imagen. Sin autosave, Caddy arranca vacío con la admin API en el socket; con autosave, retoma la última configuración (contrato §3.4).
 - **Por qué no es servicio Swarm:** un contenedor standalone se puede conectar a una red overlay attachable **en caliente** (`docker network connect`). A un servicio Swarm, agregarle una red lo recrea, y eso tumbaría todos los sitios cada vez que se crea un stage.
-- **Ciclo de vida:** al arrancar, y cada vez que cambian la imagen o los puertos de Caddy, muelle se asegura de que el contenedor exista con la imagen, los puertos, los volúmenes y las redes correctas. Recrearlo (al actualizar Caddy o cambiar puertos) provoca una caída de pocos segundos. Cuando el cambio viene de Ajustes, se recrea 2 s después de responder el `PATCH`, que también pasa por Caddy (contrato §3.5). En desarrollo (sin dominio del panel o sin imagen de Caddy) muelle no crea el contenedor ni le manda configuración (contrato §3.4).
+- **Ciclo de vida:** al arrancar, y cada vez que cambian la imagen o los puertos de Caddy, muelle se asegura de que el contenedor exista con la imagen, los puertos, los volúmenes y las redes correctas. Recrearlo (al actualizar Caddy o cambiar puertos) provoca una caída de pocos segundos. Cuando el cambio viene de Ajustes, se recrea 2 s después de responder el `PATCH`, que también pasa por Caddy (contrato §3.5). Un puerto nuevo ocupado no deja el panel sin Caddy: el `PATCH` prueba los puertos nuevos antes de guardarlos (uno ocupado es un `422` en su campo), y si igual el contenedor no arranca con ellos, muelle vuelve a los anteriores, en los ajustes y en el contenedor, y lo dice en `GET /proxy` y en la auditoría (contrato §3.5). En desarrollo (sin dominio del panel o sin imagen de Caddy) muelle no crea el contenedor ni le manda configuración (contrato §3.4).
 
 **muelle** (servicio Swarm del stack `muelle`, restricción `node.role == manager`)
 - Imagen mínima con el binario de muelle (estático, sin CGO) y el CLI de `docker` (para `docker stack deploy`).
@@ -585,7 +585,7 @@ Dokploy también usa Swarm, así que ambos pueden convivir en el mismo cluster. 
 4. Desplegar cada app y probarla contra muelle: `curl --resolve host:8443:<ip> https://host:8443/health`.
 5. Cambio (segundos de downtime):
    - bajar el Traefik de Dokploy (`docker service scale dokploy-traefik=0`, o el nombre que corresponda)
-   - en Ajustes de muelle, cambiar los puertos del proxy a 80/443. El `PATCH` responde, y 2 s después muelle recrea muelle-caddy en los puertos nuevos
+   - en Ajustes de muelle, cambiar los puertos del proxy a 80/443. El `PATCH` responde, y 2 s después muelle recrea muelle-caddy en los puertos nuevos. Si el Traefik sigue con 80 o 443, el `PATCH` responde `422` en ese puerto y no cambia nada; si algo los toma justo después, muelle vuelve a 8080/8443 y el panel sigue en `:8443`
    - el panel pasa a `https://panel…`, con la misma sesión: ese origen se acepta desde que responde el `PATCH`, y `:8443` ya no. Los links de invitación también salen con el origen nuevo; no hay que tocar la configuración de muelle
 6. Cambiar los workflows a la action de muelle.
 7. Dokploy queda detenido hasta confirmar que todo funciona y después se desinstala.

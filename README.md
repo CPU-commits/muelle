@@ -300,7 +300,7 @@ Crear y borrar un stage crea y borra su red overlay, y borrar una app hace `dock
 
 ## Proxy y dominios
 
-ingress crea muelle-caddy y lo mantiene: el job `"proxy"`, al arrancar y cada 5 minutos, asegura el contenedor y las redes, y le reenvía la configuración. Cambiar los puertos del proxy en Ajustes lo recrea 2 s después de responder el `PATCH` (contrato §3.5).
+ingress crea muelle-caddy y lo mantiene: el job `"proxy"`, al arrancar y cada 5 minutos, asegura el contenedor y las redes, y le reenvía la configuración. Cambiar los puertos del proxy en Ajustes lo recrea 2 s después de responder el `PATCH` (contrato §3.5). Antes de guardarlos, muelle prueba que los puertos nuevos estén libres en el host (uno ocupado es un `422` y no cambia nada); si igual muelle-caddy no arranca con ellos, muelle vuelve a los anteriores y lo dice en `GET /api/v1/proxy` (`ports_rollback`) y en la auditoría.
 
 - **En desarrollo** (un `MUELLE_PANEL_ORIGIN` con una IP o `localhost`, que deja `panel_domain` vacío, o un binario sin versión y sin `caddy_image`), muelle no crea muelle-caddy ni toca los puertos del host, y `GET /api/v1/proxy` dice `disabled`. Los dominios y su DNS en Cloudflare funcionan igual.
 - **El token de Cloudflare** (Ajustes) necesita los permisos Zone:Read y DNS:Edit sobre las zonas de tus dominios. muelle lo verifica al guardarlo, y con él crea los registros de los dominios y el del panel, y valida los certificados por DNS-01.
@@ -320,7 +320,7 @@ ingress crea muelle-caddy y lo mantiene: el job `"proxy"`, al arrancar y cada 5 
 go test -tags integration -count=1 -run Integration -v ./src/internal/ingress/...
 ```
 
-Solo crean contenedores, redes y volúmenes con el prefijo `it3`, en los puertos 21000–21999, y los borran al terminar; nunca usan 80, 443 ni 2019, ni la API real de Cloudflare. No se corren a la vez que la integración de la Fase 5: su test de install falla si mientras corre desaparece una red con la etiqueta `muelle.project`, y estos crean y borran redes de stage.
+Solo crean contenedores, redes y volúmenes con el prefijo `it3`, en los puertos 21000–21999 (los de la vuelta atrás de los puertos del proxy, `it6` y 23000–23999), y los borran al terminar; nunca usan 80, 443 ni 2019, ni la API real de Cloudflare. No se corren a la vez que la integración de la Fase 5: su test de install falla si mientras corre desaparece una red con la etiqueta `muelle.project`, y estos crean y borran redes de stage.
 
 ## Solo detrás de Caddy (o de otro proxy)
 
