@@ -28,6 +28,12 @@ type ProxyHook interface {
 	// error que envuelve entity.ErrCloudflareUnavailable (502). Si falla, no
 	// se guarda nada del PATCH.
 	CheckCloudflareToken(ctx context.Context, token string) (zones *int, err error)
+	// CheckProxyPorts prueba, antes de guardar, que muelle-caddy pueda tomar
+	// los puertos del proxy que cambian de old a next (contrato §4.1). Uno
+	// ocupado es un *validate.Error en su campo (422); Docker caído, un error
+	// que envuelve entity.ErrDockerUnavailable (503). Si falla, no se guarda
+	// nada del PATCH.
+	CheckProxyPorts(ctx context.Context, old, next entity.ProxySettings) error
 	// ProxySettingsChanged recibe los ajustes de antes y los nuevos, ya
 	// guardados, cuando algo cambió. Corre antes de que el PATCH responda;
 	// lo que cortaría la respuesta (recrear muelle-caddy) lo deja para

@@ -64,6 +64,7 @@ type Module struct {
 	ops           *usecases.Ops
 	panelDNS      *usecases.EnsurePanelDNS
 	checkToken    *usecases.CheckCloudflareToken
+	checkPorts    *usecases.CheckProxyPorts
 	settingsHook  *usecases.ProxySettingsChanged
 	certs         *usecases.CertChecker
 	jobs          []cron.Job
@@ -127,6 +128,7 @@ func New(d Deps) *Module {
 		DomainOp: o.Timing.DomainOp, DomainRetry: o.Timing.DomainRetry,
 	}
 	m.checkToken = usecases.NewCheckCloudflareToken(dns)
+	m.checkPorts = usecases.NewCheckProxyPorts(runtime, defImage, d.Log)
 	m.settingsHook = usecases.NewProxySettingsChanged(m.recreator, usecases.NewUpdateManagedRecords(dd), m.panelDNS, m.syncer,
 		o.Timing.Hook, d.Log)
 	m.httpUC = inhttp.UseCases{
@@ -205,6 +207,18 @@ func (m *Module) SyncRoutes(ctx context.Context) error { return m.syncer.Sync(ct
 // una cuenta, que /user/tokens/verify rechaza pero que lista zonas, se acepta.
 func (m *Module) CheckCloudflareToken(ctx context.Context, token string) (zones *int, err error) {
 	return m.checkToken.Execute(ctx, token)
+}
+
+// CheckProxyPorts prueba, antes de que admin guarde otros puertos del proxy
+// (PATCH /settings, contrato §4.1), que muelle-caddy los pueda tomar en el
+// host, con un contenedor descartable y un plazo de 30 s sobre el ctx de la
+// petición. Prueba solo los que cambian y que el muelle-caddy que sirve no
+// tiene ya. Uno ocupado devuelve un *validate.Error en proxy_http_port o
+// proxy_https_port (422); Docker caído, un error que envuelve
+// entity.ErrDockerUnavailable (503). Con el proxy deshabilitado (desarrollo)
+// no toca Docker.
+func (m *Module) CheckProxyPorts(ctx context.Context, old, next entity.ProxySettings) error {
+	return m.checkPorts.Execute(ctx, old, next)
 }
 
 // ProxySettingsChanged aplica los ajustes nuevos después de que admin los

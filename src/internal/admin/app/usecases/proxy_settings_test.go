@@ -26,6 +26,15 @@ type fakeHook struct {
 	checkErr error
 	checked  []string
 	changes  [][2]entity.ProxySettings
+	portsErr error
+	probed   [][2]entity.ProxySettings
+}
+
+func (h *fakeHook) CheckProxyPorts(ctx context.Context, old, next entity.ProxySettings) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.probed = append(h.probed, [2]entity.ProxySettings{old, next})
+	return h.portsErr
 }
 
 func (h *fakeHook) CheckCloudflareToken(ctx context.Context, token string) (*int, error) {
@@ -278,6 +287,47 @@ func TestPatchCloudflareToken(t *testing.T) {
 	}
 	if last := e.hook.changes[len(e.hook.changes)-1][1]; last.CloudflareToken != "" {
 		t.Fatal("ingress no se enteró de que se borró el token")
+	}
+}
+
+// Otros puertos del proxy se prueban antes de guardar nada (contrato §4.1):
+// uno ocupado es un 422 en su campo y no guarda nada del PATCH; Docker caído
+// pasa tal cual (503). Un PATCH que no cambia los puertos no prueba nada.
+func TestPatchProxyPortsChecked(t *testing.T) {
+	e := newProxyEnv(t)
+	if _, err := e.do(t, dto.PatchSettingsInput{PublicIP: ptr("203.0.113.7"), ProxyHTTPPort: ptr(80)}); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.hook.probed) != 0 {
+		t.Fatalf("sin cambio de puertos no se prueba: %+v", e.hook.probed)
+	}
+
+	_, err := e.do(t, dto.PatchSettingsInput{ProxyHTTPSPort: ptr(8443)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.hook.probed) != 1 || e.hook.probed[0][0].HTTPSPort != 443 || e.hook.probed[0][1].HTTPSPort != 8443 ||
+		e.hook.probed[0][1].PublicIP != "203.0.113.7" {
+		t.Fatalf("la prueba recibe los ajustes de antes y los nuevos: %+v", e.hook.probed)
+	}
+
+	e.hook.portsErr = validate.Errorf("proxy_http_port", "el puerto 9080 del host ya está en uso: libéralo o elige otro")
+	_, err = e.do(t, dto.PatchSettingsInput{ProxyHTTPPort: ptr(9080), ACMEEmail: ptr("tu@correo.cl")})
+	wantField(t, err, "proxy_http_port")
+	if got, _ := e.raw(t, entity.SettingProxyHTTPPort); got == "9080" {
+		t.Fatalf("un puerto ocupado no se guarda: %q", got)
+	}
+	if _, ok := e.raw(t, entity.SettingACMEEmail); ok {
+		t.Fatal("si los puertos fallan no se guarda nada del PATCH")
+	}
+	changes := len(e.hook.changes)
+
+	e.hook.portsErr = fmt.Errorf("probando: %w", entity.ErrDockerUnavailable)
+	if _, err := e.do(t, dto.PatchSettingsInput{ProxyHTTPPort: ptr(9080)}); !errors.Is(err, entity.ErrDockerUnavailable) {
+		t.Fatalf("Docker caído: %v", err)
+	}
+	if len(e.hook.changes) != changes {
+		t.Fatal("un PATCH que no guardó nada no avisa a ingress")
 	}
 }
 

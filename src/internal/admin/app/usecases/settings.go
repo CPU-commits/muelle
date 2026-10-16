@@ -224,6 +224,8 @@ func locksOut(cidrs []string, clientIP string) bool {
 //     guarda devuelve service.ErrWouldLockOut, salvo con ConfirmLockout.
 //   - Un token de Cloudflare nuevo se verifica con el hook antes de guardar
 //     nada (cuántas zonas ve); "" lo borra.
+//   - Otros puertos del proxy se prueban con el hook antes de guardar nada:
+//     uno ocupado en el host no se guarda (muelle-caddy no arrancaría).
 //   - Todo se guarda en una transacción, y después, si cambió algún ajuste
 //     del proxy, se invalida el origen del panel en caché (el Origin del
 //     puerto nuevo pasa enseguida, y el del viejo ya no) y se avisa al hook
@@ -255,6 +257,13 @@ func (u *PatchSettings) Execute(ctx context.Context, in dto.PatchSettingsInput) 
 	if tokenChanged && next.CloudflareToken != "" && u.hook != nil {
 		// Fuera de la transacción: es una llamada a Cloudflare.
 		if zones, err = u.hook.CheckCloudflareToken(ctx, next.CloudflareToken); err != nil {
+			return dto.SettingsOutput{}, err
+		}
+	}
+	portsChanged := next.HTTPPort != old.Proxy.HTTPPort || next.HTTPSPort != old.Proxy.HTTPSPort
+	if portsChanged && u.hook != nil {
+		// También fuera: prueba los puertos del host en Docker.
+		if err := u.hook.CheckProxyPorts(ctx, old.Proxy, next); err != nil {
 			return dto.SettingsOutput{}, err
 		}
 	}
