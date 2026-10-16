@@ -218,6 +218,12 @@ function validateCredentials(body: RegistryBody) {
 	if (CONTROL.test(body.username)) {
 		return invalid('username', 'no puede tener caracteres de control')
 	}
+	if (body.username.includes(':')) {
+		return invalid(
+			'username',
+			'no puede tener ":" (la autenticación HTTP Basic lo usa de separador)',
+		)
+	}
 	if (typeof body.password !== 'string' || body.password === '') {
 		return invalid('password', 'es obligatoria')
 	}

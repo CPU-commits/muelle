@@ -161,6 +161,10 @@ describe('SecuritySettingsViewModel', () => {
 		expect(mocks.updateSecurity).toHaveBeenCalledWith({ allowedCidrs: '10.0.0.0/8' })
 		expect(vm.confirmingLockout).toBe(true)
 		expect(vm.lockoutBody).toBe(m.admin_security_lockout_body({ ip: '198.51.100.17' }))
+		// Cómo volver a entrar desde el servidor (contrato §5.4): el comando, para copiarlo.
+		expect(vm.recoveryCommand).toBe(
+			'docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle | head -n1)" muelle settings reset-panel-ips',
+		)
 		expect(success).not.toHaveBeenCalled()
 
 		await vm.confirmLockout()

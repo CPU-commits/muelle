@@ -22,3 +22,15 @@ export interface RegistryCredentials {
 
 /** La fase en la que llega `/registries` (los deploys la usan para imágenes privadas). */
 export const REGISTRIES_PHASE = 2 as const
+
+/**
+ * El registry de las imágenes de muelle (`ghcr.io/cpu-commits/muelle…`, contrato §5.1). Son
+ * privadas: install guarda esta credencial en el primer arranque, y con ella ingress baja
+ * la imagen de Caddy de cada versión nueva (§3.4 y §5.2).
+ */
+export const MUELLE_IMAGES_HOST = 'ghcr.io'
+
+/** Borrarlo deja a muelle sin poder bajar sus propias imágenes. */
+export function isMuelleRegistry(host: string): boolean {
+	return host === MUELLE_IMAGES_HOST
+}

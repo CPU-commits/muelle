@@ -18,6 +18,8 @@ export function parseRegistryCredentials(input: {
 		throw new InvalidRegistryCredential('username', 'too_long')
 	}
 	if (CONTROL.test(username)) throw new InvalidRegistryCredential('username', 'control')
+	// La autenticación HTTP Basic separa usuario y contraseña con ":" (contrato §2.10).
+	if (username.includes(':')) throw new InvalidRegistryCredential('username', 'colon')
 	// La contraseña va tal cual: un espacio puede ser parte de ella.
 	const { password } = input
 	if (password === '') throw new RequiredField('password')

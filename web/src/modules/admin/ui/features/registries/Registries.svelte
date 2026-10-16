@@ -158,7 +158,7 @@
 <ConfirmDialog
 	open={vm.removing !== null}
 	title={m.admin_registry_delete_title({ host: vm.removing ?? '' })}
-	body={m.admin_registry_delete_body()}
+	body={vm.removeBody}
 	confirmLabel={m.admin_registries_delete()}
 	cancelLabel={m.common_cancel()}
 	loading={vm.isRemoving}

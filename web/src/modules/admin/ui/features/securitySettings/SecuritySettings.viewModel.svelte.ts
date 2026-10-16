@@ -7,6 +7,7 @@ import {
 	cidrListText,
 	type PanelAccess,
 	parseCidrList,
+	RESET_PANEL_IPS_COMMAND,
 	sameCidrList,
 	type Settings,
 	TotpRequiredFirst,
@@ -82,6 +83,11 @@ export class SecuritySettingsViewModel {
 		return this.clientIpAllowed
 			? m.admin_security_client_ip_in({ ip })
 			: m.admin_security_client_ip_out({ ip })
+	}
+
+	/** El comando para recuperar el acceso desde el servidor (se muestra para copiarlo). */
+	get recoveryCommand(): string {
+		return RESET_PANEL_IPS_COMMAND
 	}
 
 	get lockoutBody(): string {

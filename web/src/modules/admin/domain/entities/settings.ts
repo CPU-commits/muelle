@@ -60,3 +60,11 @@ export interface SettingsPatch {
 	/** Guardar una lista de IPs que deja fuera esta sesión (si no, `WouldLockOut`). */
 	readonly confirmLockout?: boolean
 }
+
+/**
+ * Volver a entrar después de una lista de IPs que deja fuera (contrato §5.4): corre adentro
+ * del contenedor de muelle, vacía `panel_allowed_cidrs` y reinicia el servicio, que al
+ * arrancar le reenvía la configuración a Caddy.
+ */
+export const RESET_PANEL_IPS_COMMAND =
+	'docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle | head -n1)" muelle settings reset-panel-ips'

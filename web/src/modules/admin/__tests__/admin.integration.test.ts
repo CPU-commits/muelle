@@ -260,6 +260,21 @@ describe('auditoría', () => {
 		expect(first.items[0]).not.toHaveProperty('details')
 	})
 
+	it('lo primero es del primer arranque: install, con actor system (contrato §2.10 y §5.2)', async () => {
+		const events = []
+		let page = await adminUseCases.listAudit()
+		events.push(...page.items)
+		while (page.nextCursor !== null) {
+			page = await adminUseCases.listAudit({ before: page.nextCursor })
+			events.push(...page.items)
+		}
+		const oldest = events.slice(-2).reverse()
+		expect(oldest.map((event) => [event.action, event.target, event.actor])).toEqual([
+			['settings.init', 'settings', { kind: 'system' }],
+			['registry.create', 'registry:ghcr.io', { kind: 'system' }],
+		])
+	})
+
 	it('lo que se hace en el panel aparece arriba', async () => {
 		await adminUseCases.updateAcmeEmail('certs@tudominio.cl')
 

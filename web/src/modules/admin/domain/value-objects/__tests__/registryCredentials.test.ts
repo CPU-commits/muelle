@@ -21,7 +21,7 @@ function problemOf(username: string, password: string): string {
 const problems = (...list: `${'username' | 'password'}:${RegistryCredentialProblem}`[]) => list
 
 // Los límites del backend (contrato §2.10): usuario de 1 a 255 caracteres sin caracteres de
-// control, contraseña de 1 a 4096 bytes sin saltos de línea.
+// control ni ":", contraseña de 1 a 4096 bytes sin saltos de línea.
 describe('registryCredentials', () => {
 	it('usuario y contraseña son obligatorios; la contraseña no se recorta', () => {
 		expect(parseRegistryCredentials({ username: ' bot ', password: ' x ' })).toEqual({
@@ -38,6 +38,12 @@ describe('registryCredentials', () => {
 		expect([problemOf('a'.repeat(256), 'x'), problemOf('bo\tt', 'x')]).toEqual(
 			problems('username:too_long', 'username:control'),
 		)
+	})
+
+	it('el usuario no lleva ":", que la autenticación HTTP Basic usa de separador', () => {
+		expect(problemOf('bot:ci', 'x')).toBe('username:colon')
+		// En la contraseña sí puede ir.
+		expect(problemOf('bot', 'ghp:x')).toBe('ok')
 	})
 
 	it('la contraseña tiene hasta 4096 bytes (no caracteres) y ningún salto de línea', () => {

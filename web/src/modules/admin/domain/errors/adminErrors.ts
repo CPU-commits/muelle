@@ -100,10 +100,21 @@ export class InvalidPort extends ValidationError {
 	}
 }
 
+/**
+ * `placeholder`: lleva `{` o `}`. Caddy expande placeholders en el email del emisor ACME y
+ * en el token de Cloudflare: con uno, el backend lo guarda pero deja de mandarle la
+ * configuración a Caddy (`GET /proxy` dice `out_of_sync`, contrato §3.4). El panel no lo
+ * deja guardar.
+ */
+export type PlaceholderProblem = 'placeholder'
+
 export class InvalidAcmeEmail extends ValidationError {
-	constructor() {
-		super('No es un email válido', 'acmeEmail')
+	readonly problem: 'format' | PlaceholderProblem
+
+	constructor(problem: 'format' | PlaceholderProblem = 'format') {
+		super(problem === 'format' ? 'No es un email válido' : 'El email lleva { o }', 'acmeEmail')
 		this.name = 'InvalidAcmeEmail'
+		this.problem = problem
 	}
 }
 
@@ -123,8 +134,11 @@ export class InvalidRegistryHost extends ValidationError {
 	}
 }
 
-/** Qué límite del backend no cumple un usuario o una contraseña de registry (§2.10). */
-export type RegistryCredentialProblem = 'too_long' | 'control' | 'newline'
+/**
+ * Qué límite del backend no cumple un usuario o una contraseña de registry (§2.10).
+ * `colon`: un `:` en el usuario (HTTP Basic lo usa de separador).
+ */
+export type RegistryCredentialProblem = 'too_long' | 'control' | 'colon' | 'newline'
 
 export class InvalidRegistryCredential extends ValidationError {
 	override readonly field: 'username' | 'password'
@@ -138,9 +152,12 @@ export class InvalidRegistryCredential extends ValidationError {
 	}
 }
 
-export type CloudflareTokenProblem = 'length' | 'spaces'
+export type CloudflareTokenProblem = 'length' | 'spaces' | PlaceholderProblem
 
-/** Un token sin la forma de un token de Cloudflare: de 20 a 512 caracteres, sin espacios. */
+/**
+ * Un token sin la forma de un token de Cloudflare: de 20 a 512 caracteres, sin espacios. Con
+ * `{` o `}`, Caddy no carga la configuración (ver `PlaceholderProblem`).
+ */
 export class InvalidCloudflareToken extends ValidationError {
 	readonly problem: CloudflareTokenProblem
 

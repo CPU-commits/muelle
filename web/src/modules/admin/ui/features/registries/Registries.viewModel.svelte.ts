@@ -10,6 +10,7 @@ import {
 	updateRegistryMutation,
 } from '../../../data'
 import {
+	isMuelleRegistry,
 	parseRegistryCredentials,
 	parseRegistryHost,
 	type Registry,
@@ -180,6 +181,13 @@ export class RegistriesViewModel {
 			return
 		}
 		toast.error(m.admin_save_error(), adminErrorMessage(error))
+	}
+
+	/** El texto de la confirmación: el registry de muelle avisa qué deja de andar. */
+	get removeBody(): string {
+		return this.removing !== null && isMuelleRegistry(this.removing)
+			? m.admin_registry_delete_body_muelle()
+			: m.admin_registry_delete_body()
 	}
 
 	askRemove = (host: string): void => {

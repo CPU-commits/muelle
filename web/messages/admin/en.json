@@ -1,6 +1,5 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
-
 	"admin_nav_label": "Settings sections",
 	"admin_nav_proxy": "Proxy and DNS",
 	"admin_nav_security": "Security",
@@ -10,9 +9,8 @@
 	"admin_settings_load_error": "The settings couldn't be loaded.",
 	"admin_proxy_feature": "Proxy and DNS",
 	"admin_save_error": "It couldn't be saved.",
-
 	"admin_cf_title": "Cloudflare",
-	"admin_cf_description": "Creates the DNS records and requests certificates through DNS-01.",
+	"admin_cf_description": "Creates the DNS records (the panel's too, if it doesn't exist) and requests certificates through DNS-01.",
 	"admin_cf_set": "Token set",
 	"admin_cf_unset": "No token",
 	"admin_cf_unset_hint": "DNS records are created by hand and certificates are requested over HTTP.",
@@ -27,7 +25,7 @@
 	"admin_cf_remove_body": "Without a token, DNS records are created by hand and certificates are requested over HTTP. To use Cloudflare again you'll have to paste a token again.",
 	"admin_cf_removed": "Cloudflare token removed",
 	"admin_cf_modal_title": "Cloudflare token",
-	"admin_cf_modal_description": "It needs permission to read zones and edit their DNS. It's stored encrypted and never shown again.",
+	"admin_cf_modal_description": "It needs the Zone:Read and DNS:Edit permissions on the zones it will use. It's stored encrypted and never shown again.",
 	"admin_cf_token": "API token",
 	"admin_cf_token_hint": "muelle checks it with Cloudflare before saving it.",
 	"admin_cf_saved": "Cloudflare token saved",
@@ -35,17 +33,15 @@
 	"admin_cf_unavailable_body": "The token wasn't saved. Paste it again and retry in a moment.",
 	"admin_error_cf_token_length": "A Cloudflare token has between {min} and {max} characters.",
 	"admin_error_cf_token_spaces": "No spaces: paste just the token.",
-
 	"admin_ip_title": "Public IP",
 	"admin_ip_description": "Where the records muelle creates point to.",
 	"admin_ip_v4": "IPv4",
 	"admin_ip_v6": "IPv6",
-	"admin_ip_v4_hint": "Leave it empty and muelle creates no DNS records.",
-	"admin_ip_note": "Changing it updates the records muelle manages.",
+	"admin_ip_v4_hint": "Leave it empty and muelle creates no DNS records and leaves the ones it manages alone.",
+	"admin_ip_note": "Changing it updates the content of the records muelle manages (never their Proxied setting). Removing the IPv6 deletes their AAAA records.",
 	"admin_ip_saved": "Public IP saved",
 	"admin_error_ipv4": "That's not a valid IPv4 (like 203.0.113.24).",
 	"admin_error_ipv6": "That's not a valid IPv6 (like 2001:db8::24).",
-
 	"admin_cert_title": "Certificates",
 	"admin_cert_description": "Let's Encrypt emails this address if a certificate has problems.",
 	"admin_cert_email": "ACME email",
@@ -53,7 +49,6 @@
 	"admin_cert_note": "The panel domain is set at install time.",
 	"admin_cert_saved": "ACME email saved",
 	"admin_error_email": "That's not a valid email.",
-
 	"admin_ports_title": "Proxy ports",
 	"admin_ports_description": "Where muelle-caddy listens on the host.",
 	"admin_ports_http": "HTTP",
@@ -70,7 +65,6 @@
 	"admin_ports_moved_action": "Go to the panel",
 	"admin_error_port": "A number between 1 and 65535.",
 	"admin_error_port_same": "It must differ from the HTTP one.",
-
 	"admin_security_title": "Security",
 	"admin_security_description": "muelle has access to docker.sock: signing in to the panel is the same as being root on the server.",
 	"admin_security_2fa": "Require 2FA",
@@ -85,11 +79,10 @@
 	"admin_security_cidrs_feature": "The allowed IPs list",
 	"admin_security_saved": "Security saved",
 	"admin_security_lockout_title": "You'd lock yourself out of the panel",
-	"admin_security_lockout_body": "muelle sees this session from {ip}, which isn't on the list. If you save anyway, you'll only get back in from an IP on the list or by changing it from the server.",
-	"admin_security_lockout_body_no_ip": "With this list, this session could no longer open the panel. If you save anyway, you'll only get back in from an IP on the list or by changing it from the server.",
+	"admin_security_lockout_body": "muelle sees this session from {ip}, which isn't on the list. If you save anyway, you'll only get back in from an IP on the list or by clearing it from the server.",
+	"admin_security_lockout_body_no_ip": "With this list, this session could no longer open the panel. If you save anyway, you'll only get back in from an IP on the list or by clearing it from the server.",
 	"admin_security_lockout_confirm": "Save anyway",
 	"admin_error_cidr": "Line {line}: “{value}” is neither an IP nor a CIDR range.",
-
 	"admin_registries_title": "Registries",
 	"admin_registries_description": "For private images. The password is stored encrypted.",
 	"admin_registries_add": "Add",
@@ -125,7 +118,6 @@
 	"admin_error_registry_password_newline": "No line breaks: paste it on a single line.",
 	"admin_error_registry_not_found": "That registry no longer exists.",
 	"admin_error_registry_exists": "There's already a registry with that host.",
-
 	"admin_audit_title": "Audit log",
 	"admin_audit_description": "180 days. It never includes variable values.",
 	"admin_audit_refresh": "Refresh",
@@ -143,5 +135,10 @@
 	"admin_audit_empty_title": "No events yet",
 	"admin_audit_empty_body": "What's done in the panel and through the API shows up here.",
 	"admin_audit_load_error": "The audit log couldn't be loaded.",
-	"admin_audit_more_error": "More events couldn't be loaded."
+	"admin_audit_more_error": "More events couldn't be loaded.",
+	"admin_error_registry_username_colon": "No \":\": registry authentication uses it to separate the username from the password.",
+	"admin_registry_delete_body_muelle": "muelle's images are private and are pulled with this registry: without it, muelle can't pull the Caddy image of a new version, and deploys with private ghcr.io images will fail to pull.",
+	"admin_error_placeholder": "No curly braces: Caddy reads them as a placeholder and would stop receiving the configuration.",
+	"admin_security_recovery_label": "To clear it, on the server (restarts muelle for a few seconds):",
+	"admin_security_recovery_copy": "Copy the command"
 }

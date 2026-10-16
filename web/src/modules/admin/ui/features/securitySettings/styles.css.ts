@@ -51,3 +51,35 @@ export const pending = style({
 	fontSize: theme.typography.fontSize[13],
 	color: theme.colors.text.tertiary,
 })
+
+// "Recuperar el acceso" en la confirmación de una lista que te deja fuera: el comando que
+// se corre en el servidor, para copiarlo.
+export const recovery = style({
+	display: 'flex',
+	flexDirection: 'column',
+	alignItems: 'flex-start',
+	gap: theme.space[8],
+	marginTop: theme.space[12],
+})
+
+export const recoveryLabel = style({
+	margin: 0,
+	fontSize: theme.typography.fontSize[13],
+	color: theme.colors.text.secondary,
+})
+
+export const recoveryCommand = style({
+	margin: 0,
+	width: '100%',
+	boxSizing: 'border-box',
+	padding: `${theme.space[10]} ${theme.space[12]}`,
+	border: `1px solid ${theme.colors.borders.subtle}`,
+	borderRadius: theme.radius.md,
+	backgroundColor: theme.colors.background.page,
+	color: theme.colors.text.secondary,
+	fontFamily: theme.typography.fontFamily.mono,
+	fontSize: theme.typography.fontSize[12],
+	lineHeight: 1.6,
+	whiteSpace: 'pre-wrap',
+	overflowWrap: 'anywhere',
+})

@@ -41,10 +41,27 @@ const REGISTRY_HOST_MESSAGES: Record<RegistryHostProblem, () => string> = {
 	format: () => m.admin_error_registry_host_format(),
 }
 
+function cloudflareTokenMessage(error: InvalidCloudflareToken): string {
+	switch (error.problem) {
+		case 'placeholder':
+			return m.admin_error_placeholder()
+		case 'spaces':
+			return m.admin_error_cf_token_spaces()
+		case 'length':
+			return m.admin_error_cf_token_length({
+				min: CLOUDFLARE_TOKEN_MIN_LENGTH,
+				max: CLOUDFLARE_TOKEN_MAX_LENGTH,
+			})
+	}
+}
+
 function registryCredentialMessage(error: InvalidRegistryCredential): string {
 	if (error.field === 'username') {
-		return error.problem === 'too_long'
-			? m.admin_error_registry_username_long({ max: REGISTRY_USERNAME_MAX_LENGTH })
+		if (error.problem === 'too_long') {
+			return m.admin_error_registry_username_long({ max: REGISTRY_USERNAME_MAX_LENGTH })
+		}
+		return error.problem === 'colon'
+			? m.admin_error_registry_username_colon()
 			: m.admin_error_registry_username_control()
 	}
 	return error.problem === 'too_long'
@@ -77,7 +94,9 @@ export function adminFieldError(error: unknown): FieldError | null {
 		}
 	}
 	if (error instanceof InvalidAcmeEmail) {
-		return { field: 'acmeEmail', message: m.admin_error_email() }
+		const message =
+			error.problem === 'placeholder' ? m.admin_error_placeholder() : m.admin_error_email()
+		return { field: 'acmeEmail', message }
 	}
 	if (error instanceof InvalidRegistryHost) {
 		return { field: 'host', message: REGISTRY_HOST_MESSAGES[error.problem]() }
@@ -86,14 +105,7 @@ export function adminFieldError(error: unknown): FieldError | null {
 		return { field: error.field, message: registryCredentialMessage(error) }
 	}
 	if (error instanceof InvalidCloudflareToken) {
-		const message =
-			error.problem === 'spaces'
-				? m.admin_error_cf_token_spaces()
-				: m.admin_error_cf_token_length({
-						min: CLOUDFLARE_TOKEN_MIN_LENGTH,
-						max: CLOUDFLARE_TOKEN_MAX_LENGTH,
-					})
-		return { field: 'cloudflareToken', message }
+		return { field: 'cloudflareToken', message: cloudflareTokenMessage(error) }
 	}
 	if (error instanceof RegistryExists) {
 		return { field: 'host', message: m.admin_error_registry_exists() }

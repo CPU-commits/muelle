@@ -3,6 +3,7 @@ import { UnavailableError, ValidationError } from '@/shared/domain'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import {
 	CloudflareUnavailable,
+	InvalidAcmeEmail,
 	InvalidCloudflareToken,
 	InvalidRegistryCredential,
 	InvalidRegistryHost,
@@ -45,6 +46,21 @@ describe('adminFieldError', () => {
 		})
 	})
 
+	it('{ y } en el email o el token: Caddy los lee como placeholder', () => {
+		expect(adminFieldError(new InvalidAcmeEmail('placeholder'))).toEqual({
+			field: 'acmeEmail',
+			message: m.admin_error_placeholder(),
+		})
+		expect(adminFieldError(new InvalidAcmeEmail())).toEqual({
+			field: 'acmeEmail',
+			message: m.admin_error_email(),
+		})
+		expect(adminFieldError(new InvalidCloudflareToken('placeholder'))).toEqual({
+			field: 'cloudflareToken',
+			message: m.admin_error_placeholder(),
+		})
+	})
+
 	it('los límites de usuario y contraseña de un registry', () => {
 		expect(adminFieldError(new InvalidRegistryCredential('username', 'too_long'))).toEqual({
 			field: 'username',
@@ -53,6 +69,10 @@ describe('adminFieldError', () => {
 		expect(adminFieldError(new InvalidRegistryCredential('username', 'control'))).toEqual({
 			field: 'username',
 			message: m.admin_error_registry_username_control(),
+		})
+		expect(adminFieldError(new InvalidRegistryCredential('username', 'colon'))).toEqual({
+			field: 'username',
+			message: m.admin_error_registry_username_colon(),
 		})
 		expect(adminFieldError(new InvalidRegistryCredential('password', 'too_long'))).toEqual({
 			field: 'password',

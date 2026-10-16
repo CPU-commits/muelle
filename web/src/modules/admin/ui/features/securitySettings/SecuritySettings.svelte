@@ -6,6 +6,7 @@
 		Button,
 		Card,
 		ConfirmDialog,
+		CopyButton,
 		Field,
 		LinkButton,
 		Switch,
@@ -18,6 +19,9 @@
 		clientIp,
 		clientIpOut,
 		pending,
+		recovery,
+		recoveryCommand,
+		recoveryLabel,
 		switchControl,
 		switchHint,
 		switchRow,
@@ -29,6 +33,8 @@
 	let { settings, id }: { settings: Settings; id?: string } = $props()
 
 	const vm = new SecuritySettingsViewModel(() => settings)
+	const uid = $props.id()
+	const recoveryId = `${uid}-recovery`
 </script>
 
 <Card
@@ -117,4 +123,16 @@
 	error={vm.lockoutError}
 	onConfirm={vm.confirmLockout}
 	onCancel={vm.cancelLockout}
-/>
+>
+	<div class={recovery}>
+		<p class={recoveryLabel}>{m.admin_security_recovery_label()}</p>
+		<pre id={recoveryId} class={recoveryCommand}>{vm.recoveryCommand}</pre>
+		<CopyButton
+			value={vm.recoveryCommand}
+			target={recoveryId}
+			label={m.admin_security_recovery_copy()}
+			variant="secondary"
+			size="sm"
+		/>
+	</div>
+</ConfirmDialog>

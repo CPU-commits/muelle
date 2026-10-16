@@ -49,6 +49,17 @@ describe('ajustes de proxy y DNS', () => {
 		expect((error as InvalidAcmeEmail).field).toBe('acmeEmail')
 	})
 
+	it('email ACME: sin { ni }, que Caddy lee como placeholder (contrato §3.4)', async () => {
+		const settings = new InMemorySettingsRepository()
+		const update = makeUpdateAcmeEmail({ settings })
+
+		const error = await update('ops{x}@tudominio.cl').catch((caught: unknown) => caught)
+
+		// El backend lo aceptaría, y muelle dejaría de mandarle la configuración a Caddy.
+		expect(error).toMatchObject({ name: 'InvalidAcmeEmail', problem: 'placeholder' })
+		expect(settings.patches).toEqual([])
+	})
+
 	it('puertos: los dos, distintos', async () => {
 		const settings = new InMemorySettingsRepository()
 		const update = makeUpdateProxyPorts({ settings })

@@ -12,6 +12,7 @@ import {
 	type ProxySettings,
 	type Settings,
 } from '../../../../domain'
+import { ingressKeys } from '@/modules/ingress'
 import ProxySettingsHarness from './ProxySettingsHarness.svelte'
 import { cacheHolds } from '../../../__tests__/cacheHolds'
 
@@ -111,6 +112,42 @@ describe('ProxySettingsViewModel', () => {
 
 		expect(mocks.updatePublicIp).toHaveBeenCalledWith({ ipv4: '203.0.113.30', ipv6: '' })
 		expect(vm.acmeEmail).toBe('certs@tudominio.cl')
+	})
+
+	it('cada cambio que sale bien vuelve a pedir los dominios y el proxy (records, estado)', async () => {
+		const vm = await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: 4 } })
+		const invalidate = vi.spyOn(client, 'invalidateQueries')
+		const refreshedIngress = () =>
+			invalidate.mock.calls.filter(([filters]) => filters?.queryKey === ingressKeys.all)
+				.length
+
+		vm.setField('ipv4', '203.0.113.30')
+		await vm.saveIp()
+		expect(refreshedIngress()).toBe(1)
+
+		vm.setField('acmeEmail', 'certs@tudominio.cl')
+		await vm.saveAcme()
+		expect(refreshedIngress()).toBe(2)
+
+		vm.setField('httpPort', '8080')
+		vm.askSavePorts()
+		await vm.savePorts()
+		expect(refreshedIngress()).toBe(3)
+
+		vm.openCloudflare()
+		vm.setField('cloudflareToken', 'x'.repeat(40))
+		await vm.saveCloudflare()
+		expect(refreshedIngress()).toBe(4)
+
+		vm.askRemoveCloudflare()
+		await vm.removeCloudflare()
+		expect(refreshedIngress()).toBe(5)
+
+		// Si falla, no cambió nada: no hay qué volver a pedir.
+		mocks.updatePublicIp.mockRejectedValueOnce(new UnavailableError('caído'))
+		vm.setField('ipv4', '203.0.113.31')
+		await vm.saveIp()
+		expect(refreshedIngress()).toBe(5)
 	})
 
 	it('los errores van a su campo y se limpian al escribir', async () => {

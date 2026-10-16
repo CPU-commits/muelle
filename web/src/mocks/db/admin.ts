@@ -44,8 +44,9 @@ export interface AdminState {
 	nextAuditId: number
 }
 
-// Con versión: una pestaña con el estado de antes (registries sin fechas) empieza de cero.
-const STORAGE_KEY = 'admin-v2'
+// Con versión: una pestaña con el estado de antes (registries sin fechas, la auditoría sin
+// el primer arranque) empieza de cero.
+const STORAGE_KEY = 'admin-v3'
 const MINUTE_MS = 60_000
 
 /** Cuántos eventos trae la auditoría al empezar: más de una página, para ver "Cargar más". */
@@ -66,11 +67,41 @@ const SEED_ACTIONS: readonly SeedAction[] = [
 	{ actor_type: 'user', action: 'domain.create', target: 'webhooks-staging.tudominio.cl' },
 ]
 
+/**
+ * Lo primero que queda en la auditoría es el primer arranque de la base, sin usuario
+ * (actor `system`): los ajustes de install (`settings.init`, solo las claves) y el registry
+ * con que install bajó las imágenes de muelle (`registry.create`, `source: install`;
+ * contrato §2.10 y §5.2).
+ */
+const INSTALL_ACTIONS: readonly (SeedAction & { details: Record<string, unknown> })[] = [
+	{
+		actor_type: 'system',
+		action: 'settings.init',
+		target: 'settings',
+		details: { keys: ['acme_email', 'public_ip', 'proxy_http_port', 'proxy_https_port'] },
+	},
+	{
+		actor_type: 'system',
+		action: 'registry.create',
+		target: 'registry:ghcr.io',
+		details: { username: 'cpu-commits', source: 'install' },
+	},
+]
+
 function seedAudit(): MockAuditEvent[] {
 	const now = Date.now()
 	return Array.from({ length: MOCK_AUDIT_SEED_COUNT }, (_, index) => {
-		const base = SEED_ACTIONS[index % SEED_ACTIONS.length] ?? LOGIN
+		const install = INSTALL_ACTIONS[index]
 		const minutesAgo = (MOCK_AUDIT_SEED_COUNT - index) * 37
+		if (install) {
+			return {
+				id: index + 1,
+				...install,
+				actor_id: null,
+				at: new Date(now - minutesAgo * MINUTE_MS).toISOString(),
+			}
+		}
+		const base = SEED_ACTIONS[index % SEED_ACTIONS.length] ?? LOGIN
 		return {
 			id: index + 1,
 			...base,

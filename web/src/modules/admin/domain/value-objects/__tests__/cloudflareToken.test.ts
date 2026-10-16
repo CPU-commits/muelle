@@ -16,6 +16,12 @@ describe('cloudflareToken', () => {
 		expect(() => parseCloudflareToken('  ')).toThrow(RequiredField)
 	})
 
+	it('rechaza { y }: Caddy los lee como placeholder y no carga la configuración (§3.4)', () => {
+		expect(() => parseCloudflareToken(`${valid}{x}`)).toThrow(
+			expect.objectContaining({ problem: 'placeholder', field: 'cloudflareToken' }),
+		)
+	})
+
 	it('rechaza el largo equivocado y los espacios del medio', () => {
 		expect(() => parseCloudflareToken('corto')).toThrow(
 			expect.objectContaining({ name: 'InvalidCloudflareToken', problem: 'length' }),

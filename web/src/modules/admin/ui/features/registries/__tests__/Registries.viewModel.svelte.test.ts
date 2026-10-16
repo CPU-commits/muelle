@@ -247,6 +247,18 @@ describe('RegistriesViewModel', () => {
 		expect(info).toHaveBeenCalledWith(m.admin_error_registry_not_found())
 	})
 
+	it('eliminar ghcr.io avisa que muelle baja sus propias imágenes con él', async () => {
+		const vm = await mountViewModel()
+
+		vm.askRemove('quay.io')
+		expect(vm.removeBody).toBe(m.admin_registry_delete_body())
+		vm.cancelRemove()
+
+		// install lo guarda: las imágenes de muelle son privadas (contrato §3.4 y §5.2).
+		vm.askRemove('ghcr.io')
+		expect(vm.removeBody).toBe(m.admin_registry_delete_body_muelle())
+	})
+
 	it('eliminar pide confirmación', async () => {
 		const vm = await mountViewModel()
 

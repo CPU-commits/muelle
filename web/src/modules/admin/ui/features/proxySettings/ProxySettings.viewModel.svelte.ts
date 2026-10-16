@@ -1,6 +1,7 @@
 import { createMutation, useQueryClient } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
+import { ingressKeys } from '@/modules/ingress'
 import {
 	removeCloudflareTokenMutation,
 	replaceCloudflareTokenMutation,
@@ -205,6 +206,7 @@ export class ProxySettingsViewModel {
 				this.#loadPorts(settings.proxy)
 				this.movedTo = this.#movedTo(settings.proxy, before)
 			}
+			this.#refreshIngress()
 			toast.success(m.admin_ports_saved())
 			this.confirmingPorts = false
 		} catch (error) {
@@ -241,6 +243,7 @@ export class ProxySettingsViewModel {
 		this.cloudflareError = null
 		try {
 			await this.#cloudflare.mutateAsync(token)
+			this.#refreshIngress()
 			toast.success(m.admin_cf_saved())
 			this.cloudflareOpen = false
 		} catch (error) {
@@ -276,6 +279,7 @@ export class ProxySettingsViewModel {
 		this.removeCloudflareError = null
 		try {
 			await this.#removeCloudflare.mutateAsync()
+			this.#refreshIngress()
 			toast.success(m.admin_cf_removed())
 			this.confirmingRemoveCloudflare = false
 		} catch (error) {
@@ -295,10 +299,21 @@ export class ProxySettingsViewModel {
 		try {
 			const settings = await run()
 			if (settings.proxy) apply(settings.proxy)
+			this.#refreshIngress()
 			toast.success(success)
 		} catch (error) {
 			this.#fail(error)
 		}
+	}
+
+	/**
+	 * Lo que cambió puede cambiar los dominios y el proxy (contrato §3.5): los `records` se
+	 * calculan con la IP pública de ahora, los registros que maneja muelle siguen a la IP (y
+	 * un dominio en error de Cloudflare puede volver a `pending`), y la configuración de
+	 * Caddy se regenera o se recrea el contenedor. Dominios los vuelve a pedir.
+	 */
+	#refreshIngress(): void {
+		void this.#client.invalidateQueries({ queryKey: ingressKeys.all })
 	}
 
 	#movedTo(proxy: ProxySettings, httpsBefore: number): string | null {
