@@ -169,6 +169,20 @@ type CaddyWant struct {
 	Auth *Credential
 }
 
+// HostPort es un puerto del host con su protocolo ("tcp" o "udp").
+type HostPort struct {
+	Port     int
+	Protocol string
+}
+
+// CaddyServing es el muelle-caddy que corre publicando sus puertos: la
+// imagen con que se creó y los puertos del host de su 80/tcp (HTTP) y su
+// 443/tcp (HTTPS).
+type CaddyServing struct {
+	Image               string
+	HTTPPort, HTTPSPort int
+}
+
 // CaddyRuntime es el contenedor muelle-caddy (adaptador: caddy.Runtime, D2
 // del plan de la Fase 3).
 type CaddyRuntime interface {
@@ -180,4 +194,13 @@ type CaddyRuntime interface {
 	// Status es lo que corre de verdad: la imagen con que se creó y si corre;
 	// found false si el contenedor no existe.
 	Status(ctx context.Context) (image string, running, found bool, err error)
+	// Serving es el muelle-caddy que sirve: ok false si no existe, no corre
+	// o corre sin publicar sus puertos.
+	Serving(ctx context.Context) (s CaddyServing, ok bool, err error)
+	// ProbePorts prueba que se puedan tomar esos puertos del host, con un
+	// contenedor descartable de image y sin tocar muelle-caddy (contrato
+	// §4.1). Errores: ErrPortInUse si alguno está tomado, o Docker caído.
+	// Si la prueba no se puede hacer por otra cosa (la imagen no está en el
+	// nodo), lo registra y devuelve nil.
+	ProbePorts(ctx context.Context, image string, ports []HostPort) error
 }

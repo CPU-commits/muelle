@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
@@ -41,11 +42,14 @@ type Engine interface {
 // Runtime es el contenedor muelle-caddy (contrato §3.4, spec §4.2): lo crea,
 // lo recrea (nunca lo rearranca) y lo conecta a las redes. No es seguro
 // llamar a Ensure desde varias goroutines a la vez: lo serializa quien lo
-// usa (usecases.EnsureCaddy).
+// usa (usecases.EnsureCaddy). ProbePorts sí se puede llamar a la vez que
+// Ensure: las pruebas de puertos, que usan el mismo contenedor descartable,
+// van de a una (probeMu).
 type Runtime struct {
-	docker Engine
-	names  Names
-	log    *slog.Logger
+	docker  Engine
+	names   Names
+	log     *slog.Logger
+	probeMu sync.Mutex
 }
 
 var _ service.CaddyRuntime = (*Runtime)(nil)
@@ -83,7 +87,7 @@ func (r *Runtime) spec(want service.CaddyWant) docker.ContainerSpec {
 //     conecta a las redes que le faltan (la panel y las de stage) y vuelve;
 //  3. si no, lo recrea (D11 del plan de la Fase 3): baja la imagen si falta
 //     (si no baja, el contenedor anterior queda intacto), lo detiene si
-//     corría, lo borra, prueba los puertos (probePorts), crea uno nuevo, lo
+//     corría, lo borra, prueba los puertos (probe), crea uno nuevo, lo
 //     conecta a las redes de stage y lo arranca. Con un puerto del host
 //     ocupado, borra el que no arrancó.
 //
@@ -121,7 +125,7 @@ func (r *Runtime) Ensure(ctx context.Context, want service.CaddyWant) (bool, err
 			return false, fmt.Errorf("borrando muelle-caddy: %w", err)
 		}
 	}
-	if err := r.probePorts(ctx, spec); err != nil {
+	if err := r.probe(ctx, spec.Image, spec.Ports); err != nil {
 		return false, err
 	}
 	if _, err := r.docker.CreateContainer(ctx, spec); err != nil {
@@ -158,7 +162,55 @@ func (r *Runtime) Status(ctx context.Context) (image string, running, found bool
 	return c.Image, c.Running, true, nil
 }
 
-// probePorts prueba que los puertos del host de spec estén libres, con un
+// Serving es el muelle-caddy que sirve (contrato §3.5: a lo que se vuelve si
+// los puertos nuevos no arrancan): la imagen con que se creó y los puertos
+// del host que pidió para su 80/tcp y su 443/tcp. ok false si no existe, no
+// corre o corre sin publicar sus puertos.
+func (r *Runtime) Serving(ctx context.Context) (service.CaddyServing, bool, error) {
+	c, err := r.docker.InspectContainer(ctx, r.names.Container)
+	if errors.Is(err, docker.ErrNotFound) {
+		return service.CaddyServing{}, false, nil
+	}
+	if err != nil {
+		return service.CaddyServing{}, false, err
+	}
+	if !c.Running || len(c.PublishedPorts) == 0 {
+		return service.CaddyServing{}, false, nil
+	}
+	s := service.CaddyServing{Image: c.Image}
+	for _, p := range c.Ports {
+		if cmp.Or(p.Protocol, "tcp") != "tcp" {
+			continue
+		}
+		switch p.ContainerPort {
+		case 80:
+			s.HTTPPort = p.HostPort
+		case 443:
+			s.HTTPSPort = p.HostPort
+		}
+	}
+	if s.HTTPPort == 0 || s.HTTPSPort == 0 {
+		return service.CaddyServing{}, false, nil
+	}
+	return s, true, nil
+}
+
+// ProbePorts prueba esos puertos del host con el contenedor descartable de
+// probe (cada uno publicado en el mismo número del contenedor), sin tocar
+// muelle-caddy. La usa PATCH /settings antes de guardar otros puertos del
+// proxy (contrato §4.1). Sin puertos no llama a Docker.
+func (r *Runtime) ProbePorts(ctx context.Context, image string, ports []service.HostPort) error {
+	if len(ports) == 0 {
+		return nil
+	}
+	bindings := make([]docker.PortBinding, 0, len(ports))
+	for _, p := range ports {
+		bindings = append(bindings, docker.PortBinding{HostPort: p.Port, ContainerPort: p.Port, Protocol: p.Protocol})
+	}
+	return r.probe(ctx, image, bindings)
+}
+
+// probe prueba que esos puertos del host estén libres, con un
 // contenedor descartable (<contenedor>-probe) de la misma imagen, en la red
 // bridge por defecto y sin redes de Swarm, que corre "caddy version" y se
 // borra enseguida. Hace falta porque Docker (29) no suelta la conexión de
@@ -168,8 +220,11 @@ func (r *Runtime) Status(ctx context.Context) (image string, running, found bool
 // "proxy" reintentaría cada 5 minutos y se comería la red panel en un día.
 // Devuelve ErrPortInUse si un puerto está ocupado; si la prueba falla por
 // otra cosa (sin la red bridge, por ejemplo), lo registra y sigue: la prueba
-// es una protección, no un requisito.
-func (r *Runtime) probePorts(ctx context.Context, spec docker.ContainerSpec) error {
+// es una protección, no un requisito. Las pruebas van de a una (probeMu):
+// todas usan el mismo nombre.
+func (r *Runtime) probe(ctx context.Context, image string, ports []docker.PortBinding) error {
+	r.probeMu.Lock()
+	defer r.probeMu.Unlock()
 	name := r.names.Container + probeSuffix
 	remove := func() {
 		err := r.docker.RemoveContainer(context.WithoutCancel(ctx), name, true)
@@ -179,13 +234,13 @@ func (r *Runtime) probePorts(ctx context.Context, spec docker.ContainerSpec) err
 	}
 	remove() // uno que quedó de una prueba cortada
 	_, err := r.docker.CreateContainer(ctx, docker.ContainerSpec{
-		Name: name, Image: spec.Image, Cmd: []string{"caddy", "version"}, Ports: spec.Ports,
+		Name: name, Image: image, Cmd: []string{"caddy", "version"}, Ports: ports,
 	})
 	if err != nil {
 		if errors.Is(err, entity.ErrDockerUnavailable) {
 			return err
 		}
-		r.log.Warn("ingress: no se pudieron probar los puertos de muelle-caddy; se crea igual", "error", err)
+		r.log.Warn("ingress: no se pudieron probar los puertos de muelle-caddy; se sigue sin la prueba", "error", err)
 		return nil
 	}
 	defer remove()
@@ -196,7 +251,7 @@ func (r *Runtime) probePorts(ctx context.Context, spec docker.ContainerSpec) err
 		case errors.Is(err, entity.ErrDockerUnavailable):
 			return err
 		}
-		r.log.Warn("ingress: no se pudieron probar los puertos de muelle-caddy; se crea igual", "error", err)
+		r.log.Warn("ingress: no se pudieron probar los puertos de muelle-caddy; se sigue sin la prueba", "error", err)
 	}
 	return nil
 }

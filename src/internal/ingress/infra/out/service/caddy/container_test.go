@@ -595,3 +595,89 @@ func TestStatus(t *testing.T) {
 		t.Fatalf("Docker caído: %v", err)
 	}
 }
+
+// Serving es el muelle-caddy que sirve: corre y publica sus puertos. Es a lo
+// que se vuelve si los puertos nuevos no arrancan (contrato §3.5).
+func TestServing(t *testing.T) {
+	f := newRuntimeFixture(t)
+	ctx := context.Background()
+	if s, ok, err := f.runtime.Serving(ctx); err != nil || ok {
+		t.Fatalf("sin contenedor: %+v %v %v", s, ok, err)
+	}
+	f.fake.SetImagePresent(testImage)
+	f.ensure(t, baseWant())
+	s, ok, err := f.runtime.Serving(ctx)
+	if err != nil || !ok || s != (service.CaddyServing{Image: testImage, HTTPPort: 8080, HTTPSPort: 8443}) {
+		t.Fatalf("corriendo: %+v %v %v", s, ok, err)
+	}
+	if err := f.fake.StopContainer(ctx, testNames.Container, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := f.runtime.Serving(ctx); err != nil || ok {
+		t.Fatalf("detenido: %v %v", ok, err)
+	}
+	f.fake.SetUnavailable(true)
+	if _, _, err := f.runtime.Serving(ctx); !errors.Is(err, entity.ErrDockerUnavailable) {
+		t.Fatalf("Docker caído: %v", err)
+	}
+}
+
+// ProbePorts (PATCH /settings, antes de guardar otros puertos) prueba solo
+// esos puertos con el contenedor descartable, sin redes de Swarm, y nunca
+// toca muelle-caddy.
+func TestProbePorts(t *testing.T) {
+	f := newRuntimeFixture(t)
+	ctx := context.Background()
+	f.fake.SetImagePresent(testImage)
+	f.ensure(t, baseWant())
+	before := f.container(t)
+	n := len(f.fake.Calls())
+	ports := []service.HostPort{{Port: 9443, Protocol: "tcp"}, {Port: 9443, Protocol: "udp"}}
+	if err := f.runtime.ProbePorts(ctx, testImage, ports); err != nil {
+		t.Fatal(err)
+	}
+	probes := f.engine.created(testProbe)
+	p := probes[len(probes)-1]
+	want := []docker.PortBinding{{HostPort: 9443, ContainerPort: 9443, Protocol: "tcp"}, {HostPort: 9443, ContainerPort: 9443, Protocol: "udp"}}
+	if p.Image != testImage || p.Network != "" || len(p.Mounts) != 0 || !slices.Equal(p.Ports, want) || !slices.Equal(p.Cmd, []string{"caddy", "version"}) {
+		t.Fatalf("la prueba: %+v", p)
+	}
+	for _, c := range f.since(n) {
+		if slices.Contains(strings.Fields(c), testNames.Container) {
+			t.Fatalf("tocó muelle-caddy: %v", f.since(n))
+		}
+	}
+	if _, err := f.fake.InspectContainer(ctx, testProbe); !errors.Is(err, docker.ErrNotFound) {
+		t.Fatalf("la prueba queda borrada: %v", err)
+	}
+
+	// Un puerto ocupado: ErrPortInUse, la prueba borrada y muelle-caddy igual.
+	f.fake.BusyHostPort(9443)
+	if err := f.runtime.ProbePorts(ctx, testImage, ports); !errors.Is(err, service.ErrPortInUse) {
+		t.Fatalf("ocupado: %v", err)
+	}
+	if _, err := f.fake.InspectContainer(ctx, testProbe); !errors.Is(err, docker.ErrNotFound) {
+		t.Fatalf("la prueba queda borrada: %v", err)
+	}
+	if c := f.container(t); c.ID != before.ID || !c.Running {
+		t.Fatalf("muelle-caddy cambió: %+v", c)
+	}
+
+	// Sin puertos no llama a Docker.
+	n = len(f.fake.Calls())
+	if err := f.runtime.ProbePorts(ctx, testImage, nil); err != nil || len(f.since(n)) != 0 {
+		t.Fatalf("sin puertos: %v %v", err, f.since(n))
+	}
+	// Sin la imagen en el nodo no se puede probar: queda en el log y no es
+	// un error (la protección de fondo es volver a los puertos anteriores).
+	if err := f.runtime.ProbePorts(ctx, testImage2, ports); err != nil {
+		t.Fatalf("sin la imagen: %v", err)
+	}
+	if !strings.Contains(f.log.String(), "no se pudieron probar los puertos") {
+		t.Fatalf("el log: %s", f.log)
+	}
+	f.fake.SetUnavailable(true)
+	if err := f.runtime.ProbePorts(ctx, testImage, ports); !errors.Is(err, entity.ErrDockerUnavailable) {
+		t.Fatalf("Docker caído: %v", err)
+	}
+}

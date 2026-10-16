@@ -128,6 +128,14 @@ func (r *recordingRuntime) Status(ctx context.Context) (string, bool, bool, erro
 	return "", false, false, nil
 }
 
+func (r *recordingRuntime) Serving(ctx context.Context) (service.CaddyServing, bool, error) {
+	return service.CaddyServing{}, false, nil
+}
+
+func (r *recordingRuntime) ProbePorts(ctx context.Context, image string, ports []service.HostPort) error {
+	return nil
+}
+
 func (r *recordingRuntime) last(t *testing.T) service.CaddyWant {
 	t.Helper()
 	r.mu.Lock()
