@@ -284,15 +284,31 @@ describe('catálogo contra el backend simulado', () => {
 		).rejects.toBeInstanceOf(StageNetworkConflict)
 	})
 
-	it('el mock no borra una app que tiene dominios, como el backend', async () => {
-		ingressDb.list('auditfy', 'staging', 'api')
+	it('el mock no borra una app que tiene dominios, como el backend, aunque nadie los haya listado', async () => {
+		// Los dominios del diseño se siembran al pedirlos: el DELETE también los ve.
 		await expect(catalogUseCases.deleteApp(stagingApi)).rejects.toBeInstanceOf(AppHasDomains)
+
+		for (const domain of ingressDb.list('auditfy', 'staging', 'api')) {
+			ingressDb.remove(domain.app, domain.hostname)
+		}
+		await catalogUseCases.deleteApp(stagingApi)
+		await expect(catalogUseCases.getApp(stagingApi)).rejects.toBeInstanceOf(AppNotFound)
 	})
 
-	it('borra una app y después es AppNotFound', async () => {
-		await catalogUseCases.deleteApp(stagingApi)
+	it('una app nueva no tiene dominios: se borra y después es AppNotFound', async () => {
+		const web = appRefFrom('auditfy', 'staging', 'web')
+		await catalogUseCases.createApp({
+			project: auditfy,
+			stage: staging,
+			slug: 'web',
+			kind: 'service',
+			spec: newServiceSpec('nginx:1.27-alpine', 80),
+		})
+		expect(ingressDb.list('auditfy', 'staging', 'web')).toEqual([])
 
-		await expect(catalogUseCases.getApp(stagingApi)).rejects.toBeInstanceOf(AppNotFound)
+		await catalogUseCases.deleteApp(web)
+
+		await expect(catalogUseCases.getApp(web)).rejects.toBeInstanceOf(AppNotFound)
 	})
 
 	it('una respuesta con otra forma es un error de contrato, no un undefined en la UI', async () => {

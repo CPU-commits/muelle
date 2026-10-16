@@ -1,7 +1,7 @@
 import { http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent, notFound } from '../api'
 import { catalogDb, type MockApp, type MockHealthcheck, type MockSpec } from '../db/catalog'
-import { appKey, ingressDb } from '../db/ingress'
+import { ingressDb } from '../db/ingress'
 import { requireSession } from '../session'
 
 // Proyectos, stages y apps (catalog/infra/in/http/handler.go). Replica las reglas que el
@@ -573,6 +573,7 @@ export const catalogHandlers: RequestHandler[] = [
 				return apiError(409, 'conflict', 'ya existe')
 			catalogDb.state.apps.push(created)
 			catalogDb.save()
+			ingressDb.startEmpty(params.p, params.s, slug)
 			return HttpResponse.json(appOutput(created), { status: 201 })
 		} catch (error) {
 			return failed(error)
@@ -621,9 +622,9 @@ export const catalogHandlers: RequestHandler[] = [
 		const denied = requireSession()
 		if (denied) return denied
 		if (!catalogDb.findApp(params.p, params.s, params.a)) return notFound()
-		// `domains.app_id` es RESTRICT: primero se borran sus dominios.
-		const key = appKey(params.p, params.s, params.a)
-		if (ingressDb.state.domains.some((domain) => domain.app === key)) {
+		// `domains.app_id` es RESTRICT: primero se borran sus dominios. `list` siembra los del
+		// diseño si nadie los pidió todavía: si no, borrar dependería de haber abierto Dominios.
+		if (ingressDb.list(params.p, params.s, params.a).length > 0) {
 			return apiError(409, 'not_empty', 'primero hay que borrar lo que contiene')
 		}
 		catalogDb.removeApp(params.p, params.s, params.a)

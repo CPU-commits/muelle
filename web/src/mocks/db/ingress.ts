@@ -244,6 +244,14 @@ export const ingressDb = {
 			.sort((a, b) => a.hostname.localeCompare(b.hostname))
 	},
 
+	/** Una app recién creada no tiene dominios: no le toca la siembra del diseño. */
+	startEmpty(project: string, stage: string, app: string): void {
+		const key = appKey(project, stage, app)
+		if (state.seeded.includes(key)) return
+		state.seeded = [...state.seeded, key]
+		commit()
+	},
+
 	/** Busca en todo muelle (el hostname es único global). */
 	findAnywhere(hostname: string): MockDomain | undefined {
 		return state.domains.find((domain) => domain.hostname === hostname)

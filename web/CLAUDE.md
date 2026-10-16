@@ -568,8 +568,11 @@ desconocidos): mientras no existan, no se mandan.
   `ingressKeys.all`: los `records` de cada dominio se calculan con los ajustes de ahora, y el
   estado del proxy cambia (contrato §3.5).
 - En MSW: `db/ingress.ts` lee el token, las IP y el dominio del panel de `db/admin.ts`, y el
-  `DELETE` de una app (`handlers/catalog.ts`) mira los dominios de `db/ingress.ts` (una app
-  con dominios es `409 not_empty`). Un test de integración que toque uno de esos resetea
+  `DELETE` de una app (`handlers/catalog.ts`) mira los dominios de `db/ingress.ts` con
+  `ingressDb.list` (una app con dominios es `409 not_empty`). `list` siembra los tres
+  dominios del diseño la primera vez que se piden los de una app, así que una app del mock
+  los tiene aunque nadie haya abierto Dominios; una app creada en el mock empieza sin
+  ninguno (`ingressDb.startEmpty`). Un test de integración que toque uno de esos resetea
   también el otro.
 
 ### Sesión y `auth`
