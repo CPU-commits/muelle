@@ -347,6 +347,14 @@ describe('el mock sigue a los ajustes, como el backend', () => {
 		expect(none?.records).toEqual([])
 	})
 
+	it('solo con IPv6, records trae el AAAA solo (entity.Records arma cada uno por su lado)', async () => {
+		adminDb.state.publicIp = ''
+		const [, manual] = await ingressUseCases.listDomains(APP)
+		expect(manual?.records).toEqual([
+			{ type: 'AAAA', name: 'api.staging.otro-dominio.com', content: '2001:db8::24' },
+		])
+	})
+
 	it('sin token de Cloudflare, un hostname de la zona queda manual y sin Proxied', async () => {
 		adminDb.state.cloudflareToken = null
 		const created = await ingressUseCases.addDomain({

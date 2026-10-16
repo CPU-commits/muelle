@@ -26,14 +26,14 @@ function iso(ms: number | null): string | null {
 }
 
 /**
- * Calculados, no guardados (contrato §3.1): un A con `public_ip` y un AAAA con
- * `public_ipv6`, con los ajustes de ahora; `[]` sin IP pública.
+ * Calculados, no guardados (contrato §3.1, `entity.Records`): un A con `public_ip` si hay,
+ * y un AAAA con `public_ipv6` si hay, cada uno por su lado, con los ajustes de ahora; `[]`
+ * sin ninguna.
  */
 function records(hostname: string) {
 	const { publicIp, publicIpv6 } = adminDb.state
-	if (publicIp === '') return []
 	return [
-		{ type: 'A', name: hostname, content: publicIp },
+		...(publicIp ? [{ type: 'A', name: hostname, content: publicIp }] : []),
 		...(publicIpv6 ? [{ type: 'AAAA', name: hostname, content: publicIpv6 }] : []),
 	]
 }
