@@ -613,6 +613,22 @@ describe('contrato de la Fase 2', () => {
 		expect(result).not.toMatchObject({ status: 422 })
 	})
 
+	it.each([
+		[{ service: 'api', follow: 2 }, 'follow'],
+		[{ service: 'api', follow: 'si' }, 'follow'],
+		// La query se valida antes de buscar el servicio en Swarm (contrato §2.9).
+		[{ service: 'noexiste', tail: 99_999 }, 'tail'],
+		[{ service: 'noexiste', since: 'ayer' }, 'since'],
+		[{ service: 'NoEsUnSlug' }, 'service'],
+	] as const)('el mock valida la query como el backend: %j es 422 %s', async (query, field) => {
+		const error = await client
+			.get(`/projects/auditfy/stages/staging/apps/api/logs`, { query })
+			.catch((caught: unknown) => caught)
+		expect(error).toBeInstanceOf(ApiError)
+		expect((error as ApiError).status).toBe(422)
+		expect((error as ApiError).message).toMatch(new RegExp(`^${field}: `))
+	})
+
 	it('el mock pide el servicio, como el backend (422 service)', async () => {
 		const error = await client
 			.get(`/projects/auditfy/stages/staging/apps/api/logs`, { query: { tail: 100 } })

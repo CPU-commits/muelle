@@ -25,6 +25,7 @@
 		shortTaskId,
 		taskLabel,
 	} from '../../../domain'
+	import { MaskedText } from '../../components/maskedText'
 	import { DeployDialog } from '../../features/deployDialog'
 	import { RollbackDialog } from '../../features/rollbackDialog'
 	import {
@@ -319,7 +320,12 @@
 										: m.deploy_none()}</td
 								>
 								<td class={row.task.error ? taskError : undefined}>
-									{row.task.error ?? m.deploy_none()}
+									<!-- Llega enmascarado como el log (contrato §2.8): puede traer ***. -->
+									{#if row.task.error}
+										<MaskedText text={row.task.error} />
+									{:else}
+										{m.deploy_none()}
+									{/if}
 								</td>
 							</tr>
 						{/each}

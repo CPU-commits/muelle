@@ -1,7 +1,8 @@
 # Módulo `deploy` (Fase 2): el contrato que usa el panel
 
 La fuente es el contrato HTTP de las Fases 2 y 3:
-`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md` en `fase-23-base` (§0 y §2).
+`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md` (§0 y §2), en su versión de
+`fase-2-deploy` (la Fase 2 terminada; se mergea en `fase-23-base`).
 Este archivo resume lo que el panel lee y manda, y cómo se comporta con cada respuesta. Si
 el contrato cambia, se cambian este README, `data/dtos/deployDto.ts` y los mocks
 (`src/mocks/{db,handlers}/deploy.ts`). Lo que el panel usa y el contrato todavía no tiene
@@ -24,6 +25,7 @@ está en [Diferencias con el contrato](#diferencias-con-el-contrato).
 | `404 not_found`                             | El recurso no existe. En un deploy, `DeployNotFound`: "Ese deploy ya no existe"      |
 | `503 docker_unavailable`                    | `DockerUnavailable`: "Docker no responde en el servidor de muelle…", con reintento   |
 | `409 no_previous_deploy` (rollback)         | `NoPreviousDeploy`: "No hay un deploy exitoso anterior al actual", en el diálogo     |
+| `409 conflict` (deploy o rollback)          | `AppRemoving`: "La app se está borrando…" (un `DELETE` en curso, a lo más 2 min)     |
 | `422 invalid` en `image` / `images.<s>`     | `ImageRejected`, con su motivo y su texto en el campo (ver `POST {app}/deploys`)     |
 | `422 invalid` en `offset` (polling del log) | El log se vuelve a leer desde 0, una vez (ver `GET …/log`)                           |
 | `401`                                       | El cliente HTTP manda al login                                                       |
@@ -87,7 +89,10 @@ en caché hasta 2 s por app.**
 | `memory_limit_bytes?`                  | El límite de **cada** tarea                                                                                                     |
 | `update_state?`                        | `Service.UpdateStatus.State`, o null si nunca se actualizó                                                                      |
 | `tasks`                                | Primero las vigentes (`desired_state: running`), después por `slot` y de la más nueva a la más vieja. Las históricas, atenuadas |
-| `tasks[].health?`                      | `healthy` · `unhealthy` · `starting`; null si no tiene healthcheck o no corre en el nodo de muelle                              |
+| `tasks[].health?`                      | `healthy` · `unhealthy` · `starting`; null si no tiene healthcheck, no corre en el nodo de muelle o es histórica                |
+| `tasks[].node?`                        | El hostname del nodo; null mientras la tarea no tiene nodo (`pending`), y el id del nodo si ya no está: "—" sin él              |
+| `tasks[].since?`                       | `Task.UpdatedAt`, truncada al milisegundo; null si Swarm no la da                                                               |
+| `tasks[].error?`                       | `Task.Err`, **enmascarado** como el log (puede traer un argumento de `command`): el panel marca los `***` como el log           |
 | `tasks[].cpu_percent?`                 | % de un núcleo, como `docker stats`. **Null si la tarea no corre en el nodo de muelle**, no corre o no se pudo medir            |
 | `tasks[].memory_bytes?`                | La RAM de su contenedor; null con el mismo criterio                                                                             |
 
@@ -122,15 +127,15 @@ si no es de esa app.
 }
 ```
 
-| Campo                         | Qué                                                                                                                   |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `status`                      | `queued` · `running` · `succeeded` · `failed` · `superseded` (los tres últimos, finales)                              |
-| `images`                      | **En cola:** los overrides del cuerpo (`{}` si no hubo). **Desde que se resolvieron:** todos, con `@sha256:…`         |
-| `actor_name`                  | Una copia del username o del nombre del token al crear el deploy: **nunca null** (puede ser `""`)                     |
-| `actor_id?`                   | El id del usuario o del token. El panel no lo usa                                                                     |
-| `error?`                      | Por qué falló, en una línea ya enmascarada (el panel la muestra arriba del log)                                       |
-| `superseded_by?`              | El deploy que lo dejó `superseded`: el historial dice "Reemplazado por #145"                                          |
-| `started_at?`, `finished_at?` | La duración que muestra el panel es `finished_at − started_at`. Un `superseded` tiene `finished_at` y no `started_at` |
+| Campo                         | Qué                                                                                                                                                         |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`                      | `queued` · `running` · `succeeded` · `failed` · `superseded` (los tres últimos, finales)                                                                    |
+| `images`                      | **En cola:** los overrides del cuerpo (`{}` si no hubo); en un rollback, las del deploy al que vuelve. **Desde que se resolvieron:** todos, con `@sha256:…` |
+| `actor_name`                  | Una copia del username o del nombre del token al crear el deploy: **nunca null** (puede ser `""`)                                                           |
+| `actor_id?`                   | El id del usuario o del token. El panel no lo usa                                                                                                           |
+| `error?`                      | Por qué falló, en una línea ya enmascarada (el panel la muestra arriba del log)                                                                             |
+| `superseded_by?`              | El deploy que lo dejó `superseded`: el historial dice "Reemplazado por #145"                                                                                |
+| `started_at?`, `finished_at?` | La duración que muestra el panel es `finished_at − started_at`. Un `superseded` tiene `finished_at` y no `started_at`                                       |
 
 El deploy "actual" es el `succeeded` más reciente; el rollback va al `succeeded` anterior.
 Un `?deploy=N` que no está en el historial se pide aparte con `GET …/deploys/{id}`: si
@@ -141,11 +146,11 @@ Cambiar el `?deploy=` sin salir de la ruta abre el nuevo.
 
 "Desplegar". El panel manda **uno** de:
 
-| Cuerpo                         | Cuándo                                                                      |
-| ------------------------------ | --------------------------------------------------------------------------- |
-| `{}`                           | Sin override: redespliega las refs actuales y vuelve a resolver los digests |
-| `{"image": "<ref>"}`           | App de formulario: la imagen de su único servicio                           |
-| `{"images": {"<s>": "<ref>"}}` | App compose: solo los servicios que cambian                                 |
+| Cuerpo                         | Cuándo                                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `{}`                           | Sin override: repite la ref **pedida** del deploy actual (un tag se vuelve a resolver; un digest queda fijo) |
+| `{"image": "<ref>"}`           | App de formulario: la imagen de su único servicio                                                            |
+| `{"images": {"<s>": "<ref>"}}` | App compose: solo los servicios que cambian                                                                  |
 
 Elige `image` o `images` con el `kind` del catálogo (lo conecta F2) o, sin él, con los
 servicios del estado (un único servicio con el nombre de la app = formulario).
@@ -169,10 +174,22 @@ Los `422` de una imagen, cada uno con su texto en el campo del servicio:
 
 Al encolar, los deploys `queued` de la misma app pasan a `superseded` con `superseded_by`.
 
+**Qué imagen sale sin override** (contrato §2.2): la ref **pedida** del deploy actual, tal
+cual. Un tag se vuelve a resolver y un digest queda fijo, así que **un rollback no se
+deshace con el próximo deploy sin cuerpo**: repite sus refs con digest. Por eso el diálogo
+de "Desplegar", si el deploy actual es un rollback (`trigger: "rollback"`), avisa que para
+volver a seguir un tag hay que escribir la imagen (o cambiarla en la configuración).
+
+`409 conflict`: la app se está borrando (el `DELETE` de la app frena sus deploys hasta 2
+min). El diálogo lo dice en su banner. El orden de los errores es `404` (la app), `400` (el
+cuerpo) y `422` (su validación).
+
 ## `POST {app}/rollback` → 202
 
 Sin cuerpo. Responde como `POST …/deploys`, con `trigger: "rollback"`. Sin un `succeeded`
-anterior al actual: `409 no_previous_deploy`.
+anterior al actual: `409 no_previous_deploy`; con la app borrándose, `409 conflict`
+(`AppRemoving`, otro texto). Las refs del destino, con digest, pasan a ser los overrides del
+rollback: el próximo deploy sin cuerpo las repite.
 
 ## `GET {app}/deploys/{id}/log?offset=N` → 200
 
@@ -187,9 +204,13 @@ El polling: lo usa el panel para un deploy terminado y como respaldo cuando el S
 }
 ```
 
-- El log es `<RFC 3339 con ms> <texto>\n` por línea, ya enmascarado, y solo crece. Los
-  offsets son **bytes** desde el principio; el panel nunca los calcula, solo devuelve los
-  que recibió.
+- El log es `<RFC 3339 con ms> <texto>\n` por línea (la hora siempre con tres decimales,
+  y el texto nunca trae `\r`), ya enmascarado, y solo crece. Los offsets son **bytes**
+  desde el principio; el panel nunca los calcula, solo devuelve los que recibió.
+- Una línea se corta a 8 KiB con `…`. Al llegar a 256 KB se agrega una vez
+  `… (log truncado: se superaron los 256 KB)` y se descartan las siguientes, salvo las de
+  cierre (el resultado y el error), que siempre se escriben. `log_truncated` queda en la
+  base, pero no viene en la respuesta: el panel ve la línea.
 - `chunk` va desde `offset`, **hasta 64 KiB y siempre en líneas completas**; puede ser `""`.
   `next_offset = offset + len(chunk)`.
 - `superseded_by` se repite acá.
@@ -239,8 +260,11 @@ Los logs en vivo de un servicio (no se guarda nada).
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `service` | El nombre corto. **Obligatorio**: sin él, `422 invalid` con `service: es obligatorio`. Si no existe en Swarm, `404 not_found`                                             |
 | `tail`    | De 0 a 5000 (200 por defecto). El panel manda 100, 200 o 500                                                                                                              |
-| `follow`  | Siempre `1` desde el panel                                                                                                                                                |
-| `since`   | **Pendiente en el backend (Fase 2).** Al reconectar, **en vez de `tail`**: la hora de la última línea (RFC 3339 con ms). Todo lo escrito desde ahí, inclusive, hasta 5000 |
+| `follow`  | Siempre `1` desde el panel (vacío o `0` manda las líneas, un `end` y cierra; otro valor es `422 follow`)                                                                  |
+| `since`   | Al reconectar, **en vez de `tail`**: la hora de la última línea (RFC 3339 con ms). Todo lo escrito desde ahí, inclusive, hasta 5000. Con los dos, el backend mira `since` |
+
+El orden de los errores: la app (`404`), la query (`422`, en el orden de la tabla) y el
+servicio en Swarm (`404`, `503`).
 
 ```
 event: log
@@ -251,8 +275,10 @@ data: eof
 ```
 
 - `log`: JSON compacto. `task` es `<servicio>.<slot>` (o los primeros 7 del id de la tarea
-  en un servicio global); `line` va sin el `\n`, cortada a 16 KiB y enmascarada. Un `data`
-  que no es ese JSON se muestra igual, como texto.
+  en un servicio global); `line` va sin el `\n`, cortada a 16 KiB con `…` y enmascarada. El
+  backend une antes los pedazos de una línea larga; `time` y `task` vienen null solo en el
+  pedazo que llegó sin su línea: se muestra igual, sin hora, y no cuenta para `since`. Un
+  `data` que no es ese JSON se muestra igual, como texto.
 - `end`: se terminó el log. `data: eof` es que el servicio se borró: el panel dice "El
   servicio dejó de existir", no reconecta solo y ofrece "Volver a conectar".
   `data: timeout` es que el stream llegó a su hora de vida (1 h): el panel vuelve a
@@ -274,9 +300,10 @@ logfmt o `level`/`severity` de un JSON).
   la misma sesión, contando los de deploys) tampoco se ve: espera como cualquier otro.
 - **Pestaña oculta más de 30 s**: cierra el stream y lo retoma al volver.
 - **Al reconectar** manda `since` (sin `tail`), y descarta lo de antes de `since` y, de ese
-  mismo milisegundo, tantas copias de cada línea como ya tenía. Mientras el backend no
-  soporte `since` (lo ignora y manda las últimas 200, su `tail` por defecto), el panel
-  nunca repite: si falta algo, queda el hueco.
+  mismo milisegundo, tantas copias de cada línea como ya tenía. Un backend sin `since` (lo
+  ignoraría y mandaría las últimas 200) tampoco haría repetir: quedaría un hueco.
+- Si el log de Docker se corta por otra causa, el stream se cierra sin `end`: es un corte,
+  y el panel reconecta con `since`.
 - El backend vuelve a validar la sesión cada 60 s y cierra el stream si ya no vale: el
   panel lo ve como un corte; al reconectar el stream no abre, pregunta por la sesión y va
   al login.
@@ -305,7 +332,9 @@ logfmt o `level`/`severity` de un JSON).
 ## Mocks (`pnpm dev:mock`)
 
 Siguen el contrato (offsets en bytes, chunks de hasta 64 KiB, `status` al conectar solo si
-no terminó, `: ping`, `end`, `422 service`, la retención de 22). Los deploys se calculan
+no terminó, `: ping`, `end`, los `422` de la query de los logs en el orden del backend —
+`service`, `tail`, `since`, `follow`— antes del `404` del servicio, la retención de 22). Los
+deploys se calculan
 con la hora, así el polling y el SSE ven lo mismo y un F5 no los pierde. La primera vez que
 se abre una app se siembra el historial del diseño (#139–#143) y un #144 que pasa
 `queued → running → succeeded` en ~10 s.
@@ -321,7 +350,4 @@ se abre una app se siembra el historial del diseño (#139–#143) y un #144 que 
 
 ## Diferencias con el contrato
 
-- **`since` en `GET {app}/logs`**: el panel lo manda al reconectar y el mock lo cumple; el
-  contrato todavía no lo tiene (se suma a la Fase 2: RFC 3339, inclusivo, reemplaza a
-  `tail`, hasta 5000). Sin él el panel sigue andando: no repite líneas y acepta el hueco.
-- Nada más: el resto de este archivo es lo que dice el contrato.
+Ninguna: lo de arriba es lo que dice el contrato (`since` ya está en §2.9).

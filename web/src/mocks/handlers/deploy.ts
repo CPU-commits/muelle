@@ -447,6 +447,9 @@ function appLogStream(
 	})
 }
 
+/** Un nombre de servicio: un slug de hasta 16 caracteres (§5.2 regla 1 del diseño). */
+const SERVICE_SLUG = /^[a-z]([a-z0-9-]{0,14}[a-z0-9])?$/
+
 // --- Handlers ------------------------------------------------------------------
 
 /** Lo que tarda en responder una escritura (para ver el botón cargando); escala con los deploys. */
@@ -591,24 +594,33 @@ export const deployHandlers: RequestHandler[] = [
 		if (denied) return denied
 		const app = appOf(params)
 		const url = new URL(request.url)
+		// El orden del backend (contrato §2.9): la query, en el orden de la tabla, y recién
+		// después el servicio en Swarm.
 		const service = url.searchParams.get('service') ?? ''
 		if (!service) return invalid('service', 'es obligatorio')
+		if (!SERVICE_SLUG.test(service)) {
+			return invalid('service', 'tiene que ser un slug de hasta 16 caracteres')
+		}
+		// Al reconectar el panel manda `since` (la hora de la última línea) en vez de `tail`:
+		// con `since`, `tail` no se mira.
+		const sinceParam = url.searchParams.get('since')
+		const since = sinceParam === null ? null : Date.parse(sinceParam)
+		const tail = Number(url.searchParams.get('tail') ?? '200')
+		if (since === null && (!Number.isInteger(tail) || tail < 0 || tail > MAX_LOG_TAIL)) {
+			return invalid('tail', `tiene que ser un entero entre 0 y ${MAX_LOG_TAIL}`)
+		}
+		if (since !== null && Number.isNaN(since)) {
+			return invalid('since', 'tiene que ser una fecha RFC 3339')
+		}
+		// Vacío o `0`: las líneas, un `end` y se cierra.
+		const followParam = url.searchParams.get('follow') ?? ''
+		if (!['', '0', '1'].includes(followParam)) return invalid('follow', 'tiene que ser 0 o 1')
+		const follow = followParam === '1'
 		if (!app.services.includes(service)) {
 			return apiError(404, 'not_found', `no existe el servicio "${service}"`)
 		}
-		const follow = url.searchParams.get('follow') === '1'
-		// Al reconectar el panel manda `since` (la hora de la última línea) en vez de `tail`:
-		// con `since`, `tail` no se mira. Pendiente en el backend (Fase 2): el mock ya lo cumple.
-		const sinceParam = url.searchParams.get('since')
-		if (sinceParam !== null) {
-			const since = Date.parse(sinceParam)
-			if (Number.isNaN(since)) return invalid('since', 'tiene que ser una fecha RFC 3339')
-			return appLogStream(request, app, service, { tail: MAX_LOG_TAIL, since }, follow)
-		}
-		const tail = Number(url.searchParams.get('tail') ?? '200')
-		if (!Number.isInteger(tail) || tail < 0 || tail > MAX_LOG_TAIL) {
-			return invalid('tail', `tiene que ser un entero entre 0 y ${MAX_LOG_TAIL}`)
-		}
-		return appLogStream(request, app, service, { tail, since: null }, follow)
+		return since === null
+			? appLogStream(request, app, service, { tail, since: null }, follow)
+			: appLogStream(request, app, service, { tail: MAX_LOG_TAIL, since }, follow)
 	}),
 ]

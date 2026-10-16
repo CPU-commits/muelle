@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { appStatusDtoSchema, deployDtoSchema, logPageDtoSchema } from '../../dtos/deployDto'
+import {
+	appLogLineDtoSchema,
+	appStatusDtoSchema,
+	deployDtoSchema,
+	logPageDtoSchema,
+} from '../../dtos/deployDto'
 import {
 	appLogLineFromDto,
 	appStatusFromDto,
@@ -182,6 +187,22 @@ describe('log', () => {
 			superseded_by: 146,
 		})
 		expect(logPageFromDto(superseded).supersededBy).toBe(146)
+	})
+
+	it('el pedazo de una línea larga llega sin hora ni tarea (contrato §2.9): se muestra igual', () => {
+		const dto = appLogLineDtoSchema.parse({
+			time: null,
+			task: null,
+			stream: 'stderr',
+			line: '…el resto de una línea de más de 16 KiB',
+		})
+		expect(appLogLineFromDto(dto)).toEqual({
+			time: null,
+			task: null,
+			stream: 'stderr',
+			text: '…el resto de una línea de más de 16 KiB',
+			level: 'info',
+		})
 	})
 
 	it('appLogLineFromDto lee el nivel sin tocar el texto', () => {
