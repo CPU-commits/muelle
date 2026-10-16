@@ -182,19 +182,22 @@ describe('DeploysViewModel', () => {
 		expect(vm.selected).toBeNull()
 	})
 
-	it('sabe si el deploy actual (el succeeded más reciente) es un rollback', async () => {
+	it('sabe qué sigue fijado por un rollback, aunque el deploy actual ya no sea el rollback', async () => {
 		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
 		await vi.waitFor(() => expect(vm.selected?.id).toBe(144))
-		expect(vm.afterRollback).toBe(false)
+		expect(vm.rollbackPin).toBeNull()
 
+		// #146 es un deploy sin cuerpo después del rollback #144: repite sus refs con digest.
 		mocks.listDeploys.mockResolvedValue([
-			makeDeploy(145, { status: 'failed' }),
+			makeDeploy(147, { status: 'failed' }),
+			makeDeploy(146),
+			makeDeploy(145, { trigger: 'rollback', status: 'failed' }),
 			makeDeploy(144, { trigger: 'rollback' }),
 			makeDeploy(143),
 		])
 		const rolledBack = await mountViewModel(() => new DeploysViewModel(() => PROPS))
-		await vi.waitFor(() => expect(rolledBack.vm.selected?.id).toBe(145))
-		expect(rolledBack.vm.afterRollback).toBe(true)
+		await vi.waitFor(() => expect(rolledBack.vm.selected?.id).toBe(147))
+		expect(rolledBack.vm.rollbackPin).toEqual({ rollback: 144, services: ['api'] })
 	})
 
 	it('al encolar uno nuevo desde el diálogo, lo abre', async () => {

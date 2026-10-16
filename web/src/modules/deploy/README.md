@@ -176,9 +176,14 @@ Al encolar, los deploys `queued` de la misma app pasan a `superseded` con `super
 
 **Qué imagen sale sin override** (contrato §2.2): la ref **pedida** del deploy actual, tal
 cual. Un tag se vuelve a resolver y un digest queda fijo, así que **un rollback no se
-deshace con el próximo deploy sin cuerpo**: repite sus refs con digest. Por eso el diálogo
-de "Desplegar", si el deploy actual es un rollback (`trigger: "rollback"`), avisa que para
-volver a seguir un tag hay que escribir la imagen (o cambiarla en la configuración).
+deshace con el próximo deploy sin cuerpo**: repite sus refs con digest, y el que sigue
+también. Por eso el diálogo de "Desplegar" avisa qué sigue fijado por el último rollback
+(`rollbackPin` de `domain/entities/deploy.ts`) y que para volver a seguir un tag hay que
+escribir la imagen (o cambiarla en la configuración). El backend no expone la ref pedida
+(`requested_images`), así que el panel la deduce: un servicio sigue fijado si en el deploy
+actual tiene la misma imagen (ref y digest) que en el último rollback `succeeded`. Se
+equivoca solo si un override pide el mismo tag y resuelve al mismo digest (avisa de más), o
+si el rollback ya salió del historial (no avisa).
 
 `409 conflict`: la app se está borrando (el `DELETE` de la app frena sus deploys hasta 2
 min). El diálogo lo dice en su banner. El orden de los errores es `404` (la app), `400` (el

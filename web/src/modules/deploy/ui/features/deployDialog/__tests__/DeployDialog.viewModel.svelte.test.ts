@@ -144,14 +144,30 @@ describe('DeployDialogViewModel', () => {
 		expect(vm.formError).toBe(m.deploy_error_app_removing())
 	})
 
-	it('si el deploy actual es un rollback, avisa que sin imagen se repite esa versión', async () => {
+	it('si algo sigue fijado por un rollback, avisa que sin imagen se repite esa versión', async () => {
 		const normal = await mountViewModel(() => new DeployDialogViewModel(() => props()))
-		expect(normal.vm.afterRollback).toBe(false)
+		expect(normal.vm.rollbackPinTitle).toBeNull()
 
-		const { vm } = await mountViewModel(
-			() => new DeployDialogViewModel(() => props({ afterRollback: true })),
+		const pin = { rollback: asDeployId(144), services: ['api'] }
+		const single = await mountViewModel(
+			() => new DeployDialogViewModel(() => props({ rollbackPin: pin })),
 		)
-		expect(vm.afterRollback).toBe(true)
+		expect(single.vm.rollbackPinTitle).toBe(m.deploy_dialog_rollback_pin_title({ id: 144 }))
+
+		// En una compose dice cuáles: un override de un servicio suelta solo ese.
+		const compose = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({
+						kind: 'compose',
+						services: ['api', 'web', 'worker'],
+						rollbackPin: { rollback: asDeployId(144), services: ['web', 'worker'] },
+					}),
+				),
+		)
+		expect(compose.vm.rollbackPinTitle).toBe(
+			m.deploy_dialog_rollback_pin_services_title({ id: 144, services: 'web, worker' }),
+		)
 	})
 
 	it('otro error va al banner del diálogo', async () => {

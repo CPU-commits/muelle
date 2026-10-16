@@ -168,6 +168,7 @@
 	"deploy_dialog_reason_compose": "This is a compose app: images go per service.",
 	"deploy_dialog_reason_unknown_service": "The service {service} no longer exists in the app configuration.",
 	"deploy_error_app_removing": "The app is being deleted: it doesn't accept deploys meanwhile (2 minutes at most).",
-	"deploy_dialog_after_rollback_title": "The current deploy is a rollback.",
-	"deploy_dialog_after_rollback_body": "Without a new image, that version is repeated with its digest. To follow a tag again (like :staging), type it here or change it in the configuration."
+	"deploy_dialog_rollback_pin_title": "The image is still pinned by rollback #{id}.",
+	"deploy_dialog_rollback_pin_services_title": "Services pinned by rollback #{id}: {services}.",
+	"deploy_dialog_rollback_pin_body": "Without a new image, that version is repeated with its digest. To follow a tag again (like :staging), type it here or change it in the configuration."
 }

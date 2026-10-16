@@ -47,13 +47,20 @@ export {
 	taskLabel,
 	weakestService,
 } from './entities/appStatus'
-export type { Deploy, DeployAccepted, DeployActor, ServiceImage } from './entities/deploy'
+export type {
+	Deploy,
+	DeployAccepted,
+	DeployActor,
+	RollbackPin,
+	ServiceImage,
+} from './entities/deploy'
 export {
 	currentDeploy,
 	deployDurationMs,
 	hasActiveDeploy,
 	imageOf,
 	latestDeploy,
+	rollbackPin,
 	rollbackTarget,
 } from './entities/deploy'
 export type {

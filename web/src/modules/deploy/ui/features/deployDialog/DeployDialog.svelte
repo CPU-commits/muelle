@@ -33,11 +33,11 @@
 		{#if vm.formError}
 			<Banner tone="error" title={vm.formError} />
 		{/if}
-		{#if vm.afterRollback}
+		{#if vm.rollbackPinTitle}
 			<Banner
 				tone="info"
-				title={m.deploy_dialog_after_rollback_title()}
-				body={m.deploy_dialog_after_rollback_body()}
+				title={vm.rollbackPinTitle}
+				body={m.deploy_dialog_rollback_pin_body()}
 			/>
 		{/if}
 		{#each vm.fields as service (service)}

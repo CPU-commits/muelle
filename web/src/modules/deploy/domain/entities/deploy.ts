@@ -65,6 +65,40 @@ export function rollbackTarget(deploys: readonly Deploy[]): Deploy | null {
 	return succeeded[1] ?? null
 }
 
+/** Los servicios que siguen en la versión de un rollback, y cuál (`rollbackPin`). */
+export interface RollbackPin {
+	readonly rollback: DeployId
+	readonly services: readonly string[]
+}
+
+function sameImage(a: ResolvedImage, b: ResolvedImage): boolean {
+	return a.ref === b.ref && a.digest === b.digest
+}
+
+/**
+ * Lo que sigue fijado por el último rollback que salió bien. Un rollback pide las refs
+ * resueltas (con digest) del deploy al que vuelve, y un deploy sin cuerpo repite la ref
+ * pedida del actual (contrato §2.2): el digest pasa de deploy en deploy hasta que llega un
+ * override o cambia la ref de la configuración. El backend no expone esa ref pedida
+ * (`requested_images`), así que se deduce de las resueltas: un servicio sigue fijado si en
+ * el deploy actual tiene la misma imagen (ref y digest) que en el rollback. Null si no
+ * queda ninguno, o si no hay un rollback en el historial.
+ */
+export function rollbackPin(deploys: readonly Deploy[]): RollbackPin | null {
+	const current = currentDeploy(deploys)
+	const rollback = newestFirst(deploys).find(
+		(deploy) => deploy.status === 'succeeded' && deploy.trigger === 'rollback',
+	)
+	if (!current || !rollback) return null
+	const services = current.images
+		.filter((image) => {
+			const pinned = imageOf(rollback, image.service)
+			return pinned !== null && sameImage(pinned, image)
+		})
+		.map((image) => image.service)
+	return services.length > 0 ? { rollback: rollback.id, services } : null
+}
+
 export function hasActiveDeploy(deploys: readonly Deploy[]): boolean {
 	return deploys.some((deploy) => isActiveStatus(deploy.status))
 }

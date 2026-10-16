@@ -17,6 +17,8 @@ import {
 	imageOf,
 	isCurrentTask,
 	latestDeploy,
+	type RollbackPin,
+	rollbackPin,
 	rollbackTarget,
 	type ServiceImage,
 	type ServiceStatus,
@@ -189,11 +191,11 @@ export class SummaryViewModel {
 	}
 
 	/**
-	 * El deploy actual es un rollback: desplegar sin imagen repite sus refs con digest (no
-	 * vuelve a seguir el tag; contrato §2.2), y el diálogo de deploy lo avisa.
+	 * Lo que sigue fijado por el último rollback: desplegar sin imagen repite esas refs con
+	 * digest (no vuelve a seguir el tag; contrato §2.2), y el diálogo de deploy lo avisa.
 	 */
-	get afterRollback(): boolean {
-		return this.current?.trigger === 'rollback'
+	get rollbackPin(): RollbackPin | null {
+		return rollbackPin(this.history)
 	}
 
 	/** La imagen actual de cada servicio (para el placeholder del diálogo). */

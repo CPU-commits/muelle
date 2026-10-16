@@ -73,18 +73,32 @@ describe('SummaryViewModel', () => {
 		expect(vm.actionsEnabled).toBe(true)
 	})
 
-	it('sabe si el deploy actual es un rollback (el diálogo de deploy lo avisa)', async () => {
+	it('sabe qué sigue fijado por un rollback (el diálogo de deploy lo avisa)', async () => {
 		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
 		await vi.waitFor(() => expect(vm.current?.id).toBe(143))
-		expect(vm.afterRollback).toBe(false)
+		expect(vm.rollbackPin).toBeNull()
 
+		// #145, sin cuerpo después del rollback #144, repite sus refs: el aviso sigue.
 		mocks.listDeploys.mockResolvedValue([
+			makeDeploy(145),
 			makeDeploy(144, { trigger: 'rollback' }),
 			makeDeploy(143),
 		])
 		const rolledBack = await mountViewModel(() => new SummaryViewModel(() => PROPS))
-		await vi.waitFor(() => expect(rolledBack.vm.current?.id).toBe(144))
-		expect(rolledBack.vm.afterRollback).toBe(true)
+		await vi.waitFor(() => expect(rolledBack.vm.current?.id).toBe(145))
+		expect(rolledBack.vm.rollbackPin).toEqual({ rollback: 144, services: ['api'] })
+
+		// Con una imagen nueva (un override) ya no hay nada fijado.
+		mocks.listDeploys.mockResolvedValue([
+			makeDeploy(146, {
+				images: [{ service: 'api', ref: 'ghcr.io/auditfy/api:sha-4', digest: 'sha256:1' }],
+			}),
+			makeDeploy(145),
+			makeDeploy(144, { trigger: 'rollback' }),
+		])
+		const released = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+		await vi.waitFor(() => expect(released.vm.current?.id).toBe(146))
+		expect(released.vm.rollbackPin).toBeNull()
 	})
 
 	it('con 22 deploys (la retención) y sin un exitoso anterior, ya sabe que no hay rollback', async () => {

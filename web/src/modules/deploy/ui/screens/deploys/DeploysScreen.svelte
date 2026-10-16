@@ -219,7 +219,7 @@
 	kind={vm.kind}
 	services={vm.services}
 	currentImages={vm.currentImages}
-	afterRollback={vm.afterRollback}
+	rollbackPin={vm.rollbackPin}
 	onDeployed={vm.onDeployed}
 	onClose={vm.closeDeploy}
 />

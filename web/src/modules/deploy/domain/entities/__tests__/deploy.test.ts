@@ -6,6 +6,7 @@ import {
 	hasActiveDeploy,
 	imageOf,
 	latestDeploy,
+	rollbackPin,
 	rollbackTarget,
 } from '../deploy'
 
@@ -41,6 +42,85 @@ describe('deploy actual y rollback (spec §5.2 regla 6)', () => {
 	it('hasActiveDeploy mira si hay uno en cola o corriendo', () => {
 		expect(hasActiveDeploy(history)).toBe(true)
 		expect(hasActiveDeploy([makeDeploy(1)])).toBe(false)
+	})
+})
+
+describe('rollbackPin: lo que sigue fijado por un rollback (contrato §2.2)', () => {
+	const digest = (n: string) => `sha256:${n.repeat(64)}`
+	const image = (service: string, ref: string, n: string) => ({
+		service,
+		ref,
+		digest: digest(n),
+	})
+	// Un compose: el rollback #145 volvió a las imágenes de #143 (api:sha-1, web:sha-1).
+	const pinned = [image('api', 'x/api:sha-1', 'a'), image('web', 'x/web:sha-1', 'b')]
+	const before = [
+		makeDeploy(145, { trigger: 'rollback', images: pinned }),
+		makeDeploy(144, {
+			images: [image('api', 'x/api:sha-2', 'c'), image('web', 'x/web:sha-2', 'd')],
+		}),
+		makeDeploy(143, { images: pinned }),
+	]
+
+	it('el deploy actual es el rollback: todos sus servicios', () => {
+		expect(rollbackPin(before)).toEqual({ rollback: 145, services: ['api', 'web'] })
+	})
+
+	it('un deploy sin cuerpo después del rollback repite sus refs: sigue fijado', () => {
+		const history = [
+			makeDeploy(147, { images: pinned }),
+			makeDeploy(146, { images: pinned }),
+			...before,
+		]
+		expect(rollbackPin(history)).toEqual({ rollback: 145, services: ['api', 'web'] })
+	})
+
+	it('un override de un servicio lo suelta; el otro sigue fijado', () => {
+		const history = [
+			makeDeploy(146, { images: [image('api', 'x/api:sha-3', 'e'), pinned[1]!] }),
+			...before,
+		]
+		expect(rollbackPin(history)).toEqual({ rollback: 145, services: ['web'] })
+	})
+
+	it('con imágenes nuevas en todos, ya no hay nada fijado', () => {
+		const history = [
+			makeDeploy(146, {
+				images: [image('api', 'x/api:sha-3', 'e'), image('web', 'x/web:sha-3', 'f')],
+			}),
+			...before,
+		]
+		expect(rollbackPin(history)).toBeNull()
+	})
+
+	it('la misma ref con otro digest (el tag se movió) no es la del rollback', () => {
+		const history = [
+			makeDeploy(146, {
+				images: [image('api', 'x/api:sha-1', 'z'), image('web', 'x/web:sha-1', 'y')],
+			}),
+			...before,
+		]
+		expect(rollbackPin(history)).toBeNull()
+	})
+
+	it('un rollback que falló, o en curso, no fija nada', () => {
+		expect(
+			rollbackPin([
+				makeDeploy(146, { trigger: 'rollback', status: 'failed', images: pinned }),
+				makeDeploy(145, { images: pinned }),
+			]),
+		).toBeNull()
+		expect(
+			rollbackPin([
+				makeDeploy(146, { trigger: 'rollback', status: 'running', images: pinned }),
+				makeDeploy(145, { images: pinned }),
+			]),
+		).toBeNull()
+	})
+
+	it('sin rollback en el historial (o sin historial) no hay nada fijado', () => {
+		expect(rollbackPin(history)).toBeNull()
+		expect(rollbackPin([])).toBeNull()
 	})
 })
 
