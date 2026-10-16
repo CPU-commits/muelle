@@ -228,10 +228,10 @@ proyecto (auditfy)
 | `invites` | `id`, `token_hash`, `created_by`, `expires_at`, `used_at` |
 | `sessions` | `id_hash`, `user_id`, `mfa_pending` (contraseña correcta, falta el código TOTP), `created_at`, `last_seen_at`, `expires_at`, `user_agent`, `ip` |
 | `api_tokens` | `id`, `name`, `token_hash`, `project_id`, `stage_id` (nulo = todo el proyecto), `created_by`, `last_used_at`, `expires_at` (opcional) |
-| `audit_events` | `id`, `actor_type`, `actor_id`, `action`, `target`, `details` (JSON, sin valores secretos), `at` |
+| `audit_events` | `id`, `actor_type` (`user`\|`token`\|`system`), `actor_id`, `actor_name` (el username, el nombre del token o `system`, copiado al escribir), `action`, `target`, `details` (JSON, sin valores secretos), `at` |
 | `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `cloudflare_zones`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain` (`MUELLE_PANEL_DOMAIN`, o el host de `MUELLE_PANEL_ORIGIN`; de solo lectura), `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` (vacío: la imagen de Caddy de la misma versión de muelle) y las del registro DNS del panel (`panel_cf_*`, de ingress) |
 
-La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con la migración `0002_deploy.sql`, y `domains` con `0003_ingress.sql`. Las dos las reservó la etapa de contratos; cada fase edita la suya, en vez de agregar otra, mientras no haya una versión publicada.
+La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con la migración `0002_deploy.sql`, y `domains` con `0003_ingress.sql`. Las dos las reservó la etapa de contratos; cada fase edita la suya, en vez de agregar otra, mientras no haya una versión publicada. `0004_audit_actor_name.sql`, un pendiente de la Fase 1, suma `audit_events.actor_name` y lo llena en los eventos que ya había (contrato §6).
 
 ### 5.2 Reglas
 

@@ -824,6 +824,35 @@ Después se reinicia muelle (`docker service update --force muelle_muelle`), o s
 
 Lo mismo sirve si muelle-caddy quedó sin arrancar por los puertos y muelle no volvió solo a los anteriores (§3.5: no había un muelle-caddy sirviendo, o los anteriores también estaban tomados), y sin Caddy no se llega al panel. Se ponen otros que estén libres (`UPDATE settings SET value='8443' WHERE key='proxy_https_port'`, y lo mismo con `proxy_http_port`), y el job `"proxy"` recrea el contenedor.
 
+### 4.2 `GET /audit?limit=N&before=<id>` → 200 · sesión
+
+Los eventos de la auditoría, del más nuevo al más viejo, paginados por id: `limit` va de 1 a 500 (100 por defecto) y `before` es el id más chico ya visto, para la página siguiente. Fuera de rango, o algo que no es un número, es `422` en ese campo. No dice si hay más: una página llena puede tener otra detrás. Se conservan 180 días (§5.2 del diseño).
+
+```json
+[
+  {
+    "id": 812,
+    "actor_type": "token",
+    "actor_id": 5,
+    "actor_name": "github-actions",
+    "action": "env.replace",
+    "target": "stage:auditfy/staging",
+    "details": {"keys": ["DATABASE_URL"]},
+    "at": "2026-10-16T20:41:07.12Z"
+  }
+]
+```
+
+| Campo | Qué |
+|---|---|
+| `actor_type` | `user`, `token` o `system`: los jobs, el arranque, la CLI y lo que provoca alguien sin autenticarse (una contraseña incorrecta en el login; un código TOTP incorrecto ya es del usuario) |
+| `actor_id` | El id del usuario o del token; null con `system` |
+| `actor_name` | El username, el nombre del token o `"system"`, **copiado al escribir el evento**: sigue aunque se borren el usuario o el token, como el `actor_name` de un deploy (§2.1). Nunca es null. Es `""` solo en un evento de antes de la migración 0004 cuyo autor ya no existía al migrar y no dejó su nombre (un token borrado, o un usuario borrado sin su `auth.login` ni su `user.create` en la auditoría); el panel muestra entonces el tipo y el id |
+| `details` | Un objeto JSON (`{}` si no hay). Nunca trae valores secretos |
+| `at` | RFC 3339 (§0) |
+
+**Quien audita no pasa el nombre:** `audit.Recorder.Record(ctx, action, target, details)` lo copia del Principal del ctx (`Principal.ActorName`), del mismo del que sale el actor. Así lo reciben todos los módulos, también los eventos del deploy (Fase 2: `deploy.create` y `registry.*`), sin cambiar una línea. Un Principal armado a mano (el de `auth.login` y el de `user.create`) trae `Username`.
+
 ## 5. Fase 5: install, imágenes y el panel embebido
 
 ### 5.1 Nombres fijos (`shared/domain/naming`)
@@ -1045,6 +1074,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 - **0003** (ingress): `domains`, con:
   - `cf_record_id_aaaa`, `last_error_code`, `created_at` y `updated_at`;
   - `app_id` con `ON DELETE RESTRICT`: catalog no borra una app con dominios, `409 not_empty`.
+- **0004** (Fase 1, un pendiente de su revisión final): `audit_events.actor_name` (§4.2), con los eventos que ya había llenados con lo que se sabe de su autor. Es una migración nueva, y no un cambio a `0001_init.sql` (que no se edita, §1.3), para que corra también sobre una base de la Fase 1. La próxima migración nueva es la 0005.
 
 ## 7. Diferencias con lo que supuso el panel
 
@@ -1096,4 +1126,4 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Registries: `PATCH` | `{username, password}` | Los dos obligatorios: reemplaza | Igual al payload del panel |
 | Registries: host | Normalizado por el panel | El backend exige la forma canónica y no normaliza; Docker Hub es `docker.io`, y sus alias (`index.docker.io`…) son `422` | Una credencial con un alias nunca se usaría |
 | Registries: respuesta | `{host, username}` | Suma `created_at` y `updated_at` | Compatible |
-| Auditoría: `actor_name` | Lo pide en `GET /audit` | Sigue pendiente (README, revisión final de la Fase 1); no es de este contrato | |
+| Auditoría: `actor_name` | Lo pide en `GET /audit` | Siempre string, copiado al escribir el evento: el username, el nombre del token o `system` (§4.2) | Como el de un deploy: no se pierde al borrar el usuario o el token |

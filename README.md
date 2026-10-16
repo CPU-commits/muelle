@@ -469,7 +469,8 @@ Hallazgos de la revisión de código que las próximas fases deben respetar.
 
 **Pendiente de la revisión final de la Fase 1**
 - Pedir de nuevo la contraseña (o el código TOTP actual) para cambiar el TOTP propio y para desactivar `require_2fa`: hoy alcanza con la sesión.
-- Auditoría: guardar el nombre del actor (hoy solo `actor_type` + `actor_id`, que deja de resolverse si el usuario o el token se borran) y registrar los 403 (`out_of_scope`, `token_not_allowed`), que son sondeos.
+- ~~Auditoría: guardar el nombre del actor (hoy solo `actor_type` + `actor_id`, que deja de resolverse si el usuario o el token se borran).~~ Hecho: `actor_name`, copiado al escribir cada evento (migración 0004, contrato §4.2).
+- Auditoría: registrar los 403 (`out_of_scope`, `token_not_allowed`), que son sondeos.
 - Migraciones: no arrancar si la base tiene una versión más nueva que la del binario (hoy un downgrade arranca sobre un esquema desconocido).
 - El semáforo de Argon2id debería respetar el `ctx` de la petición: hoy un login espera su turno aunque el cliente ya se haya ido.
 - Listar y revocar invitaciones (`GET /invites`, `DELETE /invites/{id}`).
