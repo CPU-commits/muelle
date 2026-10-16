@@ -323,8 +323,9 @@ logfmt o `level`/`severity` de un JSON).
 
 ## Superficie pública (barrel)
 
-- Pantallas: `SummaryScreen` (Resumen; props `project`, `stage`, `app` y, del catálogo,
-  `kind`, `pendingChanges`, `pendingChangesHref` y `healthcheck` como texto),
+- Pantallas: `SummaryScreen` (Resumen; props `project`, `stage`, `app` y, opcionales,
+  `kind`, `pendingChanges`, `pendingChangesHref` y `healthcheck` como texto: sin ellos los
+  saca de la app en el catálogo, con `appQuery`),
   `DeploysScreen` (`deployParam` = el `?deploy=` de la URL, y `kind`) y `LogsScreen`.
 - Para Proyectos (F2): `AppDeployState`, una clase que se crea en la fila:
   `new AppDeployState(() => ref, () => enabled)` (`enabled` opcional: false no pide nada

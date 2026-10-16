@@ -568,7 +568,10 @@ desconocidos): mientras no existan, no se mandan.
   `appQuery`).
 - Resumen y Deploys piden la app al catálogo (`appQuery` de `catalog`): su `kind` decide si
   el diálogo de deploy manda `image` o `images`, y sus `services` son los campos del diálogo
-  (contra esos valida el backend). Si el catálogo no carga, salen de Swarm, como antes. Un
+  (contra esos valida el backend). Si el catálogo no carga, salen de Swarm, como antes.
+  Resumen también saca de ahí "Cambios sin desplegar" (con link a Configuración) y el
+  healthcheck del spec, y vuelve a pedir la app una vez cuando el deploy actual es más nuevo
+  que su `last_deployed_at` (un deploy exitoso lo adelanta en la misma transacción). Un
   test de viewModel de esas pantallas mockea también `@/modules/catalog/container`.
 - Ajustes, después de guardar la IP pública, el email ACME, el token, los puertos o la lista
   de IPs permitidas, invalida `ingressKeys.all`: los `records` de cada dominio se calculan
@@ -584,8 +587,9 @@ desconocidos): mientras no existan, no se mandan.
   `servicesOf` y `composeServices`): deploy valida `image`/`images` contra la configuración
   y saca de ahí la ref de un servicio que el deploy actual no tiene (§2.2), e ingress exige
   el slug como destino solo en una app de formulario. Lo que corre en Swarm (estado, logs)
-  son los servicios del deploy actual. Un test de integración que toque uno de esos resetea
-  también el otro.
+  son los servicios del deploy actual. Al revés, el `last_deployed_at` del catálogo sigue
+  al deploy actual del mock de deploy (`deployDb.lastDeployedAt`). Un test de integración
+  que toque uno de esos resetea también el otro.
 
 ### Sesión y `auth`
 

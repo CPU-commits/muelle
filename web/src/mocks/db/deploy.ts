@@ -576,6 +576,17 @@ export const deployDb = {
 	/** El tipo y la ref de cada servicio según la configuración de ahora (el catálogo). */
 	config: configOf,
 
+	/**
+	 * El `started_at` del deploy actual, que es hasta donde un deploy que termina bien adelanta
+	 * `last_deployed_at` (diseño §7 paso 8). null si la app no tiene un deploy exitoso o si
+	 * todavía nadie pidió sus deploys (no la siembra).
+	 */
+	lastDeployedAt(project: string, stage: string, slug: string, now = Date.now()): number | null {
+		const app = state.apps[appKey(project, stage, slug)]
+		const current = app ? this.current(app, now) : undefined
+		return current ? current.startAt : null
+	},
+
 	/** Los servicios que corren en Swarm: los del deploy actual, por nombre ([] sin uno). */
 	swarmServices(app: MockApp, now: number): string[] {
 		const current = this.current(app, now)

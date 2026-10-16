@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { UnavailableError } from '@/shared/domain'
+import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { asDeployId } from '../../../../domain'
 import {
 	makeDeploy,
@@ -37,6 +38,39 @@ const catalog = vi.hoisted(() => ({ getApp: vi.fn() }))
 vi.mock('@/modules/catalog/container', () => ({ catalogUseCases: catalog }))
 
 const PROPS = { project: 'auditfy', stage: 'staging', app: 'api' }
+
+/** La app de formulario del catálogo, ya desplegada por #143 (`startedAt` 14:00:01). */
+function serviceApp(overrides: Record<string, unknown> = {}) {
+	return {
+		project: 'auditfy',
+		stage: 'staging',
+		slug: 'api',
+		kind: 'service',
+		spec: {
+			image: 'ghcr.io/aumi-app/backend-app:sha-3f9c2e1',
+			port: 3000,
+			replicas: 2,
+			command: [],
+			healthcheck: {
+				type: 'http',
+				path: '/health',
+				intervalSeconds: 10,
+				timeoutSeconds: 5,
+				retries: 3,
+				startPeriodSeconds: 20,
+			},
+			volumes: [],
+			resources: null,
+		},
+		deployTimeoutSeconds: 300,
+		configChangedAt: new Date('2026-10-10T14:05:00Z'),
+		lastDeployedAt: new Date('2026-10-10T14:00:01Z'),
+		pendingChanges: true,
+		createdAt: new Date('2026-09-01T00:00:00Z'),
+		services: [{ name: 'api', ports: [3000] }],
+		...overrides,
+	}
+}
 
 function setVisibility(state: 'visible' | 'hidden'): void {
 	Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
@@ -219,6 +253,77 @@ describe('SummaryViewModel', () => {
 
 		await vi.waitFor(() => expect(vm.kind).toBe('compose'))
 		expect(vm.deployServices).toEqual(['gateway', 'runner'])
+	})
+
+	it('sin props, los cambios sin desplegar y el healthcheck salen del catálogo', async () => {
+		catalog.getApp.mockResolvedValue(serviceApp())
+		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+
+		await vi.waitFor(() => expect(vm.pendingChanges).toBe(true))
+		// La marca lleva a Configuración.
+		expect(vm.pendingChangesHref).toBe(
+			'/projects/auditfy/stages/staging/apps/api/configuracion',
+		)
+		expect(vm.healthcheck).toBe(m.deploy_healthcheck_http({ path: '/health', interval: 10 }))
+		expect(vm.healthcheck).toBe('GET /health · cada 10 s')
+	})
+
+	it('el healthcheck de un comando; sin healthcheck (none) o en una compose, no se muestra', async () => {
+		const withHealthcheck = (healthcheck: unknown) => {
+			const app = serviceApp()
+			return { ...app, spec: { ...app.spec, healthcheck } }
+		}
+		catalog.getApp.mockResolvedValue(
+			withHealthcheck({
+				type: 'command',
+				command: ['redis-cli', 'ping'],
+				intervalSeconds: 15,
+				timeoutSeconds: 3,
+				retries: 5,
+				startPeriodSeconds: 10,
+			}),
+		)
+		const command = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+		await vi.waitFor(() => expect(command.vm.healthcheck).toBe('redis-cli ping · cada 15 s'))
+
+		catalog.getApp.mockResolvedValue(withHealthcheck({ type: 'none' }))
+		const none = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+		await vi.waitFor(() => expect(none.vm.kind).toBe('service'))
+		expect(none.vm.healthcheck).toBeNull()
+
+		catalog.getApp.mockResolvedValue({
+			...serviceApp(),
+			kind: 'compose',
+			spec: undefined,
+			composeYaml: 'services: {}',
+		})
+		const compose = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+		await vi.waitFor(() => expect(compose.vm.kind).toBe('compose'))
+		expect(compose.vm.healthcheck).toBeNull()
+	})
+
+	it('si el deploy actual es más nuevo que el último deploy del catálogo, lo vuelve a pedir', async () => {
+		// El catálogo es de antes de #143 (muelle adelanta last_deployed_at al started_at del
+		// deploy que terminó bien, diseño §7 paso 8): la marca de cambios puede estar vieja.
+		catalog.getApp
+			.mockResolvedValueOnce(serviceApp({ lastDeployedAt: new Date('2026-10-10T13:00:00Z') }))
+			.mockResolvedValue(serviceApp({ pendingChanges: false }))
+		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+
+		await vi.waitFor(() => expect(catalog.getApp).toHaveBeenCalledTimes(2))
+		await vi.waitFor(() => expect(vm.pendingChanges).toBe(false))
+	})
+
+	it('si el catálogo sigue atrasado, lo pide una sola vez por deploy', async () => {
+		catalog.getApp.mockResolvedValue(
+			serviceApp({ lastDeployedAt: new Date('2026-10-10T13:00:00Z') }),
+		)
+		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+
+		await vi.waitFor(() => expect(catalog.getApp).toHaveBeenCalledTimes(2))
+		await new Promise((resolve) => setTimeout(resolve, 100))
+		expect(catalog.getApp).toHaveBeenCalledTimes(2)
+		expect(vm.pendingChanges).toBe(true)
 	})
 
 	it('al encolar un deploy va a Deploys, que abre el más reciente (ese)', async () => {

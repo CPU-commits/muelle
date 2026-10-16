@@ -5,6 +5,7 @@ import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { catalogDb } from '@/mocks/db/catalog'
 import { deployDb } from '@/mocks/db/deploy'
 import { server } from '@/mocks/server'
+import { appRefFrom, catalogUseCases } from '@/modules/catalog'
 import { http as client } from '@/shared/data/http/client'
 import { ApiError } from '@/shared/data/http/errors'
 import {
@@ -379,6 +380,31 @@ describe('qué imagen se despliega sin override (contrato §2.2)', () => {
 		expect((await deployUseCases.getDeploy(APP, next.id)).images[0]?.ref).toBe(
 			'ghcr.io/aumi-app/backend-app:v9',
 		)
+	})
+})
+
+describe('el catálogo sigue a los deploys (diseño §7 paso 8)', () => {
+	it('un deploy que termina bien adelanta last_deployed_at y saca los cambios sin desplegar', async () => {
+		const ref = appRefFrom('auditfy', 'staging', 'api')
+		// La api de staging tiene un cambio de configuración de después de #143.
+		expect((await catalogUseCases.getApp(ref)).pendingChanges).toBe(true)
+
+		const { id } = await deployUseCases.createDeploy({
+			app: APP,
+			services: ['api'],
+			overrides: {},
+		})
+		await collect(
+			deployUseCases.followDeployLog(
+				{ app: APP, id, live: true },
+				new AbortController().signal,
+			),
+		)
+
+		const deploy = await deployUseCases.getDeploy(APP, id)
+		const app = await catalogUseCases.getApp(ref)
+		expect(app.lastDeployedAt).toEqual(deploy.startedAt)
+		expect(app.pendingChanges).toBe(false)
 	})
 })
 

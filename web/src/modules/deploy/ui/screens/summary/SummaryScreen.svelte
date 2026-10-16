@@ -78,18 +78,12 @@
 				>
 			{/if}
 			{#if vm.pendingChanges}
-				{#if vm.pendingChangesHref}
-					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- llega ya resuelto (prop de la ruta) -->
-					<a class={badgeLink} href={vm.pendingChangesHref}>
-						<Badge tone="warn" shape="pill" size="md" dot
-							>{m.deploy_pending_changes()}</Badge
-						>
-					</a>
-				{:else}
+				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- llega ya resuelto (del viewModel o de la ruta) -->
+				<a class={badgeLink} href={vm.pendingChangesHref}>
 					<Badge tone="warn" shape="pill" size="md" dot
 						>{m.deploy_pending_changes()}</Badge
 					>
-				{/if}
+				</a>
 			{/if}
 		{/snippet}
 		{#snippet details()}

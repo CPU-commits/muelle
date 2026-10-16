@@ -1,6 +1,7 @@
 import { getLocale } from '@/shared/ui/i18n'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import type { StatusTone } from '@/shared/ui'
+import type { App as CatalogApp } from '@/modules/catalog'
 import type { AppHealth, Deploy, DeployStatus, DeployTrigger } from '../../../domain'
 
 // Cómo se nombra y se colorea cada cosa del módulo en la vista. Las pantallas y los
@@ -168,4 +169,29 @@ export function taskTone(state: string, health: string | null): StatusTone {
 	if (state === 'running' && (health === null || health === 'healthy')) return 'ok'
 	if (state === 'shutdown' || state === 'complete' || state === 'orphaned') return 'idle'
 	return 'warn'
+}
+
+/**
+ * El healthcheck de una app de formulario, como lo muestra el Resumen ("GET /health · cada
+ * 10 s"). null en una compose (cada servicio trae el suyo en el compose) y sin healthcheck
+ * (`none`: vale el `HEALTHCHECK` de la imagen, si trae uno).
+ */
+export function healthcheckText(app: CatalogApp): string | null {
+	if (app.kind !== 'service') return null
+	const healthcheck = app.spec.healthcheck
+	switch (healthcheck.type) {
+		case 'none':
+			return null
+		case 'http':
+		case 'bun-http':
+			return m.deploy_healthcheck_http({
+				path: healthcheck.path,
+				interval: healthcheck.intervalSeconds,
+			})
+		case 'command':
+			return m.deploy_healthcheck_command({
+				command: healthcheck.command.join(' '),
+				interval: healthcheck.intervalSeconds,
+			})
+	}
 }

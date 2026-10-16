@@ -1,10 +1,12 @@
 import { goto } from '$app/navigation'
 import { resolve } from '$app/paths'
 import { createQuery, type CreateQueryResult } from '@tanstack/svelte-query'
+import { untrack } from 'svelte'
 import { pendingPhase, type RoadmapPhase } from '@/shared/domain'
 import { withQuery } from '@/shared/ui'
 import { type App as CatalogApp, appQuery, appRefFrom } from '@/modules/catalog'
 import { appStatusQuery, deploysQuery, STATUS_REFRESH_MS } from '../../../data'
+import { healthcheckText } from '../../components/labels/deployLabels'
 import {
 	allTasks,
 	type AppHealth,
@@ -42,13 +44,16 @@ export interface SummaryProps {
 	 * los servicios.
 	 */
 	readonly kind?: AppKind | null
-	/** Del catálogo (F2): `pending_changes` de la app → la marca "Cambios sin desplegar". */
+	/**
+	 * `pending_changes` de la app → la marca "Cambios sin desplegar". Sin él, el de la app en
+	 * el catálogo (`appQuery`).
+	 */
 	readonly pendingChanges?: boolean
-	/** A dónde lleva esa marca (ya resuelto con `resolve()`); sin él, no es un link. */
+	/** A dónde lleva esa marca (ya resuelto con `resolve()`). Sin él, a Configuración. */
 	readonly pendingChangesHref?: string
 	/**
-	 * Del catálogo (F2): el healthcheck del spec, ya como texto ("GET /health · cada 10 s").
-	 * Sin él, no se muestra la métrica.
+	 * El healthcheck del spec, ya como texto ("GET /health · cada 10 s"). Sin él, el del spec
+	 * de la app en el catálogo; en una compose, o con `none`, no se muestra la métrica.
 	 */
 	readonly healthcheck?: string | null
 }
@@ -83,8 +88,13 @@ export class SummaryViewModel {
 	readonly status: CreateQueryResult<AppStatus, Error>
 	readonly deploys: CreateQueryResult<readonly Deploy[], Error>
 	readonly tasks: TaskRow[]
-	/** El kind y los servicios de la configuración (contrato §2.12). */
+	/**
+	 * La app en el catálogo: el kind y los servicios de la configuración (contrato §2.12), los
+	 * cambios sin desplegar y el healthcheck del spec.
+	 */
 	readonly #catalogApp: CreateQueryResult<CatalogApp, Error>
+	/** El deploy por el que ya se volvió a pedir la app al catálogo (una vez por deploy). */
+	#catalogRefreshedFor: DeployId | null = null
 
 	constructor(props: () => SummaryProps) {
 		this.#props = props
@@ -108,6 +118,18 @@ export class SummaryViewModel {
 					}))
 				: [],
 		)
+		// Un deploy que termina bien adelanta `last_deployed_at` hasta su `started_at`, en la
+		// misma transacción (diseño §7 paso 8): si el catálogo es de antes del deploy actual,
+		// sus cambios sin desplegar están viejos y se piden de nuevo, una vez por deploy.
+		$effect(() => {
+			const current = this.current
+			const app = this.#catalogApp.data
+			if (!current?.startedAt || !app || this.#catalogRefreshedFor === current.id) return
+			const deployedAt = app.lastDeployedAt?.getTime() ?? Number.NEGATIVE_INFINITY
+			if (deployedAt >= current.startedAt.getTime()) return
+			this.#catalogRefreshedFor = current.id
+			untrack(() => void this.#catalogApp.refetch())
+		})
 		$effect(() => {
 			const onVisibility = (): void => {
 				const visible = isVisible()
@@ -130,15 +152,22 @@ export class SummaryViewModel {
 	}
 
 	get pendingChanges(): boolean {
-		return this.#props().pendingChanges ?? false
+		return this.#props().pendingChanges ?? this.#catalogApp.data?.pendingChanges ?? false
 	}
 
 	get healthcheck(): string | null {
-		return this.#props().healthcheck ?? null
+		const fromProps = this.#props().healthcheck
+		if (fromProps !== undefined) return fromProps
+		const app = this.#catalogApp.data
+		return app ? healthcheckText(app) : null
 	}
 
-	get pendingChangesHref(): string | null {
-		return this.#props().pendingChangesHref ?? null
+	/** Configuración, donde se ve qué cambió (o lo que pase la ruta). */
+	get pendingChangesHref(): string {
+		const fromProps = this.#props().pendingChangesHref
+		if (fromProps !== undefined) return fromProps
+		const { project: p, stage: s, app: a } = this.ref
+		return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/configuracion', { p, s, a })
 	}
 
 	get stack(): string {

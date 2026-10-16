@@ -8,6 +8,7 @@ import {
 	type MockSpec,
 	servicesOf,
 } from '../db/catalog'
+import { deployDb } from '../db/deploy'
 import { ingressDb } from '../db/ingress'
 import { requireSession } from '../session'
 
@@ -312,11 +313,26 @@ function checkServiceSlug(project: string, stage: string, slug: string): void {
 	}
 }
 
+/**
+ * `last_deployed_at`: el guardado o, si es más nuevo, el `started_at` del deploy actual del
+ * mock de deploy (un deploy que termina bien lo adelanta hasta ahí, diseño §7 paso 8).
+ */
+function lastDeployedAt(app: MockApp): string | null {
+	const stored = app.last_deployed_at === null ? null : new Date(app.last_deployed_at).getTime()
+	const deployed = deployDb.lastDeployedAt(app.project, app.stage, app.slug)
+	const latest = Math.max(
+		stored ?? Number.NEGATIVE_INFINITY,
+		deployed ?? Number.NEGATIVE_INFINITY,
+	)
+	return Number.isFinite(latest) ? new Date(latest).toISOString() : null
+}
+
 /** El `AppOutput` del backend: `spec` u `compose_yaml` según el tipo, y `pending_changes`. */
 function appOutput(app: MockApp) {
+	const lastDeployed = lastDeployedAt(app)
 	const pending =
-		app.last_deployed_at !== null &&
-		new Date(app.config_changed_at).getTime() > new Date(app.last_deployed_at).getTime()
+		lastDeployed !== null &&
+		new Date(app.config_changed_at).getTime() > new Date(lastDeployed).getTime()
 	return {
 		project: app.project,
 		stage: app.stage,
@@ -325,7 +341,7 @@ function appOutput(app: MockApp) {
 		...(app.kind === 'service' ? { spec: app.spec } : { compose_yaml: app.compose_yaml }),
 		deploy_timeout_s: app.deploy_timeout_s,
 		config_changed_at: app.config_changed_at,
-		last_deployed_at: app.last_deployed_at,
+		last_deployed_at: lastDeployed,
 		pending_changes: pending,
 		created_at: app.created_at,
 		services: servicesOf(app),

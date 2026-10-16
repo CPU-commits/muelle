@@ -154,6 +154,8 @@
 		}
 	],
 	"deploy_healthcheck": "Healthcheck",
+	"deploy_healthcheck_http": "GET {path} · cada {interval} s",
+	"deploy_healthcheck_command": "{command} · cada {interval} s",
 	"deploy_logs_pause": "Pausar",
 	"deploy_logs_resume": "Reanudar",
 	"deploy_logs_new_lines_announce": "Hay líneas nuevas",
