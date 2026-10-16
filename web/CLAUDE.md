@@ -525,13 +525,15 @@ panel sigue el contrato final de las tres:
 
 En producción el panel va embebido en el binario que lo sirve (contrato §5.5): las rutas del
 panel y las del backend llegan juntas, y `<ComingSoon>` no aparece. **El fallback se queda**
-porque todavía sirve, y cuesta poco (un `phase` en el `DomainErrorMap` y un `<ComingSoon>`):
+por una sola razón, y cuesta poco (un `phase` en el `DomainErrorMap` y un `<ComingSoon>`):
+`pnpm dev` contra un `muelle serve` de una rama que no tiene una fase (hoy `fase-23-base`
+sin la Fase 2 hasta su merge, o la Fase 1 sola). Sin el fallback, Resumen, Deploys, Logs y
+Registries mostrarían un error de verdad, con reintentos.
 
-- `pnpm dev` contra un `muelle serve` de una rama que no tiene una fase (hoy `fase-23-base`
-  sin la Fase 2 hasta su merge, o la Fase 1 sola). Sin el fallback, Resumen, Deploys, Logs y
-  Registries mostrarían un error de verdad, con reintentos;
-- un 404 `no_route` también es lo que responde el backend a una ruta mal armada: el panel lo
-  muestra como "todavía no está", no como un error genérico.
+**Lo que cuesta:** con el panel embebido, un 404 `no_route` en una de esas rutas solo puede
+ser un bug del panel (una ruta mal armada), y `<ComingSoon>` lo esconde detrás de "todavía
+no está". Cuando las tres fases estén en `main`, el fallback se saca (el `phase` de los
+mapas, `pendingPhase` y `<ComingSoon>`) y ese 404 vuelve a ser un error.
 
 Cómo funciona:
 
