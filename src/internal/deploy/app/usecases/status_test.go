@@ -19,7 +19,6 @@ import (
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker/dockertest"
 )
 
-
 // statusFixture es GetStatus sobre la base del fixture, el Docker en memoria
 // (con su adaptador) y las variables de fakeEnv.
 type statusFixture struct {

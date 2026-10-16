@@ -91,7 +91,7 @@ func (s *miniSwarm) deploy(d docker.StackDeploy) error {
 		Services map[string]struct {
 			Image  string `json:"image"`
 			Deploy *struct {
-				Replicas *uint64          `json:"replicas"`
+				Replicas *uint64           `json:"replicas"`
 				Labels   map[string]string `json:"labels"`
 			} `json:"deploy"`
 		} `json:"services"`
