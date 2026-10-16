@@ -128,8 +128,10 @@ func TestIntegrationCaddyLifecycle(t *testing.T) {
 	}
 
 	// 2. Una red de stage nueva se conecta en caliente: el mismo contenedor.
+	// Swarm puede tardar en conectarlo a la overlay recién creada: quien
+	// llama reintenta (EnsureStageNetwork toma "ya conectado" como éxito).
 	ingresstest.Stage(t, e.db, e.project, "s2")
-	if err := m.EnsureStageNetwork(ctx, e.project, "s2"); err != nil {
+	if err := e.retryAttach(func() error { return m.EnsureStageNetwork(ctx, e.project, "s2") }); err != nil {
 		t.Fatal(err)
 	}
 	s2 := naming.Network(e.project, "s2")

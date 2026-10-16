@@ -242,12 +242,48 @@ func (e *itEnv) createAndStart(spec docker.ContainerSpec, extraNetworks ...strin
 		e.t.Fatalf("creando %s: %v", spec.Name, err)
 	}
 	for _, n := range extraNetworks {
-		if err := e.docker.ConnectNetwork(ctx, n, spec.Name, nil); err != nil {
+		if err := e.retryAttach(func() error { return e.docker.ConnectNetwork(ctx, n, spec.Name, nil) }); err != nil {
 			e.t.Fatalf("conectando %s a %s: %v", spec.Name, n, err)
 		}
 	}
-	if err := e.docker.StartContainer(ctx, spec.Name); err != nil {
+	if err := e.retryAttach(func() error { return e.docker.StartContainer(ctx, spec.Name) }); err != nil {
 		e.t.Fatalf("arrancando %s: %v", spec.Name, err)
+	}
+}
+
+// itAttachRetry es cuánto se reintenta una conexión a una overlay que Swarm
+// no completó a tiempo (cada intento puede tardar ~20 s en fallar).
+const itAttachRetry = 90 * time.Second
+
+// isSwarmAttachTimeout dice si err es la espera de Swarm al conectar un
+// contenedor a una overlay attachable: el manager no asignó la conexión a
+// tiempo y el daemon responde "attaching to network failed … context
+// deadline exceeded". Pasa con el Swarm cargado, sobre todo cuando otros
+// tests crean y borran overlays a la vez (en el log del daemon: "could not
+// find network allocator state"). No es un error de muelle: en producción
+// el job "proxy" conecta muelle-caddy a las redes que le falten.
+func isSwarmAttachTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "attaching to network failed") && strings.Contains(msg, "context deadline exceeded")
+}
+
+// retryAttach corre f y la repite mientras falle con isSwarmAttachTimeout,
+// hasta itAttachRetry. Devuelve el último error: cualquier otro, al primer
+// intento. f tiene que poder repetirse (arrancar un contenedor creado,
+// conectarlo o EnsureStageNetwork, que toma "ya conectado" como éxito).
+func (e *itEnv) retryAttach(f func() error) error {
+	e.t.Helper()
+	deadline := time.Now().Add(itAttachRetry)
+	for {
+		err := f()
+		if !isSwarmAttachTimeout(err) || time.Now().After(deadline) {
+			return err
+		}
+		e.t.Logf("Swarm no completó la conexión a la red a tiempo; se reintenta: %v", err)
+		time.Sleep(time.Second)
 	}
 }
 
@@ -445,6 +481,28 @@ func (e *itEnv) proxyStatus(m *Module, want string) func() (bool, error) {
 			return false, fmt.Errorf("estado %s: %q", status, msg)
 		}
 		return true, nil
+	}
+}
+
+// La espera transitoria de Swarm al conectar un contenedor a una overlay
+// (arrancándolo o en caliente) se reintenta; cualquier otro error, no. No
+// necesita Docker.
+func TestIntegrationEnvSwarmAttachTimeout(t *testing.T) {
+	const attach = "attaching to network failed, make sure your network options are correct and check manager logs: context deadline exceeded"
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{fmt.Errorf("docker: arrancando el contenedor it3-x-web: Error response from daemon: failed to set up container networking: %s", attach), true},
+		{fmt.Errorf("docker: conectando it3-x-caddy a it3x_s2: Error response from daemon: %s", attach), true},
+		{nil, false},
+		{errors.New("docker: arrancando el contenedor it3-x-web: el puerto del host ya está en uso: address already in use"), false},
+		{errors.New("docker: conectando it3-x-caddy a it3x_s2: no existe"), false},
+		{context.DeadlineExceeded, false},
+	} {
+		if got := isSwarmAttachTimeout(tc.err); got != tc.want {
+			t.Errorf("isSwarmAttachTimeout(%v) = %v, esperaba %v", tc.err, got, tc.want)
+		}
 	}
 }
 

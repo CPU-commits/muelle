@@ -1083,6 +1083,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
   - `module()` arma ingress con `e.db`, `e.cipher`, el Docker real y `e.opts`; `host(sub)`, `panelHost()`, `addDomain(appID, host, svc, port)` y `expectGet(host, path, status, body)` (un check para `eventually`).
   - Todo contenedor pasa por `createAndStart(spec, redesExtra...)`, que lo anota para la limpieza **antes** de crearlo, se niega a crear uno sin el prefijo del test y le pone la etiqueta `muelle.test=it3`.
   - **`waitNetwork`:** antes de conectar un contenedor a una overlay, `createAndStart` espera a que Swarm le dé subred (hasta 30 s). Sin eso, arrancar un contenedor en una overlay recién creada falló con "attaching to network failed … context deadline exceeded" (lo mismo que ya espera el test de redes del paquete docker).
+  - **`retryAttach`** (sumado al re-verificar T2, 2026-10-16): la subred no alcanza con el Swarm cargado. Con las líneas 2 y 5 corriendo su integración a la vez (el daemon loguea "could not find network allocator state"), `StartContainer` en la overlay falló igual en 1 de 8 corridas de `TestIntegrationCaddyAcceptsConfig`, y la conexión en caliente de T3 (`EnsureStageNetwork` de `s2`) en 2 de 10. `createAndStart` (conectar y arrancar) y esa conexión en caliente reintentan hasta 90 s, solo ante `isSwarmAttachTimeout` ("attaching to network failed" + "context deadline exceeded"; lo prueba `TestIntegrationEnvSwarmAttachTimeout`, sin Docker). Cualquier otro error falla al primer intento. No cambia producción: si la conexión en caliente falla, el job `"proxy"` conecta muelle-caddy a las redes que le falten (`caddy.Runtime.Ensure`).
   - La limpieza toma como del test los nombres que empiezan con `it3<id>_` o `it3-<id>-` (con el separador: el id tiene largo fijo, pero así ni se acerca a otro).
   - `settings(p)` cambia 80 y 443 (o 0) por los puertos de la ranura: un test nunca los publica.
   - `startCaddyManually` publica en `127.0.0.1`, como el puente.
@@ -1121,6 +1122,7 @@ Un test de integración prueba que **Caddy real** acepta la configuración y enr
 - [x] **Step 7: Cierre de T2.** Las verificaciones de "Convenciones" pasan, y el test de integración del Step 6 también.
   - Hecho: gofmt, `go vet ./...` (y con `-tags integration` en ingress), `go test -race ./...` (51 paquetes), `go mod tidy -diff` y `go test -tags integration -race ./src/internal/ingress/...` (`TestIntegrationCaddyAcceptsConfig` en ~10 s, tres corridas seguidas sin fallar). Después, `docker ps -a`, `docker network ls` y `docker volume ls` con `it3` no muestran nada.
   - `caddy validate` en `caddy:2-alpine` acepta los golden `panel_only`, `no_token` e `internal`; `full` y `no_email` fallan ahí solo por `dns.providers.cloudflare`, que esa imagen no trae (D4).
+  - Re-verificación (2026-10-16, con T3–T5 ya en la rama): todo lo de arriba pasa otra vez. La integración falló a veces por la espera de Swarm al conectar a una overlay. Pasaba con las otras líneas corriendo su integración, y por eso se sumó `retryAttach` (Step 6). Después, 8 corridas seguidas de `TestIntegrationCaddyAcceptsConfig` y 8 del conjunto de ingress pasan.
 
 ---
 
