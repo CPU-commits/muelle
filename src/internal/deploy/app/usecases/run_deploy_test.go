@@ -20,9 +20,9 @@ import (
 )
 
 // Un deploy de una app de formulario, de punta a punta (§7): las líneas de
-// contrato §2.11 en orden (con la advertencia de Caddy mientras SyncRoutes no
-// existe), la imagen resuelta, las refs guardadas, last_deployed_at y las
-// etiquetas del deploy en el compose. El compose nunca queda en la base.
+// contrato §2.11 en orden (con la advertencia de Caddy, porque el fake de
+// SyncRoutes falla), la imagen resuelta, las refs guardadas, last_deployed_at
+// y las etiquetas del deploy en el compose. El compose nunca queda en la base.
 func TestRunDeployFormApp(t *testing.T) {
 	w := newWorld(t)
 	id := w.deploy(t, apiRef, nil, nil)

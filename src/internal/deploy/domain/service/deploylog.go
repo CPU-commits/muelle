@@ -40,9 +40,9 @@ func FormatLine(m Masker, t time.Time, text string) string {
 
 // Sanitize deja el texto en una línea: quita los \r y cambia por un espacio
 // los \n y los demás caracteres de control (C0, DEL y C1), salvo \t. Algunos
-// textos que llegan al log traen \n (los errores de compose-go, los de Caddy
-// cuando SyncRoutes exista); sin esto quedarían líneas sin hora, y un \r
-// cortaría el evento del SSE. Un byte de UTF-8 inválido sale como U+FFFD.
+// textos que llegan al log traen \n (los errores de compose-go); sin
+// esto quedarían líneas sin hora, y un \r cortaría el evento del SSE. Un byte
+// de UTF-8 inválido sale como U+FFFD.
 func Sanitize(s string) string {
 	clean := true
 	for _, r := range s {
