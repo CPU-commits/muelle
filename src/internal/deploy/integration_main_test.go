@@ -15,6 +15,7 @@ import (
 
 	"github.com/CPU-commits/muelle/src/shared/domain/naming"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/docker/dockertest/swarmlock"
 )
 
 // staleAfter es la edad desde la que algo it2 se considera de una corrida
@@ -29,10 +30,15 @@ const staleAfter = 30 * time.Minute
 //   - las redes it2… con la etiqueta muelle.test=it2 (las crea itIngress);
 //   - los volúmenes it2… cuya com.docker.stack.namespace empieza con it2.
 //
-// Si Docker no está, no hace nada (los tests se saltan solos).
+// Si Docker no está, no hace nada (los tests se saltan solos). Antes toma el
+// candado del Swarm (swarmlock): los paquetes de integración que usan el Swarm
+// corren de a uno.
 func TestMain(m *testing.M) {
+	unlock := swarmlock.Lock()
 	sweepStale()
-	os.Exit(m.Run())
+	code := m.Run()
+	unlock()
+	os.Exit(code)
 }
 
 func sweepStale() {
