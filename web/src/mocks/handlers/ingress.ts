@@ -2,7 +2,7 @@ import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent } from '../api'
 import { catalogDb } from '../db/catalog'
 import { adminDb } from '../db/admin'
-import { appKey, ingressDb, type MockDomain } from '../db/ingress'
+import { appKey, ingressDb, type MockDomain, NO_TOKEN_REASON } from '../db/ingress'
 import { requireSession } from '../session'
 
 // Dominios (Fase 3) del backend simulado, con el contrato de
@@ -186,15 +186,17 @@ export const ingressHandlers: RequestHandler[] = [
 			...(typeof body.target_port === 'number' ? { targetPort: body.target_port } : {}),
 			...(typeof body.proxied === 'boolean' ? { proxied: body.proxied } : {}),
 		}
-		// Si Cloudflare falla al cambiar Proxied, se guarda lo pedido y el dominio queda en
-		// `error` + `cloudflare`: igual responde 200.
+		// Si Cloudflare falla al cambiar Proxied, o ya no hay token (se quitó en Ajustes), se
+		// guarda lo pedido y el dominio queda en `error` + `cloudflare`: igual responde 200.
 		// Si sale bien y estaba en `error` + `cloudflare`, vuelve a `pending`.
 		const updated =
 			typeof body.proxied !== 'boolean'
 				? ingressDb.save(changed)
-				: ingressDb.cloudflareFlaky(domain)
-					? ingressDb.failCloudflare(changed)
-					: ingressDb.recoverCloudflare(changed)
+				: adminDb.state.cloudflareToken === null
+					? ingressDb.failCloudflare(changed, NO_TOKEN_REASON)
+					: ingressDb.cloudflareFlaky(domain)
+						? ingressDb.failCloudflare(changed)
+						: ingressDb.recoverCloudflare(changed)
 		return HttpResponse.json(domainDto(updated))
 	}),
 

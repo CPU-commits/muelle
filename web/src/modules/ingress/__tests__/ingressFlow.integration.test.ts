@@ -391,6 +391,27 @@ describe('el mock sigue a los ajustes, como el backend', () => {
 		expect(toggled.errorKind).toBeNull()
 	})
 
+	it('Proxied sin token (se quitó en Ajustes): se guarda y el dominio queda en error de Cloudflare (200)', async () => {
+		// Un dominio cuyo registro maneja muelle (con cf_record_id).
+		const created = await ingressUseCases.addDomain({
+			app: APP,
+			hostname: 'sin-token-despues.tudominio.cl',
+			target: 'api:3000',
+			proxied: false,
+		})
+		adminDb.state.cloudflareToken = null
+
+		const toggled = await ingressUseCases.setProxied({
+			app: APP,
+			hostname: created.hostname,
+			proxied: true,
+		})
+		expect(toggled.proxied).toBe(true)
+		expect(domainState(toggled)).toBe('error')
+		expect(toggled.errorKind).toBe('cloudflare')
+		expect(toggled.lastError).toBe('agrega el token de Cloudflare en Ajustes')
+	})
+
 	it('adoptar sin IP pública deja el dominio en error de Cloudflare, con qué falta (200)', async () => {
 		await ingressUseCases.listDomains(APP)
 		adminDb.state.publicIp = ''

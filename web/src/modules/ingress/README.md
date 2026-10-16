@@ -229,6 +229,8 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
   ahora (sin IPv6 no hay `AAAA`, sin IP pública `[]`); adoptar sin token o sin IP queda en
   `error` + `cloudflare`; sin dominio del panel, `GET /proxy` dice `disabled`.
 - Un `PATCH` de Proxied que sale bien saca un `error` + `cloudflare` (vuelve a `pending`).
+  Sin token (se quitó en Ajustes), se guarda y el dominio queda en `error` + `cloudflare`
+  con "agrega el token de Cloudflare en Ajustes", como en el backend.
 
 ## Diferencias con el contrato
 

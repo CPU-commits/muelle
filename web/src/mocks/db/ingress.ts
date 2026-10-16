@@ -80,10 +80,13 @@ function inZone(hostname: string): boolean {
 	return hostname === MOCK_ZONE || hostname.endsWith(`.${MOCK_ZONE}`)
 }
 
+/** El motivo del backend cuando hace falta el token y no está (`msgNoToken`). */
+export const NO_TOKEN_REASON = 'agrega el token de Cloudflare en Ajustes'
+
 /** Lo que falta para adoptar (el token y la IP pública), con el mensaje del backend. */
 function adoptBlocker(): string | null {
 	if (adminDb.state.cloudflareToken === null) {
-		return 'adoptar necesita el token de Cloudflare: agrégalo en Ajustes'
+		return NO_TOKEN_REASON
 	}
 	if (adminDb.state.publicIp === '') return 'configura la IP pública en Ajustes'
 	return null
@@ -408,12 +411,17 @@ export const ingressDb = {
 		)
 	},
 
-	failCloudflare(domain: MockDomain, now = Date.now()): MockDomain {
+	/** Cloudflare falló (o no hay token, con su mensaje): `error` + `cloudflare`. */
+	failCloudflare(
+		domain: MockDomain,
+		reason = 'Cloudflare respondió 500 al actualizar el registro',
+		now = Date.now(),
+	): MockDomain {
 		return this.save(
 			{
 				...domain,
 				status: 'error',
-				lastError: 'Cloudflare respondió 500 al actualizar el registro',
+				lastError: reason,
 				lastErrorCode: 'cloudflare',
 				activeAt: null,
 			},
