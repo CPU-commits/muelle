@@ -84,7 +84,7 @@ Los streams (`…/log/stream` y `…/logs`) son `text/event-stream`:
 
 > El estado y los logs en vivo eran de la Fase 3 en §17. Pasan a la Fase 2: usan el mismo cliente de Docker que el deploy, y el panel ya los trata como Fase 2 (`ComingSoon phase={2}`).
 
-Las rutas se registran recién cuando están implementadas. El esqueleto de `deploy.Module.RegisterRoutes` no registra nada, así que hoy esas rutas responden `404 no_route`.
+`deploy.Module.RegisterRoutes` e `ingress.Module.RegisterRoutes` registran todas las rutas de §2 y §3. Solo una ruta que no existe responde `404 no_route` (§0.2).
 
 ### 1.1 Puertos entre módulos (ya en el código)
 
