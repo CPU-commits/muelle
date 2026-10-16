@@ -18,8 +18,13 @@ type Settings struct {
 	Listen        string // MUELLE_LISTEN, por defecto ":8080"
 	DataDir       string // MUELLE_DATA_DIR, por defecto "/data"
 	MasterKeyFile string // MUELLE_MASTER_KEY_FILE, por defecto "/run/secrets/muelle_master_key"
-	PanelOrigin   string // MUELLE_PANEL_ORIGIN, obligatorio, ej. "https://panel.tudominio.cl"
+	PanelOrigin   string // MUELLE_PANEL_ORIGIN, ej. "https://panel.tudominio.cl"; obligatorio sin MUELLE_PANEL_DOMAIN
 	SecureCookies bool   // MUELLE_SECURE_COOKIES, por defecto true
+	// Domain es MUELLE_PANEL_DOMAIN, el dominio del panel (el que enruta
+	// muelle-caddy), que escribe install. Con él, el origen del panel sale de
+	// los ajustes (https://<dominio>[:<proxy_https_port>]) y sigue al puerto,
+	// y PanelOrigin queda como un origen permitido más (detrás de otro proxy).
+	Domain string
 
 	// Init es la configuración inicial que install le pasa al primer arranque
 	// (MUELLE_INIT_*, Fase 5). admin la aplica solo en el primer arranque de
@@ -66,9 +71,13 @@ func (s Settings) LogValue() slog.Value {
 	return slog.StringValue(fmt.Sprintf("%+v", plain(s)))
 }
 
-// PanelDomain es el host de PanelOrigin si es un dominio (el que enruta
-// Caddy, settings panel_domain); "" si es una IP o localhost (desarrollo).
+// PanelDomain es el dominio del panel (el que enruta Caddy, settings
+// panel_domain): Domain si está; si no, el host de PanelOrigin si es un
+// dominio, y "" si es una IP o localhost (desarrollo).
 func (s Settings) PanelDomain() string {
+	if s.Domain != "" {
+		return s.Domain
+	}
 	u, err := url.Parse(s.PanelOrigin)
 	if err != nil {
 		return ""
@@ -85,6 +94,7 @@ func Load() (Settings, error) {
 		DataDir:       getenv("MUELLE_DATA_DIR", "/data"),
 		MasterKeyFile: getenv("MUELLE_MASTER_KEY_FILE", "/run/secrets/muelle_master_key"),
 		PanelOrigin:   os.Getenv("MUELLE_PANEL_ORIGIN"),
+		Domain:        os.Getenv("MUELLE_PANEL_DOMAIN"),
 		SecureCookies: true,
 	}
 	if v := os.Getenv("MUELLE_SECURE_COOKIES"); v != "" {
@@ -94,11 +104,21 @@ func Load() (Settings, error) {
 		}
 		c.SecureCookies = b
 	}
-	if err := validateOrigin(c.PanelOrigin); err != nil {
-		return Settings{}, fmt.Errorf("MUELLE_PANEL_ORIGIN: %w", err)
+	if c.Domain != "" {
+		if err := validate.Hostname("MUELLE_PANEL_DOMAIN", c.Domain); err != nil {
+			return Settings{}, err
+		}
+	}
+	if c.PanelOrigin != "" || c.Domain == "" {
+		if err := validateOrigin(c.PanelOrigin); err != nil {
+			return Settings{}, fmt.Errorf("MUELLE_PANEL_ORIGIN: %w", err)
+		}
 	}
 	if strings.HasPrefix(c.PanelOrigin, "https://") && !c.SecureCookies {
 		return Settings{}, errors.New("MUELLE_SECURE_COOKIES: no puede ser false con un MUELLE_PANEL_ORIGIN https")
+	}
+	if c.Domain != "" && !c.SecureCookies {
+		return Settings{}, errors.New("MUELLE_SECURE_COOKIES: no puede ser false con MUELLE_PANEL_DOMAIN (el panel va por https)")
 	}
 	init, err := loadInit()
 	if err != nil {
@@ -175,7 +195,7 @@ func loadInit() (Init, error) {
 // Rechaza en vez de normalizar: un valor no canónico nunca coincidiría.
 func validateOrigin(origin string) error {
 	if origin == "" {
-		return errors.New("es obligatorio (ej. https://panel.tudominio.cl)")
+		return errors.New("es obligatorio sin MUELLE_PANEL_DOMAIN (ej. https://panel.tudominio.cl)")
 	}
 	const forma = "debe ser solo esquema y host[:puerto], sin ruta, query, fragmento ni usuario (ej. https://panel.tudominio.cl)"
 	u, err := url.Parse(origin)

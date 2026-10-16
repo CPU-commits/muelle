@@ -19,6 +19,7 @@ func clearEnv(t *testing.T) {
 		"MUELLE_INIT_PROXY_HTTPS_PORT", "MUELLE_INIT_CLOUDFLARE_TOKEN_FILE", "MUELLE_INIT_CADDY_IMAGE"} {
 		t.Setenv(k, "")
 	}
+	t.Setenv("MUELLE_PANEL_DOMAIN", "")
 }
 
 func TestLoadDefaults(t *testing.T) {
