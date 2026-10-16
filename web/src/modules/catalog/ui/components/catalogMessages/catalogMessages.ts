@@ -119,8 +119,13 @@ function quoted(message: string, index = 0): string {
 	return [...message.matchAll(/"([^"]*)"/g)][index]?.[1] ?? ''
 }
 
-/** Un motivo del backend (en minúscula, estilo Go) como oración. */
+/**
+ * Un motivo del backend (en minúscula, estilo Go) como oración. Si empieza con la ruta de
+ * una clave (`services.web.ports: …`), queda tal cual: las claves de YAML distinguen
+ * mayúsculas, y `Services.web.ports` nombraría una que no existe.
+ */
 function sentence(text: string): string {
+	if (/^[^\s:]+:\s/.test(text)) return text
 	return text.charAt(0).toUpperCase() + text.slice(1)
 }
 

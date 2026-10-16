@@ -63,8 +63,11 @@ describe('serverFieldMessage', () => {
 	it('compose_yaml: el resto de las reglas, con el motivo del backend (no "es obligatorio")', () => {
 		const reason =
 			'services.web.ports: publicar puertos no está soportado en la v1: los dominios van por Caddy'
-		expect(serverFieldMessage('composeYaml', reason)).toBe(
-			'Services.web.ports: publicar puertos no está soportado en la v1: los dominios van por Caddy',
+		// Empieza con la ruta de la clave: queda tal cual (las claves de YAML distinguen
+		// mayúsculas, y `Services.web.ports` no existe).
+		expect(serverFieldMessage('composeYaml', reason)).toBe(reason)
+		expect(serverFieldMessage('composeYaml', 'volumes.data.driver: no está soportado')).toBe(
+			'volumes.data.driver: no está soportado',
 		)
 		expect(
 			serverFieldMessage('composeYaml', 'el compose debe tener al menos un servicio'),
