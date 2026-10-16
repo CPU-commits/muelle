@@ -203,7 +203,7 @@
 	"catalog_compose_check_one": "1 error",
 	"catalog_compose_check_other": "{count} errores",
 	"catalog_compose_valid": "La sintaxis YAML es válida",
-	"catalog_compose_valid_body": "La validación completa (puertos, build, redes) llega con la Fase 2.",
+	"catalog_compose_valid_body": "Al guardar, muelle valida el resto: puertos, build, volúmenes, redes y que ningún servicio se llame como otro del stage.",
 	"catalog_compose_syntax_error": "La sintaxis YAML no es válida en esta línea.",
 	"catalog_compose_line": "L{line}",
 	"catalog_compose_go_to_line": "Ir a la línea {line}",
@@ -251,7 +251,7 @@
 	"catalog_crumb_stage_variables": "Variables de {stage}",
 
 	"catalog_compose_syntax_unavailable": "No se pudo revisar la sintaxis",
-	"catalog_compose_syntax_unavailable_body": "El editor no se cargó. Al guardar, muelle solo revisa que el compose no esté vacío.",
+	"catalog_compose_syntax_unavailable_body": "El editor no se cargó: muelle valida el compose al guardar.",
 	"catalog_error_compose_service_taken": "El servicio {service} ya existe en la app {app} de este stage: los servicios de un stage comparten la red, así que cada nombre va una sola vez.",
 	"catalog_error_slug_is_service": "{slug} ya es un servicio de la app compose {app} de este stage: los servicios de un stage comparten la red. Elige otro slug.",
 	"catalog_error_app_has_domains": "La app todavía tiene dominios: bórralos primero en Dominios.",

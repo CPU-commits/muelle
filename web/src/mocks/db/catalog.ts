@@ -58,7 +58,7 @@ export interface CatalogState {
 
 const STORAGE_KEY = 'catalog'
 
-/** El compose de aumi-agents (`App-Compose.dc.html`), sin los `ports:` que la Fase 2 rechaza. */
+/** El compose de aumi-agents (`App-Compose.dc.html`), sin los `ports:` que catalog rechaza al guardar. */
 export const MOCK_AGENTS_COMPOSE = `services:
   gateway:
     image: ghcr.io/aumi-app/agents-gateway:staging

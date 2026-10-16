@@ -197,7 +197,7 @@ describe('ComposeConfigViewModel', () => {
 		const vm = await mount()
 		await expect(vm.editor).rejects.toThrow()
 
-		// Sintaxis rota y todo: el backend solo pide que no esté vacío.
+		// Sintaxis rota y todo: la revisa el backend al guardar (un 422 en compose_yaml).
 		const broken = 'services:\n  web:\n    image: [nginx\n'
 		vm.setDraft(broken)
 		await vm.save()

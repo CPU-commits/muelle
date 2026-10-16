@@ -3,8 +3,8 @@ import { yamlLanguage } from '@codemirror/lang-yaml'
 /**
  * Las líneas (desde 1) donde el parser de YAML de CodeMirror encontró un error de
  * sintaxis: indentación rota, un `[` sin cerrar, una clave fuera de lugar. Es la misma
- * gramática que resalta el editor; lo que valida compose (puertos, build, redes) es de
- * la Fase 2.
+ * gramática que resalta el editor; las reglas de compose (puertos, build, redes) las valida
+ * el backend al guardar (contrato §2.12).
  */
 export function yamlSyntaxErrorLines(text: string): number[] {
 	const tree = yamlLanguage.parser.parse(text)

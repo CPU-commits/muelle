@@ -203,7 +203,7 @@
 	"catalog_compose_check_one": "1 error",
 	"catalog_compose_check_other": "{count} errors",
 	"catalog_compose_valid": "The YAML syntax is valid",
-	"catalog_compose_valid_body": "Full validation (ports, build, networks) arrives with Phase 2.",
+	"catalog_compose_valid_body": "On save, muelle checks the rest: ports, build, volumes, networks, and that no service is named like another one in the stage.",
 	"catalog_compose_syntax_error": "The YAML syntax isn't valid on this line.",
 	"catalog_compose_line": "L{line}",
 	"catalog_compose_go_to_line": "Go to line {line}",
@@ -251,7 +251,7 @@
 	"catalog_crumb_stage_variables": "{stage} variables",
 
 	"catalog_compose_syntax_unavailable": "The syntax couldn't be checked",
-	"catalog_compose_syntax_unavailable_body": "The editor didn't load. On save, muelle only checks that the compose isn't empty.",
+	"catalog_compose_syntax_unavailable_body": "The editor didn't load: muelle validates the compose on save.",
 	"catalog_error_compose_service_taken": "The service {service} already exists in the app {app} of this stage: services in a stage share the network, so each name can be used only once.",
 	"catalog_error_slug_is_service": "{slug} is already a service of the compose app {app} in this stage: services in a stage share the network. Pick another slug.",
 	"catalog_error_app_has_domains": "The app still has domains: delete them first in Domains.",

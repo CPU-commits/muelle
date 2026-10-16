@@ -34,8 +34,9 @@ export type ComposeCheck =
 	| { readonly kind: 'rejected'; readonly message: string }
 
 // App·Compose (`App-Compose.dc.html`): el YAML en un editor, "Validar" (sintaxis y
-// servicios repetidos, en el navegador) y "Guardar" (PATCH `compose_yaml`). La validación
-// completa del compose (puertos, build, redes) es de la Fase 2.
+// servicios repetidos, en el navegador) y "Guardar" (PATCH `compose_yaml`). El resto
+// (puertos, build, volúmenes, redes, nombres de servicio en el stage) lo valida el backend
+// al guardar (contrato §2.12): su motivo llega como `rejected`.
 export class ComposeConfigViewModel {
 	draft = $state('')
 	check = $state.raw<ComposeCheck>({ kind: 'idle' })

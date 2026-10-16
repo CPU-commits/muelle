@@ -9,8 +9,9 @@ export function composeByteLength(yaml: string): number {
 	return encoder.encode(yaml).length
 }
 
-// En la Fase 1 el backend solo exige que el compose no esté vacío y pese hasta 256 KiB;
-// la Fase 2 lo valida entero con compose-go antes de desplegar.
+// Lo que el panel revisa antes de mandar: que no esté vacío y pese hasta 256 KiB. El resto
+// (§6.3 del diseño: puertos, build, volúmenes, redes, nombres de servicio en el stage) lo
+// valida catalog al guardar (contrato §2.12) y llega como un 422 en `compose_yaml`.
 export function composeProblem(yaml: string): ComposeProblem | null {
 	if (yaml.trim().length === 0) return 'empty'
 	return composeByteLength(yaml) > COMPOSE_MAX_BYTES ? 'too_large' : null
@@ -182,7 +183,7 @@ function summarizeService(
 /**
  * Los servicios de un compose, para mostrarlos (Proyectos y Configuración). Es una
  * lectura aproximada del YAML en estilo bloque, el de casi todos los compose: lo que no
- * entiende lo deja afuera. La validación de verdad es la de compose-go en la Fase 2.
+ * entiende lo deja afuera. La validación de verdad es la del backend al guardar (§2.12).
  */
 export function summarizeCompose(yaml: string): ComposeServiceSummary[] {
 	const lines = toLines(yaml)
