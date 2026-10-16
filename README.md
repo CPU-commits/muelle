@@ -389,11 +389,17 @@ Los de integración (build tag `integration`) usan el Docker real: necesitan un 
 go test -tags integration -race -count=1 -timeout 40m ./...
 ```
 
-Cada paquete usa su prefijo (`it2` deploy, `it3` ingress, `it5` distribución e install, `ctr23` el cliente de Docker) y borra lo suyo. Los que usan el Swarm (deploy, ingress, el cliente de Docker e install) corren de a uno aunque `go test` los lance a la vez: los serializa un candado en el directorio temporal (`dockertest/swarmlock`), porque con varios creando y borrando overlays a la vez, Swarm deja de conectar contenedores a una overlay attachable ("attaching to network failed … context deadline exceeded"). La espera cuenta para el `-timeout` de cada paquete. Los de install necesitan además la imagen `it5-muelle:test` de este árbol (ver `src/cmd/install/integration_test.go`).
+Cada paquete usa su prefijo (`it2` deploy, `it3` ingress, `it5` distribución e install, `ctr23` el cliente de Docker, `it9` la prueba de punta a punta de `container`) y borra lo suyo. Los que usan el Swarm (deploy, ingress, el cliente de Docker, install y `container`) corren de a uno aunque `go test` los lance a la vez: los serializa un candado en el directorio temporal (`dockertest/swarmlock`), porque con varios creando y borrando overlays a la vez, Swarm deja de conectar contenedores a una overlay attachable ("attaching to network failed … context deadline exceeded"). La espera cuenta para el `-timeout` de cada paquete. Los de install necesitan además la imagen `it5-muelle:test` de este árbol (ver `src/cmd/install/integration_test.go`).
 
 Los tests de `action/` corren el `deploy.sh` de la GitHub Action con bash, `curl` y `jq` contra un muelle falso (se saltan si falta alguno); CI corre además `shellcheck action/deploy.sh`.
 
-Los tests de `src/shared/infra/container` arman muelle completo con los cuatro módulos (matriz de permisos de los tokens, contratos entre módulos, fechas). La prueba de punta a punta con el binario real y `curl` (spec §15) por ahora es manual: los pasos de "Primer usuario" de arriba, más los endpoints de la fase.
+Los tests de `src/shared/infra/container` arman muelle completo con los seis módulos (matriz de permisos de los tokens, contratos entre módulos, fechas). Con el tag `integration`, `TestIntegrationEndToEnd` prueba las Fases 2, 3 y 5 juntas contra el Swarm real, por la API HTTP: proyecto, stage y una app de formulario con una variable secreta; el deploy seguido por SSE (con el secreto enmascarado), el estado y los logs; un dominio con Cloudflare falso que muelle-caddy (`caddy:2-alpine` con la CA interna) enruta a la app; un redeploy y el rollback; y al borrar todo, ni servicios, ni red, ni rutas. Usa el prefijo `it9` y los puertos 23001–23003, y necesita `nginx:alpine`, `caddy:2-alpine` y `alpine/socat:latest` en el nodo:
+
+```bash
+go test -tags integration -race -count=1 -timeout 25m -run Integration -v ./src/shared/infra/container/
+```
+
+La prueba con el binario real y `curl` (spec §15) sigue siendo manual: los pasos de "Primer usuario" de arriba, más los endpoints de la fase.
 
 ## Imágenes
 
