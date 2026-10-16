@@ -61,6 +61,15 @@ type Module struct {
 	deploys      *depsqlite.DeployRepository
 	dispatcher   *usecases.Dispatcher
 	storeManager *usecases.StoreManagerNode
+
+	// Los streams (contrato §0.3): el Hub que comparten el worker, los casos
+	// de uso y los streams; un ctx que Run cancela al apagar (así
+	// srv.Shutdown no espera a los streams abiertos); y sus límites, que los
+	// tests acortan antes de RegisterRoutes.
+	hub         *usecases.Hub
+	streamCtx   context.Context
+	stopStreams context.CancelFunc
+	sse         dephttp.SSEConfig
 }
 
 // New arma el módulo. DB, Cipher, Audit, Docker, Env e Ingress son
@@ -111,7 +120,12 @@ func New(d Deps) *Module {
 		Clock:   d.Clock,
 		Audit:   d.Audit,
 	}
+	streamCtx, stopStreams := context.WithCancel(context.Background())
 	return &Module{
+		hub:          hub,
+		streamCtx:    streamCtx,
+		stopStreams:  stopStreams,
+		sse:          dephttp.DefaultSSEConfig(),
 		deploys:      deploys,
 		dispatcher:   dispatcher,
 		storeManager: usecases.NewStoreManagerNode(dk, settings, d.Log),
@@ -129,16 +143,19 @@ func New(d Deps) *Module {
 			ListDeploys:  usecases.NewListDeploys(ud),
 			GetDeploy:    usecases.NewGetDeploy(ud),
 			ReadLog:      usecases.NewReadLog(ud),
+			FollowLog:    usecases.NewFollowLog(ud),
 		},
 		log: d.Log,
 	}
 }
 
 // RegisterRoutes registra los errores y las rutas del módulo (contrato §2):
-// POST/GET …/apps/{a}/deploys, GET …/deploys/{id} y …/log, POST
-// …/apps/{a}/rollback (AccessToken) y /api/v1/registries (AccessSession).
-// Faltan …/log/stream, GET …/apps/{a}/status y …/logs (AccessToken).
-func (m *Module) RegisterRoutes(k *utils.Kit) { dephttp.Register(k, m.uc) }
+// POST/GET …/apps/{a}/deploys, GET …/deploys/{id}, …/log y …/log/stream,
+// POST …/apps/{a}/rollback (AccessToken) y /api/v1/registries
+// (AccessSession). Faltan GET …/apps/{a}/status y …/logs (AccessToken).
+func (m *Module) RegisterRoutes(k *utils.Kit) {
+	dephttp.Register(k, m.uc, dephttp.Streams{Ctx: m.streamCtx, Config: m.sse})
+}
 
 // SeedInitRegistry guarda Deps.InitRegistry como un registry solo en el
 // primer arranque de la base (contrato §1.2 y §2.10), con la marca
@@ -170,6 +187,8 @@ func (m *Module) Run(ctx context.Context) {
 	}
 	m.dispatcher.Start(ctx, apps)
 	<-ctx.Done()
+	// Los streams se cierran enseguida: si no, srv.Shutdown esperaría sus 8 s.
+	m.stopStreams()
 	m.dispatcher.Wait()
 }
 

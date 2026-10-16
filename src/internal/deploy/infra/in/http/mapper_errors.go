@@ -18,4 +18,7 @@ func RegisterErrors(k *utils.Kit) {
 	// (catalog): el Kit es uno solo (contrato §1.1).
 	k.RegisterError(service.ErrWorkerBusy, http.StatusConflict, "conflict",
 		"un deploy de la app todavía no se detiene; vuelve a intentar en unos segundos")
+	// El Kit pone Retry-After en todo 429 (contrato §0.3).
+	k.RegisterError(ErrTooManyStreams, http.StatusTooManyRequests, "rate_limited",
+		"demasiados streams abiertos a la vez; cierra alguno (el panel en otra pestaña) y vuelve a intentar")
 }

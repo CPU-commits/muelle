@@ -3,6 +3,8 @@
 package http
 
 import (
+	"context"
+
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
 	"github.com/CPU-commits/muelle/src/internal/deploy/app/usecases"
 )
@@ -19,17 +21,25 @@ type UseCases struct {
 	ListDeploys  *usecases.ListDeploys
 	GetDeploy    *usecases.GetDeploy
 	ReadLog      *usecases.ReadLog
+	FollowLog    *usecases.FollowLog
 }
 
 type Handler struct {
-	uc UseCases
-	k  *utils.Kit
+	uc    UseCases
+	k     *utils.Kit
+	limit *streamLimit
+	cfg   SSEConfig
+	base  context.Context
 }
 
-// Register registra los errores del módulo y sus rutas en k.
-func Register(k *utils.Kit, uc UseCases) {
+// Register registra los errores del módulo y sus rutas en k (contrato §1:
+// todas las de deploy). s son el ctx y los límites de los streams.
+func Register(k *utils.Kit, uc UseCases, s Streams) {
 	RegisterErrors(k)
-	h := &Handler{uc: uc, k: k}
+	if s.Ctx == nil {
+		s.Ctx = context.Background()
+	}
+	h := &Handler{uc: uc, k: k, limit: newStreamLimit(s.Config.MaxPerPrincipal), cfg: s.Config, base: s.Ctx}
 
 	k.Handle("GET /api/v1/registries", utils.AccessSession, h.listRegistries)
 	k.Handle("POST /api/v1/registries", utils.AccessSession, h.createRegistry)
@@ -41,5 +51,6 @@ func Register(k *utils.Kit, uc UseCases) {
 	k.Handle("GET "+app+"/deploys", utils.AccessToken, h.listDeploys)
 	k.Handle("GET "+app+"/deploys/{id}", utils.AccessToken, h.getDeploy)
 	k.Handle("GET "+app+"/deploys/{id}/log", utils.AccessToken, h.readLog)
+	k.Handle("GET "+app+"/deploys/{id}/log/stream", utils.AccessToken, h.streamLog)
 	k.Handle("POST "+app+"/rollback", utils.AccessToken, h.rollback)
 }

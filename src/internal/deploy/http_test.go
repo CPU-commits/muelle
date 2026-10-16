@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
+	"github.com/CPU-commits/muelle/src/internal/deploy/domain/service"
 	"github.com/CPU-commits/muelle/src/package/clock"
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
@@ -29,6 +30,7 @@ type httpTest struct {
 	m     *Module
 	db    *sqlite.DB
 	clock *clock.Manual
+	f     *dockertest.Fake
 	c     *httptestutil.Client
 }
 
@@ -42,6 +44,15 @@ var testAuth = httptestutil.FakeAuth{
 
 func newHTTPTest(t *testing.T) *httpTest {
 	t.Helper()
+	h := newModuleTest(t, fakeEnv{})
+	h.c = httptestutil.New(t, testAuth, h.m.RegisterRoutes)
+	return h
+}
+
+// newModuleTest arma el módulo sin registrar sus rutas (así un test puede
+// cambiar sus límites de SSE antes), con env como las variables de las apps.
+func newModuleTest(t *testing.T, env service.EnvResolver) *httpTest {
+	t.Helper()
 	db := sqlitetest.New(t)
 	c, err := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
 	if err != nil {
@@ -49,9 +60,10 @@ func newHTTPTest(t *testing.T) *httpTest {
 	}
 	clk := clock.NewManual(t0)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	f := dockertest.New()
 	m := New(Deps{DB: db, Cipher: c, Clock: clk, Audit: sqlite.NewAuditRecorder(db, clk, log), Log: log,
-		Docker: dockertest.New(), Env: fakeEnv{}, Ingress: fakeIngress{}})
-	return &httpTest{m: m, db: db, clock: clk, c: httptestutil.New(t, testAuth, m.RegisterRoutes)}
+		Docker: f, Env: env, Ingress: fakeIngress{}})
+	return &httpTest{m: m, db: db, clock: clk, f: f}
 }
 
 func (h *httpTest) exec(t *testing.T, query string, args ...any) int64 {

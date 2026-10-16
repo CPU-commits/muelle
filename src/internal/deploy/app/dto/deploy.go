@@ -36,3 +36,10 @@ type LogPage struct {
 	Status       entity.Status
 	SupersededBy *int64
 }
+
+// LogLine es una línea del log de un deploy para el stream (contrato §2.6):
+// el texto sin el \n, y el offset después de ella (el id del evento).
+type LogLine struct {
+	Text   string
+	Offset int
+}
