@@ -2,8 +2,14 @@ import { expect, test } from '@playwright/test'
 import { PROD_URL } from './ports'
 
 // El build de producción tal como lo sirve el binario de Go con `-tags panel` (contrato
-// §5.5, `src/cmd/http/panel/panel.go`): `scripts/serve-build.mjs` copia sus reglas. Lo que
-// se prueba del lado del panel es que el build tiene la forma que ese handler espera.
+// §5.5, `src/cmd/http/panel/panel.go`), copiado a mano en `scripts/serve-build.mjs`.
+//
+// Lo que prueba del BUILD: que pide todo con rutas absolutas bajo `/_app/immutable/` (lo que
+// necesita panel.go para servir el mismo `200.html` en cualquier ruta, y para darle un año de
+// caché) y que `csp-header.txt` trae `frame-ancestors 'none'`. El resto (los headers, el 404
+// de un chunk, el 405) lo contesta serve-build.mjs: esos tests DOCUMENTAN lo que hace
+// panel.go, no lo verifican. Si serve-build.mjs se aleja de panel.go, siguen pasando; lo que
+// sí lo verifica son los tests de Go del handler (`panel_test.go`).
 
 test('el shell sale en cualquier ruta, con los headers del panel y sin caché', async ({
 	request,

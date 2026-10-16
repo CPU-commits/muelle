@@ -7,7 +7,13 @@
 // - solo GET y HEAD: otro método es 405 en JSON, con `Allow: GET, HEAD`;
 // - en TODAS las respuestas, `Content-Security-Policy` (el contenido de `csp-header.txt`),
 //   `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` y `Cache-Control`: un
-//   año e `immutable` en `/_app/immutable/…`, `no-cache` en todo lo demás.
+//   año e `immutable` en `/_app/immutable/…`, `no-cache` en todo lo demás;
+// - el `Content-Type` sale de la tabla de panel.go, por la extensión en minúscula.
+//
+// Lo que NO copia (los e2e no lo necesitan, y por eso no lo prueban): el `ETag` de lo que
+// está fuera de `/_app/immutable/` y su `304` con `If-None-Match`, y los `Range` que atiende
+// `http.ServeContent`. Que este servidor y panel.go digan lo mismo no lo verifica nada: si
+// cambia panel.go, se cambia acá a mano.
 //
 //   node scripts/serve-build.mjs <carpeta>:<puerto> [<carpeta>:<puerto> …]
 //
@@ -106,7 +112,8 @@ async function serve(dir, port) {
 		const name = cleanName(pathname) ?? ''
 		const file = await fileFor(root, name)
 		if (file) {
-			const headers = { 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream' }
+			const type = TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream'
+			const headers = { 'Content-Type': type }
 			if (name.startsWith(IMMUTABLE)) {
 				headers['Cache-Control'] = 'public, max-age=31536000, immutable'
 			}

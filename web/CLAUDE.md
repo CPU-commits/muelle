@@ -644,8 +644,8 @@ http.post(api('/projects'), async ({ request }) => {
 - Chrome anota en la consola cada respuesta 4xx de `fetch` ("Failed to load resource"): un
   401 de `/auth/me` en `/login` es esperado, no un error de la app.
 - `pnpm test:e2e` construye en `build-e2e/` (ignorado): `mock` con MSW y `prod` igual al de
-  `pnpm build`, y los sirve con `scripts/serve-build.mjs` (con las reglas de `panel.go`: ver
-  [CSP](#csp)). `./build` no se toca.
+  `pnpm build`, y los sirve con `scripts/serve-build.mjs` (una copia a mano de las reglas de
+  `panel.go`, sin `ETag` ni `Range`: ver [CSP](#csp)). `./build` no se toca.
 - **Puertos de los e2e:** `mock` en `E2E_MOCK_PORT` (4173, el `baseURL`) y `prod` en
   `E2E_PROD_PORT` (4174). Salen de `e2e/ports.ts`: un test que necesite una URL la importa
   de ahí (`PROD_URL`, `MOCK_URL`) o usa rutas relativas al `baseURL`, nunca un puerto
@@ -691,14 +691,21 @@ El panel corre bajo una CSP estricta: nada en línea ni `eval`, todo del mismo o
   `mockServiceWorker.js`), lo copia en `src/cmd/http/panel/build/` y compila con `-tags panel`
   (`//go:embed all:build`: sin `all:` se pierde `_app/`). Sin el tag, toda ruta del panel es
   un `404` corto. El panel va en la raíz (`/`, sin `paths.base`) y todas sus rutas absolutas.
-- **Qué responde Go**, y copia `scripts/serve-build.mjs` para los e2e: el archivo del build
-  si existe; si no, `200.html` (`/` también). Un `/_app/…` que no existe es `404` en texto, y
-  `csp-header.txt` no se sirve. Solo `GET` y `HEAD` (otro método, `405` en JSON). En todas:
-  la CSP, `nosniff`, `Referrer-Policy: same-origin` (la misma del `<meta name="referrer">`
-  de `app.html`; no `no-referrer`, que haría que un `<form>` nativo mande `Origin: null`) y
-  `Cache-Control` de un año `immutable` en `/_app/immutable/…` y `no-cache` en el resto (el
-  `200.html` y `_app/version.json` revalidan con su `ETag`). `e2e/embed.e2e.ts` lo prueba
-  contra el build de producción. Si cambia `panel.go`, se cambian los dos.
+- **Qué responde Go**: el archivo del build si existe; si no, `200.html` (`/` también). Un
+  `/_app/…` que no existe es `404` en texto, y `csp-header.txt` no se sirve. Solo `GET` y
+  `HEAD` (otro método, `405` en JSON). En todas: la CSP, `nosniff`,
+  `Referrer-Policy: same-origin` (la misma del `<meta name="referrer">` de `app.html`; no
+  `no-referrer`, que haría que un `<form>` nativo mande `Origin: null`) y `Cache-Control` de
+  un año `immutable` en `/_app/immutable/…` y `no-cache` en el resto (el `200.html` y
+  `_app/version.json` revalidan con su `ETag`). El `Content-Type` sale de una tabla propia,
+  por la extensión en minúscula, y `http.ServeContent` atiende `HEAD`, `Range` y las
+  condiciones (`If-None-Match` → `304`).
+- **`scripts/serve-build.mjs` lo copia a mano** para los e2e, sin el `ETag`, el `304` ni los
+  `Range` (los e2e no los usan). Nada verifica que diga lo mismo que `panel.go`: si cambia
+  uno, se cambia el otro. `e2e/embed.e2e.ts` prueba lo que es del build (rutas absolutas
+  bajo `/_app/immutable/`, `frame-ancestors` en `csp-header.txt`); sus tests de headers, 404
+  y 405 documentan lo que hace `panel.go` contra el mock, y lo de verdad lo prueba
+  `panel_test.go`.
 - **Qué rompe la CSP** (lo atrapa `e2e/csp.e2e.ts`, que falla con cualquier violación):
     - un `style="…"` fijo en un template (va una clase de `styles.css.ts`; `style:prop={x}`
       sí se puede: Svelte lo aplica por CSSOM);
