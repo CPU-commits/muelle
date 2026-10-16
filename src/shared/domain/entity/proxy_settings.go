@@ -29,9 +29,10 @@ const (
 	// SettingACMEEmail es el email de la cuenta ACME de Caddy.
 	SettingACMEEmail = "acme_email"
 	// SettingPanelDomain es el host del panel (sin esquema ni puerto). No se
-	// edita: admin lo escribe en cada arranque con el host de
-	// MUELLE_PANEL_ORIGIN, o vacío si ese host no es un dominio (una IP o
-	// localhost, en desarrollo). Así nunca hay dos fuentes que no coincidan.
+	// edita: admin lo escribe en cada arranque con MUELLE_PANEL_DOMAIN (lo que
+	// escribe install) o, si no está, con el host de MUELLE_PANEL_ORIGIN, o
+	// vacío si ese host no es un dominio (una IP o localhost, en desarrollo).
+	// Así nunca hay dos fuentes que no coincidan.
 	SettingPanelDomain = "panel_domain"
 	// SettingPanelAllowedCIDRs es un arreglo JSON de prefijos normalizados
 	// (validate.CIDRs); [] = sin restricción.
@@ -106,9 +107,9 @@ func (p ProxySettings) Enabled(def string) bool {
 
 // PanelOrigin es el origen en que muelle-caddy sirve el panel con estos
 // ajustes: https://<panel_domain>, con :<proxy_https_port> si no es 443. ""
-// sin dominio del panel. Puede no ser MUELLE_PANEL_ORIGIN: después de cambiar
-// los puertos del proxy (spec §16), el panel queda acá, y cmd/http acepta
-// los dos orígenes.
+// sin dominio del panel. Es el Origin que acepta cmd/http y el de los links
+// (además de MUELLE_PANEL_ORIGIN, si está), así después de cambiar los
+// puertos del proxy (spec §16) el panel sigue en el puerto nuevo.
 func (p ProxySettings) PanelOrigin() string {
 	if p.PanelDomain == "" {
 		return ""

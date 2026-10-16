@@ -104,9 +104,10 @@ func (m *Module) Jobs() []cron.Job { return m.jobs }
 func (m *Module) VerifyMasterKey(ctx context.Context) error { return m.verify.Execute(ctx) }
 
 // ApplyStartupSettings lo llama el contenedor en cada arranque, después de
-// VerifyMasterKey: escribe panel_domain (el host de MUELLE_PANEL_ORIGIN si es
-// un dominio, si no "") y, solo en el primer arranque de la base (la clave
-// init_applied), guarda la configuración inicial de install (MUELLE_INIT_*).
+// VerifyMasterKey: escribe panel_domain (MUELLE_PANEL_DOMAIN, o el host de
+// MUELLE_PANEL_ORIGIN si es un dominio, si no "") y, solo en el primer
+// arranque de la base (la clave init_applied), guarda la configuración
+// inicial de install (MUELLE_INIT_*). Invalida el origen del panel en caché.
 func (m *Module) ApplyStartupSettings(ctx context.Context, panelDomain string, init InitialSettings) error {
 	defer m.panelOrigin.Invalidate()
 	return m.startup.Execute(ctx, dto.StartupSettings{PanelDomain: panelDomain, Init: init})

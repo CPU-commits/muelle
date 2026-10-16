@@ -29,8 +29,9 @@ func NewApplyStartupSettings(settings repository.SettingsRepository, c cipher.Ci
 }
 
 // Execute, en una transacción:
-//   - panel_domain se escribe siempre con in.PanelDomain (el host de
-//     MUELLE_PANEL_ORIGIN): no se edita en el panel, así nunca hay dos fuentes;
+//   - panel_domain se escribe siempre con in.PanelDomain (MUELLE_PANEL_DOMAIN
+//     o el host de MUELLE_PANEL_ORIGIN): no se edita en el panel, así nunca
+//     hay dos fuentes;
 //   - in.Init se aplica solo en el primer arranque de la base, el que guarda
 //     la marca entity.KeyInitApplied. install deja montado el secreto del
 //     token y las variables MUELLE_INIT_*, así que sin la marca un reinicio
