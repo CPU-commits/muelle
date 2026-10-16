@@ -199,15 +199,19 @@ func (r *run) steps(ctx context.Context) error {
 		return err
 	}
 	r.app = app
+	// Las variables se leen antes de la primera línea: el actor_name (el
+	// nombre de un token, un username) también se enmascara (contrato §2.5).
+	vars, secrets, envErr := u.Env.ResolveEnv(ctx, app.ID)
+	if envErr == nil {
+		r.setMasker(secrets)
+	}
 	r.line("deploy #%d de %s/%s/%s (%s · %s)", d.ID, app.Project, app.Stage, app.Slug, d.Trigger, d.ActorName)
-	vars, secrets, err := u.Env.ResolveEnv(ctx, app.ID)
-	if err != nil {
+	if envErr != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		return failf("%s", reasonEnv)
 	}
-	r.setMasker(secrets)
 
 	// Paso 2: la configuración y las imágenes.
 	r.line("resolviendo imágenes")

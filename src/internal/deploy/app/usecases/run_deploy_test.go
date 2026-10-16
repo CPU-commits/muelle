@@ -166,6 +166,31 @@ func TestRunDeployMasks(t *testing.T) {
 	}
 }
 
+// La primera línea del log (con el actor_name, que es el nombre del token o
+// el username) también pasa por el enmascarado con los secretos de la app
+// (contrato §2.5): las variables se leen antes de escribirla. Si no se pueden
+// leer, la línea va igual, y el deploy falla después.
+func TestRunDeployMasksFirstLine(t *testing.T) {
+	w := newWorld(t)
+	w.env.set(w.apiID, map[string]string{"NAME": "github-actions"}, "github-actions") // el nombre del token de tokenCtx
+	w.deploy(t, apiRef, nil, nil)
+	d := w.runOK(t, w.apiID)
+	if texts := w.texts(t, d.ID); len(texts) == 0 || texts[0] != fmt.Sprintf("deploy #%d de auditfy/staging/api (api · ***)", d.ID) {
+		t.Fatalf("la primera línea no salió enmascarada:\n%s", w.log(t, d.ID))
+	}
+
+	w.env.err = errors.New("la base no responde")
+	w.deploy(t, apiRef, nil, nil)
+	d, err := w.claimAndRun(t, w.apiID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectFailed(t, w, d, "no se pudieron leer las variables de la app")
+	if texts := w.texts(t, d.ID); len(texts) == 0 || !strings.HasPrefix(texts[0], fmt.Sprintf("deploy #%d de auditfy/staging/api", d.ID)) {
+		t.Fatalf("sin las variables, falta la primera línea:\n%s", w.log(t, d.ID))
+	}
+}
+
 // El margen de un servicio que no cambió se cuenta desde que docker stack
 // deploy volvió, no desde antes de llamarlo (decisión 6): con un CLI lento y
 // un servicio cambiado que Swarm todavía no empezó a actualizar, el deploy no
