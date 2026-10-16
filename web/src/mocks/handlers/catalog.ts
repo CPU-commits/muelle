@@ -1,11 +1,15 @@
 import { http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent, notFound } from '../api'
 import { catalogDb, type MockApp, type MockHealthcheck, type MockSpec } from '../db/catalog'
+import { appKey, ingressDb } from '../db/ingress'
 import { requireSession } from '../session'
 
 // Proyectos, stages y apps (catalog/infra/in/http/handler.go). Replica las reglas que el
 // panel tiene que manejar: slugs, nombres, spec de formulario, compose, `not_empty`,
-// `conflict` y `kind_mismatch`. Los mensajes de los 422 son los del backend.
+// `conflict` y `kind_mismatch`. Los mensajes de los 422 son los del backend. Del compose
+// (contrato §2.12 y §6.3 del diseño) solo dos de las claves rechazadas, `ports` y `build`,
+// y los nombres de servicio repetidos en el stage: alcanza para ver cómo los muestra el
+// panel. Una app con dominios (los de `db/ingress.ts`) no se borra: `409 not_empty`.
 
 const SLUG_16 = /^[a-z]([a-z0-9-]{0,14}[a-z0-9])?$/
 const SLUG_12 = /^[a-z]([a-z0-9-]{0,10}[a-z0-9])?$/
@@ -228,6 +232,142 @@ function checkSpec(raw: unknown): MockSpec {
 	}
 }
 
+/** Un puerto de `expose`: un entero o `N/tcp`; los rangos y los `${VAR}` no cuentan. */
+function exposedPort(value: string): number | null {
+	const match = /^(\d+)(\/tcp)?$/.exec(value.trim().replace(/^["']|["']$/g, ''))
+	const port = match ? Number(match[1]) : Number.NaN
+	return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null
+}
+
+/**
+ * Los servicios de un compose y los puertos de su `expose`, como `compose.Services` del
+ * backend (contrato §2.12): por nombre, con los puertos ordenados. Un parser de líneas
+ * alcanza para los compose del mock (`expose: [..]` o una lista con `- `).
+ */
+function composeServices(yaml: string): { name: string; ports: number[] }[] {
+	const services = new Map<string, Set<number>>()
+	let inServices = false
+	let serviceIndent = -1
+	let current: Set<number> | null = null
+	let exposeIndent = -1
+	const add = (value: string) => {
+		const port = exposedPort(value)
+		if (port !== null) current?.add(port)
+	}
+	for (const raw of yaml.split('\n')) {
+		const text = raw.trim()
+		if (text === '' || text.startsWith('#')) continue
+		const indent = raw.length - raw.trimStart().length
+		if (indent === 0) {
+			inServices = /^services:\s*$/.test(text)
+			serviceIndent = -1
+			current = null
+			continue
+		}
+		if (!inServices) continue
+		if (serviceIndent === -1) serviceIndent = indent
+		if (indent === serviceIndent) {
+			current = new Set()
+			services.set(text.replace(/:.*$/, ''), current)
+			exposeIndent = -1
+			continue
+		}
+		if (exposeIndent !== -1 && indent > exposeIndent && text.startsWith('- ')) {
+			add(text.slice(2))
+			continue
+		}
+		exposeIndent = -1
+		const expose = /^expose:\s*(.*)$/.exec(text)
+		if (!expose) continue
+		const inline = expose[1] ?? ''
+		if (inline.startsWith('[')) inline.slice(1, -1).split(',').forEach(add)
+		else exposeIndent = indent
+	}
+	return [...services]
+		.map(([name, ports]) => ({ name, ports: [...ports].sort((a, b) => a - b) }))
+		.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** Los motivos del backend para las dos claves de servicio que el mock rechaza. */
+const REJECTED_KEYS: Readonly<Record<string, string>> = {
+	ports: 'publicar puertos no está soportado en la v1: los dominios van por Caddy',
+	build: 'construir imágenes no está soportado: las imágenes vienen de un registry',
+}
+
+/** La primera clave rechazada de un servicio (`services.web.ports: …`), o null. */
+function rejectedKey(yaml: string): string | null {
+	let inServices = false
+	let serviceIndent = -1
+	let keyIndent = -1
+	let service = ''
+	for (const raw of yaml.split('\n')) {
+		const text = raw.trim()
+		if (text === '' || text.startsWith('#')) continue
+		const indent = raw.length - raw.trimStart().length
+		if (indent === 0) {
+			inServices = /^services:\s*$/.test(text)
+			serviceIndent = -1
+			continue
+		}
+		if (!inServices) continue
+		if (serviceIndent === -1) serviceIndent = indent
+		if (indent === serviceIndent) {
+			service = text.replace(/:.*$/, '')
+			keyIndent = -1
+			continue
+		}
+		if (keyIndent === -1) keyIndent = indent
+		const key = indent === keyIndent ? /^([a-z_]+):/.exec(text)?.[1] : undefined
+		const reason = key ? REJECTED_KEYS[key] : undefined
+		if (key && reason) return `services.${service}.${key}: ${reason}`
+	}
+	return null
+}
+
+/** Los nombres de servicio de cada otra app del stage (§5.2 regla 2: comparten la red). */
+function stageServices(project: string, stage: string, except: string): Map<string, MockApp> {
+	const names = new Map<string, MockApp>()
+	for (const other of catalogDb.appsOf(project, stage)) {
+		if (other.slug === except) continue
+		for (const service of servicesOf(other)) names.set(service.name, other)
+	}
+	return names
+}
+
+/** Lo que valida catalog al guardar un compose, además del tamaño. */
+function checkComposeRules(project: string, stage: string, slug: string, yaml: string): void {
+	const rejected = rejectedKey(yaml)
+	if (rejected) throw new Invalid('compose_yaml', rejected)
+	const taken = stageServices(project, stage, slug)
+	for (const service of composeServices(yaml)) {
+		const owner = taken.get(service.name)
+		if (owner) {
+			throw new Invalid(
+				'compose_yaml',
+				`el servicio "${service.name}" ya existe en la app "${owner.slug}" del stage: los servicios de un stage comparten la red`,
+			)
+		}
+	}
+}
+
+/** Una app de formulario nueva no puede llamarse como un servicio de una compose del stage. */
+function checkServiceSlug(project: string, stage: string, slug: string): void {
+	const owner = stageServices(project, stage, slug).get(slug)
+	if (owner?.kind === 'compose') {
+		throw new Invalid(
+			'slug',
+			`"${slug}" ya es un servicio de la app compose "${owner.slug}" del stage`,
+		)
+	}
+}
+
+/** `services` del `AppOutput` (contrato §2.12): de la configuración guardada, no de Swarm. */
+function servicesOf(app: MockApp): { name: string; ports: number[] }[] {
+	if (app.kind === 'compose') return composeServices(app.compose_yaml ?? '')
+	const port = app.spec?.port ?? 0
+	return [{ name: app.slug, ports: port > 0 ? [port] : [] }]
+}
+
 /** El `AppOutput` del backend: `spec` u `compose_yaml` según el tipo, y `pending_changes`. */
 function appOutput(app: MockApp) {
 	const pending =
@@ -244,6 +384,7 @@ function appOutput(app: MockApp) {
 		last_deployed_at: app.last_deployed_at,
 		pending_changes: pending,
 		created_at: app.created_at,
+		services: servicesOf(app),
 	}
 }
 
@@ -402,6 +543,7 @@ export const catalogHandlers: RequestHandler[] = [
 				if (body.compose_yaml !== undefined && body.compose_yaml !== null) {
 					throw new Invalid('compose_yaml', 'no aplica a apps de tipo service')
 				}
+				checkServiceSlug(params.p, params.s, slug)
 				created = {
 					...base,
 					kind: 'service',
@@ -412,10 +554,12 @@ export const catalogHandlers: RequestHandler[] = [
 				if (body.spec !== undefined && body.spec !== null) {
 					throw new Invalid('spec', 'no aplica a apps de tipo compose')
 				}
+				const composeYaml = checkCompose(body.compose_yaml)
+				checkComposeRules(params.p, params.s, slug, composeYaml)
 				created = {
 					...base,
 					kind: 'compose',
-					compose_yaml: checkCompose(body.compose_yaml),
+					compose_yaml: composeYaml,
 					deploy_timeout_s: 300,
 				}
 			} else {
@@ -461,6 +605,7 @@ export const catalogHandlers: RequestHandler[] = [
 			) {
 				return apiError(422, 'kind_mismatch', 'el campo no corresponde al tipo de app')
 			}
+			if (composeYaml !== null) checkComposeRules(params.p, params.s, found.slug, composeYaml)
 			if (spec) found.spec = spec
 			if (composeYaml !== null) found.compose_yaml = composeYaml
 			if (spec || composeYaml !== null) found.config_changed_at = new Date().toISOString()
@@ -476,6 +621,11 @@ export const catalogHandlers: RequestHandler[] = [
 		const denied = requireSession()
 		if (denied) return denied
 		if (!catalogDb.findApp(params.p, params.s, params.a)) return notFound()
+		// `domains.app_id` es RESTRICT: primero se borran sus dominios.
+		const key = appKey(params.p, params.s, params.a)
+		if (ingressDb.state.domains.some((domain) => domain.app === key)) {
+			return apiError(409, 'not_empty', 'primero hay que borrar lo que contiene')
+		}
 		catalogDb.removeApp(params.p, params.s, params.a)
 		catalogDb.save()
 		return noContent()

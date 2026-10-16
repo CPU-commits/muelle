@@ -62,6 +62,7 @@ const STORAGE_KEY = 'catalog'
 export const MOCK_AGENTS_COMPOSE = `services:
   gateway:
     image: ghcr.io/aumi-app/agents-gateway:staging
+    expose: ["8080"]
     environment:
       LLM_API_KEY: \${LLM_API_KEY}
       NATS_URL: \${NATS_URL:-nats://nats:4222}

@@ -3,6 +3,7 @@ export type {
 	AppContents,
 	AppKind,
 	AppRef,
+	AppService,
 	ComposeApp,
 	AppSummary,
 	DeployState,
@@ -16,6 +17,7 @@ export {
 	appSummaryOf,
 	deployStateOf,
 	sameAppRef,
+	serviceTargets,
 } from './entities/app'
 export type { CatalogTree, ProjectNode, StageNode } from './entities/catalogTree'
 export {
@@ -31,6 +33,8 @@ export type { Stage } from './entities/stage'
 export { stageNetwork } from './entities/stage'
 export type { ComposeProblem, ProjectNameProblem, SlugProblem } from './errors/catalogErrors'
 export {
+	AppDeployStopping,
+	AppHasDomains,
 	AppNotFound,
 	InvalidAppSpec,
 	InvalidCompose,
@@ -41,6 +45,7 @@ export {
 	ProjectNotEmpty,
 	ProjectNotFound,
 	SlugTaken,
+	StageNetworkConflict,
 	StageNotEmpty,
 	StageNotFound,
 } from './errors/catalogErrors'

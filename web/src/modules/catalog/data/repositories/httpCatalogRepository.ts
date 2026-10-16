@@ -2,11 +2,14 @@ import type { ApiError } from '@/shared/data/http/errors'
 import { type DomainErrorMap, withDomainErrors } from '@/shared/data/http/domainErrors'
 import type { CatalogRepository } from '../../domain'
 import {
+	AppDeployStopping,
+	AppHasDomains,
 	AppNotFound,
 	KindMismatch,
 	ProjectNotEmpty,
 	ProjectNotFound,
 	SlugTaken,
+	StageNetworkConflict,
 	StageNotEmpty,
 	StageNotFound,
 } from '../../domain'
@@ -43,10 +46,15 @@ const PROJECT: DomainErrorMap = {
 }
 
 // Un 404 al crear un stage es su proyecto; al borrarlo, el stage (o su proyecto).
+// `network_conflict`: ya hay una red de Docker con el nombre del stage que no creó muelle
+// (la crea ingress al crear el stage).
 const NEW_STAGE: DomainErrorMap = {
 	notFound: (error) => new ProjectNotFound(cause(error)),
 	fields: FIELDS,
-	codes: { conflict: (error) => new SlugTaken('stage', cause(error)) },
+	codes: {
+		conflict: (error) => new SlugTaken('stage', cause(error)),
+		network_conflict: (error) => new StageNetworkConflict(cause(error)),
+	},
 }
 
 const STAGE: DomainErrorMap = {
@@ -62,6 +70,16 @@ const APP: DomainErrorMap = {
 	notFound: (error) => new AppNotFound(cause(error)),
 	fields: FIELDS,
 	codes: { kind_mismatch: (error) => new KindMismatch(cause(error)) },
+}
+
+// Borrar una app: `not_empty` si tiene dominios; `conflict` si un deploy suyo no se detuvo
+// a tiempo y la app no se borró (contrato §1.1, `RemoveApp`).
+const DELETE_APP: DomainErrorMap = {
+	...APP,
+	codes: {
+		not_empty: (error) => new AppHasDomains(cause(error)),
+		conflict: (error) => new AppDeployStopping(cause(error)),
+	},
 }
 
 export const httpCatalogRepository: CatalogRepository = {
@@ -124,5 +142,6 @@ export const httpCatalogRepository: CatalogRepository = {
 			APP,
 		),
 
-	deleteApp: (ref) => withDomainErrors(() => ds.deleteApp(ref.project, ref.stage, ref.app), APP),
+	deleteApp: (ref) =>
+		withDomainErrors(() => ds.deleteApp(ref.project, ref.stage, ref.app), DELETE_APP),
 }

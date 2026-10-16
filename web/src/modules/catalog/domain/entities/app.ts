@@ -11,6 +11,16 @@ export interface AppRef {
 	readonly app: AppSlug
 }
 
+/**
+ * Un servicio de la app según la configuración guardada (no según Swarm): el único de una
+ * app de formulario, con el slug de la app, o cada uno del compose. `ports` son los que
+ * declara (`port` del spec, `expose` del compose): una sugerencia, no se publican.
+ */
+export interface AppService {
+	readonly name: string
+	readonly ports: readonly number[]
+}
+
 interface AppBase {
 	readonly project: ProjectSlug
 	readonly stage: StageSlug
@@ -23,6 +33,8 @@ interface AppBase {
 	/** La configuración cambió después del último deploy. Sin deploys, nunca. */
 	readonly pendingChanges: boolean
 	readonly createdAt: Date
+	/** Sus servicios (contrato §2.12); null si el backend no los manda (sin la Fase 2). */
+	readonly services: readonly AppService[] | null
 }
 
 /** Una app de formulario: un servicio descrito por su spec. */
@@ -62,6 +74,17 @@ export function sameAppRef(a: AppRef, b: AppRef): boolean {
 /** El stack de Swarm de la app, `<proyecto>_<stage>_<app>` (§5.2 del spec). */
 export function appStackName(ref: AppRef): string {
 	return `${ref.project}_${ref.stage}_${ref.app}`
+}
+
+/**
+ * Los destinos que puede ofrecer el formulario de un dominio (`target_service:target_port`):
+ * uno por cada puerto que declara cada servicio. Un servicio sin puertos no da ninguno
+ * (el puerto no se adivina).
+ */
+export function serviceTargets(app: Pick<App, 'services'>): string[] {
+	return (app.services ?? []).flatMap((service) =>
+		service.ports.map((port) => `${service.name}:${String(port)}`),
+	)
 }
 
 export type DeployState = 'never_deployed' | 'pending_changes' | 'up_to_date'

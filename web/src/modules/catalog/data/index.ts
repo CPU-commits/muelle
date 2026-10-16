@@ -1,6 +1,7 @@
 export {
 	appQuery,
 	appSummaryQuery,
+	appTargetsQuery,
 	catalogKeys,
 	catalogTreeQuery,
 	createAppMutation,

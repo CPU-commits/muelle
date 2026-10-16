@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { serverFieldMessage } from '../catalogMessages'
+import { ConflictError } from '@/shared/domain'
+import { AppDeployStopping, AppHasDomains, StageNetworkConflict } from '../../../../domain'
+import { catalogErrorMessage, serverFieldMessage } from '../catalogMessages'
 
 // Los motivos son los textos exactos del backend (src/internal/catalog/domain/vo/appspec.go
 // y src/shared/domain/validate/validate.go): el 422 llega como "<campo>: <motivo>".
@@ -40,5 +42,57 @@ describe('serverFieldMessage', () => {
 			serverFieldMessage('spec', 'JSON inválido: el campo "port" tiene un valor incorrecto'),
 		).toBe(m.catalog_error_spec_shape())
 		expect(serverFieldMessage('otro', 'un motivo nuevo')).toBe('un motivo nuevo')
+	})
+
+	// Al guardar, catalog valida el compose con las reglas de §6.3 del diseño (contrato §2.12).
+	it('compose_yaml: vacío y tamaño con su texto; un servicio repetido en el stage, traducido', () => {
+		expect(serverFieldMessage('composeYaml', 'es obligatorio')).toBe(
+			m.catalog_error_compose_empty(),
+		)
+		expect(serverFieldMessage('composeYaml', 'no puede superar 256 KiB')).toBe(
+			m.catalog_error_compose_too_large(),
+		)
+		expect(
+			serverFieldMessage(
+				'composeYaml',
+				'el servicio "web" ya existe en la app "front" del stage: los servicios de un stage comparten la red',
+			),
+		).toBe(m.catalog_error_compose_service_taken({ service: 'web', app: 'front' }))
+	})
+
+	it('compose_yaml: el resto de las reglas, con el motivo del backend (no "es obligatorio")', () => {
+		const reason =
+			'services.web.ports: publicar puertos no está soportado en la v1: los dominios van por Caddy'
+		expect(serverFieldMessage('composeYaml', reason)).toBe(
+			'Services.web.ports: publicar puertos no está soportado en la v1: los dominios van por Caddy',
+		)
+		expect(
+			serverFieldMessage('composeYaml', 'el compose debe tener al menos un servicio'),
+		).toBe('El compose debe tener al menos un servicio')
+	})
+
+	it('slug: el de un servicio de una app compose del stage, traducido', () => {
+		expect(
+			serverFieldMessage(
+				'slug',
+				'"web" ya es un servicio de la app compose "front" del stage',
+			),
+		).toBe(m.catalog_error_slug_is_service({ slug: 'web', app: 'front' }))
+	})
+})
+
+describe('catalogErrorMessage', () => {
+	it('borrar una app: con dominios, o con un deploy que no se detiene', () => {
+		expect(catalogErrorMessage(new AppHasDomains())).toBe(m.catalog_error_app_has_domains())
+		expect(catalogErrorMessage(new AppDeployStopping())).toBe(
+			m.catalog_error_app_deploy_stopping(),
+		)
+	})
+
+	it('crear un stage: una red de Docker ajena con su nombre', () => {
+		expect(catalogErrorMessage(new StageNetworkConflict())).toBe(
+			m.catalog_error_stage_network_conflict(),
+		)
+		expect(new StageNetworkConflict()).toBeInstanceOf(ConflictError)
 	})
 })

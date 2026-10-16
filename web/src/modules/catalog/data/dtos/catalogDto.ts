@@ -47,6 +47,16 @@ export const specDtoSchema = z.object({
 	resources: resourcesDtoSchema.nullish(),
 })
 
+/**
+ * Un servicio de la app y los puertos que declara (contrato §2.12, Fase 2): el `port` del
+ * spec en una de formulario, los de `expose` en una compose. Solo sugerencias para el
+ * destino de un dominio: no se publican.
+ */
+const appServiceDtoSchema = z.object({
+	name: z.string().min(1),
+	ports: z.array(z.number().int().min(1).max(65535)),
+})
+
 const appBaseDtoSchema = z.object({
 	project: z.string().min(1),
 	stage: z.string().min(1),
@@ -56,6 +66,8 @@ const appBaseDtoSchema = z.object({
 	last_deployed_at: z.string().nullable(),
 	pending_changes: z.boolean(),
 	created_at: z.string(),
+	// Siempre está desde la Fase 2, ordenado por nombre. Un backend sin ella no lo manda.
+	services: z.array(appServiceDtoSchema).optional(),
 })
 
 /**

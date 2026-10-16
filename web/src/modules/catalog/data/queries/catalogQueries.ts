@@ -11,6 +11,7 @@ import {
 	type DeleteStageInput,
 	type ProjectSlug,
 	type RenameProjectInput,
+	serviceTargets,
 	type UpdateAppInput,
 } from '../../domain'
 
@@ -43,6 +44,14 @@ export function appQuery(ref: AppRef) {
  */
 export function appSummaryQuery(ref: AppRef) {
 	return queryOptions({ ...appQuery(ref), select: appSummaryOf })
+}
+
+/**
+ * Los destinos que el formulario de un dominio ofrece (`servicio:puerto`, contrato §2.12).
+ * Comparte el cache de `appQuery`: guardar el compose o el spec los actualiza.
+ */
+export function appTargetsQuery(ref: AppRef) {
+	return queryOptions({ ...appQuery(ref), select: serviceTargets })
 }
 
 // Crear o borrar cambia el árbol entero; cambiar una app, además, su entrada del cache.

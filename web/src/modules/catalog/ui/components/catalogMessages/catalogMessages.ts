@@ -5,6 +5,8 @@ import {
 	type AppKind,
 	type AppSpecMessages,
 	type ComposeServiceSummary,
+	AppDeployStopping,
+	AppHasDomains,
 	AppNotFound,
 	InvalidCompose,
 	InvalidDeployTimeout,
@@ -14,6 +16,7 @@ import {
 	PROJECT_NAME_MAX,
 	ProjectNotFound,
 	SlugTaken,
+	StageNetworkConflict,
 	StageNotFound,
 } from '../../../domain'
 
@@ -112,8 +115,13 @@ export function slugTakenMessage(error: SlugTaken): string {
 }
 
 // El texto de algo puesto entre comillas en el mensaje del backend (`"uploads" está repetido`).
-function quoted(message: string): string {
-	return /"([^"]*)"/.exec(message)?.[1] ?? ''
+function quoted(message: string, index = 0): string {
+	return [...message.matchAll(/"([^"]*)"/g)][index]?.[1] ?? ''
+}
+
+/** Un motivo del backend (en minúscula, estilo Go) como oración. */
+function sentence(text: string): string {
+	return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
 const TIMINGS: Readonly<Record<string, () => string>> = {
@@ -176,16 +184,32 @@ export function serverFieldMessage(field: string, backend: string): string {
 			return specMessages.cpus()
 		case 'deployTimeoutSeconds':
 			return m.catalog_error_timeout()
+		// Al guardar, catalog valida el compose con las reglas de §6.3 del diseño (contrato
+		// §2.12): el motivo del backend nombra la clave (`services.web.ports: …`) y dice por
+		// qué; el panel no tiene un texto propio para cada regla.
 		case 'composeYaml':
-			return /256/.test(backend)
-				? m.catalog_error_compose_too_large()
-				: m.catalog_error_compose_empty()
+			if (/^es obligatorio/.test(backend)) return m.catalog_error_compose_empty()
+			if (/256 KiB/.test(backend)) return m.catalog_error_compose_too_large()
+			if (/ya existe en la app/.test(backend)) {
+				return m.catalog_error_compose_service_taken({
+					service: quoted(backend),
+					app: quoted(backend, 1),
+				})
+			}
+			return sentence(backend)
 		case 'spec':
 			return m.catalog_error_spec_shape()
 		case 'slug':
-			return /reservad/.test(backend)
-				? m.catalog_error_slug_reserved({ slug: quoted(backend) })
-				: m.catalog_error_slug_invalid()
+			if (/reservad/.test(backend))
+				return m.catalog_error_slug_reserved({ slug: quoted(backend) })
+			// Una app de formulario nueva con el nombre de un servicio de una compose del stage.
+			if (/ya es un servicio/.test(backend)) {
+				return m.catalog_error_slug_is_service({
+					slug: quoted(backend),
+					app: quoted(backend, 1),
+				})
+			}
+			return m.catalog_error_slug_invalid()
 		case 'name':
 			if (/superar/.test(backend)) return m.catalog_error_name_long({ max: PROJECT_NAME_MAX })
 			if (/obligatorio/.test(backend)) return m.common_required()
@@ -202,6 +226,9 @@ export function catalogErrorMessage(error: unknown): string {
 	if (error instanceof StageNotFound) return m.catalog_error_stage_not_found()
 	if (error instanceof AppNotFound) return m.catalog_error_app_not_found()
 	if (error instanceof SlugTaken) return slugTakenMessage(error)
+	if (error instanceof AppHasDomains) return m.catalog_error_app_has_domains()
+	if (error instanceof AppDeployStopping) return m.catalog_error_app_deploy_stopping()
+	if (error instanceof StageNetworkConflict) return m.catalog_error_stage_network_conflict()
 	if (error instanceof InvalidProjectName) return projectNameMessage(error)
 	if (error instanceof InvalidSlug) return slugMessage(error, error.slug)
 	if (error instanceof InvalidCompose) {

@@ -1,12 +1,10 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
-
 	"catalog_apps_one": "1 app",
 	"catalog_apps_other": "{count} apps",
 	"catalog_stages_one": "1 stage",
 	"catalog_stages_other": "{count} stages",
 	"catalog_meta_join": "{first} · {second}",
-
 	"catalog_search_label": "Search apps",
 	"catalog_search_placeholder": "Search apps…",
 	"catalog_search_empty_title": "No app matches “{query}”",
@@ -16,14 +14,12 @@
 	"catalog_load_error": "Projects couldn't be loaded",
 	"catalog_empty_title": "No projects yet",
 	"catalog_empty_body": "A project groups a product's stages, like staging and production, and each stage holds its apps.",
-
 	"catalog_new_project": "New project",
 	"catalog_project_options": "Options for {project}",
 	"catalog_project_new_stage": "New stage",
 	"catalog_project_rename": "Rename",
 	"catalog_project_delete": "Delete project",
 	"catalog_project_no_stages": "This project has no stages yet.",
-
 	"catalog_stage_label": "Stage {stage}",
 	"catalog_stage_network": "Stage network",
 	"catalog_stage_variables": "Variables",
@@ -34,21 +30,18 @@
 	"catalog_stage_no_apps": "This stage has no apps yet.",
 	"catalog_stage_add_app": "New app",
 	"catalog_stage_apps": "Apps in {project}/{stage}",
-
 	"catalog_app_compose_badge": "compose",
 	"catalog_app_pending": "Pending changes",
 	"catalog_app_kind_service": "Service",
 	"catalog_app_kind_compose": "Compose",
 	"catalog_app_no_deploys": "No deploys",
 	"catalog_app_no_services": "No services",
-
 	"catalog_badge_pending": "Undeployed changes",
 	"catalog_badge_never": "Not deployed",
 	"catalog_identity_stack": "stack",
 	"catalog_identity_network": "network",
 	"catalog_identity_image": "image",
 	"catalog_identity_services": "services",
-
 	"catalog_new_project_title": "New project",
 	"catalog_new_project_description": "Groups a product's stages. The slug goes into URLs and Swarm names, and can't be changed.",
 	"catalog_project_name": "Name",
@@ -75,7 +68,6 @@
 	"catalog_app_compose_yaml": "compose.yaml",
 	"catalog_app_created": "App {app} created",
 	"catalog_app_created_body": "Finish configuring it before the first deploy.",
-
 	"catalog_delete_project_title": "Delete project {project}?",
 	"catalog_delete_project_body": "The project is deleted. This can't be undone.",
 	"catalog_delete_project_body_stages": "It still has stages: delete its apps and stages first.",
@@ -88,7 +80,6 @@
 	"catalog_stage_deleted": "Stage {stage} deleted",
 	"catalog_stage_not_empty_title": "{stage} can't be deleted",
 	"catalog_stage_not_empty_body": "It still has apps. Delete them first from their Settings.",
-
 	"catalog_error_slug_format": "Up to {max} characters: a-z, 0-9 and hyphens; starts with a letter and doesn't end with a hyphen.",
 	"catalog_error_slug_reserved": "“{slug}” is reserved: muelle uses it for its own networks.",
 	"catalog_error_project_taken": "There's already a project with that slug.",
@@ -104,7 +95,6 @@
 	"catalog_error_compose_too_large": "The compose file is larger than 256 KiB.",
 	"catalog_error_timeout": "Between 30 and 3600 seconds.",
 	"catalog_error_unclosed_quote": "There's an unclosed quote.",
-
 	"catalog_spec_image_required": "Required (up to 512 characters).",
 	"catalog_spec_image_invalid": "Not a valid Docker reference: registry/repository[:tag][@sha256:…], in lowercase.",
 	"catalog_spec_port": "Between 1 and 65535.",
@@ -123,13 +113,11 @@
 	"catalog_spec_volume_mount_repeated": "“{mount}” is repeated.",
 	"catalog_spec_memory": "Between 16 and 1048576 MB.",
 	"catalog_spec_cpus": "Between 0.01 and 256.",
-
 	"catalog_app_loading": "Loading the app…",
 	"catalog_app_load_error": "The app couldn't be loaded",
 	"catalog_app_not_found_title": "This app doesn't exist",
 	"catalog_app_not_found_body": "It may have been deleted, or the link is wrong.",
 	"catalog_back_to_projects": "Go to Projects",
-
 	"catalog_config_subtitle": "Saving doesn't redeploy: changes stay pending until the next deploy.",
 	"catalog_config_sections": "Settings sections",
 	"catalog_config_image": "Image",
@@ -153,11 +141,11 @@
 	"catalog_config_health_retries": "Retries",
 	"catalog_config_health_start": "Start period",
 	"catalog_config_health_preview": "What Swarm will run",
-	"catalog_config_health_none_warning": "Without a healthcheck there's no zero-downtime guarantee: Swarm considers the new version ready as soon as it starts.",
+	"catalog_config_health_none_warning": "Without a healthcheck there's no zero-downtime guarantee: Swarm considers the new version ready as soon as it starts (unless the image has its own HEALTHCHECK).",
 	"catalog_config_health_req_http": "No shell. The image needs wget.",
-	"catalog_config_health_req_bun": "The image needs bun.",
+	"catalog_config_health_req_bun": "No shell. The image needs bun.",
 	"catalog_config_health_req_command": "No shell: to use the image's, start with sh -c.",
-	"catalog_config_health_req_none": "Swarm won't check the new version.",
+	"catalog_config_health_req_none": "muelle doesn't add one: if the image has its own HEALTHCHECK, Swarm uses it.",
 	"catalog_config_volumes": "Volumes",
 	"catalog_config_volumes_description": "Named volumes with the local driver.",
 	"catalog_config_volume_name": "Name",
@@ -181,7 +169,6 @@
 	"catalog_config_stored_problem": "The saved configuration has a problem in {card}: {message}",
 	"catalog_unit_seconds": "s",
 	"catalog_unit_mb": "MB",
-
 	"catalog_delete_app_title": "Delete app",
 	"catalog_delete_app_description": "Deletes the app {app}, its variables and its stack {stack}. This can't be undone.",
 	"catalog_delete_app_confirm_title": "Delete app {app}?",
@@ -190,7 +177,6 @@
 	"catalog_delete_app_error": "The app couldn't be deleted",
 	"catalog_delete_project_error": "The project couldn't be deleted",
 	"catalog_delete_stage_error": "The stage couldn't be deleted",
-
 	"catalog_compose_subtitle": "Compose app. {variables} are replaced with the stage's and the app's.",
 	"catalog_compose_validate": "Validate",
 	"catalog_compose_file": "compose.yaml",
@@ -230,7 +216,6 @@
 	"catalog_compose_inj_logs_value": "json-file · 3 × 10 MB",
 	"catalog_compose_inj_labels": "Labels",
 	"catalog_compose_inj_note": "Whatever you already define in the compose is kept, except networks.",
-
 	"catalog_unsaved_confirm": "You have unsaved changes. Leave anyway and lose them?",
 	"catalog_error_healthcheck_shape": "The healthcheck isn't valid for that type.",
 	"catalog_error_spec_shape": "The configuration doesn't have the shape muelle expects.",
@@ -245,11 +230,13 @@
 	"catalog_crumb_projects": "Projects",
 	"catalog_crumb_stages": "Stages of {project}",
 	"catalog_crumb_apps": "Apps in {project}/{stage}",
-
 	"catalog_config_other_card": "another part of the configuration",
-
 	"catalog_crumb_stage_variables": "{stage} variables",
-
 	"catalog_compose_syntax_unavailable": "The syntax couldn't be checked",
-	"catalog_compose_syntax_unavailable_body": "The editor didn't load. On save, muelle only checks that the compose isn't empty."
+	"catalog_compose_syntax_unavailable_body": "The editor didn't load. On save, muelle only checks that the compose isn't empty.",
+	"catalog_error_compose_service_taken": "The service {service} already exists in the app {app} of this stage: services in a stage share the network, so each name can be used only once.",
+	"catalog_error_slug_is_service": "{slug} is already a service of the compose app {app} in this stage: services in a stage share the network. Pick another slug.",
+	"catalog_error_app_has_domains": "The app still has domains: delete them first in Domains.",
+	"catalog_error_app_deploy_stopping": "A deploy of the app hasn't stopped yet, so it wasn't deleted. Try again in a few seconds.",
+	"catalog_error_stage_network_conflict": "There's already a Docker network with this stage's name that muelle didn't create (it isn't an attachable overlay). Delete or rename it on the server and try again."
 }

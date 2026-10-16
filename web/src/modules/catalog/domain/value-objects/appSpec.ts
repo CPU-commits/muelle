@@ -359,8 +359,9 @@ function execForm(args: readonly string[]): string {
 }
 
 /**
- * El healthcheck como lo va a generar la Fase 2 (§6.1): `http` en forma exec con wget,
- * `bun-http` con un fetch de bun y `command` con sus argumentos. `null` para `none`.
+ * El healthcheck como lo genera el render de la Fase 2 (§6.1 del diseño), siempre en forma
+ * exec y sin shell: `http` con wget, `bun-http` con un fetch de bun y `command` con sus
+ * argumentos. `null` para `none` (muelle no agrega uno; vale el `HEALTHCHECK` de la imagen).
  */
 export function healthcheckPreview(healthcheck: Healthcheck, port: number): string | null {
 	switch (healthcheck.type) {
@@ -376,7 +377,12 @@ export function healthcheckPreview(healthcheck: Healthcheck, port: number): stri
 				`http://127.0.0.1:${port}${healthcheck.path}`,
 			])
 		case 'bun-http':
-			return `CMD bun -e "fetch('http://127.0.0.1:${port}${healthcheck.path}').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`
+			return execForm([
+				'CMD',
+				'bun',
+				'-e',
+				`fetch('http://127.0.0.1:${port}${healthcheck.path}').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))`,
+			])
 		case 'command':
 			return execForm(['CMD', ...healthcheck.command])
 	}

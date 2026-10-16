@@ -259,8 +259,9 @@ describe('appSpec', () => {
 		expect(healthcheckPreview(http, 3000)).toBe(
 			'["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]',
 		)
+		// En forma exec, como el render de la Fase 2 (formspec.go): sin shell.
 		expect(healthcheckPreview({ ...http, type: 'bun-http' }, 8080)).toBe(
-			`CMD bun -e "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`,
+			`["CMD", "bun", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]`,
 		)
 		expect(
 			healthcheckPreview(

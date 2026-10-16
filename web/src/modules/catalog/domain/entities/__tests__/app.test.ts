@@ -7,6 +7,7 @@ import {
 	deployStateOf,
 	projectInitial,
 	sameAppRef,
+	serviceTargets,
 	stageNetwork,
 } from '../..'
 import {
@@ -50,6 +51,20 @@ describe('app', () => {
 			'services:\n  gateway:\n    image: a\n  runner:\n    image: b\n',
 		)
 		expect(appContents(compose)).toEqual({ kind: 'services', services: ['gateway', 'runner'] })
+	})
+
+	it('los destinos de un dominio: un servicio:puerto por cada puerto que declara', () => {
+		const app = {
+			...fakeComposeApp('auditfy', 'staging', 'front'),
+			services: [
+				{ name: 'api', ports: [3000] },
+				{ name: 'web', ports: [] },
+				{ name: 'worker', ports: [80, 8080] },
+			],
+		}
+		expect(serviceTargets(app)).toEqual(['api:3000', 'worker:80', 'worker:8080'])
+		// Sin la Fase 2 el backend no los manda: no hay sugerencias del catálogo.
+		expect(serviceTargets({ ...app, services: null })).toEqual([])
 	})
 
 	it('el resumen junta todo lo del encabezado', () => {

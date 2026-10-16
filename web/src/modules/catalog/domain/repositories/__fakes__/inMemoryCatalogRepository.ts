@@ -21,6 +21,7 @@ import {
 	SlugTaken,
 	StageNotEmpty,
 	StageNotFound,
+	summarizeCompose,
 } from '../..'
 
 const T0 = new Date('2026-10-01T12:00:00.000Z')
@@ -50,6 +51,7 @@ export function fakeServiceApp(
 		lastDeployedAt: null,
 		pendingChanges: false,
 		createdAt: T0,
+		services: [{ name: slug, ports: [80] }],
 		...overrides,
 	}
 }
@@ -71,6 +73,10 @@ export function fakeComposeApp(
 		lastDeployedAt: null,
 		pendingChanges: false,
 		createdAt: T0,
+		services: summarizeCompose(composeYaml).map((service) => ({
+			name: service.name,
+			ports: [],
+		})),
 	}
 }
 
@@ -221,8 +227,20 @@ export class InMemoryCatalogRepository implements CatalogRepository {
 		}
 		const app: App =
 			input.kind === 'service'
-				? { ...base, kind: 'service', spec: input.spec }
-				: { ...base, kind: 'compose', composeYaml: input.composeYaml }
+				? fakeServiceApp(input.project, input.stage, input.slug, {
+						...base,
+						spec: input.spec,
+						services: [{ name: input.slug, ports: [input.spec.port] }],
+					})
+				: {
+						...fakeComposeApp(
+							input.project,
+							input.stage,
+							input.slug,
+							input.composeYaml,
+						),
+						...base,
+					}
 		this.apps.push(app)
 		return app
 	}
@@ -245,10 +263,30 @@ export class InMemoryCatalogRepository implements CatalogRepository {
 			pendingChanges:
 				current.lastDeployedAt !== null && configChangedAt > current.lastDeployedAt,
 		}
+		// Los servicios salen de la configuración guardada, como en el backend (§2.12).
+		const spec = current.kind === 'service' ? (changes.spec ?? current.spec) : null
+		const composeYaml =
+			current.kind === 'compose' ? (changes.composeYaml ?? current.composeYaml) : ''
 		const next: App =
-			current.kind === 'service'
-				? { ...current, ...common, spec: changes.spec ?? current.spec }
-				: { ...current, ...common, composeYaml: changes.composeYaml ?? current.composeYaml }
+			current.kind === 'service' && spec
+				? {
+						...current,
+						...common,
+						spec,
+						services: [{ name: current.slug, ports: [spec.port] }],
+					}
+				: {
+						...current,
+						...common,
+						kind: 'compose',
+						composeYaml,
+						services: fakeComposeApp(
+							current.project,
+							current.stage,
+							current.slug,
+							composeYaml,
+						).services,
+					}
 		this.apps[index] = next
 		return next
 	}

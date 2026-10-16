@@ -70,6 +70,8 @@ describe('catalogMapper', () => {
 			lastDeployedAt: new Date(base.last_deployed_at),
 			pendingChanges: true,
 			createdAt: new Date(base.created_at),
+			// Un backend sin la Fase 2 no manda `services` (contrato §2.12).
+			services: null,
 			spec: {
 				image: 'ghcr.io/aumi-app/backend-app:sha-3f9c2e1',
 				port: 3000,
@@ -96,6 +98,23 @@ describe('catalogMapper', () => {
 			composeYaml: 'services: {}\n',
 			lastDeployedAt: null,
 		})
+	})
+
+	it('los servicios de la app (contrato §2.12), con sus puertos', () => {
+		const dto = appDtoSchema.parse({
+			...base,
+			kind: 'compose',
+			compose_yaml: 'services: {}\n',
+			services: [
+				{ name: 'api', ports: [3000] },
+				{ name: 'web', ports: [] },
+			],
+		})
+
+		expect(appFromDto(dto).services).toEqual([
+			{ name: 'api', ports: [3000] },
+			{ name: 'web', ports: [] },
+		])
 	})
 
 	it('una app de formulario sin spec no pasa el contrato', () => {

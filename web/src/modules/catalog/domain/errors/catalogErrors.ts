@@ -44,6 +44,36 @@ export class StageNotEmpty extends ConflictError {
 	}
 }
 
+/** `not_empty` al borrar una app: todavía tiene dominios (§5.1 del diseño). */
+export class AppHasDomains extends ConflictError {
+	constructor(options?: ErrorOptions) {
+		super('La app todavía tiene dominios', options)
+		this.name = 'AppHasDomains'
+	}
+}
+
+/**
+ * `conflict` al borrar una app: un deploy suyo no se detuvo en 15 s y la app no se borró
+ * (contrato §1.1, `RemoveApp`). Se reintenta en unos segundos.
+ */
+export class AppDeployStopping extends ConflictError {
+	constructor(options?: ErrorOptions) {
+		super('Un deploy de la app todavía no se detiene', options)
+		this.name = 'AppDeployStopping'
+	}
+}
+
+/**
+ * `network_conflict` al crear un stage: ya hay una red de Docker con su nombre que no es
+ * overlay attachable (no la creó muelle). Hay que borrarla o renombrarla en el servidor.
+ */
+export class StageNetworkConflict extends ConflictError {
+	constructor(options?: ErrorOptions) {
+		super('Ya existe una red de Docker con el nombre del stage', options)
+		this.name = 'StageNetworkConflict'
+	}
+}
+
 /** `conflict` al crear: el slug ya está usado (en el panel, o en su proyecto o stage). */
 export class SlugTaken extends ConflictError {
 	readonly entity: 'project' | 'stage' | 'app'
