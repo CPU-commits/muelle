@@ -1,5 +1,6 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
+
 	"admin_nav_label": "Settings sections",
 	"admin_nav_proxy": "Proxy and DNS",
 	"admin_nav_security": "Security",
@@ -9,6 +10,7 @@
 	"admin_settings_load_error": "The settings couldn't be loaded.",
 	"admin_proxy_feature": "Proxy and DNS",
 	"admin_save_error": "It couldn't be saved.",
+
 	"admin_cf_title": "Cloudflare",
 	"admin_cf_description": "Creates the DNS records (the panel's too, if it doesn't exist) and requests certificates through DNS-01.",
 	"admin_cf_set": "Token set",
@@ -33,6 +35,7 @@
 	"admin_cf_unavailable_body": "The token wasn't saved. Paste it again and retry in a moment.",
 	"admin_error_cf_token_length": "A Cloudflare token has between {min} and {max} characters.",
 	"admin_error_cf_token_spaces": "No spaces: paste just the token.",
+
 	"admin_ip_title": "Public IP",
 	"admin_ip_description": "Where the records muelle creates point to.",
 	"admin_ip_v4": "IPv4",
@@ -42,6 +45,7 @@
 	"admin_ip_saved": "Public IP saved",
 	"admin_error_ipv4": "That's not a valid IPv4 (like 203.0.113.24).",
 	"admin_error_ipv6": "That's not a valid IPv6 (like 2001:db8::24).",
+
 	"admin_cert_title": "Certificates",
 	"admin_cert_description": "Let's Encrypt emails this address if a certificate has problems.",
 	"admin_cert_email": "ACME email",
@@ -49,6 +53,7 @@
 	"admin_cert_note": "The panel domain is set at install time.",
 	"admin_cert_saved": "ACME email saved",
 	"admin_error_email": "That's not a valid email.",
+
 	"admin_ports_title": "Proxy ports",
 	"admin_ports_description": "Where muelle-caddy listens on the host.",
 	"admin_ports_http": "HTTP",
@@ -65,6 +70,7 @@
 	"admin_ports_moved_action": "Go to the panel",
 	"admin_error_port": "A number between 1 and 65535.",
 	"admin_error_port_same": "It must differ from the HTTP one.",
+
 	"admin_security_title": "Security",
 	"admin_security_description": "muelle has access to docker.sock: signing in to the panel is the same as being root on the server.",
 	"admin_security_2fa": "Require 2FA",
@@ -83,6 +89,7 @@
 	"admin_security_lockout_body_no_ip": "With this list, this session could no longer open the panel. If you save anyway, you'll only get back in from an IP on the list or by clearing it from the server.",
 	"admin_security_lockout_confirm": "Save anyway",
 	"admin_error_cidr": "Line {line}: “{value}” is neither an IP nor a CIDR range.",
+
 	"admin_registries_title": "Registries",
 	"admin_registries_description": "For private images. The password is stored encrypted.",
 	"admin_registries_add": "Add",
@@ -118,6 +125,7 @@
 	"admin_error_registry_password_newline": "No line breaks: paste it on a single line.",
 	"admin_error_registry_not_found": "That registry no longer exists.",
 	"admin_error_registry_exists": "There's already a registry with that host.",
+
 	"admin_audit_title": "Audit log",
 	"admin_audit_description": "180 days. It never includes variable values.",
 	"admin_audit_refresh": "Refresh",
