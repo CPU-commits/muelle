@@ -42,23 +42,23 @@ func golden(t *testing.T, name string, got []byte) {
 func stackCases() map[string]stackInput {
 	return map[string]stackInput{
 		"stack.golden.json": {
-			Names:  naming.InstallNamesFor(naming.MuelleStack),
-			Image:  "ghcr.io/cpu-commits/muelle:v0.1.0",
-			Origin: "https://panel.tudominio.cl", PublicIP: "203.0.113.24", NodeID: "node-1",
-			Opts: Options{Email: "tu@correo.cl", PublicIPv6: "2001:db8::24", HTTPPort: 80, HTTPSPort: 443,
+			Names:    naming.InstallNamesFor(naming.MuelleStack),
+			Image:    "ghcr.io/cpu-commits/muelle:v0.1.0",
+			PublicIP: "203.0.113.24", NodeID: "node-1",
+			Opts: Options{PanelDomain: "panel.tudominio.cl", Email: "tu@correo.cl", PublicIPv6: "2001:db8::24", HTTPPort: 80, HTTPSPort: 443,
 				CaddyImage: "ghcr.io/cpu-commits/muelle-caddy:v0.1.0"},
 		},
 		"stack_token.golden.json": {
 			Names:  naming.InstallNamesFor("it5abc"),
 			Image:  "it5-muelle:test",
-			Origin: "https://127.0.0.1:22443", NodeID: "node-1", Token: true,
-			Opts: Options{Email: "it5@example.com", HTTPPort: 22080, HTTPSPort: 22443},
+			NodeID: "node-1", Token: true,
+			Opts: Options{PanelOrigin: "https://127.0.0.1:22443", Email: "it5@example.com", HTTPPort: 22080, HTTPSPort: 22443},
 		},
 		"stack_registry.golden.json": {
-			Names:  naming.InstallNamesFor(naming.MuelleStack),
-			Image:  "ghcr.io/cpu-commits/muelle:v0.1.0",
-			Origin: "https://panel.tudominio.cl:8443", PublicIP: "203.0.113.24", NodeID: "abc123", Registry: true,
-			Opts: Options{Email: "tu@correo.cl", HTTPPort: 8080, HTTPSPort: 8443},
+			Names:    naming.InstallNamesFor(naming.MuelleStack),
+			Image:    "ghcr.io/cpu-commits/muelle:v0.1.0",
+			PublicIP: "203.0.113.24", NodeID: "abc123", Registry: true,
+			Opts: Options{PanelDomain: "panel.tudominio.cl", Email: "tu@correo.cl", HTTPPort: 8080, HTTPSPort: 8443},
 		},
 	}
 }
@@ -107,12 +107,36 @@ func TestServiceEnv(t *testing.T) {
 
 	in = stackCases()["stack_registry.golden.json"]
 	env = serviceEnv(in)
-	if env["MUELLE_INIT_REGISTRY_FILE"] != "/run/secrets/muelle_init_registry" || env["MUELLE_INIT_PUBLIC_IP"] != "203.0.113.24" {
+	if env["MUELLE_INIT_REGISTRY_FILE"] != "/run/secrets/muelle_init_registry" || env["MUELLE_INIT_PUBLIC_IP"] != "203.0.113.24" ||
+		env["MUELLE_PANEL_DOMAIN"] != "panel.tudominio.cl" {
 		t.Errorf("env=%v", env)
 	}
-	for _, k := range []string{"MUELLE_INIT_CLOUDFLARE_TOKEN_FILE", "MUELLE_INIT_PUBLIC_IPV6", "MUELLE_INIT_CADDY_IMAGE"} {
+	for _, k := range []string{"MUELLE_INIT_CLOUDFLARE_TOKEN_FILE", "MUELLE_INIT_PUBLIC_IPV6", "MUELLE_INIT_CADDY_IMAGE", "MUELLE_PANEL_ORIGIN"} {
 		if _, ok := env[k]; ok {
 			t.Errorf("%s no debería ir: %v", k, env)
+		}
+	}
+}
+
+// --panel-domain va en MUELLE_PANEL_DOMAIN, sin el puerto: el origen del
+// panel sale de los ajustes y sigue al puerto HTTPS. --panel-origin (solo los
+// tests) lo reemplaza por MUELLE_PANEL_ORIGIN: con una IP, muelle no maneja
+// muelle-caddy, que tiene nombres fijos.
+func TestServiceEnvPanel(t *testing.T) {
+	for _, tc := range []struct {
+		o              Options
+		domain, origin string
+	}{
+		{Options{PanelDomain: "panel.example.com", HTTPSPort: 443}, "panel.example.com", ""},
+		{Options{PanelDomain: "panel.example.com", HTTPSPort: 8443}, "panel.example.com", ""},
+		{Options{PanelOrigin: "https://127.0.0.1:22443", HTTPSPort: 22443}, "", "https://127.0.0.1:22443"},
+		{Options{PanelDomain: "panel.example.com", PanelOrigin: "https://127.0.0.1:22443", HTTPSPort: 22443}, "", "https://127.0.0.1:22443"},
+	} {
+		env := serviceEnv(stackInput{Opts: tc.o})
+		domain, hasDomain := env["MUELLE_PANEL_DOMAIN"]
+		origin, hasOrigin := env["MUELLE_PANEL_ORIGIN"]
+		if domain != tc.domain || hasDomain != (tc.domain != "") || origin != tc.origin || hasOrigin != (tc.origin != "") {
+			t.Errorf("%v: MUELLE_PANEL_DOMAIN=%q (%v) MUELLE_PANEL_ORIGIN=%q (%v)", tc.o, domain, hasDomain, origin, hasOrigin)
 		}
 	}
 }

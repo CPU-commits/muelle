@@ -164,10 +164,13 @@ func TestRunFreshInstall(t *testing.T) {
 	}
 	c := compose(t, h.f)
 	for _, want := range []string{"node.id == node-1", `"image": "` + muelleRef + `"`, `"MUELLE_INIT_PUBLIC_IP": "203.0.113.24"`,
-		`"MUELLE_PANEL_ORIGIN": "https://panel.example.com"`} {
+		`"MUELLE_PANEL_DOMAIN": "panel.example.com"`} {
 		if !strings.Contains(c, want) {
 			t.Errorf("el compose no trae %s:\n%s", want, c)
 		}
+	}
+	if strings.Contains(c, "MUELLE_PANEL_ORIGIN") {
+		t.Errorf("con --panel-domain, MUELLE_PANEL_ORIGIN no va (el origen sale de los ajustes):\n%s", c)
 	}
 	if strings.Contains(c, "MUELLE_INIT_REGISTRY_FILE") || strings.Contains(c, "MUELLE_INIT_CLOUDFLARE_TOKEN_FILE") {
 		t.Errorf("sin token ni credencial, no monta sus secretos:\n%s", c)
@@ -475,7 +478,10 @@ func TestRunHTTP01Warning(t *testing.T) {
 	if !strings.Contains(h.stderr.String(), "HTTP-01") {
 		t.Errorf("sin aviso de HTTP-01: %s", h.stderr)
 	}
-	if c := compose(t, h.f); !strings.Contains(c, `"MUELLE_PANEL_ORIGIN": "https://panel.example.com:8443"`) {
+	// El puerto no va en la configuración de muelle: el origen del panel
+	// sale de los ajustes (MUELLE_INIT_PROXY_HTTPS_PORT, después el panel).
+	if c := compose(t, h.f); !strings.Contains(c, `"MUELLE_PANEL_DOMAIN": "panel.example.com"`) || strings.Contains(c, "MUELLE_PANEL_ORIGIN") ||
+		!strings.Contains(c, `"MUELLE_INIT_PROXY_HTTPS_PORT": "8443"`) {
 		t.Errorf("compose:\n%s", c)
 	}
 

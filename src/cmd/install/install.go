@@ -552,7 +552,7 @@ func (in *installer) create(ctx context.Context) (key string, err error) {
 	}
 
 	compose, err := composeStack(stackInput{
-		Names: n, Image: in.image, Origin: panelOrigin(o), PublicIP: in.publicIP, NodeID: in.nodeID,
+		Names: n, Image: in.image, PublicIP: in.publicIP, NodeID: in.nodeID,
 		Token: o.CloudflareToken != "", Registry: registry != nil, Opts: o,
 	})
 	if err != nil {

@@ -320,7 +320,7 @@ func validAdvertiseAddr(s string) bool {
 	return ifaceRe.MatchString(s)
 }
 
-// panelOrigin es el MUELLE_PANEL_ORIGIN del servicio (contrato §5.2):
+// panelOrigin es el origen del panel recién instalado, para el mensaje final:
 // --panel-origin si vino; si no, https://<dominio>, con el puerto si no es 443.
 func panelOrigin(o Options) string {
 	if o.PanelOrigin != "" {
