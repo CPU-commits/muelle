@@ -39,8 +39,8 @@ export interface AppLogsQuery {
 	readonly tail: LogTail
 	/**
 	 * Al reconectar, en vez de `tail`: todo lo escrito desde este momento (inclusivo), hasta
-	 * 5000. Así no se pierde lo que pasó mientras estaba cortado. Pendiente en el backend
-	 * (Fase 2): mientras lo ignore, llegan las últimas 200 y el panel descarta lo repetido.
+	 * 5000 (contrato §2.9). Así no se pierde lo que pasó mientras estaba cortado; las líneas
+	 * de ese milisegundo vuelven a llegar y el panel descarta las que ya tenía.
 	 */
 	readonly since?: Date
 }
