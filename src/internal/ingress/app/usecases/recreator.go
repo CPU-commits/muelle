@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Recreator recrea muelle-caddy cuando cambian los puertos o la imagen
+// Recreator recrea muelle-caddy cuando cambian los puertos
 // (contrato §3.5): delay después del último Schedule (2 s), y nunca mientras
 // un hook lo frena (Hold, D15 del plan de la Fase 3). El PATCH /settings que
 // cambia los puertos sale por ese mismo contenedor: recrearlo antes de que

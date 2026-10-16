@@ -211,9 +211,8 @@ func (m *Module) CheckCloudflareToken(ctx context.Context, token string) (zones 
 // guardó (PATCH /settings): Caddy (email ACME, IPs del panel, token) y los
 // registros DNS que maneja muelle (IP pública) (§3.1, §9). Corre antes de que
 // el PATCH responda, con su propio plazo (no el ctx de la petición: un cliente
-// que se va no puede dejar el cambio a medias). Si cambiaron los puertos o la
-// imagen, no recrea muelle-caddy acá: lo agenda en Run, 2 s después de volver,
-// porque la respuesta del PATCH sale por ese mismo contenedor (contrato
+// que se va no puede dejar el cambio a medias). Si cambiaron los puertos, no recrea muelle-caddy acá: lo agenda
+// en Run, 2 s después de volver, porque la respuesta del PATCH sale por ese mismo contenedor (contrato
 // §3.5). No devuelve error: un fallo queda en el estado del proxy (GET
 // /api/v1/proxy) y en el de cada dominio. Un token nuevo, o la IP pública,
 // también llevan el registro DNS del panel (§3.4).

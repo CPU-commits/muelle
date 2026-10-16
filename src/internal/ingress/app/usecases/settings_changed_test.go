@@ -145,22 +145,6 @@ wait:
 	}
 }
 
-// Cambia la imagen: igual que los puertos.
-func TestSettingsChangedImage(t *testing.T) {
-	f := newHookFixture(t, 20*time.Millisecond)
-	f.docker.SetImagePresent(newCaddyImage)
-	old, next := f.change(t, func(p *shared.ProxySettings) { p.CaddyImage = newCaddyImage })
-	loads := len(f.caddy.Loads())
-	f.uc.Execute(context.Background(), old, next)
-	if !f.state.Recreating() || len(f.caddy.Loads()) != loads {
-		t.Fatal("agenda la recreación sin mandar nada")
-	}
-	eventually(t, 2*time.Second, "recrea", func() bool { return !f.state.Recreating() })
-	if c := f.container(t); c.Image != newCaddyImage {
-		t.Fatalf("imagen: %s", c.Image)
-	}
-}
-
 // Cambia el email ACME: un Load enseguida, con el email nuevo.
 func TestSettingsChangedEmail(t *testing.T) {
 	f := newHookFixture(t, time.Hour)

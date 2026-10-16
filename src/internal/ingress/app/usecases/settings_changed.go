@@ -29,7 +29,7 @@ func NewProxySettingsChanged(recreator *Recreator, records *UpdateManagedRecords
 // Execute aplica lo que cambió (next.ChangedKeys(old)), con su propio plazo
 // derivado con context.WithoutCancel (un cliente que se va no lo deja a
 // medias), en este orden:
-//  1. puertos o imagen → release := recreator.Hold() y defer release(): GET
+//  1. puertos → release := recreator.Hold() y defer release(): GET
 //     /proxy dice recreating desde ya, y los 2 s de RecreateDelay empiezan
 //     recién cuando Execute vuelve (D15). No recrea acá: la respuesta del
 //     PATCH sale por ese mismo contenedor;
@@ -52,7 +52,7 @@ func (u *ProxySettingsChanged) Execute(ctx context.Context, old, next shared.Pro
 	}
 	u.log.Info("ingress: aplicando los ajustes del proxy", "claves", keys)
 
-	recreate := changed(shared.SettingProxyHTTPPort, shared.SettingProxyHTTPSPort, shared.SettingCaddyImage)
+	recreate := changed(shared.SettingProxyHTTPPort, shared.SettingProxyHTTPSPort)
 	if recreate {
 		release := u.recreator.Hold()
 		defer release()
