@@ -16,7 +16,7 @@ Etapa de contratos de las Fases 2, 3 y 5:
 - los ajustes del proxy y el DNS en `/settings`;
 - las migraciones reservadas.
 
-Fase 2 (Deploy): despliega apps de formulario y compose (render con las restricciones de §6.3, una cola por app, digests con las credenciales de los registries, `docker stack deploy`, espera de convergencia y rollback), con el log del deploy por polling y en vivo, los registries, y el estado y los logs en vivo de cada app. Las rutas de Caddy llegan con la Fase 3: mientras tanto, cada deploy deja una advertencia en su log.
+Fase 2 (Deploy): despliega apps de formulario y compose (render con las restricciones de §6.3, una cola por app, digests con las credenciales de los registries, `docker stack deploy`, espera de convergencia y rollback), con el log del deploy por polling y en vivo, los registries, y el estado y los logs en vivo de cada app. Al final, cada deploy le manda las rutas a muelle-caddy (Fase 3); si Caddy no las toma, el deploy deja una advertencia en su log y termina igual.
 
 Fase 3 (ingress): muelle crea y mantiene el contenedor muelle-caddy y le manda las rutas (los dominios de cada app y el panel, con TLS por Cloudflare o por HTTP y las IPs permitidas del panel); maneja los dominios con su DNS en Cloudflare (crear, adoptar, reintentar, la IP pública) y el registro del panel; verifica los certificados, y expone `GET /api/v1/proxy`. Ver "Proxy y dominios".
 
@@ -465,7 +465,7 @@ Hallazgos de la revisión de código que las próximas fases deben respetar.
 - ~~Enmascarar también cada línea de un secreto de varias líneas, y nada de menos de 8 bytes (contrato §2.5).~~
 - ~~Los SSE revisan la credencial cada 60 s y tienen límites por principal y de duración (contrato §0.3).~~
 - Un deploy sin cuerpo repite la ref **pedida** del deploy actual (`requested_images`): un tag se vuelve a resolver y un digest fijado a propósito (override, configuración o rollback) se mantiene; un rollback no se deshace con el próximo deploy sin cuerpo, y para volver a seguir un tag hace falta un override o cambiar la configuración (contrato §2.2).
-- `SyncRoutes` devuelve `ErrNotImplemented` hasta que se mergee la Fase 3: cada deploy deja `advertencia: no se pudo actualizar Caddy: …` en su log y termina igual (contrato §2.11). El test de contrato del contenedor acepta las dos líneas.
+- ~~`SyncRoutes` devuelve `ErrNotImplemented` hasta que se mergee la Fase 3: cada deploy deja `advertencia: no se pudo actualizar Caddy: …` en su log y termina igual (contrato §2.11). El test de contrato del contenedor acepta las dos líneas.~~ Hecho al integrar la Fase 3: el paso 7 es el `Sync` de ingress, y el test de contrato del contenedor exige `rutas de Caddy actualizadas`.
 - La convergencia de un servicio que ya existía y no cambió espera un margen de 5 s sin `UpdateStatus` nuevo (decisión 6 del plan de la Fase 2). Se podría reemplazar comparando el spec con `PreviousSpec`, con un método nuevo del cliente de Docker.
 
 **Fase 2, estado y logs**

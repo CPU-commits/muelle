@@ -66,7 +66,8 @@ func (e *fakeEnv) ResolveEnv(ctx context.Context, appID int64) (map[string]strin
 }
 
 // fakeIngress cuenta las llamadas; SyncRoutes devuelve ErrNotImplemented,
-// como en esta rama hasta que se mergee la Fase 3.
+// así los tests del worker pasan por la advertencia del paso 7 (un error de
+// SyncRoutes no hace fallar el deploy).
 type fakeIngress struct {
 	mu        sync.Mutex
 	ensureErr error

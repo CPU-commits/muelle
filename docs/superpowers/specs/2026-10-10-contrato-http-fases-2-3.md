@@ -529,7 +529,7 @@ No es un contrato de texto (los clientes deciden por `status`), pero cada paso d
 - Con `rollback_*` o `paused` (§7 paso 6), el log recibe el `Status.Err` de la última tarea fallida y sus últimas 50 líneas (`TaskLogs`). Con el timeout, el estado de cada servicio que no llegó (`web: 0/2 réplicas corriendo`) y el `Status.Err` de su última tarea fallida, si hay.
   - "La última tarea fallida" es la que nombra Swarm en el mensaje de la actualización (`… early termination of task <id>`); si no nombra ninguna, la más nueva de **ese** deploy que falló o fue rechazada (una de antes, que Swarm ya reintentó, no cuenta).
   - Una tarea que no pasó el healthcheck termina `complete` y sin `Status.Err`: el log lo dice (`web: última tarea fallida: terminó en complete, sin un motivo de Swarm`) y trae igual sus líneas.
-- Un error de `SyncRoutes` es solo una advertencia (§13). Mientras la Fase 3 no está, `SyncRoutes` devuelve `ErrNotImplemented` y cada deploy deja esa advertencia.
+- Un error de `SyncRoutes` es solo una advertencia (§13). `SyncRoutes` es el `Sync` de ingress (§3.4): con el proxy deshabilitado no manda nada y no falla, así que la línea es `rutas de Caddy actualizadas`.
 - Un deploy que cerró la reconciliación (§1.2) suma "muelle se reinició durante el deploy" antes de su resultado.
 - Todo lo que se escribe pasa por el enmascarado (§2.5), también la salida del CLI y los mensajes de error del render.
 
