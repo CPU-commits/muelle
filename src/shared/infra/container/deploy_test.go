@@ -210,8 +210,9 @@ func (e *deployEnv) waitDeploy(token, appPath string, id int64) (string, string)
 }
 
 // El flujo de un deploy por HTTP con los módulos reales: el token de CI
-// despliega, el log llega a succeeded (con la advertencia de Caddy mientras la
-// Fase 3 no está, o la línea de las rutas cuando esté), catalog ve el deploy
+// despliega, el log llega a succeeded con la línea de las rutas (el paso 7 va
+// al SyncRoutes de ingress, que con el proxy deshabilitado no manda nada y no
+// falla, contrato §3.4), catalog ve el deploy
 // (last_deployed_at y pending_changes), el estado sale de Swarm, y el rollback
 // vuelve a la versión anterior (con su digest verificado en el paso 2).
 func TestContractDeployFlow(t *testing.T) {
@@ -224,8 +225,8 @@ func TestContractDeployFlow(t *testing.T) {
 	if status != "succeeded" {
 		t.Fatalf("el primer deploy: %s\n%s", status, log)
 	}
-	if !strings.Contains(log, "rutas de Caddy actualizadas") && !strings.Contains(log, "advertencia: no se pudo actualizar Caddy:") {
-		t.Fatalf("el log no tiene la línea del paso 7:\n%s", log)
+	if !strings.Contains(log, "rutas de Caddy actualizadas") || strings.Contains(log, "advertencia: no se pudo actualizar Caddy") {
+		t.Fatalf("el paso 7 no llegó a ingress:\n%s", log)
 	}
 
 	w := e.bearer(tok, "GET", webPath+"/deploys", nil)
