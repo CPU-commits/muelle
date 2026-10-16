@@ -136,7 +136,6 @@ func (e *EnvCrypto) decrypt(o entity.Owner, r entity.EncryptedEnvVar) ([]byte, e
 	return plain, nil
 }
 
-// Merge combina las variables del stage con las de la app; la app gana (§5.2 del spec).
 // SecretValues son los valores de las variables secretas de los sets, sin
 // repetidos ni vacíos, de los más largos a los más cortos (a igual largo, en
 // orden alfabético): enmascarar primero el más largo evita dejar a la vista
@@ -161,6 +160,7 @@ func SecretValues(sets ...[]entity.EnvVar) []string {
 	return out
 }
 
+// Merge combina las variables del stage con las de la app; la app gana (§5.2 del spec).
 func Merge(stage, app []entity.EnvVar) map[string]string {
 	out := make(map[string]string, len(stage)+len(app))
 	for _, set := range [][]entity.EnvVar{stage, app} {
