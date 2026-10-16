@@ -31,9 +31,9 @@ func NewAuditRecorder(db *DB, c clock.Clock, log *slog.Logger) *AuditRecorder {
 // Record guarda el evento con Conn(ctx), así que dentro de un InTx que hace
 // rollback el evento tampoco queda. El nombre del actor se copia del Principal
 // (Principal.ActorName): el evento lo conserva aunque se borre el usuario o el
-// token. details se guarda como JSON con las claves
-// de los map ordenadas; nil (o un valor que da null) se guarda como {}. Los
-// bytes de UTF-8 inválido en un string se guardan como U+FFFD.
+// token. details se guarda como JSON con las claves de los map ordenadas; nil
+// (o un valor que da null) se guarda como {}. Los bytes de UTF-8 inválido en
+// un string se guardan como U+FFFD.
 func (r *AuditRecorder) Record(ctx context.Context, action, target string, details any) {
 	actorType, actorID, actorName := entity.ActorSystem, (*int64)(nil), entity.ActorSystemName
 	if p, ok := entity.PrincipalFrom(ctx); ok {
