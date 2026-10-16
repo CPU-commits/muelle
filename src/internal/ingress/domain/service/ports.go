@@ -58,7 +58,16 @@ type Settings interface {
 	// SaveZones guarda cloudflare_zones solo si el token guardado sigue siendo
 	// token (en una transacción); saved dice si lo guardó.
 	SaveZones(ctx context.Context, token string, zones int) (saved bool, err error)
+	// RollbackPorts vuelve proxy_http_port y proxy_https_port a to solo si
+	// los guardados siguen siendo from (en una transacción): así no pisa un
+	// PATCH /settings que los cambió mientras tanto (contrato §3.5). saved
+	// dice si los volvió.
+	RollbackPorts(ctx context.Context, from, to ProxyPorts) (saved bool, err error)
 }
+
+// ProxyPorts son los puertos del host del proxy (proxy_http_port y
+// proxy_https_port).
+type ProxyPorts struct{ HTTPPort, HTTPSPort int }
 
 // Zone es una zona de Cloudflare visible para el token.
 type Zone struct{ ID, Name string }

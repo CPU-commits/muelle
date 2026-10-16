@@ -199,3 +199,39 @@ func TestSaveZonesCompareAndSet(t *testing.T) {
 		t.Fatalf("cloudflare_zones con un token ilegible = %q", v)
 	}
 }
+
+// RollbackPorts vuelve los puertos del proxy solo si siguen siendo los que
+// fallaron: un PATCH /settings que los cambió mientras tanto gana. Con las
+// claves sin guardar, valen los de por defecto (80 y 443).
+func TestRollbackPortsCompareAndSet(t *testing.T) {
+	db := sqlitetest.New(t)
+	r := NewProxySettingsReader(db, newCipher(t))
+	ctx := context.Background()
+	ports := func() service.ProxyPorts {
+		t.Helper()
+		p, err := r.ProxySettings(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return service.ProxyPorts{HTTPPort: p.HTTPPort, HTTPSPort: p.HTTPSPort}
+	}
+	old := service.ProxyPorts{HTTPPort: 8080, HTTPSPort: 8443}
+
+	// Sin las claves (80 y 443, los de por defecto) fallaron: vuelve a 8080/8443.
+	saved, err := r.RollbackPorts(ctx, service.ProxyPorts{HTTPPort: 80, HTTPSPort: 443}, old)
+	if err != nil || !saved || ports() != old {
+		t.Fatalf("desde los de por defecto: %v %v %+v", saved, err, ports())
+	}
+
+	setRaw(t, db, entity.SettingProxyHTTPSPort, "443", false)
+	if saved, err := r.RollbackPorts(ctx, service.ProxyPorts{HTTPPort: 8080, HTTPSPort: 9443}, service.ProxyPorts{HTTPPort: 1, HTTPSPort: 2}); err != nil || saved {
+		t.Fatalf("con otros puertos guardados no vuelve: %v %v", saved, err)
+	}
+	if got := ports(); got != (service.ProxyPorts{HTTPPort: 8080, HTTPSPort: 443}) {
+		t.Fatalf("no tocó nada: %+v", got)
+	}
+	saved, err = r.RollbackPorts(ctx, service.ProxyPorts{HTTPPort: 8080, HTTPSPort: 443}, old)
+	if err != nil || !saved || ports() != old {
+		t.Fatalf("vuelve: %v %v %+v", saved, err, ports())
+	}
+}
