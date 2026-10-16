@@ -120,7 +120,7 @@ Pasos (el orden y los detalles están en el contrato de las fases 2 y 3, §5.4).
 10. Imprime una URL de setup de un solo uso (`https://panel…/setup?token=…`, vence en 24 h) para crear el primer usuario. Si muelle ya tiene usuarios (una reinstalación), lo dice.
 11. Sobre el dominio del panel: con `--cloudflare-token`, muelle crea su registro DNS y usa DNS-01; sin token, el registro DNS tiene que existir de antemano y se usa HTTP-01, que necesita que el puerto 80 público llegue a `--http-port` (install avisa si no es 80).
 
-**Actualizar muelle:** `docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<versión> muelle_muelle`, con el `docker login ghcr.io` del servidor. Los sitios no se ven afectados, porque Caddy es un contenedor aparte.
+**Actualizar muelle:** `docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<versión> muelle_muelle`, con el `docker login ghcr.io` del servidor. Caddy es un contenedor aparte, pero sigue a la versión de muelle: con `caddy_image` vacío, el job `"proxy"` del arranque recrea muelle-caddy con la imagen de la versión nueva, y los sitios se cortan unos segundos. Si `caddy_image` se fijó en la instalación (`--caddy-image`), Caddy no cambia (contrato de las fases 2 y 3, §5.4).
 
 **Recuperar el acceso** si la lista de IPs permitidas te deja fuera del panel: `docker exec <contenedor de muelle> muelle settings reset-panel-ips` vacía la lista y reinicia muelle, que al arrancar reenvía la configuración a Caddy (contrato §4.1 y §5.4).
 
@@ -621,7 +621,7 @@ Cada fase deja algo que se puede probar de punta a punta:
    3. **Integración** (secuencial): el contenedor, `main.go`, el cron, la prueba de punta a punta, CI y el README.
 2. **Deploy:** el módulo `deploy` (`render` y `deployer`, sobre el cliente compartido `shared/infra/out/docker`). Apps de formulario y compose desplegables por API, con log, rollback, reconciliación, registries, y el estado y los logs en vivo de cada app.
 3. **Proxy y DNS:** el módulo `ingress`: el contenedor muelle-caddy, las rutas, `dns` de Cloudflare, la verificación de certificados y el estado del proxy.
-
-Antes de las Fases 2, 3 y 5, una etapa de contratos (secuencial) dejó el cliente de Docker compartido, los nombres (`shared/domain/naming`), las migraciones reservadas, los esqueletos de `deploy` e `ingress` con sus puertos, los ajustes del proxy en `/settings` y el contrato HTTP. Después, las tres fases corren en paralelo.
 4. **Panel:** el SPA de Svelte sobre la API ya existente.
 5. **Distribución:** `install`, las imágenes (muelle y Caddy) y la GitHub Action. Después, la migración de auditfy.
+
+Antes de las Fases 2, 3 y 5, una etapa de contratos (secuencial) dejó el cliente de Docker compartido, los nombres (`shared/domain/naming`), las migraciones reservadas, los esqueletos de `deploy` e `ingress` con sus puertos, los ajustes del proxy en `/settings` y el contrato HTTP. Después, las tres fases corren en paralelo.
