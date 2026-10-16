@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -49,6 +50,9 @@ func NewEnsureCaddy(runtime service.CaddyRuntime, settings service.Settings, cat
 // ContainerFailed con un mensaje en español (el puerto ocupado, la imagen que
 // no baja y Docker caído tienen el suyo). Un error leyendo la base no cambia
 // el estado. Nunca registra want ni la credencial.
+//
+// Si lo creó, vuelve a leer los stages y lo conecta a las redes de los que
+// no estaban en la primera lectura (connectNewStages).
 func (u *EnsureCaddy) Execute(ctx context.Context) (recreated bool, err error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -91,8 +95,43 @@ func (u *EnsureCaddy) Execute(ctx context.Context) (recreated bool, err error) {
 	u.state.ContainerOK()
 	if recreated {
 		u.log.Info("ingress: muelle-caddy creado", "imagen", image, "http", p.HTTPPort, "https", p.HTTPSPort)
+		u.connectNewStages(ctx, nets)
 	}
 	return recreated, nil
+}
+
+// connectNewStages conecta el muelle-caddy recién creado a las redes de los
+// stages que no están en nets (las de la lectura de antes de crearlo).
+//
+// Un EnsureStageNetwork que corre mientras el contenedor no existe (entre que
+// se borra el viejo y se crea el nuevo) no lo encuentra, y el nuevo se crea
+// sin esa red: las rutas del stage darían 502 hasta el próximo job "proxy".
+// Esta lectura es posterior a la creación, así que cubre el paso 4 de un
+// deploy (§7), cuyo stage ya está en la base. catalog guarda el stage recién
+// después de asegurar su red; si llega tarde a esta lectura, conecta la red
+// el paso 4 del primer deploy del stage (antes no hay rutas que servir) o el
+// job "proxy".
+//
+// Un error solo se registra: el contenedor ya quedó, y el job "proxy" conecta
+// las redes que falten.
+func (u *EnsureCaddy) connectNewStages(ctx context.Context, nets []string) {
+	stages, err := u.catalog.Stages(ctx)
+	if err != nil {
+		u.log.Warn("ingress: releyendo los stages después de crear muelle-caddy", "error", err)
+		return
+	}
+	var missing []string
+	for _, s := range stages {
+		if n := naming.Network(s.Project, s.Stage); !slices.Contains(nets, n) {
+			missing = append(missing, n)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	if err := u.runtime.Connect(ctx, missing); err != nil {
+		u.log.Warn("ingress: conectando muelle-caddy a las redes de los stages nuevos", "error", err)
+	}
 }
 
 // message es el error del contenedor para GET /proxy (contrato §3.3).

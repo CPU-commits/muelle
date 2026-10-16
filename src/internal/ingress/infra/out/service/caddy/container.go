@@ -40,8 +40,8 @@ type Engine interface {
 
 // Runtime es el contenedor muelle-caddy (contrato §3.4, spec §4.2): lo crea,
 // lo recrea (nunca lo rearranca) y lo conecta a las redes. No es seguro
-// llamar a Ensure desde varias goroutines a la vez: lo serializa quien lo
-// usa (usecases.EnsureCaddy).
+// llamar a Ensure ni a Connect desde varias goroutines a la vez: los
+// serializa quien los usa (usecases.EnsureCaddy).
 type Runtime struct {
 	docker Engine
 	names  Names
@@ -143,6 +143,16 @@ func (r *Runtime) Ensure(ctx context.Context, want service.CaddyWant) (bool, err
 		return false, fmt.Errorf("arrancando muelle-caddy: %w", err)
 	}
 	return true, nil
+}
+
+// Connect conecta muelle-caddy a las redes de networks que le faltan, sin
+// recrearlo. Una red que no existe se registra y se salta, como en Ensure.
+func (r *Runtime) Connect(ctx context.Context, networks []string) error {
+	c, err := r.docker.InspectContainer(ctx, r.names.Container)
+	if err != nil {
+		return err
+	}
+	return r.connect(ctx, c.Networks, networks)
 }
 
 // Status es lo que corre de verdad (GET /proxy): la imagen con que se creó y

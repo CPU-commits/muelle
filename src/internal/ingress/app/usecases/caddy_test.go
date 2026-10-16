@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CPU-commits/muelle/src/internal/ingress/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy"
@@ -123,6 +124,8 @@ func (r *recordingRuntime) Ensure(ctx context.Context, want service.CaddyWant) (
 	r.wants = append(r.wants, want)
 	return false, nil
 }
+
+func (r *recordingRuntime) Connect(ctx context.Context, networks []string) error { return nil }
 
 func (r *recordingRuntime) Status(ctx context.Context) (string, bool, bool, error) {
 	return "", false, false, nil
@@ -368,5 +371,63 @@ func TestEnsureCaddyOtherError(t *testing.T) {
 	}
 	if _, msg, _ := f.state.Snapshot(true); msg != "muelle no pudo dejar muelle-caddy como piden los ajustes: respuesta rara del daemon" {
 		t.Fatalf("mensaje: %q", msg)
+	}
+}
+
+// hookEngine es el Docker en memoria con un hook que corre una vez, justo
+// antes de crear muelle-caddy (no el contenedor de prueba de los puertos): al
+// recrearlo, ahí el viejo ya no existe y el nuevo todavía no.
+type hookEngine struct {
+	*dockertest.Fake
+	beforeCreate func()
+}
+
+func (e *hookEngine) CreateContainer(ctx context.Context, spec docker.ContainerSpec) (string, error) {
+	if hook := e.beforeCreate; hook != nil && spec.Name == testCaddyNames.Container {
+		e.beforeCreate = nil
+		hook()
+	}
+	return e.Fake.CreateContainer(ctx, spec)
+}
+
+// Un stage cuya red se asegura mientras muelle-caddy se recrea (el paso 4 de
+// un deploy, §7, entre que se borra el viejo y se crea el nuevo): Connect no
+// encuentra el contenedor, y el nuevo se crea con los stages que se leyeron
+// antes. EnsureCaddy vuelve a leer los stages después de crearlo y lo conecta
+// a la red que falta; si no, las rutas del stage darían 502 hasta el próximo
+// job "proxy".
+func TestEnsureCaddyConnectsStageAddedWhileRecreating(t *testing.T) {
+	f := newLifecycleFixture(t)
+	f.enableCaddy(t, nil)
+	f.docker.SetImagePresent(defCaddyImage)
+	ctx := context.Background()
+	if _, err := f.ensure.Execute(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.changePorts(t, 8081)
+
+	eng := &hookEngine{Fake: f.docker}
+	f.ensure = NewEnsureCaddy(caddy.NewRuntime(eng, testCaddyNames, f.slog), f.settings, f.catalog,
+		outservice.NewRegistriesReader(f.db, f.cipher), f.state, defCaddyImage, f.slog)
+	networks := NewEnsureStageNetwork(outservice.NewDockerNetworks(f.docker), testCaddyNames.Container, f.slog)
+	web := naming.Network("web", "dev")
+	eng.beforeCreate = func() {
+		if _, err := f.docker.InspectContainer(ctx, testCaddyNames.Container); !errors.Is(err, docker.ErrNotFound) {
+			t.Errorf("muelle-caddy todavía existe antes de crearlo de nuevo: %v", err)
+		}
+		ingresstest.Stage(t, f.db, "web", "dev")
+		if err := networks.Execute(ctx, dto.StageRef{Project: "web", Stage: "dev"}); err != nil {
+			t.Errorf("EnsureStageNetwork: %v", err)
+		}
+	}
+	recreated, err := f.ensure.Execute(ctx)
+	if err != nil || !recreated {
+		t.Fatalf("recreated %v, err %v", recreated, err)
+	}
+	if eng.beforeCreate != nil {
+		t.Fatal("el hook no corrió: muelle-caddy no se recreó")
+	}
+	if got := f.container(t).Networks; !slices.Contains(got, web) {
+		t.Fatalf("muelle-caddy no quedó conectado a %s: %v", web, got)
 	}
 }

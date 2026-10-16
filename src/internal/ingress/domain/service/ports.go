@@ -177,6 +177,9 @@ type CaddyRuntime interface {
 	// anterior sigue intacto), ErrPortInUse (el contenedor queda borrado) o
 	// Docker caído (entity.ErrDockerUnavailable).
 	Ensure(ctx context.Context, want CaddyWant) (recreated bool, err error)
+	// Connect conecta el contenedor que ya existe a las redes de stage de
+	// networks que le faltan, sin recrearlo. Una red que no existe se salta.
+	Connect(ctx context.Context, networks []string) error
 	// Status es lo que corre de verdad: la imagen con que se creó y si corre;
 	// found false si el contenedor no existe.
 	Status(ctx context.Context) (image string, running, found bool, err error)
