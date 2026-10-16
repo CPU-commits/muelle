@@ -1340,7 +1340,7 @@ func (s *sse) comment(text string) error         // ": ping"
   - `TestContractDeployLogStream`: `httptest.NewServer(c.Server)` y el SSE del log hasta el `status` final.
 
   Commit: `test(container): contratos del deploy con el contenedor completo`.
-- [ ] **Step 9: Integración** (agregar a `integration_test.go`): `TestIntegrationStatusAndLogs`: con `nginx:alpine` desplegado, `GetStatus` da 1/1, `health: healthy`, `cpu_percent` y `memory_bytes` medidos (la tarea corre en este nodo); `GET …/logs` sin `follow` trae las líneas de arranque de nginx y `end` `eof`; con `since` = la hora de la última, vuelve a llegar esa línea (inclusivo).
+- [x] **Step 9: Integración** (agregar a `integration_test.go`): `TestIntegrationStatusAndLogs`: con `nginx:alpine` desplegado, `GetStatus` da 1/1, `health: healthy`, `cpu_percent` y `memory_bytes` medidos (la tarea corre en este nodo); `GET …/logs` sin `follow` trae las líneas de arranque de nginx y `end` `eof`; con `since` = la hora de la última, vuelve a llegar esa línea (inclusivo).
 
 ```bash
 go test -tags integration -run Integration -count=1 -timeout 25m ./src/internal/deploy/

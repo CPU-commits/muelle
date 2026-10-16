@@ -3,7 +3,7 @@
 // Tests del worker de deploy contra el Swarm real (este nodo, manager de un
 // Swarm activo):
 //
-//	go test -tags integration -run Integration -count=1 -timeout 20m ./src/internal/deploy/
+//	go test -tags integration -run Integration -count=1 -timeout 25m ./src/internal/deploy/
 //
 // Todo lo que crean se llama it2… (un proyecto it2 + 4 hex por test: sus
 // stacks, servicios, redes y volúmenes empiezan con eso) y la red lleva la
@@ -28,11 +28,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -42,6 +44,7 @@ import (
 
 	"github.com/distribution/reference"
 
+	httpserver "github.com/CPU-commits/muelle/src/cmd/http"
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/entity"
 	depsqlite "github.com/CPU-commits/muelle/src/internal/deploy/infra/out/repository/sqlite"
@@ -520,5 +523,121 @@ func TestIntegrationResumeAfterRestart(t *testing.T) {
 	}
 	if s := e.service("slow", "slow"); s.RunningTasks != 1 {
 		t.Fatalf("servicio: %+v", s)
+	}
+}
+
+// El estado y los logs de una app con nginx desplegado (contrato §2.8 y
+// §2.9): GET …/status da 1/1, health healthy y las medidas de la tarea (corre
+// en este nodo); GET …/logs sin follow trae las líneas de nginx y end eof; y
+// con since = la hora de la última, esa línea vuelve a llegar (inclusivo).
+func TestIntegrationStatusAndLogs(t *testing.T) {
+	e := newItEnv(t)
+	e.formApp("web", `{"image":"nginx:alpine","port":80,"replicas":1,
+		"healthcheck":{"type":"http","path":"/","interval_s":1,"timeout_s":2,"retries":3}}`)
+	im := e.start()
+	e.waitOK(e.deploy(im, "web"))
+
+	var svc map[string]any
+	if !retry(context.Background(), 30*time.Second, func() bool {
+		w := im.http.Do("GET", e.appPath("web")+"/status", nil, session())
+		if w.Code != http.StatusOK {
+			return false
+		}
+		svcs := httptestutil.Decode[map[string][]map[string]any](t, w)["services"]
+		if len(svcs) != 1 {
+			return false
+		}
+		svc = svcs[0]
+		tasks, _ := svc["tasks"].([]any)
+		if len(tasks) == 0 {
+			return false
+		}
+		task, _ := tasks[0].(map[string]any)
+		return task["health"] == "healthy" && task["cpu_percent"] != nil && task["memory_bytes"] != nil
+	}) {
+		t.Fatalf("GET …/status: %v", svc)
+	}
+	if svc["name"] != "web" || svc["replicas_desired"] != 1.0 || svc["replicas_running"] != 1.0 ||
+		svc["memory_bytes"] == nil || svc["cpu_percent"] == nil {
+		t.Fatalf("servicio: %v", svc)
+	}
+	task := svc["tasks"].([]any)[0].(map[string]any)
+	if task["slot"] != 1.0 || task["state"] != "running" || task["node"] == nil || task["since"] == nil {
+		t.Fatalf("tarea: %v", task)
+	}
+
+	s := httpserver.NewServer(httpserver.Config{PanelOrigin: httptestutil.PanelOrigin, SecureCookies: true, Auth: testAuth,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	im.m.RegisterRoutes(s.Kit())
+	srv := httptest.NewServer(s)
+	t.Cleanup(srv.Close)
+	logs := func(query string) []sseEvent {
+		t.Helper()
+		req, err := http.NewRequest("GET", srv.URL+e.appPath("web")+"/logs?"+query, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session()(req)
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("GET …/logs?%s: %d %s", query, resp.StatusCode, b)
+		}
+		r := readSSE(t, resp)
+		var out []sseEvent
+		for {
+			ev, ok := r.next(t, 30*time.Second)
+			if !ok {
+				return out
+			}
+			out = append(out, ev)
+		}
+	}
+	type line struct {
+		Time   string `json:"time"`
+		Task   string `json:"task"`
+		Stream string `json:"stream"`
+		Line   string `json:"line"`
+	}
+	parse := func(evs []sseEvent) []line {
+		t.Helper()
+		if len(evs) < 2 || evs[len(evs)-1].Name != "end" || evs[len(evs)-1].Data != "eof" {
+			t.Fatalf("sin end eof al final: %+v", evs)
+		}
+		var out []line
+		for _, ev := range evs[:len(evs)-1] {
+			if ev.Name != "log" {
+				t.Fatalf("evento %+v", ev)
+			}
+			var l line
+			if err := jsonv2.Unmarshal([]byte(ev.Data), &l); err != nil {
+				t.Fatalf("data %q: %v", ev.Data, err)
+			}
+			out = append(out, l)
+		}
+		return out
+	}
+	first := parse(logs("service=web&tail=200"))
+	if !slices.ContainsFunc(first, func(l line) bool { return strings.Contains(l.Line, "nginx") }) {
+		t.Fatalf("no están las líneas de arranque de nginx: %+v", first)
+	}
+	last := first[len(first)-1]
+	lastAt, err := time.Parse(time.RFC3339Nano, last.Time)
+	if err != nil || last.Task != "web.1" || (last.Stream != "stdout" && last.Stream != "stderr") ||
+		!strings.HasSuffix(last.Time, "Z") || !lastAt.Equal(lastAt.Truncate(time.Millisecond)) {
+		t.Fatalf("última línea: %+v (%v)", last, err)
+	}
+	again := parse(logs("service=web&since=" + last.Time))
+	if !slices.Contains(again, last) {
+		t.Fatalf("since=%s no trajo de nuevo la última línea %+v: %+v", last.Time, last, again)
+	}
+	for _, l := range again {
+		if at, err := time.Parse(time.RFC3339Nano, l.Time); err != nil || at.Before(lastAt) {
+			t.Fatalf("since=%s trajo una línea anterior: %+v", last.Time, l)
+		}
 	}
 }
