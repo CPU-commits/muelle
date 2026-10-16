@@ -264,29 +264,25 @@ export class InMemoryCatalogRepository implements CatalogRepository {
 				current.lastDeployedAt !== null && configChangedAt > current.lastDeployedAt,
 		}
 		// Los servicios salen de la configuración guardada, como en el backend (§2.12).
-		const spec = current.kind === 'service' ? (changes.spec ?? current.spec) : null
-		const composeYaml =
-			current.kind === 'compose' ? (changes.composeYaml ?? current.composeYaml) : ''
-		const next: App =
-			current.kind === 'service' && spec
-				? {
-						...current,
-						...common,
-						spec,
-						services: [{ name: current.slug, ports: [spec.port] }],
-					}
-				: {
-						...current,
-						...common,
-						kind: 'compose',
-						composeYaml,
-						services: fakeComposeApp(
-							current.project,
-							current.stage,
-							current.slug,
-							composeYaml,
-						).services,
-					}
+		let next: App
+		if (current.kind === 'service') {
+			const spec = changes.spec ?? current.spec
+			next = {
+				...current,
+				...common,
+				spec,
+				services: [{ name: current.slug, ports: [spec.port] }],
+			}
+		} else {
+			const composeYaml = changes.composeYaml ?? current.composeYaml
+			const { services } = fakeComposeApp(
+				current.project,
+				current.stage,
+				current.slug,
+				composeYaml,
+			)
+			next = { ...current, ...common, composeYaml, services }
+		}
 		this.apps[index] = next
 		return next
 	}
