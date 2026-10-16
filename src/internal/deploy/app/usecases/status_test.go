@@ -86,6 +86,12 @@ func TestStatusValues(t *testing.T) {
 		Name: naming.Service("auditfy", "staging", "api", "cron"), Labels: naming.Labels("auditfy", "staging", "api", 7),
 		Image: "ghcr.io/x/cron:1", DesiredTasks: 1,
 	}, docker.Task{ID: "tg", State: docker.TaskPending, DesiredState: docker.TaskRunning, UpdatedAt: t0})
+	// La tarea vieja tiene su contenedor en este nodo: una histórica no
+	// lleva health. Y una tarea en un nodo que ya no está sale con su id.
+	f.docker.PutContainer(docker.Container{ID: "c0", Name: "auditfy_staging_api_api.1.t0", Health: "unhealthy"})
+	f.docker.SetTasks(naming.Service("auditfy", "staging", "api", "cron"),
+		docker.Task{ID: "tg", State: docker.TaskPending, DesiredState: docker.TaskRunning, UpdatedAt: t0},
+		docker.Task{ID: "tx", State: docker.TaskShutdown, DesiredState: docker.TaskShutdown, NodeID: "node-gone", UpdatedAt: t0.Add(-time.Hour)})
 	// Otra app del stage no aparece.
 	f.docker.PutStackService(naming.Stack("auditfy", "staging", "web"), docker.Service{
 		Name: naming.Service("auditfy", "staging", "web", "web"), Labels: naming.Labels("auditfy", "staging", "web", 3),
@@ -121,8 +127,11 @@ func TestStatusValues(t *testing.T) {
 		t.Fatalf("t0 (vieja): %+v", old)
 	}
 	if cron.ReplicasDesired != 1 || cron.ReplicasRunning != 0 || cron.MemoryLimitBytes != nil || cron.UpdateState != nil ||
-		cron.CPUPercent != nil || cron.MemoryBytes != nil || len(cron.Tasks) != 1 || cron.Tasks[0].Slot != nil || cron.Tasks[0].Node != nil {
+		cron.CPUPercent != nil || cron.MemoryBytes != nil || len(cron.Tasks) != 2 || cron.Tasks[0].Slot != nil || cron.Tasks[0].Node != nil {
 		t.Fatalf("cron (global): %+v", cron)
+	}
+	if gone := cron.Tasks[1]; gone.ID != "tx" || gone.Node == nil || *gone.Node != "node-gone" {
+		t.Fatalf("tarea en un nodo que ya no está: %+v", gone)
 	}
 	// Solo se miden las tareas que corren en este nodo.
 	if n := f.countCalls("ContainerStats"); n != 1 {

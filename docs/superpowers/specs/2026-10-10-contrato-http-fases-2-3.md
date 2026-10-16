@@ -408,9 +408,9 @@ El estado real en Swarm de los servicios de la app (filtrados por `naming.AppLab
 | `id` | El id de la tarea |
 | `slot` | Null en un servicio global |
 | `state`, `desired_state` | Los de Swarm, tal cual |
-| `health` | `healthy`, `unhealthy` o `starting`, del contenedor en el nodo local (`InspectContainer`); null si no tiene healthcheck o no está en este nodo |
-| `node` | El hostname del nodo (`Node`, con caché) |
-| `since` | `Task.UpdatedAt`, truncada al milisegundo (Docker la da con nanosegundos; §0) |
+| `health` | `healthy`, `unhealthy` o `starting`, del contenedor en el nodo local (`InspectContainer`); null si no tiene healthcheck, no está en este nodo o es una tarea histórica (`desired_state` no es `running`) |
+| `node` | El hostname del nodo (`Node`, con caché de 5 min). Null si la tarea todavía no tiene nodo (`pending`); el id del nodo si su hostname no se puede leer (el nodo ya no está) |
+| `since` | `Task.UpdatedAt`, truncada al milisegundo (Docker la da con nanosegundos; §0). Null si Swarm no la da |
 | `error` | `Task.Err`, enmascarado como el log (§2.5) con los valores secretos de la app y del stage: puede traer un argumento de `command` ya interpolado. Null si está vacío |
 | `cpu_percent`, `memory_bytes` | Los de su contenedor (`ContainerStats`), si la tarea corre en el nodo local. `cpu_percent` es el % de un núcleo, como `docker stats`. Null si la tarea no está en el nodo local, no corre o no se pudo medir. Las muestras se toman en paralelo, con un plazo total de 2 s |
 
@@ -434,7 +434,7 @@ Los logs de un servicio, en vivo. No se guarda nada (§10).
 | `service` | El nombre corto. Obligatorio (`422 invalid` con `service: es obligatorio`). Tiene que ser un slug de servicio, de hasta 16 caracteres (§5.2 regla 1 del diseño); si no, `422 invalid` con `service: …`. Si no existe en Swarm para la app: `404 not_found` (ver abajo) |
 | `tail` | De 0 a 5000; 200 por defecto. Otro valor: `422 invalid` con `tail: …` |
 | `since` | Una fecha RFC 3339 (el panel manda milisegundos: `2026-10-10T14:31:40.118Z`). Reemplaza a `tail`: si vienen los dos, manda `since` y `tail` no se mira. Se mandan las líneas escritas desde `since`, **inclusive** (la hora de Docker, con nanosegundos, ≥ `since`), hasta las últimas 5000 (`LogOptions{Since: since, Tail: 5000}`). Si no es una fecha: `422 invalid` con `since: …` |
-| `follow` | `1` deja el stream abierto. Si no viene, o es `0`, manda las líneas de `tail` (o de `since`), un `end` y cierra. Otro valor: `422 invalid` con `follow: …` |
+| `follow` | `1` deja el stream abierto. Si no viene, viene vacío o es `0`, manda las líneas de `tail` (o de `since`), un `end` y cierra. Otro valor: `422 invalid` con `follow: …` |
 
 El orden de los errores: primero la app (`404`), después la query (`422`, en el orden de la tabla) y al final el servicio en Swarm (`404`, `503`).
 
@@ -456,11 +456,12 @@ data: eof
 
 - **`log`:** `data` es JSON compacto.
   - `time` es la hora de Docker, **truncada** al milisegundo (§0; nunca redondeada hacia arriba).
-  - `task` es `<servicio>.<slot>`, o `<servicio>.<primeros 7 del id de la tarea>` en un servicio global.
+  - `task` es `<servicio>.<slot>`, o `<servicio>.<primeros 7 del id de la tarea>` en un servicio global. Una tarea que no estaba al abrir (un deploy durante un stream con `follow`) se busca una vez; si no aparece, sale con los 7 del id.
+  - `time` y `task` son null solo en el pedazo de una línea larga que llegó sin la línea a la que pertenece (ver "Enmascarado").
   - `stream` es `stdout` o `stderr`.
   - `line` va sin el `\n` final, cortada a 16 KiB con `…` (el corte respeta UTF-8; un byte inválido sale como U+FFFD).
 - **Enmascarado:** como el log del deploy (§2.5), con los valores secretos de la app y del stage, y con los pedazos de una línea larga unidos antes. Es una defensa extra: las apps a veces imprimen su configuración.
-- **`end`:** se termina el log (el servicio se borró, o no había `follow`). El servidor cierra después.
+- **`end`:** se termina el log (el servicio se borró, o no había `follow`): `data: eof`. A la hora (§0.3): `data: timeout`. El servidor cierra después. Si el log de Docker se corta por otra causa, el stream se cierra sin `end`, y el panel reconecta con `since`.
 - **Reconectar:** el panel vuelve a abrir el stream con `since` = el `time` de la última línea que recibió (`{service, since, follow: 1}`; si además manda `tail`, no se mira): al cortarse el stream, y al volver a una pestaña que estuvo oculta más de 30 s. Como `since` es inclusivo y `time` está truncado, vuelven a llegar las líneas de ese milisegundo, la última incluida, y el panel descarta las que ya tenía (por tarea, stream y texto). Así no se pierde ninguna: con `time` redondeado hacia arriba, o un `since` exclusivo, se perderían las de ese milisegundo que no alcanzaron a llegar. Sin `since`, cada reconexión repetiría las últimas 200.
 
 **Errores antes de abrir:** `404`, `422` y `503 docker_unavailable`.
