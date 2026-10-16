@@ -118,14 +118,14 @@ siga `pending`, así que pasa solo a `active` (o a `error` + `certificate` a los
   cualquier app: `409 conflict`. Tampoco puede ser el dominio del panel (`422 hostname`).
 - **Editar**: `proxied` sobre un dominio sin `cf_record_id` es `422` (el panel no ofrece el
   switch en ese caso). Si Cloudflare falla (o ya no hay token), el valor se guarda, el
-  dominio queda en `error` + `cloudflare` y responde `200`; si sale bien y estaba en `error`
-    - `cloudflare`, vuelve a `pending`. El switch es optimista: se mueve enseguida y vuelve si
-      el backend falla.
+  dominio queda en `error` + `cloudflare` y responde `200`; si sale bien y estaba en
+  `error`/`cloudflare`, vuelve a `pending`. El switch es optimista: se mueve enseguida y
+  vuelve si el backend falla.
 - **Borrar**: con `cf_record_id`, borra primero los registros en Cloudflare (`A` y `AAAA`).
-  Si Cloudflare no responde **o rechaza el borrado** (un token sin permiso): `502
-cloudflare_unavailable` y **no se borra nada**; el diálogo de confirmación queda abierto
-  con el error, que dice cómo borrarlo solo en muelle (quitar el token en Ajustes). Sin
-  token, borra solo en muelle.
+  Si Cloudflare no responde **o rechaza el borrado** (un token sin permiso):
+  `502 cloudflare_unavailable` y **no se borra nada**; el diálogo de confirmación queda
+  abierto con el error, que dice cómo borrarlo solo en muelle (quitar el token en Ajustes).
+  Sin token, borra solo en muelle.
 - **Adoptar**: solo con `error` + `record_exists` (si no, `409 nothing_to_adopt`). Apunta el
   registro existente a la IP pública, **conserva su `proxied` y lo copia al dominio**
   (adoptar no cambia hacia dónde va el tráfico; para cambiarlo, un `PATCH` después) y deja
