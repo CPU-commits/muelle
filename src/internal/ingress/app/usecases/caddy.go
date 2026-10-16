@@ -103,9 +103,12 @@ func (u *EnsureCaddy) Execute(ctx context.Context) (recreated bool, err error) {
 // connectNewStages conecta el muelle-caddy recién creado a las redes de los
 // stages que no están en nets (las de la lectura de antes de crearlo).
 //
-// Un EnsureStageNetwork que corre mientras el contenedor no existe (entre que
-// se borra el viejo y se crea el nuevo) no lo encuentra, y el nuevo se crea
-// sin esa red: las rutas del stage darían 502 hasta el próximo job "proxy".
+// La ventana va desde la primera lectura de Stages hasta CreateContainer, e
+// incluye la bajada de la imagen y el StopContainer (hasta 10 s). Un
+// EnsureStageNetwork que corre ahí, con el contenedor viejo ya borrado o a
+// punto de serlo, no conecta al nuevo, y este se crea sin esa red: las rutas
+// del stage darían 502 hasta el próximo job "proxy". Solo afecta a los stages
+// que faltan en la primera lectura (los nuevos): los demás ya están en nets.
 // Esta lectura es posterior a la creación, así que cubre el paso 4 de un
 // deploy (§7), cuyo stage ya está en la base. catalog guarda el stage recién
 // después de asegurar su red; si llega tarde a esta lectura, conecta la red
@@ -131,7 +134,9 @@ func (u *EnsureCaddy) connectNewStages(ctx context.Context, nets []string) {
 	}
 	if err := u.runtime.Connect(ctx, missing); err != nil {
 		u.log.Warn("ingress: conectando muelle-caddy a las redes de los stages nuevos", "error", err)
+		return
 	}
+	u.log.Info("ingress: muelle-caddy conectado a las redes de stages nuevos", "redes", missing)
 }
 
 // message es el error del contenedor para GET /proxy (contrato §3.3).
