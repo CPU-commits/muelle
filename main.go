@@ -218,7 +218,7 @@ func serve(log *slog.Logger) error {
 	if token, created, err := c.Identity.EnsureSetupInvite(ctx); err != nil {
 		return err
 	} else if created {
-		logSetupURL(log, s.PanelOrigin, token)
+		logSetupURL(log, c.PanelOrigin(ctx), token)
 	}
 
 	// Las tareas periódicas y los workers de los módulos (deploy, ingress)

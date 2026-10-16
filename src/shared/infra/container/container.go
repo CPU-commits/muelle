@@ -57,6 +57,18 @@ type Container struct {
 	Jobs     []cron.Job // las tareas periódicas de los módulos, para cron.Run
 
 	closeDocker func() error // nil si el Docker vino de WithDocker
+	panelOrigin string       // MUELLE_PANEL_ORIGIN, o ""
+}
+
+// PanelOrigin es el origen del panel para los links de setup y de las
+// invitaciones: MUELLE_PANEL_ORIGIN si está (puesto a mano, por ejemplo
+// detrás de otro proxy); si no, el de los ajustes (admin.Module.PanelOrigin:
+// https://<panel_domain>[:<proxy_https_port>]), que sigue al puerto HTTPS.
+func (c *Container) PanelOrigin(ctx context.Context) string {
+	if c.panelOrigin != "" {
+		return c.panelOrigin
+	}
+	return c.Admin.PanelOrigin(ctx)
 }
 
 // Option cambia cómo se arma el contenedor.
@@ -88,7 +100,7 @@ func WithIngress(o ingress.Options) Option { return func(op *options) { op.ingre
 // con el Authenticator de identity y registra las rutas de todos los módulos.
 // Nada de esto llama a Docker: lo que corre en segundo plano arranca con Run.
 //
-// Sin PanelOrigin o DataDir devuelve un error sin tocar nada. La clave y el
+// Sin PanelOrigin ni Domain, o sin DataDir, devuelve un error sin tocar nada. La clave y el
 // panel embebido se leen antes de tocar DataDir, así una clave que falta (o
 // un panel roto) no deja una base vacía; si la clave falta o no sirve, el
 // error nombra MUELLE_MASTER_KEY_FILE y `muelle genkey`. Si algo falla,
@@ -96,8 +108,8 @@ func WithIngress(o ingress.Options) Option { return func(op *options) { op.ingre
 func New(ctx context.Context, s settings.Settings, log *slog.Logger, opts ...Option) (*Container, error) {
 	// Sin estos valores un módulo haría panic (identity y admin los exigen).
 	switch {
-	case s.PanelOrigin == "":
-		return nil, errors.New("container: falta PanelOrigin (MUELLE_PANEL_ORIGIN)")
+	case s.PanelOrigin == "" && s.Domain == "":
+		return nil, errors.New("container: falta PanelOrigin o Domain (MUELLE_PANEL_ORIGIN o MUELLE_PANEL_DOMAIN)")
 	case s.DataDir == "":
 		return nil, errors.New("container: falta DataDir (MUELLE_DATA_DIR)")
 	}
@@ -167,7 +179,7 @@ func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docke
 
 	clk := clock.System{}
 	rec := sqlite.NewAuditRecorder(db, clk, log)
-	c := &Container{DB: db, Docker: engine}
+	c := &Container{DB: db, Docker: engine, panelOrigin: s.PanelOrigin}
 	// En orden de dependencias: cada módulo recibe los que ya están armados.
 	c.Ingress = ingress.New(ingress.Deps{
 		DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log, Docker: engine, Version: s.Version, Options: o.ingress,
@@ -184,7 +196,7 @@ func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docke
 		DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log, DataDir: s.DataDir, ProxyHook: c.Ingress,
 	})
 	c.Identity = identity.New(identity.Deps{
-		DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log, PanelOrigin: s.PanelOrigin,
+		DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log, PanelOrigin: c.PanelOrigin,
 	})
 	if err := c.Admin.VerifyMasterKey(ctx); err != nil {
 		return nil, err

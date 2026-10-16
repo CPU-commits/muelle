@@ -50,6 +50,13 @@ func newEnvWith(t *testing.T, extra func(k *utils.Kit)) *env {
 // siempre manda el Origin de httptestutil).
 func newEnvFull(t *testing.T, panelOrigin string, extra func(k *utils.Kit)) *env {
 	t.Helper()
+	return newEnvOrigin(t, func(context.Context) string { return panelOrigin }, extra)
+}
+
+// newEnvOrigin es newEnvFull con el origen de los links como función, que
+// identity llama en cada invitación.
+func newEnvOrigin(t *testing.T, panelOrigin func(context.Context) string, extra func(k *utils.Kit)) *env {
+	t.Helper()
 	db := sqlitetest.New(t)
 	c := clock.NewManual(time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC))
 	ciph, err := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
