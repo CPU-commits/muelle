@@ -112,6 +112,7 @@ type AuditEventOutput struct {
 	ID        int64          `json:"id"`
 	ActorType string         `json:"actor_type"`
 	ActorID   *int64         `json:"actor_id"`
+	ActorName string         `json:"actor_name"` // siempre string (ver entity.AuditEvent)
 	Action    string         `json:"action"`
 	Target    string         `json:"target"`
 	Details   jsontext.Value `json:"details"`

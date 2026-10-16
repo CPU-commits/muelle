@@ -20,19 +20,19 @@ func TestAudit(t *testing.T) {
 	repo := NewAuditRepository(db)
 	ctx := context.Background()
 
-	rec.Record(entity.WithPrincipal(ctx, entity.Principal{UserID: 7}), "project.create", "project:a", nil)
+	rec.Record(entity.WithPrincipal(ctx, entity.Principal{UserID: 7, Username: "ana"}), "project.create", "project:a", nil)
 	clk.Advance(time.Hour)
-	rec.Record(entity.WithPrincipal(ctx, entity.Principal{Token: &entity.TokenScope{ID: 3}}),
+	rec.Record(entity.WithPrincipal(ctx, entity.Principal{Token: &entity.TokenScope{ID: 3, Name: "ci"}}),
 		"env.replace", "app:a/s/x", map[string][]string{"keys": {"A"}})
 
 	list, err := repo.List(ctx, 0, 10)
 	if err != nil || len(list) != 2 || list[0].Action != "env.replace" || string(list[0].Details) != `{"keys":["A"]}` {
 		t.Fatalf("list=%+v err=%v", list, err)
 	}
-	if list[0].ActorType != "token" || list[0].ActorID == nil || *list[0].ActorID != 3 {
+	if list[0].ActorType != "token" || list[0].ActorID == nil || *list[0].ActorID != 3 || list[0].ActorName != "ci" {
 		t.Fatalf("evento 0=%+v", list[0])
 	}
-	if string(list[1].Details) != "{}" || list[1].ActorID == nil || *list[1].ActorID != 7 || list[1].ActorType != "user" {
+	if string(list[1].Details) != "{}" || list[1].ActorID == nil || *list[1].ActorID != 7 || list[1].ActorType != "user" || list[1].ActorName != "ana" {
 		t.Fatalf("evento 1=%+v", list[1])
 	}
 	if !list[1].At.Equal(clk.Now().Add(-time.Hour)) {

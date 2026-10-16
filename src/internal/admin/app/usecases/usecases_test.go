@@ -92,7 +92,7 @@ func TestSettingsRequire2FA(t *testing.T) {
 	}
 	events, _ := NewListAudit(adminrepo.NewAuditRepository(e.db)).Execute(context.Background(), dto.ListAuditInput{})
 	if len(events) != 1 || events[0].Action != "settings.update" || events[0].Target != "settings" ||
-		string(events[0].Details) != `{"require_2fa":true}` || *events[0].ActorID != withTOTP {
+		string(events[0].Details) != `{"require_2fa":true}` || *events[0].ActorID != withTOTP || events[0].ActorName != "admin" {
 		t.Fatalf("events=%+v", events)
 	}
 
@@ -135,6 +135,31 @@ func TestListAuditValidation(t *testing.T) {
 	page, _ := uc.Execute(context.Background(), dto.ListAuditInput{Limit: ptr(1), Before: &all[0].ID})
 	if len(page) != 1 || page[0].ID != all[1].ID {
 		t.Fatalf("page=%+v", page)
+	}
+}
+
+// Cada evento trae el nombre de su autor, el que tenía al escribirse: sigue
+// aunque el usuario ya no exista, y "system" en los del sistema.
+func TestListAuditActorName(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	gone := admintest.InsertUser(t, e.db, "ana", false)
+	e.rec.Record(ctx, "settings.init", "settings", nil)
+	e.rec.Record(entity.WithPrincipal(ctx, entity.Principal{UserID: gone, Username: "ana"}), "project.create", "project:a", nil)
+	e.rec.Record(entity.WithPrincipal(ctx, entity.Principal{Token: &entity.TokenScope{ID: 4, Name: "ci", ProjectSlug: "a"}}),
+		"env.replace", "stage:a/staging", nil)
+	if _, err := e.db.Conn(ctx).ExecContext(ctx, `DELETE FROM users WHERE id = ?`, gone); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := NewListAudit(adminrepo.NewAuditRepository(e.db)).Execute(ctx, dto.ListAuditInput{})
+	if err != nil || len(events) != 3 {
+		t.Fatalf("events=%+v err=%v", events, err)
+	}
+	for i, want := range [][2]string{{"token", "ci"}, {"user", "ana"}, {"system", "system"}} {
+		if events[i].ActorType != want[0] || events[i].ActorName != want[1] {
+			t.Errorf("evento %d: %s/%q, esperaba %s/%q", i, events[i].ActorType, events[i].ActorName, want[0], want[1])
+		}
 	}
 }
 

@@ -47,7 +47,7 @@ func (u *ListAudit) Execute(ctx context.Context, in dto.ListAuditInput) ([]dto.A
 	out := make([]dto.AuditEventOutput, 0, len(events))
 	for _, e := range events {
 		out = append(out, dto.AuditEventOutput{
-			ID: e.ID, ActorType: e.ActorType, ActorID: e.ActorID,
+			ID: e.ID, ActorType: e.ActorType, ActorID: e.ActorID, ActorName: e.ActorName,
 			Action: e.Action, Target: e.Target, Details: e.Details, At: e.At,
 		})
 	}
