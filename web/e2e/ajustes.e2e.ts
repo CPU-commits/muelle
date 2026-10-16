@@ -101,6 +101,8 @@ test('una lista de IPs que te deja fuera pide confirmar, y confirmada se guarda'
 	const dialog = page.getByRole('dialog', { name: 'Te quedarías fuera del panel' })
 	await expect(dialog).toBeVisible()
 	await expect(dialog.getByText(/desde 198\.51\.100\.17/)).toBeVisible()
+	// Cómo volver a entrar desde el servidor (contrato §5.4), para copiarlo.
+	await expect(dialog.getByText(/muelle settings reset-panel-ips/)).toBeVisible()
 	await dialog.getByRole('button', { name: 'Cancelar' }).click()
 	await expect(dialog).toHaveCount(0)
 	await expect(cidrs).toHaveValue('10.0.0.0/8')

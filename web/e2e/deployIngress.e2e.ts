@@ -169,6 +169,25 @@ test('Dominios: el aviso "proxy desincronizado" cuando Caddy no acepta la config
 
 	await expect(page.getByText('El proxy está desincronizado.')).toBeVisible()
 	await expect(page.getByText(/Caddy rechazó la configuración/)).toBeVisible()
+	// Lo que lo arregla (los puertos, el registry de la imagen de Caddy…) está en Ajustes.
+	await page.getByRole('link', { name: 'Abrir Ajustes' }).click()
+	await expect(page).toHaveURL(/\/ajustes$/)
+
+	expect(problems).toEqual([])
+})
+
+test('Dominios de una compose ofrece los servicios del catálogo con sus puertos', async ({
+	page,
+}) => {
+	const problems = await watch(page)
+	await login(page)
+
+	// aumi-agents/staging/agents: gateway declara `expose: ["8080"]` (contrato §2.12).
+	await page.goto('/projects/aumi-agents/stages/staging/apps/agents/dominios')
+	await expect(page.getByRole('list', { name: 'Dominios de la app' })).toBeVisible()
+	await expect(page.getByRole('combobox', { name: 'Servicio y puerto de destino' })).toHaveValue(
+		'gateway:8080',
+	)
 
 	expect(problems).toEqual([])
 })
