@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
+	"github.com/CPU-commits/muelle/src/internal/ingress/ingresstest"
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
@@ -91,5 +93,109 @@ func TestProxySettingsReaderRejectsGarbage(t *testing.T) {
 	setRaw(t, db, entity.SettingProxyHTTPPort, "ochenta", false)
 	if _, err := NewProxySettingsReader(db, newCipher(t)).ProxySettings(context.Background()); err == nil {
 		t.Fatal("un puerto que no es número debió fallar")
+	}
+}
+
+func countKey(t *testing.T, db *sqlite.DB, key string) int {
+	t.Helper()
+	var n int
+	ctx := context.Background()
+	if err := db.Conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM settings WHERE key = ?`, key).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestPanelDNSRoundTrip(t *testing.T) {
+	db := sqlitetest.New(t)
+	r := NewProxySettingsReader(db, newCipher(t))
+	ctx := context.Background()
+
+	if got, err := r.PanelDNS(ctx); err != nil || got != (service.PanelDNS{}) {
+		t.Fatalf("vacío: %+v %v", got, err)
+	}
+	full := service.PanelDNS{ZoneID: "z1", RecordID: "r4", RecordIDAAAA: "r6"}
+	if err := r.SavePanelDNS(ctx, full); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := r.PanelDNS(ctx); err != nil || got != full {
+		t.Fatalf("los tres: %+v %v", got, err)
+	}
+	// Guardar otra vez pisa (ON CONFLICT), y una vacía borra su fila.
+	noAAAA := service.PanelDNS{ZoneID: "z2", RecordID: "r5"}
+	if err := r.SavePanelDNS(ctx, noAAAA); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := r.PanelDNS(ctx); err != nil || got != noAAAA {
+		t.Fatalf("sin AAAA: %+v %v", got, err)
+	}
+	if n := countKey(t, db, entity.SettingPanelCFRecordIDAAAA); n != 0 {
+		t.Fatalf("la clave vacía debió borrarse: %d filas", n)
+	}
+	if err := r.SavePanelDNS(ctx, service.PanelDNS{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{entity.SettingPanelCFZoneID, entity.SettingPanelCFRecordID, entity.SettingPanelCFRecordIDAAAA} {
+		if n := countKey(t, db, k); n != 0 {
+			t.Fatalf("%s debió borrarse: %d filas", k, n)
+		}
+	}
+	// Las claves del panel no son ajustes del proxy.
+	if err := r.SavePanelDNS(ctx, full); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := r.ProxySettings(ctx); err != nil || !reflect.DeepEqual(got, entity.DefaultProxySettings()) {
+		t.Fatalf("ProxySettings con las claves del panel: %+v %v", got, err)
+	}
+}
+
+func TestSaveZonesCompareAndSet(t *testing.T) {
+	db := sqlitetest.New(t)
+	c := newCipher(t)
+	r := NewProxySettingsReader(db, c)
+	ctx := context.Background()
+	zones := func() string {
+		t.Helper()
+		var v string
+		if err := db.Conn(ctx).QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, entity.SettingCloudflareZones).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+
+	// Sin token guardado no se guarda nada.
+	if saved, err := r.SaveZones(ctx, "t1", 3); err != nil || saved {
+		t.Fatalf("sin token: saved=%v %v", saved, err)
+	}
+	if n := countKey(t, db, entity.SettingCloudflareZones); n != 0 {
+		t.Fatalf("sin token: %d filas", n)
+	}
+
+	p := entity.DefaultProxySettings()
+	p.CloudflareToken = "t1"
+	ingresstest.SetProxySettings(t, db, c, p)
+	if saved, err := r.SaveZones(ctx, "t1", 3); err != nil || !saved {
+		t.Fatalf("mismo token: saved=%v %v", saved, err)
+	}
+	if v := zones(); v != "3" {
+		t.Fatalf("cloudflare_zones = %q", v)
+	}
+	// Otro token (el guardado cambió mientras se listaban las zonas): no se pisa.
+	if saved, err := r.SaveZones(ctx, "t2", 5); err != nil || saved {
+		t.Fatalf("otro token: saved=%v %v", saved, err)
+	}
+	if v := zones(); v != "3" {
+		t.Fatalf("cloudflare_zones con otro token = %q", v)
+	}
+	if saved, err := r.SaveZones(ctx, "", 5); err != nil || saved {
+		t.Fatalf("token vacío: saved=%v %v", saved, err)
+	}
+	// Un token guardado que no se puede descifrar es un error, y no se guarda.
+	setRaw(t, db, entity.SettingCloudflareToken, c.Encrypt([]byte("t1"), "settings:otra"), true)
+	if saved, err := r.SaveZones(ctx, "t1", 7); err == nil || saved {
+		t.Fatalf("token con otra AAD: saved=%v %v", saved, err)
+	}
+	if v := zones(); v != "3" {
+		t.Fatalf("cloudflare_zones con un token ilegible = %q", v)
 	}
 }

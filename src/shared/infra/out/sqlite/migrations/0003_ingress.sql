@@ -32,6 +32,12 @@ CREATE TABLE domains (
   created_at        INTEGER NOT NULL,
   updated_at        INTEGER NOT NULL,
   -- Un dominio en error siempre dice por qué (el panel ofrece Adoptar solo con record_exists).
-  CHECK ((status = 'error') = (last_error_code IS NOT NULL))
+  CHECK ((status = 'error') = (last_error_code IS NOT NULL)),
+  -- Invariantes del DNS (contrato §3.1): muelle maneja el AAAA solo si maneja
+  -- el A, un registro siempre está en una zona, y el TLS por Cloudflare
+  -- necesita la zona.
+  CHECK (cf_record_id_aaaa IS NULL OR cf_record_id IS NOT NULL),
+  CHECK (cf_record_id IS NULL OR cf_zone_id IS NOT NULL),
+  CHECK (tls_mode = 'http' OR cf_zone_id IS NOT NULL)
 );
 CREATE INDEX domains_app ON domains(app_id);

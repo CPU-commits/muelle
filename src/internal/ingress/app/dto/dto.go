@@ -1,4 +1,4 @@
-// Package dto tiene las entradas de los casos de uso de ingress.
+// Package dto tiene las entradas y las salidas de los casos de uso de ingress.
 package dto
 
 // StageRef identifica un stage por sus slugs.

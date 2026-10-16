@@ -63,13 +63,20 @@ type Container struct {
 type Option func(*options)
 
 type options struct {
-	docker docker.Engine
+	docker  docker.Engine
+	ingress ingress.Options
 }
 
 // WithDocker usa e en vez del cliente de Docker del entorno (DOCKER_HOST o el
 // socket por defecto). Los tests pasan un dockertest.Fake: así nunca tocan el
 // Docker real de la máquina. El contenedor no lo cierra.
 func WithDocker(e docker.Engine) Option { return func(o *options) { o.docker = e } }
+
+// WithIngress cambia cómo ingress llega a Docker, Caddy y Cloudflare (los
+// nombres, la admin API, la URL de Cloudflare). Solo para tests: el cero es
+// producción, y un test que manda un token de Cloudflare pasa la URL de un
+// cftest, así nunca llega a la API real.
+func WithIngress(o ingress.Options) Option { return func(op *options) { op.ingress = o } }
 
 // New carga la clave maestra (s.MasterKeyFile), arma el cliente de Docker (sin
 // conectarse: muelle arranca aunque Docker no responda), abre la base en
@@ -127,7 +134,7 @@ func New(ctx context.Context, s settings.Settings, log *slog.Logger, opts ...Opt
 	if err != nil {
 		return nil, errors.Join(err, closeDocker())
 	}
-	c, err := build(ctx, db, ciph, engine, s, log, panelHandler)
+	c, err := build(ctx, db, ciph, engine, s, log, panelHandler, o)
 	if err != nil {
 		return nil, errors.Join(err, db.Close(), closeDocker())
 	}
@@ -153,7 +160,7 @@ func keyError(path string, err error) error {
 	return fmt.Errorf("container: MUELLE_MASTER_KEY_FILE=%s: %w (en una instalación nueva, crea la clave con `muelle genkey`; si ya hay datos, hace falta la clave con la que se cifraron)", path, err)
 }
 
-func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docker.Engine, s settings.Settings, log *slog.Logger, panelHandler http.Handler) (*Container, error) {
+func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docker.Engine, s settings.Settings, log *slog.Logger, panelHandler http.Handler, o options) (*Container, error) {
 	if err := db.Migrate(ctx); err != nil {
 		return nil, err
 	}
@@ -163,7 +170,7 @@ func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docke
 	c := &Container{DB: db, Docker: engine}
 	// En orden de dependencias: cada módulo recibe los que ya están armados.
 	c.Ingress = ingress.New(ingress.Deps{
-		DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log, Docker: engine, Version: s.Version,
+		DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log, Docker: engine, Version: s.Version, Options: o.ingress,
 	})
 	c.Secrets = secrets.New(secrets.Deps{DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log})
 	c.Deploy = deploy.New(deploy.Deps{

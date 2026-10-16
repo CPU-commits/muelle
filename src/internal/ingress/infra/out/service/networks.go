@@ -1,5 +1,8 @@
 // Package service tiene los adaptadores de salida de ingress: Docker (con
-// shared/infra/out/docker) y los ajustes de la tabla settings.
+// shared/infra/out/docker) y lo que ingress lee de otros módulos por SQL
+// (§4.1 regla 1): las apps y los stages de catalog, las credenciales de
+// registries y los ajustes de la tabla settings, donde también escribe sus
+// claves (contrato §3.6).
 package service
 
 import (
@@ -32,9 +35,25 @@ func (n *DockerNetworks) Inspect(ctx context.Context, name string) (service.Netw
 	if err != nil {
 		return service.Network{}, false, err
 	}
+	return toNetwork(net), true, nil
+}
+
+func (n *DockerNetworks) List(ctx context.Context) ([]service.Network, error) {
+	nets, err := n.docker.ListNetworks(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]service.Network, 0, len(nets))
+	for _, net := range nets {
+		out = append(out, toNetwork(net))
+	}
+	return out, nil
+}
+
+func toNetwork(net docker.Network) service.Network {
 	// Recién creada, una red de Swarm puede venir sin driver: cuenta por el scope.
 	overlay := net.Scope == "swarm" && (net.Driver == "overlay" || net.Driver == "")
-	return service.Network{Name: net.Name, Overlay: overlay, Attachable: net.Attachable, Containers: net.Containers}, true, nil
+	return service.Network{Name: net.Name, Overlay: overlay, Attachable: net.Attachable, Labels: net.Labels, Containers: net.Containers}
 }
 
 func (n *DockerNetworks) CreateOverlay(ctx context.Context, name string, labels map[string]string) error {
