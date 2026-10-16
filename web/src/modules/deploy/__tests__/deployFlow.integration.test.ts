@@ -510,6 +510,9 @@ describe('contrato de la Fase 2', () => {
 	})
 
 	it('el SSE de un deploy en curso empieza con su status', async () => {
+		// A escala real (~9 s): a 0.01 dura ~100 ms y, con la máquina cargada, ya terminó
+		// cuando se abre el stream (y un deploy terminado empieza con el log, no el status).
+		deployDb.reset({ liveScale: 1, seedLive: false })
 		const { id } = await deployUseCases.createDeploy({
 			app: APP,
 			services: ['api'],
