@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { UnavailableError } from '@/shared/domain'
-import { asDeployId, NoPreviousDeploy } from '../../../../domain'
+import { AppRemoving, asDeployId, NoPreviousDeploy } from '../../../../domain'
 import { APP, makeDeploy } from '../../../../domain/repositories/__fakes__/deployFixtures'
 import { mountViewModel } from '../../../__tests__/mountViewModel'
 import {
@@ -80,6 +80,16 @@ describe('RollbackDialogViewModel', () => {
 		expect(vm.nothingToRollBack).toBe(true)
 		await vm.confirm()
 		expect(mocks.rollback).not.toHaveBeenCalled()
+	})
+
+	it('una app que se está borrando (409 conflict) lo dice en el banner, no "no hay anterior"', async () => {
+		mocks.rollback.mockRejectedValue(new AppRemoving())
+		const { vm } = await mountViewModel(() => new RollbackDialogViewModel(() => props()))
+
+		await vm.confirm()
+
+		expect(vm.noPrevious).toBe(false)
+		expect(vm.formError).toBe(m.deploy_error_app_removing())
 	})
 
 	it('otro error va al banner; cerrar lo limpia', async () => {

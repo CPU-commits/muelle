@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
 import { UnavailableError } from '@/shared/domain'
-import { asDeployId, ImageRejected } from '../../../../domain'
+import { AppRemoving, asDeployId, ImageRejected } from '../../../../domain'
 import { APP } from '../../../../domain/repositories/__fakes__/deployFixtures'
 import { mountViewModel } from '../../../__tests__/mountViewModel'
 import { type DeployDialogProps, DeployDialogViewModel } from '../DeployDialog.viewModel.svelte.ts'
@@ -133,6 +133,25 @@ describe('DeployDialogViewModel', () => {
 		await vm.submit()
 
 		expect(vm.formError).toBe(m.deploy_dialog_reason_unknown_service({ service: 'otro' }))
+	})
+
+	it('una app que se está borrando (409 conflict) lo dice en el banner', async () => {
+		mocks.createDeploy.mockRejectedValue(new AppRemoving())
+		const { vm } = await mountViewModel(() => new DeployDialogViewModel(() => props()))
+
+		await vm.submit()
+
+		expect(vm.formError).toBe(m.deploy_error_app_removing())
+	})
+
+	it('si el deploy actual es un rollback, avisa que sin imagen se repite esa versión', async () => {
+		const normal = await mountViewModel(() => new DeployDialogViewModel(() => props()))
+		expect(normal.vm.afterRollback).toBe(false)
+
+		const { vm } = await mountViewModel(
+			() => new DeployDialogViewModel(() => props({ afterRollback: true })),
+		)
+		expect(vm.afterRollback).toBe(true)
 	})
 
 	it('otro error va al banner del diálogo', async () => {

@@ -20,6 +20,11 @@ export interface DeployDialogProps {
 	readonly services: readonly string[]
 	/** La imagen actual de cada servicio, para el placeholder. */
 	readonly currentImages: Readonly<Record<string, string>>
+	/**
+	 * El deploy actual es un rollback: un deploy sin imagen repite sus refs con digest, así
+	 * que no vuelve a seguir el tag (contrato §2.2). El diálogo lo avisa.
+	 */
+	readonly afterRollback?: boolean
 	readonly onDeployed: (id: DeployId) => void
 	readonly onClose: () => void
 }
@@ -39,7 +44,8 @@ function rejectionMessage(error: ImageRejected, service: string): string {
 }
 
 // "Desplegar" (App-Resumen.dc.html): un campo de imagen opcional por servicio. Vacío
-// redespliega la imagen actual y vuelve a resolver el digest.
+// repite la ref pedida del deploy actual: un tag se vuelve a resolver, un digest queda fijo
+// (contrato §2.2).
 export class DeployDialogViewModel {
 	overrides = $state<Record<string, string>>({})
 	errors = $state<Record<string, string>>({})
@@ -60,6 +66,10 @@ export class DeployDialogViewModel {
 
 	get isPending(): boolean {
 		return this.#deploy.isPending
+	}
+
+	get afterRollback(): boolean {
+		return this.#props().afterRollback === true
 	}
 
 	placeholder(service: string): string {

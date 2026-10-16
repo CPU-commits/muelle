@@ -69,14 +69,14 @@
 	"deploy_dialog_body": "Creates a deploy with the current configuration, pending changes included.",
 	"deploy_dialog_image": "Image",
 	"deploy_dialog_image_service": "Image for {service}",
-	"deploy_dialog_image_hint": "Empty: redeploys the same image and resolves the digest again.",
+	"deploy_dialog_image_hint": "Empty: repeats the current deploy's image. A tag is resolved again; a pinned digest is kept.",
 	"deploy_dialog_invalid_image": "Not a valid image reference: registry/repository[:tag], with a lowercase repository and no spaces.",
 	"deploy_dialog_submit": "Deploy",
 	"deploy_toast_queued": "Deploy #{id} queued",
 	"deploy_toast_queued_body": "You can follow it in Deploys.",
 	"deploy_rollback_title": "Roll back to #{id}",
 	"deploy_rollback_title_generic": "Rollback",
-	"deploy_rollback_body": "Goes back to the images of the previous successful deploy.",
+	"deploy_rollback_body": "Goes back to the images of the previous successful deploy. Later deploys without an image repeat that version.",
 	"deploy_rollback_image": "Image",
 	"deploy_rollback_deployed": "Deployed",
 	"deploy_rollback_config": "Configuration",
@@ -166,5 +166,8 @@
 	"deploy_error_docker": "Docker is not responding on the muelle server (or the node is not a Swarm manager).",
 	"deploy_dialog_reason_both": "Send one image for the app or one per service, not both.",
 	"deploy_dialog_reason_compose": "This is a compose app: images go per service.",
-	"deploy_dialog_reason_unknown_service": "The service {service} no longer exists in the app configuration."
+	"deploy_dialog_reason_unknown_service": "The service {service} no longer exists in the app configuration.",
+	"deploy_error_app_removing": "The app is being deleted: it doesn't accept deploys meanwhile (2 minutes at most).",
+	"deploy_dialog_after_rollback_title": "The current deploy is a rollback.",
+	"deploy_dialog_after_rollback_body": "Without a new image, that version is repeated with its digest. To follow a tag again (like :staging), type it here or change it in the configuration."
 }

@@ -216,6 +216,14 @@ export class DeploysViewModel {
 		return (this.status.data?.services ?? []).map((service) => service.name)
 	}
 
+	/**
+	 * El deploy actual es un rollback: desplegar sin imagen repite sus refs con digest (no
+	 * vuelve a seguir el tag; contrato §2.2), y el diálogo de deploy lo avisa.
+	 */
+	get afterRollback(): boolean {
+		return currentDeploy(this.history)?.trigger === 'rollback'
+	}
+
 	get currentImages(): Record<string, string> {
 		const current = currentDeploy(this.history)
 		return Object.fromEntries(

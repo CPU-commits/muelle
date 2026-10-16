@@ -69,14 +69,14 @@
 	"deploy_dialog_body": "Crea un deploy con la configuración actual, incluidos los cambios pendientes.",
 	"deploy_dialog_image": "Imagen",
 	"deploy_dialog_image_service": "Imagen de {service}",
-	"deploy_dialog_image_hint": "Vacío: redespliega la misma imagen y vuelve a resolver el digest.",
+	"deploy_dialog_image_hint": "Vacío: repite la imagen del deploy actual. Un tag se vuelve a resolver; un digest fijado se mantiene.",
 	"deploy_dialog_invalid_image": "No es una referencia de imagen válida: registro/repositorio[:tag], el repositorio en minúsculas y sin espacios.",
 	"deploy_dialog_submit": "Desplegar",
 	"deploy_toast_queued": "Deploy #{id} en cola",
 	"deploy_toast_queued_body": "Lo puedes seguir en Deploys.",
 	"deploy_rollback_title": "Rollback a #{id}",
 	"deploy_rollback_title_generic": "Rollback",
-	"deploy_rollback_body": "Vuelve a las imágenes del deploy exitoso anterior.",
+	"deploy_rollback_body": "Vuelve a las imágenes del deploy exitoso anterior. Los deploys sin imagen que sigan repiten esa versión.",
 	"deploy_rollback_image": "Imagen",
 	"deploy_rollback_deployed": "Desplegado",
 	"deploy_rollback_config": "Configuración",
@@ -166,5 +166,8 @@
 	"deploy_error_docker": "Docker no responde en el servidor de muelle (o el nodo no es manager de un Swarm).",
 	"deploy_dialog_reason_both": "Va una imagen para la app o una por servicio, no las dos.",
 	"deploy_dialog_reason_compose": "Esta app es compose: la imagen va por servicio.",
-	"deploy_dialog_reason_unknown_service": "El servicio {service} ya no existe en la configuración de la app."
+	"deploy_dialog_reason_unknown_service": "El servicio {service} ya no existe en la configuración de la app.",
+	"deploy_error_app_removing": "La app se está borrando: no acepta deploys mientras tanto (a lo más 2 minutos).",
+	"deploy_dialog_after_rollback_title": "El deploy actual es un rollback.",
+	"deploy_dialog_after_rollback_body": "Sin una imagen nueva se repite esa versión, con su digest. Para volver a seguir un tag (como :staging), escríbelo aquí o cámbialo en la configuración."
 }

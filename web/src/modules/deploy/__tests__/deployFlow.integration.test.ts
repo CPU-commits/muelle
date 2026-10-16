@@ -18,6 +18,7 @@ import { httpDeployRepository } from '../data/repositories/httpDeployRepository'
 import {
 	type AppLogEvent,
 	type AppRef,
+	AppRemoving,
 	appHealth,
 	asDeployId,
 	asLogOffset,
@@ -443,13 +444,31 @@ describe('contrato de la Fase 2', () => {
 		await expect(deployUseCases.getAppStatus(APP)).rejects.toBeInstanceOf(DockerUnavailable)
 	})
 
-	it('el rollback sin anterior es solo no_previous_deploy: un conflict es otro 409', async () => {
+	it('el rollback sin anterior es solo no_previous_deploy: un conflict es la app que se borra', async () => {
 		server.use(
-			http.post(api(`${APP_PATH}/rollback`), () => apiError(409, 'conflict', 'otra cosa')),
+			http.post(api(`${APP_PATH}/rollback`), () =>
+				apiError(409, 'conflict', 'la app se está borrando'),
+			),
 		)
 		const result = deployUseCases.rollback(APP)
+		await expect(result).rejects.toBeInstanceOf(AppRemoving)
 		await expect(result).rejects.toBeInstanceOf(ConflictError)
 		await expect(result).rejects.not.toBeInstanceOf(NoPreviousDeploy)
+	})
+
+	it('un deploy de una app que se está borrando (409 conflict) es AppRemoving', async () => {
+		server.use(
+			http.post(api(`${APP_PATH}/deploys`), () =>
+				apiError(409, 'conflict', 'la app se está borrando'),
+			),
+		)
+		const result = deployUseCases.createDeploy({
+			app: APP,
+			kind: 'service',
+			services: ['api'],
+			overrides: {},
+		})
+		await expect(result).rejects.toBeInstanceOf(AppRemoving)
 	})
 
 	it('el log por polling: un offset más allá del final es 422 offset', async () => {

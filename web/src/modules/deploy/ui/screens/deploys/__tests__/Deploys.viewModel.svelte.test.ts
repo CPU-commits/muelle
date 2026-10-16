@@ -182,6 +182,21 @@ describe('DeploysViewModel', () => {
 		expect(vm.selected).toBeNull()
 	})
 
+	it('sabe si el deploy actual (el succeeded más reciente) es un rollback', async () => {
+		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
+		await vi.waitFor(() => expect(vm.selected?.id).toBe(144))
+		expect(vm.afterRollback).toBe(false)
+
+		mocks.listDeploys.mockResolvedValue([
+			makeDeploy(145, { status: 'failed' }),
+			makeDeploy(144, { trigger: 'rollback' }),
+			makeDeploy(143),
+		])
+		const rolledBack = await mountViewModel(() => new DeploysViewModel(() => PROPS))
+		await vi.waitFor(() => expect(rolledBack.vm.selected?.id).toBe(145))
+		expect(rolledBack.vm.afterRollback).toBe(true)
+	})
+
 	it('al encolar uno nuevo desde el diálogo, lo abre', async () => {
 		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
 		await vi.waitFor(() => expect(vm.selected?.id).toBe(144))

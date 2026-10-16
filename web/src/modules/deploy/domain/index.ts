@@ -81,6 +81,7 @@ export {
 export type { AppKind, DeployOverridesInput, DeployRequest } from './entities/deployRequest'
 export { buildDeployRequest, inferAppKind, overridableServices } from './entities/deployRequest'
 export {
+	AppRemoving,
 	DeployNotFound,
 	DockerUnavailable,
 	ImageRejected,

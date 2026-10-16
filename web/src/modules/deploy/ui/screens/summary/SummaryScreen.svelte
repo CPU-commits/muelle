@@ -336,6 +336,7 @@
 	kind={vm.kind}
 	services={vm.serviceNames}
 	currentImages={vm.currentImages}
+	afterRollback={vm.afterRollback}
 	onDeployed={() => void vm.onQueued()}
 	onClose={vm.closeDeploy}
 />

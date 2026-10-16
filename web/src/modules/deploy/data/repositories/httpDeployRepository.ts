@@ -8,6 +8,7 @@ import { UnauthorizedError, ValidationError } from '@/shared/domain'
 import {
 	type AppLogEvent,
 	type AppRef,
+	AppRemoving,
 	asLogOffset,
 	type DeployLogEvent,
 	DeployNotFound,
@@ -55,10 +56,20 @@ const ONE_DEPLOY_ERRORS: DomainErrorMap = {
 	codes: { ...docker, not_found: (error) => new DeployNotFound(cause(error)) },
 }
 
+// Encolar (un deploy o un rollback): `409 conflict` es una app que se está borrando
+// (contrato §1.1 y §2.2), y dura a lo más 2 min.
+const removing = { conflict: (error: ApiError) => new AppRemoving(cause(error)) }
+
+const CREATE_ERRORS: DomainErrorMap = { phase: 2, codes: { ...docker, ...removing } }
+
 // `409 no_previous_deploy`: no hay un succeeded anterior al actual (contrato §2.7).
 const ROLLBACK_ERRORS: DomainErrorMap = {
 	phase: 2,
-	codes: { ...docker, no_previous_deploy: (error) => new NoPreviousDeploy(cause(error)) },
+	codes: {
+		...docker,
+		...removing,
+		no_previous_deploy: (error) => new NoPreviousDeploy(cause(error)),
+	},
 }
 
 // Los motivos del `422` de una imagen (contrato §2.2). El backend no les da código propio:
@@ -157,7 +168,7 @@ export const httpDeployRepository: DeployRepository = {
 					deployAcceptedFromDto(
 						await deployHttpDataSource.create(app, createDeployPayload(request)),
 					),
-				DEPLOY_ERRORS,
+				CREATE_ERRORS,
 			)
 		} catch (error) {
 			throw imageRejection(error)

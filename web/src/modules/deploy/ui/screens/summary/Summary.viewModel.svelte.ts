@@ -188,6 +188,14 @@ export class SummaryViewModel {
 		return this.deploys.isSuccess
 	}
 
+	/**
+	 * El deploy actual es un rollback: desplegar sin imagen repite sus refs con digest (no
+	 * vuelve a seguir el tag; contrato §2.2), y el diálogo de deploy lo avisa.
+	 */
+	get afterRollback(): boolean {
+		return this.current?.trigger === 'rollback'
+	}
+
 	/** La imagen actual de cada servicio (para el placeholder del diálogo). */
 	get currentImages(): Record<string, string> {
 		return Object.fromEntries(

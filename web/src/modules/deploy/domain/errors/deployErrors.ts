@@ -16,6 +16,17 @@ export class NoPreviousDeploy extends ConflictError {
 	}
 }
 
+/**
+ * `409 conflict` al desplegar o hacer rollback: la app se está borrando (un `DELETE` de la
+ * app en curso, que dura a lo más 2 min; contrato §1.1 y §2.2). No es "ya existe".
+ */
+export class AppRemoving extends ConflictError {
+	constructor(options?: ErrorOptions) {
+		super('La app se está borrando', options)
+		this.name = 'AppRemoving'
+	}
+}
+
 /** `503 docker_unavailable`: Docker no responde, o el nodo no es manager de un Swarm. */
 export class DockerUnavailable extends UnavailableError {
 	constructor(options?: ErrorOptions) {

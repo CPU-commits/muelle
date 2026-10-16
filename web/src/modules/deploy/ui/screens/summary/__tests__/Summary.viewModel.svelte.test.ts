@@ -73,6 +73,20 @@ describe('SummaryViewModel', () => {
 		expect(vm.actionsEnabled).toBe(true)
 	})
 
+	it('sabe si el deploy actual es un rollback (el diálogo de deploy lo avisa)', async () => {
+		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+		await vi.waitFor(() => expect(vm.current?.id).toBe(143))
+		expect(vm.afterRollback).toBe(false)
+
+		mocks.listDeploys.mockResolvedValue([
+			makeDeploy(144, { trigger: 'rollback' }),
+			makeDeploy(143),
+		])
+		const rolledBack = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+		await vi.waitFor(() => expect(rolledBack.vm.current?.id).toBe(144))
+		expect(rolledBack.vm.afterRollback).toBe(true)
+	})
+
 	it('con 22 deploys (la retención) y sin un exitoso anterior, ya sabe que no hay rollback', async () => {
 		// 21 fallidos y el actual: la retención guarda siempre el actual y su anterior.
 		mocks.listDeploys.mockResolvedValue([
