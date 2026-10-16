@@ -1285,7 +1285,7 @@ docker volume ls --format "{{.Name}}" | grep "^it2" | xargs -r docker volume rm'
 - Modify: `src/shared/infra/container/deploy_test.go` (lo creó T3 con `TestInitRegistrySeededOnce`)
 - Modify: `src/internal/deploy/integration_test.go`, `README.md` (solo las partes de deploy)
 
-- [ ] **Step 1: `Kit.Revalidate` (contrato §0.3; test primero).**
+- [x] **Step 1: `Kit.Revalidate` (contrato §0.3; test primero).**
 
 ```go
 // Revalidate repite las comprobaciones de Handle con la credencial de r (la
