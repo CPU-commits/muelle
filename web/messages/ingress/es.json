@@ -38,7 +38,7 @@
 	"ingress_adopt_after": "y pasa a manejarlo, con el mismo Proxied.",
 	"ingress_adopt_body_no_ip": "Ya existe en Cloudflare un registro con este nombre que no creó muelle. Para adoptarlo, muelle necesita la IP pública del servidor: configúrala en Ajustes.",
 	"ingress_adopt": "Adoptar registro",
-	"ingress_manual_body": "muelle no maneja el DNS de este dominio: no hay un token de Cloudflare, o la zona no está en tu cuenta. Crea este registro en tu proveedor de DNS; muelle lo verifica cada minuto:",
+	"ingress_manual_body": "muelle no maneja el DNS de este dominio: no hay un token de Cloudflare, o la zona no está en tu cuenta. Crea este registro en tu proveedor de DNS; muelle lo verifica cada minuto durante los primeros 10 minutos:",
 	"ingress_records_caption": "Registros DNS para {hostname}",
 	"ingress_record_type": "Tipo",
 	"ingress_record_name": "Nombre",
@@ -97,7 +97,7 @@
 	"ingress_toast_added_error": "{hostname} se agregó, pero con un error",
 	"ingress_toast_added_exists": "{hostname} se agregó: el registro ya existía",
 	"ingress_toast_added_exists_body": "Hay un registro con ese nombre en Cloudflare que muelle no creó. Adóptalo para que muelle lo maneje.",
-	"ingress_toast_added_manual_body": "Crea el registro DNS que se muestra: muelle lo verifica cada minuto, o toca Verificar.",
+	"ingress_toast_added_manual_body": "Crea el registro DNS que se muestra: muelle lo verifica cada minuto durante 10 minutos, o toca Verificar.",
 	"ingress_toast_adopt_failed": "No se pudo adoptar el registro de {hostname}",
 	"ingress_proxy_open_settings": "Abrir Ajustes"
 }
