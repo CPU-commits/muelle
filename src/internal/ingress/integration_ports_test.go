@@ -121,9 +121,10 @@ func TestIntegrationProxyPortsRollback(t *testing.T) {
 		!strings.Contains(fmt.Sprint(rb["error"]), strconv.Itoa(e.ports.Busy)) {
 		t.Fatalf("GET /proxy: %v", body)
 	}
-	var actor, details string
-	if err := e.db.Conn(ctx).QueryRowContext(ctx, `SELECT actor_type, details FROM audit_events WHERE action = 'settings.ports_rollback'`).
-		Scan(&actor, &details); err != nil || actor != "system" || !strings.Contains(details, `"proxy_https_port":`+strconv.Itoa(e.ports.HTTPS)) {
-		t.Fatalf("auditoría: %q %q %v", actor, details, err)
+	var actor, actorName, details string
+	if err := e.db.Conn(ctx).QueryRowContext(ctx, `SELECT actor_type, actor_name, details FROM audit_events WHERE action = 'settings.ports_rollback'`).
+		Scan(&actor, &actorName, &details); err != nil || actor != "system" || actorName != "system" ||
+		!strings.Contains(details, `"proxy_https_port":`+strconv.Itoa(e.ports.HTTPS)) {
+		t.Fatalf("auditoría: %q %q %q %v", actor, actorName, details, err)
 	}
 }

@@ -395,7 +395,7 @@ func TestApplyStartupSettings(t *testing.T) {
 		t.Fatal("el token va cifrado con su AAD")
 	}
 	events := admintestEvents(t, e)
-	if len(events) != 1 || events[0].Action != "settings.init" || events[0].ActorType != "system" || bytes.Contains(events[0].Details, []byte("cf-token")) {
+	if len(events) != 1 || events[0].Action != "settings.init" || events[0].ActorType != "system" || events[0].ActorName != "system" || bytes.Contains(events[0].Details, []byte("cf-token")) {
 		t.Fatalf("events=%+v", events)
 	}
 

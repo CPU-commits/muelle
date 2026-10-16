@@ -460,7 +460,9 @@ func TestModuleDomainsFlow(t *testing.T) {
 
 	ctx := context.Background()
 	var n int
-	if err := tm.db.Conn(ctx).QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE action LIKE 'domain.%'`).Scan(&n); err != nil || n != 3 {
+	// A nombre de la sesión: actor_name es su username.
+	if err := tm.db.Conn(ctx).QueryRowContext(ctx,
+		`SELECT count(*) FROM audit_events WHERE action LIKE 'domain.%' AND actor_type = 'user' AND actor_name = 'felipe'`).Scan(&n); err != nil || n != 3 {
 		t.Fatalf("auditoría: %d %v", n, err)
 	}
 }
