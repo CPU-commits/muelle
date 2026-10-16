@@ -515,8 +515,25 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
 
 ### Endpoints de las fases 2 y 3: `UnavailableError`
 
-Deploys, status, logs, rollback y dominios (spec §7, §8, §9, §10), y en Ajustes registries,
-Cloudflare, IP pública, email ACME y `panel_allowed_cidrs`, todavía no existen en el backend.
+**El estado real.** Las Fases 3 (dominios, `GET /proxy` y, en Ajustes, Cloudflare, IP
+pública, email ACME, puertos e IPs permitidas) y 5 (install y el panel embebido) están
+mergeadas en `fase-23-base`. La Fase 2 (deploys, status, logs, rollback, registries y los
+`services` de una app) está terminada en `fase-2-deploy` y se mergea en `fase-23-base`. El
+panel sigue el contrato final de las tres:
+`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md` (para §2, la versión de
+`fase-2-deploy`), resumido en `src/modules/{deploy,ingress}/README.md`, sin diferencias.
+
+En producción el panel va embebido en el binario que lo sirve (contrato §5.5): las rutas del
+panel y las del backend llegan juntas, y `<ComingSoon>` no aparece. **El fallback se queda**
+porque todavía sirve, y cuesta poco (un `phase` en el `DomainErrorMap` y un `<ComingSoon>`):
+
+- `pnpm dev` contra un `muelle serve` de una rama que no tiene una fase (hoy `fase-23-base`
+  sin la Fase 2 hasta su merge, o la Fase 1 sola). Sin el fallback, Resumen, Deploys, Logs y
+  Registries mostrarían un error de verdad, con reintentos;
+- un 404 `no_route` también es lo que responde el backend a una ruta mal armada: el panel lo
+  muestra como "todavía no está", no como un error genérico.
+
+Cómo funciona:
 
 1. El repositorio de esas rutas pasa `{ phase: 2 }` (o `3`) en su `DomainErrorMap`. Se
    decide por el `code`, no por el status:
@@ -535,10 +552,25 @@ Cloudflare, IP pública, email ACME y `panel_allowed_cidrs`, todavía no existen
 Un `UnavailableError` sin `phase` es un backend caído o sin red: eso sí es un error
 (`ErrorState` con reintento).
 
-Si lo nuevo son **campos** de un endpoint que ya existe (`GET/PATCH /settings` de la Fase 1
-solo tiene `require_2fa`), no hay 404: el DTO los declara opcionales y que falten quiere
-decir "fase pendiente". Mandarlos en un `PATCH` responde 400 `invalid_json` (el backend
-rechaza campos desconocidos): mientras no existan, no se mandan.
+Si lo nuevo son **campos** de un endpoint que ya existe, no hay 404: el DTO los declara
+opcionales y que falten quiere decir "fase pendiente". Así están los campos de proxy y DNS
+de `GET /settings` (la Fase 1 solo tiene `require_2fa`) y los `services` de una app de
+catalog (§2.12, Fase 2: sin ellos, Dominios sugiere solo los destinos que ya usan sus
+dominios). Mandarlos en un `PATCH` responde 400 `invalid_json` (el backend rechaza campos
+desconocidos): mientras no existan, no se mandan.
+
+**Lo que un módulo usa de otro** (siempre por el barrel):
+
+- Dominios pide los destinos al catálogo: `appTargetsQuery(ref)` de `catalog` (un
+  `servicio:puerto` por cada puerto que declara cada servicio, comparte el cache de
+  `appQuery`).
+- Ajustes, después de guardar la IP pública, el email ACME, el token o los puertos, invalida
+  `ingressKeys.all`: los `records` de cada dominio se calculan con los ajustes de ahora, y el
+  estado del proxy cambia (contrato §3.5).
+- En MSW: `db/ingress.ts` lee el token, las IP y el dominio del panel de `db/admin.ts`, y el
+  `DELETE` de una app (`handlers/catalog.ts`) mira los dominios de `db/ingress.ts` (una app
+  con dominios es `409 not_empty`). Un test de integración que toque uno de esos resetea
+  también el otro.
 
 ### Sesión y `auth`
 
@@ -607,8 +639,8 @@ http.post(api('/projects'), async ({ request }) => {
 - Chrome anota en la consola cada respuesta 4xx de `fetch` ("Failed to load resource"): un
   401 de `/auth/me` en `/login` es esperado, no un error de la app.
 - `pnpm test:e2e` construye en `build-e2e/` (ignorado): `mock` con MSW y `prod` igual al de
-  `pnpm build`, y los sirve con `scripts/serve-build.mjs` (como Go: archivo o `200.html`, y
-  la CSP como header). `./build` no se toca.
+  `pnpm build`, y los sirve con `scripts/serve-build.mjs` (con las reglas de `panel.go`: ver
+  [CSP](#csp)). `./build` no se toca.
 - **Puertos de los e2e:** `mock` en `E2E_MOCK_PORT` (4173, el `baseURL`) y `prod` en
   `E2E_PROD_PORT` (4174). Salen de `e2e/ports.ts`: un test que necesite una URL la importa
   de ahí (`PROD_URL`, `MOCK_URL`) o usa rutas relativas al `baseURL`, nunca un puerto
@@ -642,13 +674,26 @@ El panel corre bajo una CSP estricta: nada en línea ni `eval`, todo del mismo o
   escribe como `<meta http-equiv>` en el `200.html`, con el hash del script de arranque de
   SvelteKit, y `style-src-attr 'unsafe-hashes'` con el hash del único `style` en línea que
   hay (el `#svelte-announcer` de SvelteKit).
-- **Lo que tiene que mandar Go (F2)** como header `Content-Security-Policy` en cada
-  respuesta del panel: el contenido de `build/csp-header.txt`, que el build escribe con la
-  política del `<meta>` más `frame-ancestors 'none'` (un `<meta>` no puede llevarlo). El
-  hash cambia en cada build: Go lo lee del embed al arrancar, no lo copia a mano. Un header
-  con otra política no sirve: el navegador aplica las dos, y sin el hash el script de
-  arranque no corre. Recordá `//go:embed all:build` (sin `all:` se pierde `_app/`) y que
-  adapter-static vacía `build/` en cada build (también un `.keep`).
+- **Lo que manda Go** (la Fase 5, `src/cmd/http/panel/panel.go`, contrato §5.5) como
+  header `Content-Security-Policy` en cada respuesta del panel: el contenido de
+  `build/csp-header.txt`, que el build escribe con la política del `<meta>` más
+  `frame-ancestors 'none'` (un `<meta>` no puede llevarlo). El hash cambia en cada build: Go
+  lo lee del embed al arrancar (y no arranca si falta, si está vacío o si no es una sola
+  línea). Un header con otra política no sirve: el navegador aplica las dos, y sin el hash
+  el script de arranque no corre.
+- **Cómo se embebe:** el `Dockerfile` construye `web/` (`pnpm codegen && pnpm build`, con
+  `VITE_USE_MOCKS=0`, y verifica `build/200.html`, `build/csp-header.txt` y que no esté
+  `mockServiceWorker.js`), lo copia en `src/cmd/http/panel/build/` y compila con `-tags panel`
+  (`//go:embed all:build`: sin `all:` se pierde `_app/`). Sin el tag, toda ruta del panel es
+  un `404` corto. El panel va en la raíz (`/`, sin `paths.base`) y todas sus rutas absolutas.
+- **Qué responde Go**, y copia `scripts/serve-build.mjs` para los e2e: el archivo del build
+  si existe; si no, `200.html` (`/` también). Un `/_app/…` que no existe es `404` en texto, y
+  `csp-header.txt` no se sirve. Solo `GET` y `HEAD` (otro método, `405` en JSON). En todas:
+  la CSP, `nosniff`, `Referrer-Policy: same-origin` (la misma del `<meta name="referrer">`
+  de `app.html`; no `no-referrer`, que haría que un `<form>` nativo mande `Origin: null`) y
+  `Cache-Control` de un año `immutable` en `/_app/immutable/…` y `no-cache` en el resto (el
+  `200.html` y `_app/version.json` revalidan con su `ETag`). `e2e/embed.e2e.ts` lo prueba
+  contra el build de producción. Si cambia `panel.go`, se cambian los dos.
 - **Qué rompe la CSP** (lo atrapa `e2e/csp.e2e.ts`, que falla con cualquier violación):
     - un `style="…"` fijo en un template (va una clase de `styles.css.ts`; `style:prop={x}`
       sí se puede: Svelte lo aplica por CSSOM);

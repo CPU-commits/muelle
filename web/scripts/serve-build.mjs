@@ -1,6 +1,13 @@
-// Sirve uno o más builds del panel como los va a servir el binario de Go (F2): el
-// archivo del build si existe, `200.html` para cualquier otra ruta, y en TODAS las
-// respuestas el header Content-Security-Policy de `csp-header.txt`. Solo para los e2e.
+// Sirve uno o más builds del panel como los sirve el binario de Go con `-tags panel`
+// (contrato §5.5, `src/cmd/http/panel/panel.go`). Solo para los e2e:
+// - el archivo del build si existe con ese path (un directorio cuenta como que no existe);
+//   si no, el `200.html`, que resuelve el router del panel. `/` es el `200.html`;
+// - un `/_app/…` que no existe es 404 en texto (un chunk viejo nunca recibe HTML), y
+//   `csp-header.txt` no se sirve (responde el `200.html`);
+// - solo GET y HEAD: otro método es 405 en JSON, con `Allow: GET, HEAD`;
+// - en TODAS las respuestas, `Content-Security-Policy` (el contenido de `csp-header.txt`),
+//   `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` y `Cache-Control`: un
+//   año e `immutable` en `/_app/immutable/…`, `no-cache` en todo lo demás.
 //
 //   node scripts/serve-build.mjs <carpeta>:<puerto> [<carpeta>:<puerto> …]
 //
@@ -8,22 +15,53 @@
 // cookie. Un build con MSW no llega acá (el service worker contesta antes).
 import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
-import { extname, join, resolve, sep } from 'node:path'
+import { extname, join, posix, resolve, sep } from 'node:path'
 
+const SHELL = '200.html'
+const CSP_FILE = 'csp-header.txt'
+const IMMUTABLE = '_app/immutable/'
+
+// La tabla de tipos de panel.go (sin depender de los del sistema).
 const TYPES = {
 	'.html': 'text/html; charset=utf-8',
 	'.js': 'text/javascript; charset=utf-8',
+	'.mjs': 'text/javascript; charset=utf-8',
 	'.css': 'text/css; charset=utf-8',
 	'.json': 'application/json',
+	'.map': 'application/json',
+	'.webmanifest': 'application/manifest+json',
+	'.txt': 'text/plain; charset=utf-8',
+	'.xml': 'application/xml',
 	'.svg': 'image/svg+xml',
 	'.png': 'image/png',
+	'.jpg': 'image/jpeg',
+	'.jpeg': 'image/jpeg',
+	'.gif': 'image/gif',
+	'.webp': 'image/webp',
+	'.avif': 'image/avif',
+	'.ico': 'image/x-icon',
+	'.woff': 'font/woff',
 	'.woff2': 'font/woff2',
-	'.txt': 'text/plain; charset=utf-8',
+	'.ttf': 'font/ttf',
+	'.otf': 'font/otf',
+	'.wasm': 'application/wasm',
 }
 
-/** @param {string} root @param {string} pathname */
-async function fileFor(root, pathname) {
-	const file = resolve(root, `.${decodeURIComponent(pathname)}`)
+/** `path.Clean("/" + path)` sin la `/` del principio: `""` es la raíz. */
+function cleanName(pathname) {
+	let decoded
+	try {
+		decoded = decodeURIComponent(pathname)
+	} catch {
+		return null
+	}
+	return posix.normalize(`/${decoded}`).replace(/^\/+/, '').replace(/\/+$/, '')
+}
+
+/** El archivo del build que corresponde a `name`, si es uno que se sirve. */
+async function fileFor(root, name) {
+	if (name === '' || name === CSP_FILE) return null
+	const file = resolve(root, name)
 	if (!file.startsWith(root + sep)) return null
 	try {
 		return (await stat(file)).isFile() ? file : null
@@ -35,15 +73,13 @@ async function fileFor(root, pathname) {
 /** @param {string} dir @param {number} port */
 async function serve(dir, port) {
 	const root = resolve(dir)
-	const csp = (await readFile(join(root, 'csp-header.txt'), 'utf8')).trim()
-	const shell = await readFile(join(root, '200.html'))
+	const csp = (await readFile(join(root, CSP_FILE), 'utf8')).trim()
+	const shell = await readFile(join(root, SHELL))
 
 	const server = createServer(async (request, response) => {
 		const { pathname } = new URL(request.url ?? '/', 'http://panel')
-		response.setHeader('Content-Security-Policy', csp)
-		response.setHeader('X-Content-Type-Options', 'nosniff')
 
-		if (pathname.startsWith('/api/')) {
+		if (pathname === '/api' || pathname.startsWith('/api/')) {
 			response.writeHead(401, { 'Content-Type': 'application/json' })
 			response.end(
 				JSON.stringify({ error: { code: 'unauthenticated', message: 'sin backend' } }),
@@ -51,20 +87,40 @@ async function serve(dir, port) {
 			return
 		}
 
-		const file = await fileFor(root, pathname)
+		response.setHeader('Content-Security-Policy', csp)
+		response.setHeader('X-Content-Type-Options', 'nosniff')
+		response.setHeader('Referrer-Policy', 'same-origin')
+		response.setHeader('Cache-Control', 'no-cache')
+
+		if (request.method !== 'GET' && request.method !== 'HEAD') {
+			response.writeHead(405, { 'Content-Type': 'application/json', Allow: 'GET, HEAD' })
+			response.end(
+				JSON.stringify({
+					error: { code: 'method_not_allowed', message: 'método no permitido' },
+				}),
+			)
+			return
+		}
+		const head = request.method === 'HEAD'
+
+		const name = cleanName(pathname) ?? ''
+		const file = await fileFor(root, name)
 		if (file) {
-			response.writeHead(200, {
-				'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream',
-			})
-			response.end(await readFile(file))
+			const headers = { 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream' }
+			if (name.startsWith(IMMUTABLE)) {
+				headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+			}
+			response.writeHead(200, headers)
+			response.end(head ? undefined : await readFile(file))
 			return
 		}
-		if (pathname.startsWith('/_app/')) {
-			response.writeHead(404).end()
+		if (name === '_app' || name.startsWith('_app/')) {
+			response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+			response.end(head ? undefined : 'no existe\n')
 			return
 		}
-		response.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' })
-		response.end(shell)
+		response.writeHead(200, { 'Content-Type': TYPES['.html'] })
+		response.end(head ? undefined : shell)
 	})
 
 	await new Promise((done) => server.listen(port, '127.0.0.1', () => done(undefined)))
