@@ -1,6 +1,7 @@
 import { createMutation, useQueryClient } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
+import { ingressKeys } from '@/modules/ingress'
 import { updateSecurityMutation } from '../../../data'
 import {
 	cidrListAllows,
@@ -163,6 +164,11 @@ export class SecuritySettingsViewModel {
 		}
 		try {
 			this.#load(await this.#update.mutateAsync(input))
+			// La lista de IPs va en la configuración de Caddy (contrato §3.5): el estado del
+			// proxy puede cambiar, y Dominios lo vuelve a pedir. El 2FA solo no la toca.
+			if (input.allowedCidrs !== undefined) {
+				void this.#client.invalidateQueries({ queryKey: ingressKeys.all })
+			}
 			toast.success(m.admin_security_saved())
 			return null
 		} catch (error) {

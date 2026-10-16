@@ -1,5 +1,7 @@
+import type { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { ingressKeys } from '@/modules/ingress'
 import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
@@ -42,8 +44,10 @@ function leavesOut(cidrs: string, ip: string): boolean {
 	return cidrs.trim() !== '' && ip !== '' && !cidrListAllows(cidrs, ip)
 }
 
+let client: QueryClient
+
 async function mountViewModel(initial: Settings): Promise<SecuritySettingsViewModel> {
-	const client = createQueryClient({ retry: false })
+	client = createQueryClient({ retry: false })
 	let current = initial
 	mocks.updateSecurity.mockImplementation(
 		(input: { require2fa?: boolean; allowedCidrs?: string; confirmLockout?: boolean }) => {
@@ -118,6 +122,38 @@ describe('SecuritySettingsViewModel', () => {
 		// Volver a tocar el switch esconde el aviso.
 		vm.setRequire2fa(true)
 		expect(vm.totpRequiredFirst).toBe(false)
+	})
+
+	it('guardar otra lista de IPs vuelve a pedir el proxy y los dominios (regenera Caddy, §3.5)', async () => {
+		const vm = await mountViewModel(PHASE_3)
+		const invalidate = vi.spyOn(client, 'invalidateQueries')
+		const refreshedIngress = () =>
+			invalidate.mock.calls.filter(([filters]) => filters?.queryKey === ingressKeys.all)
+				.length
+
+		// Solo el 2FA: Caddy no cambia.
+		vm.setRequire2fa(true)
+		await vm.save()
+		expect(refreshedIngress()).toBe(0)
+
+		vm.setCidrs('198.51.100.0/24\n10.0.0.0/8')
+		await vm.save()
+		expect(refreshedIngress()).toBe(1)
+	})
+
+	it('después de confirmar una lista que deja fuera la sesión, también', async () => {
+		const vm = await mountViewModel(PHASE_3)
+		const invalidate = vi.spyOn(client, 'invalidateQueries')
+		const refreshedIngress = () =>
+			invalidate.mock.calls.filter(([filters]) => filters?.queryKey === ingressKeys.all)
+				.length
+
+		vm.setCidrs('10.0.0.0/8')
+		await vm.save()
+		// El 409 no guardó nada.
+		expect(refreshedIngress()).toBe(0)
+		await vm.confirmLockout()
+		expect(refreshedIngress()).toBe(1)
 	})
 
 	it('en la Fase 1 no hay IPs permitidas y no se mandan', async () => {

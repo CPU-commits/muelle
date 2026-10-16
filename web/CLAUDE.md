@@ -570,9 +570,10 @@ desconocidos): mientras no existan, no se mandan.
   el diálogo de deploy manda `image` o `images`, y sus `services` son los campos del diálogo
   (contra esos valida el backend). Si el catálogo no carga, salen de Swarm, como antes. Un
   test de viewModel de esas pantallas mockea también `@/modules/catalog/container`.
-- Ajustes, después de guardar la IP pública, el email ACME, el token o los puertos, invalida
-  `ingressKeys.all`: los `records` de cada dominio se calculan con los ajustes de ahora, y el
-  estado del proxy cambia (contrato §3.5).
+- Ajustes, después de guardar la IP pública, el email ACME, el token, los puertos o la lista
+  de IPs permitidas, invalida `ingressKeys.all`: los `records` de cada dominio se calculan
+  con los ajustes de ahora, y todos regeneran (o recrean) la configuración de Caddy, así
+  que el estado del proxy puede cambiar (contrato §3.5). Guardar solo el 2FA no la toca.
 - En MSW: `db/ingress.ts` lee el token, las IP y el dominio del panel de `db/admin.ts`, y el
   `DELETE` de una app (`handlers/catalog.ts`) mira los dominios de `db/ingress.ts` con
   `ingressDb.list` (una app con dominios es `409 not_empty`). `list` siembra los tres
