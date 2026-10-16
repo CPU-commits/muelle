@@ -114,6 +114,9 @@ describe('TokensViewModel', () => {
 		expect(vm.activeRows.find((row) => row.token.id === 2)?.isNew).toBe(true)
 		// El recién creado va arriba de la lista; el resto, en el orden del backend.
 		expect(vm.activeRows.map((row) => row.token.id)).toEqual([2, 1])
+		// La versión mayor de la action, que se mueve en cada release (spec §14): `@v0`
+		// mientras no haya 1.0.
+		expect(vm.snippet).toContain('- uses: CPU-commits/muelle/action@v0\n')
 		expect(vm.snippet).toContain('token: ${{ secrets.MUELLE_TOKEN }}')
 		expect(vm.snippet).toContain('app: extractor/staging/<app>')
 

@@ -114,11 +114,14 @@ export class TokensViewModel {
 		return this.#rows.expired
 	}
 
-	/** El paso de GitHub Actions para el token recién creado (spec §14). */
+	/**
+	 * El paso de GitHub Actions para el token recién creado (spec §14). `@v0` es la versión
+	 * mayor de la action, que se mueve con cada release mientras no haya 1.0.
+	 */
 	get snippet(): string {
 		if (!this.created) return ''
 		return [
-			'- uses: CPU-commits/muelle/action@v1',
+			'- uses: CPU-commits/muelle/action@v0',
 			'  with:',
 			'    url: ${{ secrets.MUELLE_URL }}',
 			'    token: ${{ secrets.MUELLE_TOKEN }}',
