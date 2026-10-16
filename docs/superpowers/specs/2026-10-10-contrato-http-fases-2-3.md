@@ -675,7 +675,7 @@ El estado del proxy, para el banner "proxy desincronizado" (§8, §13):
 
 | Campo | Qué |
 |---|---|
-| `status` | `synced`: la última configuración se aplicó. `out_of_sync`: la última falló, o el contenedor no se pudo crear (un puerto ocupado, la imagen que no baja), y se reintenta con backoff. `recreating`: muelle-caddy se va a recrear, o se está recreando, por un cambio de imagen o de puertos (§3.5); termina en `synced` u `out_of_sync`. `disabled`: `ProxySettings.Enabled` es falso (sin `panel_domain` o sin imagen de Caddy, en desarrollo) |
+| `status` | `synced`: la última configuración se aplicó. `out_of_sync`: la última falló, o el contenedor no se pudo crear (un puerto ocupado, la imagen que no baja), y se reintenta con backoff. `recreating`: muelle-caddy se va a recrear, o se está recreando, por un cambio de puertos en `PATCH /settings` (§3.5); termina en `synced` u `out_of_sync`. `disabled`: `ProxySettings.Enabled` es falso (sin `panel_domain` o sin imagen de Caddy, en desarrollo) |
 | `error` | Solo con `out_of_sync`: el último fallo del contenedor mientras no se resuelva (un puerto ocupado al recrear, la imagen que no baja) y, si no hay, el de `POST /load`. Null con los demás estados. Si el mensaje de Caddy trae el token de Cloudflare, va como `***` |
 | `synced_at` | El último `POST /load` exitoso; null si todavía no hubo uno desde que arrancó muelle |
 | `caddy.image`, `caddy.running` | Lo que corre de verdad, según `InspectContainer`. Si el contenedor no existe: `image: null` y `running: false` |
@@ -762,20 +762,21 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
 - **`ProxySettingsChanged(ctx, old, next)`** (después de guardar, antes de responder):
   - corre con su propio plazo de 2 min, derivado con `context.WithoutCancel`;
   - aplica, según `next.ChangedKeys(old)`:
-    - IPs, email, token o lista de IPs → regenera la configuración de Caddy. `POST /load` no corta las conexiones abiertas, así que la respuesta del `PATCH` sale igual. Si en el mismo `PATCH` cambiaron los puertos o la imagen, no la manda ahora: la manda la recreación, con los ajustes de ese momento;
+    - IPs, email, token o lista de IPs → regenera la configuración de Caddy. `POST /load` no corta las conexiones abiertas, así que la respuesta del `PATCH` sale igual. Si en el mismo `PATCH` cambiaron los puertos, no la manda ahora: la manda la recreación, con los ajustes de ese momento;
     - IP pública → actualiza los registros que maneja muelle, de los dominios y el del panel (los que fallan dejan su dominio en `error`/`cloudflare`):
       - un `public_ip` nuevo cambia el contenido de los `A` (nunca su `proxied`); borrar `public_ip` no toca ningún registro (borrarlos dejaría los sitios sin DNS);
       - un dominio en `error`/`cloudflare` cuyos registros se actualizan bien vuelve a `pending`; los demás no cambian de estado;
       - un `public_ipv6` nuevo crea el `AAAA` de cada dominio cuyo `A` maneja muelle (si ya hay un `AAAA` ajeno, ese dominio queda en `error`/`cloudflare`) y cambia los que ya maneja; borrarla borra los `AAAA` que maneja muelle;
       - sin token, los dominios cuyos registros maneja muelle quedan en `error`/`cloudflare`, porque no se pueden actualizar;
     - token nuevo → busca la zona del panel y su registro (§3.4), como el job `"proxy"`. Los dominios que se crearon sin token no cambian solos: el reintento busca su zona (§3.2);
-    - puertos o imagen → **agenda** la recreación de muelle-caddy, y no la hace antes de volver;
+    - puertos → **agenda** la recreación de muelle-caddy, y no la hace antes de volver;
+    - la imagen nunca cambia por un `PATCH`: `caddy_image` no está en `/settings` (§4.1), y solo la escribe la configuración inicial (`--caddy-image`, `MUELLE_INIT_CADDY_IMAGE`, §5.2). La imagen es esa `caddy_image` fijada o, si está vacía, la de la versión de muelle: cambia con una versión nueva de muelle, y la aplica el job `"proxy"` del arranque (§3.4 y §5.4);
   - no devuelve error: el resultado se ve en `GET /proxy` y en cada dominio.
 - **Por qué la recreación va después:** el `PATCH` mismo pasa por muelle-caddy. Si el hook lo borrara antes de responder, el cliente recibiría una conexión cortada por un cambio que sí se guardó.
   - `ingress.Run` recrea el contenedor 2 s después de que el hook volvió, que alcanza para que la respuesta salga por el Caddy viejo. Mientras tanto, y hasta que termina, `GET /proxy` dice `recreating`.
   - Dos cambios seguidos se juntan en una sola recreación, con los ajustes que estén guardados en ese momento.
-  - Si muelle se reinicia antes, el job `"proxy"` del arranque recrea el contenedor igual (las diferencias de imagen y puertos, §3.4).
-  - El panel ya avisa que cambiar los puertos corta unos segundos. Si cambió la imagen, o solo el puerto HTTP, sigue en el mismo origen y pregunta `GET /proxy` hasta que deja de decir `recreating`. Si cambió `proxy_https_port`, el origen actual deja de responder: el panel muestra el nuevo, `https://<panel_domain>[:<proxy_https_port>]` (con los valores de la respuesta del `PATCH`), y lleva ahí al usuario. La sesión sigue, porque la cookie no depende del puerto, y ese `Origin` pasa (§0.1).
+  - Si muelle se reinicia antes, el job `"proxy"` del arranque recrea el contenedor igual (las diferencias de puertos, §3.4).
+  - El panel ya avisa que cambiar los puertos corta unos segundos. Si cambió solo el puerto HTTP, sigue en el mismo origen y pregunta `GET /proxy` hasta que deja de decir `recreating`. Si cambió `proxy_https_port`, el origen actual deja de responder: el panel muestra el nuevo, `https://<panel_domain>[:<proxy_https_port>]` (con los valores de la respuesta del `PATCH`), y lleva ahí al usuario. La sesión sigue, porque la cookie no depende del puerto, y ese `Origin` pasa (§0.1).
 
 ### 3.6 Claves de settings que escribe ingress
 
@@ -1022,7 +1023,7 @@ networks:
 **Actualizar:** `docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<v> muelle_muelle`, con `docker login ghcr.io` hecho en el servidor (las imágenes son privadas: `--with-registry-auth` le pasa a Swarm la credencial para bajar la nueva).
 - La imagen de Caddy de la versión nueva la baja ingress con el registry `ghcr.io` que guardó install (§5.2).
 - Con `caddy_image` vacío, el job `"proxy"` del arranque recrea muelle-caddy con la imagen de la versión nueva, con unos segundos de corte.
-- Con `caddy_image` fijo, Caddy no cambia.
+- Con `caddy_image` fijo (solo se fija al instalar, con `--caddy-image`), Caddy no cambia.
 
 **`muelle settings reset-panel-ips`** ("Recuperar el acceso", §4.1) corre **dentro** del contenedor de muelle, con su entorno:
 

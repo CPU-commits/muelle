@@ -119,7 +119,7 @@ docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<v
 ```
 
 - Con el `docker login ghcr.io` del servidor: `--with-registry-auth` le pasa a Swarm la credencial para bajar la imagen nueva.
-- muelle-caddy sigue a muelle: al arrancar, muelle lo recrea con la Caddy de la versión nueva (unos segundos de corte en los sitios), que baja con el registry `ghcr.io` guardado. Con `caddy_image` fijo en Ajustes, Caddy no cambia.
+- muelle-caddy sigue a muelle: al arrancar, muelle lo recrea con la Caddy de la versión nueva (unos segundos de corte en los sitios), que baja con el registry `ghcr.io` guardado. Si fijaste la imagen al instalar (`--caddy-image`), Caddy no cambia: esa imagen (`caddy_image`) se guarda solo en el primer arranque y no está en Ajustes.
 - Si la versión nueva se cae al arrancar, Swarm vuelve sola a la anterior (`failure_action: rollback`, con `monitor: 30s`).
 - **Si el token de GitHub vence:** actualízalo en Ajustes → Registries (lo usa muelle) y vuelve a hacer `docker login ghcr.io` en el servidor (lo usa `docker service update`).
 
