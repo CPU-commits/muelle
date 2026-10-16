@@ -18,6 +18,7 @@ type DockerReader interface {
 	docker.System
 	docker.Services
 	docker.Images
+	docker.Containers
 }
 
 // Docker implementa service.Images y service.Cluster con el cliente
@@ -124,6 +125,52 @@ func (d *Docker) LocalNodeID(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("deploy: el nodo no está en un Swarm activo (%s): %w", info.SwarmState, docker.ErrUnavailable)
 	}
 	return info.NodeID, nil
+}
+
+// ServiceLogs abre el log del servicio; las líneas pasan a los tipos del puerto.
+func (d *Docker) ServiceLogs(ctx context.Context, serviceID string, o service.LogOptions) (service.LogStream, error) {
+	st, err := d.docker.ServiceLogs(ctx, serviceID, docker.LogOptions{Tail: o.Tail, Follow: o.Follow, Since: o.Since})
+	if err != nil {
+		return nil, swarmErr(err)
+	}
+	return logStream{st}, nil
+}
+
+// logStream es un docker.LogStream con las líneas del puerto.
+type logStream struct{ s docker.LogStream }
+
+func (l logStream) Next() (service.LogLine, error) {
+	x, err := l.s.Next()
+	if err != nil {
+		return service.LogLine{}, err
+	}
+	return service.LogLine{Time: x.Time, Stream: x.Stream, TaskID: x.TaskID, Text: x.Text}, nil
+}
+
+func (l logStream) Close() error { return l.s.Close() }
+
+func (d *Docker) NodeHostname(ctx context.Context, nodeID string) (string, error) {
+	n, err := d.docker.Node(ctx, nodeID)
+	if err != nil {
+		return "", swarmErr(err)
+	}
+	return n.Hostname, nil
+}
+
+func (d *Docker) ContainerHealth(ctx context.Context, containerID string) (string, error) {
+	c, err := d.docker.InspectContainer(ctx, containerID)
+	if err != nil {
+		return "", swarmErr(err)
+	}
+	return c.Health, nil
+}
+
+func (d *Docker) ContainerStats(ctx context.Context, containerID string) (service.Stats, error) {
+	s, err := d.docker.ContainerStats(ctx, containerID)
+	if err != nil {
+		return service.Stats{}, swarmErr(err)
+	}
+	return service.Stats{CPUPercent: s.CPUPercent, MemoryBytes: s.MemoryBytes}, nil
 }
 
 func swarmErr(err error) error {

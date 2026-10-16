@@ -131,6 +131,44 @@ type Cluster interface {
 	TaskLogs(ctx context.Context, taskID string, tail int) ([]LogLine, error)
 	// LocalNodeID es el id del nodo local en el Swarm (Info().NodeID).
 	LocalNodeID(ctx context.Context) (string, error)
+	// ServiceLogs es el log de todas las tareas del servicio serviceID (GET
+	// …/logs, contrato §2.9), con los pedazos de una línea larga tal cual
+	// (LogLine). Hay que cerrarlo siempre. ErrSwarmNotFound si el servicio no
+	// está.
+	ServiceLogs(ctx context.Context, serviceID string, o LogOptions) (LogStream, error)
+	// NodeHostname es el hostname de un nodo del Swarm (GET …/status);
+	// ErrSwarmNotFound si el nodo ya no está.
+	NodeHostname(ctx context.Context, nodeID string) (string, error)
+	// ContainerHealth es el health de un contenedor del nodo local:
+	// "healthy", "unhealthy", "starting", o "" si no tiene healthcheck.
+	// ErrSwarmNotFound si no está en este nodo.
+	ContainerHealth(ctx context.Context, containerID string) (string, error)
+	// ContainerStats es una muestra del consumo de un contenedor del nodo
+	// local (tarda cerca de 1 s). ErrSwarmNotFound si no está en este nodo.
+	ContainerStats(ctx context.Context, containerID string) (Stats, error)
+}
+
+// LogOptions elige las líneas de ServiceLogs: las últimas Tail (con Since,
+// las últimas Tail desde esa hora, inclusive) y, con Follow, las que siguen.
+type LogOptions struct {
+	Tail   int
+	Follow bool
+	Since  time.Time // cero: sin límite
+}
+
+// LogStream entrega las líneas de un log en orden. Next devuelve io.EOF al
+// terminar (sin Follow, o con Follow cuando el servicio se borra); con
+// Follow, termina también al cancelar el ctx o con Close. Close se puede
+// llamar desde otra goroutine mientras Next espera.
+type LogStream interface {
+	Next() (LogLine, error)
+	Close() error
+}
+
+// Stats es una muestra del consumo de un contenedor.
+type Stats struct {
+	CPUPercent  float64 // el % de un núcleo, como docker stats
+	MemoryBytes uint64  // sin la caché de páginas
 }
 
 // ManagerNode es settings.manager_node_id (contrato §1.1 y §1.2; la clave es

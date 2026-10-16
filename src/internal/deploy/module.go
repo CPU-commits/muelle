@@ -144,6 +144,7 @@ func New(d Deps) *Module {
 			GetDeploy:    usecases.NewGetDeploy(ud),
 			ReadLog:      usecases.NewReadLog(ud),
 			FollowLog:    usecases.NewFollowLog(ud),
+			GetStatus:    usecases.NewGetStatus(apps, dk, d.Env, d.Clock),
 		},
 		log: d.Log,
 	}
@@ -151,8 +152,8 @@ func New(d Deps) *Module {
 
 // RegisterRoutes registra los errores y las rutas del módulo (contrato §2):
 // POST/GET …/apps/{a}/deploys, GET …/deploys/{id}, …/log y …/log/stream,
-// POST …/apps/{a}/rollback (AccessToken) y /api/v1/registries
-// (AccessSession). Faltan GET …/apps/{a}/status y …/logs (AccessToken).
+// POST …/apps/{a}/rollback, GET …/apps/{a}/status (AccessToken) y
+// /api/v1/registries (AccessSession). Falta GET …/apps/{a}/logs (AccessToken).
 func (m *Module) RegisterRoutes(k *utils.Kit) {
 	dephttp.Register(k, m.uc, dephttp.Streams{Ctx: m.streamCtx, Config: m.sse})
 }

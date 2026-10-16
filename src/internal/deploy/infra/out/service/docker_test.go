@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -167,6 +168,86 @@ func TestDockerClusterLocalNodeID(t *testing.T) {
 	}
 	f.FailNext("Info", fmt.Errorf("caído: %w", docker.ErrUnavailable))
 	if _, err := d.LocalNodeID(ctx); !errors.Is(err, entity.ErrDockerUnavailable) {
+		t.Fatalf("Docker caído: %v", err)
+	}
+}
+
+// ServiceLogs entrega las líneas del servicio con sus opciones (Tail, Since)
+// y los pedazos tal cual; ErrSwarmNotFound si el servicio no está.
+func TestDockerClusterServiceLogs(t *testing.T) {
+	f := dockertest.New()
+	d := NewDocker(f)
+	ctx := context.Background()
+	if _, err := d.ServiceLogs(ctx, "svc-nada", service.LogOptions{Tail: 10}); !errors.Is(err, service.ErrSwarmNotFound) {
+		t.Fatalf("no existe: %v", err)
+	}
+	f.PutService(docker.Service{Name: "p_s_api_api"})
+	svc, _ := d.Service(ctx, "p_s_api_api")
+	at := time.Date(2026, 10, 10, 14, 0, 0, 0, time.UTC)
+	for i := range 5 {
+		f.AppendServiceLogs("p_s_api_api", docker.LogLine{Time: at.Add(time.Duration(i) * time.Second), Stream: docker.StreamStdout, TaskID: "t1", Text: fmt.Sprintf("línea %d", i)})
+	}
+	f.AppendServiceLogs("p_s_api_api", docker.LogLine{Stream: docker.StreamStdout, Text: "pedazo"})
+	read := func(o service.LogOptions) []service.LogLine {
+		t.Helper()
+		st, err := d.ServiceLogs(ctx, svc.ID, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer st.Close()
+		var out []service.LogLine
+		for {
+			l, err := st.Next()
+			if errors.Is(err, io.EOF) {
+				return out
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, l)
+		}
+	}
+	if got := read(service.LogOptions{Tail: 3}); len(got) != 3 || got[0].Text != "línea 3" || got[0].TaskID != "t1" ||
+		got[0].Stream != docker.StreamStdout || !got[0].Time.Equal(at.Add(3*time.Second)) || got[2].Text != "pedazo" || !got[2].Time.IsZero() {
+		t.Fatalf("Tail 3: %+v", got)
+	}
+	// Since es inclusivo; el pedazo (sin hora) lo descarta el fake.
+	if got := read(service.LogOptions{Tail: 5000, Since: at.Add(4 * time.Second)}); len(got) < 1 || got[0].Text != "línea 4" {
+		t.Fatalf("Since: %+v", got)
+	}
+	if calls := f.Calls(); !slices.Contains(calls, "ServiceLogs "+svc.ID) {
+		t.Fatalf("ServiceLogs con el id: %v", calls)
+	}
+}
+
+// NodeHostname, ContainerHealth y ContainerStats, para GET …/status; lo que
+// no está es ErrSwarmNotFound, y Docker caído es ErrDockerUnavailable.
+func TestDockerClusterNodesAndContainers(t *testing.T) {
+	f := dockertest.New()
+	d := NewDocker(f)
+	ctx := context.Background()
+	if h, err := d.NodeHostname(ctx, "node-1"); err != nil || h != "manager-1" {
+		t.Fatalf("NodeHostname: %q, %v", h, err)
+	}
+	if _, err := d.NodeHostname(ctx, "node-x"); !errors.Is(err, service.ErrSwarmNotFound) {
+		t.Fatalf("nodo que no está: %v", err)
+	}
+	f.PutContainer(docker.Container{ID: "c1", Name: "p_s_api_api.1.t1", Running: true, Health: "healthy"})
+	f.SetStats("c1", docker.Stats{CPUPercent: 3.5, MemoryBytes: 64 << 20, MemoryLimitBytes: 1 << 30})
+	if h, err := d.ContainerHealth(ctx, "c1"); err != nil || h != "healthy" {
+		t.Fatalf("ContainerHealth: %q, %v", h, err)
+	}
+	if s, err := d.ContainerStats(ctx, "c1"); err != nil || s.CPUPercent != 3.5 || s.MemoryBytes != 64<<20 {
+		t.Fatalf("ContainerStats: %+v, %v", s, err)
+	}
+	if _, err := d.ContainerHealth(ctx, "c-nada"); !errors.Is(err, service.ErrSwarmNotFound) {
+		t.Fatalf("contenedor que no está: %v", err)
+	}
+	if _, err := d.ContainerStats(ctx, "c-nada"); !errors.Is(err, service.ErrSwarmNotFound) {
+		t.Fatalf("stats de uno que no está: %v", err)
+	}
+	f.SetUnavailable(true)
+	if _, err := d.ContainerStats(ctx, "c1"); !errors.Is(err, entity.ErrDockerUnavailable) {
 		t.Fatalf("Docker caído: %v", err)
 	}
 }
