@@ -35,7 +35,7 @@ func newHookFixture(t *testing.T, delay time.Duration) *hookFixture {
 		DomainOp: 30 * time.Second, DomainRetry: 20 * time.Second,
 	})
 	return &hookFixture{lifecycleFixture: f, recreator: r,
-		uc: NewProxySettingsChanged(r, records, f.panel, f.syncer, 2*time.Minute, f.slog)}
+		uc: NewProxySettingsChanged(r, records, f.panel, f.syncer, f.state, 2*time.Minute, f.slog)}
 }
 
 // change guarda los ajustes con mod, como admin antes de llamar al hook, y
@@ -289,5 +289,24 @@ func TestSettingsChangedPortsAndEmail(t *testing.T) {
 	eventually(t, 2*time.Second, "recrea", func() bool { return !f.state.Recreating() })
 	if len(f.caddy.Loads()) != loads+1 || !strings.Contains(f.lastLoad(t), "nuevo@correo.cl") {
 		t.Fatalf("la recreación manda el email nuevo: loads %d → %d", loads, len(f.caddy.Loads()))
+	}
+}
+
+// Un PATCH que vuelve a cambiar los puertos olvida la vuelta atrás anterior
+// (GET /proxy: ports_rollback null): es un intento nuevo. Otro ajuste no la
+// olvida.
+func TestSettingsChangedPortsClearsRollback(t *testing.T) {
+	f := newHookFixture(t, 20*time.Millisecond)
+	rb := PortsRollback{Attempted: service.ProxyPorts{HTTPPort: 80, HTTPSPort: 443}, Restored: servingPorts, Error: "ocupados"}
+	f.state.PortsRolledBack(rb)
+	old, next := f.change(t, func(p *shared.ProxySettings) { p.ACMEEmail = "nuevo@correo.cl" })
+	f.uc.Execute(context.Background(), old, next)
+	if f.state.LastPortsRollback() == nil {
+		t.Fatal("otro ajuste no la olvida")
+	}
+	old, next = f.change(t, func(p *shared.ProxySettings) { p.HTTPPort = 9080 })
+	f.uc.Execute(context.Background(), old, next)
+	if got := f.state.LastPortsRollback(); got != nil {
+		t.Fatalf("un cambio de puertos la olvida: %+v", got)
 	}
 }

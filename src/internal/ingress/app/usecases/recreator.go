@@ -102,11 +102,12 @@ func (r *Recreator) Run(ctx context.Context) {
 	}
 }
 
-// recreate asegura muelle-caddy y le manda la configuración; si lo creó de
-// nuevo, espera a que su admin API responda (syncStarting). Los errores ya
-// quedaron en el estado y en el log.
+// recreate asegura muelle-caddy (Recreate: si no arranca con los puertos
+// nuevos, vuelve a los anteriores) y le manda la configuración; si lo creó
+// de nuevo, espera a que su admin API responda (syncStarting). Los errores
+// ya quedaron en el estado y en el log.
 func (r *Recreator) recreate(ctx context.Context) {
-	recreated, err := r.caddy.Execute(ctx)
+	recreated, err := r.caddy.Recreate(ctx)
 	if err != nil {
 		r.log.Warn("ingress: la recreación de muelle-caddy falló", "error", err)
 	}

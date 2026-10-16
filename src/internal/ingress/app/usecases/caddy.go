@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
+	"github.com/CPU-commits/muelle/src/package/audit"
+	"github.com/CPU-commits/muelle/src/package/clock"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/domain/naming"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
@@ -22,7 +24,8 @@ const maxCauseRunes = 300
 
 // EnsureCaddy deja muelle-caddy como piden los ajustes (contrato §3.4): la
 // imagen, los puertos, la red panel y las de todos los stages. Lo llaman el
-// job "proxy" y la recreación agendada (Recreator), de a uno.
+// job "proxy" (Execute) y la recreación agendada (Recreator, con Recreate),
+// de a uno.
 type EnsureCaddy struct {
 	mu         sync.Mutex
 	runtime    service.CaddyRuntime
@@ -31,15 +34,29 @@ type EnsureCaddy struct {
 	registries service.Registries
 	state      *ProxyState
 	defImage   string
+	rb         PortsRollbackDeps
 	log        *slog.Logger
+}
+
+// PortsRollbackDeps es lo que usa Recreate para volver a los puertos
+// anteriores (contrato §3.5). Audit y Clock son obligatorios. Done puede ser
+// nil: se llama después de volver los ajustes (el contenedor invalida ahí el
+// origen del panel en caché de admin, así el del puerto anterior pasa enseguida).
+type PortsRollbackDeps struct {
+	Audit audit.Recorder
+	Clock clock.Clock
+	Done  func()
 }
 
 // NewEnsureCaddy recibe la imagen de Caddy de esta versión
 // (naming.CaddyImageFor), la que va si caddy_image está vacío.
 func NewEnsureCaddy(runtime service.CaddyRuntime, settings service.Settings, catalog service.Catalog,
-	registries service.Registries, state *ProxyState, defImage string, log *slog.Logger) *EnsureCaddy {
+	registries service.Registries, state *ProxyState, defImage string, rb PortsRollbackDeps, log *slog.Logger) *EnsureCaddy {
+	if rb.Audit == nil || rb.Clock == nil {
+		panic("usecases.NewEnsureCaddy: falta PortsRollbackDeps.Audit o Clock")
+	}
 	return &EnsureCaddy{runtime: runtime, settings: settings, catalog: catalog, registries: registries,
-		state: state, defImage: defImage, log: log}
+		state: state, defImage: defImage, rb: rb, log: log}
 }
 
 // Execute, de a uno: sin el proxy habilitado devuelve (false, nil) sin tocar
@@ -48,8 +65,33 @@ func NewEnsureCaddy(runtime service.CaddyRuntime, settings service.Settings, cat
 // runtime.Ensure. El resultado va al estado de GET /proxy: ContainerOK, o
 // ContainerFailed con un mensaje en español (el puerto ocupado, la imagen que
 // no baja y Docker caído tienen el suyo). Un error leyendo la base no cambia
-// el estado. Nunca registra want ni la credencial.
+// el estado. Nunca registra want ni la credencial. Es el job "proxy": nunca
+// vuelve a otros puertos (un cambio hecho a mano, el UPDATE del contrato
+// §4.1, se reintenta con los mismos ajustes).
 func (u *EnsureCaddy) Execute(ctx context.Context) (recreated bool, err error) {
+	return u.execute(ctx, false)
+}
+
+// Recreate es Execute para la recreación que agenda un cambio de puertos o de
+// imagen (Recreator, contrato §3.5). Si muelle-caddy servía con otros
+// puertos y no queda como piden los ajustes (un puerto ocupado, el
+// contenedor que no se crea o no arranca, la imagen que no baja), vuelve a
+// los puertos con que servía:
+//  1. los ajustes, con RollbackPorts: solo si siguen siendo los que fallaron
+//     (si un PATCH /settings los cambió mientras tanto, gana ese, y su
+//     recreación viene después);
+//  2. Done, la auditoría (settings.ports_rollback, actor system), el log y
+//     GET /proxy (ports_rollback);
+//  3. el contenedor, con un Ensure con esos puertos.
+//
+// Con Docker caído no vuelve atrás: no es culpa de los puertos, y el job lo
+// reintenta. Después de volver atrás devuelve recreated del segundo Ensure y
+// un error que envuelve el primero.
+func (u *EnsureCaddy) Recreate(ctx context.Context) (recreated bool, err error) {
+	return u.execute(ctx, true)
+}
+
+func (u *EnsureCaddy) execute(ctx context.Context, rollback bool) (recreated bool, err error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	p, err := u.settings.ProxySettings(ctx)
@@ -76,23 +118,95 @@ func (u *EnsureCaddy) Execute(ctx context.Context) (recreated bool, err error) {
 		nets = append(nets, naming.Network(s.Project, s.Stage))
 	}
 	want := service.CaddyWant{Image: image, HTTPPort: p.HTTPPort, HTTPSPort: p.HTTPSPort, Networks: nets, Auth: auth}
+	password := ""
+	if auth != nil {
+		password = auth.Password
+	}
+
+	// A qué volver: el muelle-caddy que sirve, si sirve con otros puertos.
+	var prev service.CaddyServing
+	canRollBack := false
+	if rollback {
+		var serving bool
+		prev, serving, err = u.runtime.Serving(ctx)
+		if err != nil {
+			u.log.Debug("ingress: no se pudo revisar muelle-caddy antes de recrearlo", "error", err)
+		}
+		canRollBack = err == nil && serving && (prev.HTTPPort != p.HTTPPort || prev.HTTPSPort != p.HTTPSPort)
+	}
 
 	recreated, err = u.runtime.Ensure(ctx, want)
-	if err != nil {
-		password := ""
-		if auth != nil {
-			password = auth.Password
+	if err == nil {
+		u.state.ContainerOK()
+		if recreated {
+			u.log.Info("ingress: muelle-caddy creado", "imagen", image, "http", p.HTTPPort, "https", p.HTTPSPort)
 		}
-		msg := u.message(ctx, err, p, image, host, auth != nil, password)
-		u.state.ContainerFailed(msg)
-		u.log.Warn("ingress: muelle-caddy no quedó como piden los ajustes", "error", hideSecret(err.Error(), password))
-		return recreated, fmt.Errorf("ingress: asegurando muelle-caddy: %w", secretError{err, password})
+		return recreated, nil
+	}
+	failure := fmt.Errorf("ingress: asegurando muelle-caddy: %w", secretError{err, password})
+	if canRollBack && !errors.Is(err, shared.ErrDockerUnavailable) {
+		return u.rollback(ctx, p, prev, want, err, failure, host, password)
+	}
+	u.state.ContainerFailed(u.message(ctx, err, p, image, host, auth != nil, password))
+	u.log.Warn("ingress: muelle-caddy no quedó como piden los ajustes", "error", hideSecret(err.Error(), password))
+	return recreated, failure
+}
+
+// rollback vuelve a los puertos con que servía muelle-caddy (prev) después
+// de que el Ensure con los de p falló con cause (Recreate).
+func (u *EnsureCaddy) rollback(ctx context.Context, p shared.ProxySettings, prev service.CaddyServing, want service.CaddyWant,
+	cause, failure error, host, password string) (bool, error) {
+	attempted := service.ProxyPorts{HTTPPort: p.HTTPPort, HTTPSPort: p.HTTPSPort}
+	restored := service.ProxyPorts{HTTPPort: prev.HTTPPort, HTTPSPort: prev.HTTPSPort}
+	msg := u.rollbackMessage(ctx, cause, p, want.Image, host, want.Auth != nil, password)
+	saved, err := u.settings.RollbackPorts(ctx, attempted, restored)
+	if err != nil || !saved {
+		// Un PATCH cambió los puertos mientras tanto (su recreación viene
+		// después), o la base falló: queda el error, como en el job.
+		u.state.ContainerFailed(u.message(ctx, cause, p, want.Image, host, want.Auth != nil, password))
+		u.log.Warn("ingress: muelle-caddy no arrancó con los puertos nuevos y no se volvió a los anteriores",
+			"error", hideSecret(cause.Error(), password), "guardado", saved, "error_base", err)
+		return false, failure
+	}
+	if u.rb.Done != nil {
+		u.rb.Done()
+	}
+	u.rb.Audit.Record(ctx, "settings.ports_rollback", "settings", map[string]any{
+		shared.SettingProxyHTTPPort:  restored.HTTPPort,
+		shared.SettingProxyHTTPSPort: restored.HTTPSPort,
+		"attempted": map[string]any{
+			shared.SettingProxyHTTPPort:  attempted.HTTPPort,
+			shared.SettingProxyHTTPSPort: attempted.HTTPSPort,
+		},
+		"error": msg,
+	})
+	u.state.PortsRolledBack(PortsRollback{Attempted: attempted, Restored: restored, Error: msg, At: u.rb.Clock.Now()})
+	u.log.Warn("ingress: muelle-caddy no arrancó con los puertos nuevos; se vuelve a los puertos anteriores",
+		"intentados_http", attempted.HTTPPort, "intentados_https", attempted.HTTPSPort,
+		"http", restored.HTTPPort, "https", restored.HTTPSPort, "error", hideSecret(cause.Error(), password))
+
+	want.HTTPPort, want.HTTPSPort = restored.HTTPPort, restored.HTTPSPort
+	recreated, err := u.runtime.Ensure(ctx, want)
+	if err != nil {
+		p.HTTPPort, p.HTTPSPort = restored.HTTPPort, restored.HTTPSPort
+		u.state.ContainerFailed(u.message(ctx, err, p, want.Image, host, want.Auth != nil, password))
+		u.log.Warn("ingress: muelle-caddy tampoco arrancó con los puertos anteriores", "error", hideSecret(err.Error(), password))
+		return recreated, errors.Join(failure, fmt.Errorf("ingress: volviendo muelle-caddy a los puertos anteriores: %w", secretError{err, password}))
 	}
 	u.state.ContainerOK()
-	if recreated {
-		u.log.Info("ingress: muelle-caddy creado", "imagen", image, "http", p.HTTPPort, "https", p.HTTPSPort)
+	u.log.Info("ingress: muelle-caddy volvió a los puertos anteriores", "http", restored.HTTPPort, "https", restored.HTTPSPort)
+	return recreated, fmt.Errorf("ingress: muelle-caddy no arrancó con los puertos %d y %d, y volvió a %d y %d: %w",
+		attempted.HTTPPort, attempted.HTTPSPort, restored.HTTPPort, restored.HTTPSPort, failure)
+}
+
+// rollbackMessage es por qué muelle-caddy no arrancó con los puertos de p,
+// para ports_rollback y la auditoría. Un puerto ocupado tiene el suyo: el de
+// message dice que se reintenta, y acá no se reintenta.
+func (u *EnsureCaddy) rollbackMessage(ctx context.Context, err error, p shared.ProxySettings, image, host string, hasCredential bool, password string) string {
+	if errors.Is(err, service.ErrPortInUse) {
+		return fmt.Sprintf("los puertos %d o %d del host ya están en uso, y muelle-caddy no pudo arrancar con ellos", p.HTTPPort, p.HTTPSPort)
 	}
-	return recreated, nil
+	return u.message(ctx, err, p, image, host, hasCredential, password)
 }
 
 // message es el error del contenedor para GET /proxy (contrato §3.3).

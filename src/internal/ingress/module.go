@@ -49,6 +49,11 @@ type Deps struct {
 	// Options cambian los nombres de Docker, cómo se llega a Caddy y a
 	// Cloudflare, y los plazos. El cero es producción; solo los tests las cambian.
 	Options Options
+	// PortsRolledBack, opcional, se llama cuando ingress vuelve los puertos
+	// del proxy a los anteriores porque muelle-caddy no arrancó con los
+	// nuevos (contrato §3.5). El contenedor invalida ahí el origen del panel
+	// en caché de admin.
+	PortsRolledBack func()
 }
 
 type Module struct {
@@ -110,7 +115,8 @@ func New(d Deps) *Module {
 		o.Timing.RetryMin, o.Timing.RetryMax)
 	m.ensureNetwork = usecases.NewEnsureStageNetwork(nets, o.CaddyContainer, d.Log)
 	m.removeNetwork = usecases.NewRemoveStageNetwork(nets, o.CaddyContainer, d.Log)
-	m.caddy = usecases.NewEnsureCaddy(runtime, settings, catalog, registries, m.state, defImage, d.Log)
+	m.caddy = usecases.NewEnsureCaddy(runtime, settings, catalog, registries, m.state, defImage,
+		usecases.PortsRollbackDeps{Audit: d.Audit, Clock: d.Clock, Done: d.PortsRolledBack}, d.Log)
 	m.orphans = usecases.NewRemoveOrphanNetworks(nets, catalog, o.CaddyContainer, o.NetworkPrefix, d.Log)
 	m.ops = &usecases.Ops{}
 	dns := cloudflare.New(o.CloudflareURL)
@@ -130,7 +136,7 @@ func New(d Deps) *Module {
 	m.checkToken = usecases.NewCheckCloudflareToken(dns)
 	m.checkPorts = usecases.NewCheckProxyPorts(runtime, defImage, d.Log)
 	m.settingsHook = usecases.NewProxySettingsChanged(m.recreator, usecases.NewUpdateManagedRecords(dd), m.panelDNS, m.syncer,
-		o.Timing.Hook, d.Log)
+		m.state, o.Timing.Hook, d.Log)
 	m.httpUC = inhttp.UseCases{
 		ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage),
 		ListDomains: usecases.NewListDomains(dd), CreateDomain: usecases.NewCreateDomain(dd),
