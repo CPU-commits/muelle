@@ -163,8 +163,10 @@ func (m *Module) Jobs() []cron.Job { return m.jobs }
 // Run corre lo que ingress necesita en segundo plano hasta que ctx se cancela,
 // y vuelve cuando terminó: los reintentos con backoff (1 s, 2 s… 60 s) de una
 // configuración que Caddy no aceptó, la recreación de muelle-caddy que
-// agenda ProxySettingsChanged, la verificación de un dominio 30 s después de
-// crearlo, adoptarlo o reintentarlo, y la de los pending cada minuto (§8).
+// agenda ProxySettingsChanged (si no arranca con los puertos nuevos, vuelve
+// a los anteriores: contrato §3.5), la verificación de un dominio 30 s
+// después de crearlo, adoptarlo o reintentarlo, y la de los pending cada
+// minuto (§8).
 func (m *Module) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Go(func() { m.retrier.Run(ctx) })
@@ -234,7 +236,8 @@ func (m *Module) CheckProxyPorts(ctx context.Context, old, next entity.ProxySett
 // que se va no puede dejar el cambio a medias). Si cambiaron los puertos o la
 // imagen, no recrea muelle-caddy acá: lo agenda en Run, 2 s después de volver,
 // porque la respuesta del PATCH sale por ese mismo contenedor (contrato
-// §3.5). No devuelve error: un fallo queda en el estado del proxy (GET
+// §3.5); si no arranca con los puertos nuevos, Run vuelve a los anteriores y
+// llama a Deps.PortsRolledBack. No devuelve error: un fallo queda en el estado del proxy (GET
 // /api/v1/proxy) y en el de cada dominio. Un token nuevo, o la IP pública,
 // también llevan el registro DNS del panel (§3.4).
 func (m *Module) ProxySettingsChanged(ctx context.Context, old, next entity.ProxySettings) {
