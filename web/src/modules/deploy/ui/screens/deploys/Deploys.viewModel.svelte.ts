@@ -3,6 +3,7 @@ import { untrack } from 'svelte'
 import type { Attachment } from 'svelte/attachments'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { pendingPhase, type RoadmapPhase } from '@/shared/domain'
+import { type App as CatalogApp, appQuery, appRefFrom } from '@/modules/catalog'
 import {
 	appStatusQuery,
 	deployQuery,
@@ -19,6 +20,7 @@ import {
 	type Deploy,
 	deployDurationMs,
 	type DeployId,
+	deployableServices,
 	DeployNotFound,
 	type DeployStatus,
 	EMPTY_LOG,
@@ -38,7 +40,7 @@ export interface DeploysProps {
 	readonly app: string
 	/** El `?deploy=144` de la URL: qué deploy abrir. Sin él, el más reciente. */
 	readonly deployParam?: string | null
-	/** Del catálogo (F2), para el diálogo de deploy. */
+	/** Para el diálogo de deploy. Sin él, el de la app en el catálogo (`appQuery`). */
 	readonly kind?: AppKind | null
 }
 
@@ -87,6 +89,8 @@ export class DeploysViewModel {
 	readonly deploys: CreateQueryResult<readonly Deploy[], Error>
 	/** Solo para saber los servicios en el diálogo de deploy. */
 	readonly status: CreateQueryResult<AppStatus, Error>
+	/** El kind y los servicios de la configuración, para el diálogo (contrato §2.12). */
+	readonly #catalogApp: CreateQueryResult<CatalogApp, Error>
 	/** El `?deploy=` que no está en el historial (más viejo que la retención, o borrado). */
 	readonly linked: CreateQueryResult<Deploy, Error>
 
@@ -102,6 +106,10 @@ export class DeploysViewModel {
 		this.selectedId = untrack(() => this.#linkedId)
 		this.deploys = createQuery(() => liveDeploysQuery(this.ref))
 		this.status = createQuery(() => appStatusQuery(this.ref))
+		this.#catalogApp = createQuery(() => {
+			const { project, stage, app } = this.#props()
+			return appQuery(appRefFrom(project, stage, app))
+		})
 		this.linked = createQuery(() =>
 			deployQuery(this.ref, this.#linkedId, {
 				enabled: this.deploys.isSuccess && !this.#inHistory(this.#linkedId),
@@ -164,7 +172,7 @@ export class DeploysViewModel {
 	}
 
 	get kind(): AppKind | null {
-		return this.#props().kind ?? null
+		return this.#props().kind ?? this.#catalogApp.data?.kind ?? null
 	}
 
 	get pendingPhase(): RoadmapPhase | null {
@@ -214,8 +222,12 @@ export class DeploysViewModel {
 		return logText(this.log)
 	}
 
-	get services(): string[] {
-		return (this.status.data?.services ?? []).map((service) => service.name)
+	/** Los servicios del diálogo de deploy: los de la configuración o, sin ella, los de Swarm. */
+	get deployServices(): readonly string[] {
+		return deployableServices(
+			this.#catalogApp.data?.services?.map((service) => service.name),
+			(this.status.data?.services ?? []).map((service) => service.name),
+		)
 	}
 
 	/**

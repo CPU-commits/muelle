@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { ValidationError } from '@/shared/domain'
-import { buildDeployRequest, inferAppKind, overridableServices } from '../deployRequest'
+import {
+	buildDeployRequest,
+	deployableServices,
+	inferAppKind,
+	overridableServices,
+} from '../deployRequest'
 
 describe('buildDeployRequest (spec §7, cuerpo de POST …/deploys)', () => {
 	it('sin overrides es un redeploy', () => {
@@ -71,5 +76,21 @@ describe('inferAppKind y overridableServices', () => {
 		expect(overridableServices('api', [])).toEqual(['api'])
 		expect(overridableServices('agents', ['gateway', 'runner'])).toEqual(['gateway', 'runner'])
 		expect(overridableServices('api', ['api'], 'service')).toEqual(['api'])
+	})
+})
+
+describe('deployableServices', () => {
+	it('los de la configuración (catálogo, §2.12): contra esos valida el backend `images`', () => {
+		// Una compose que todavía no se desplegó: Swarm no tiene nada.
+		expect(deployableServices(['web', 'worker'], [])).toEqual(['web', 'worker'])
+		// Un servicio que se sacó del compose y Swarm todavía corre: no se ofrece.
+		expect(deployableServices(['web'], ['web', 'old'])).toEqual(['web'])
+	})
+
+	it('sin la configuración (un backend sin la Fase 2, o el catálogo que no cargó), los de Swarm', () => {
+		expect(deployableServices(null, ['api'])).toEqual(['api'])
+		expect(deployableServices(undefined, ['api'])).toEqual(['api'])
+		// `[]`: el compose guardado no se pudo leer (§2.12).
+		expect(deployableServices([], ['api'])).toEqual(['api'])
 	})
 })

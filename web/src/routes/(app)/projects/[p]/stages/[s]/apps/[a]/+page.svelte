@@ -3,8 +3,8 @@
 	import type { PageProps } from './$types'
 
 	// El Resumen de la app: es dueño del encabezado grande (nombre, estado, Rollback y
-	// Desplegar). Lo del catálogo (`kind`, `pendingChanges`, `pendingChangesHref`) lo
-	// conecta F2 con el barrel de `catalog`.
+	// Desplegar). El `kind` y los servicios del diálogo de deploy los pide la pantalla al
+	// catálogo (contrato §2.12); `pendingChanges` y `healthcheck` todavía no se pasan.
 	let { params }: PageProps = $props()
 </script>
 

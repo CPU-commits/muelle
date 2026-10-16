@@ -566,6 +566,10 @@ desconocidos): mientras no existan, no se mandan.
 - Dominios pide los destinos al catálogo: `appTargetsQuery(ref)` de `catalog` (un
   `servicio:puerto` por cada puerto que declara cada servicio, comparte el cache de
   `appQuery`).
+- Resumen y Deploys piden la app al catálogo (`appQuery` de `catalog`): su `kind` decide si
+  el diálogo de deploy manda `image` o `images`, y sus `services` son los campos del diálogo
+  (contra esos valida el backend). Si el catálogo no carga, salen de Swarm, como antes. Un
+  test de viewModel de esas pantallas mockea también `@/modules/catalog/container`.
 - Ajustes, después de guardar la IP pública, el email ACME, el token o los puertos, invalida
   `ingressKeys.all`: los `records` de cada dominio se calculan con los ajustes de ahora, y el
   estado del proxy cambia (contrato §3.5).

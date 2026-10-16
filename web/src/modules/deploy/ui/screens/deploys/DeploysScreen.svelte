@@ -217,7 +217,7 @@
 	open={vm.deployOpen}
 	app={vm.ref}
 	kind={vm.kind}
-	services={vm.services}
+	services={vm.deployServices}
 	currentImages={vm.currentImages}
 	rollbackPin={vm.rollbackPin}
 	onDeployed={vm.onDeployed}

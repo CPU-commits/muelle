@@ -86,7 +86,12 @@ export {
 	parseLogLine,
 } from './entities/deployLog'
 export type { AppKind, DeployOverridesInput, DeployRequest } from './entities/deployRequest'
-export { buildDeployRequest, inferAppKind, overridableServices } from './entities/deployRequest'
+export {
+	buildDeployRequest,
+	deployableServices,
+	inferAppKind,
+	overridableServices,
+} from './entities/deployRequest'
 export {
 	AppRemoving,
 	DeployNotFound,

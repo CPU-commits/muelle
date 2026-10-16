@@ -152,8 +152,11 @@ Cambiar el `?deploy=` sin salir de la ruta abre el nuevo.
 | `{"image": "<ref>"}`           | App de formulario: la imagen de su único servicio                                                            |
 | `{"images": {"<s>": "<ref>"}}` | App compose: solo los servicios que cambian                                                                  |
 
-Elige `image` o `images` con el `kind` del catálogo (lo conecta F2) o, sin él, con los
-servicios del estado (un único servicio con el nombre de la app = formulario).
+Elige `image` o `images` con el `kind` del catálogo (Resumen y Deploys lo piden con
+`appQuery` del barrel de `catalog`) o, si el catálogo no carga, con los servicios del estado
+(un único servicio con el nombre de la app = formulario). Los campos del diálogo son los
+`services` de la configuración (§2.12), contra los que el backend valida `images`, aunque la
+app no se haya desplegado; sin ellos, los servicios de Swarm (`deployableServices`).
 
 Antes de mandar valida cada imagen con **la misma regla que el backend**
 (`validate.ImageRef` → `reference.ParseNormalizedNamed` de distribution/reference v0.6.0,

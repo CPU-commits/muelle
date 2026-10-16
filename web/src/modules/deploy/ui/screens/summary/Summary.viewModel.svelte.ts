@@ -3,6 +3,7 @@ import { resolve } from '$app/paths'
 import { createQuery, type CreateQueryResult } from '@tanstack/svelte-query'
 import { pendingPhase, type RoadmapPhase } from '@/shared/domain'
 import { withQuery } from '@/shared/ui'
+import { type App as CatalogApp, appQuery, appRefFrom } from '@/modules/catalog'
 import { appStatusQuery, deploysQuery, STATUS_REFRESH_MS } from '../../../data'
 import {
 	allTasks,
@@ -14,6 +15,7 @@ import {
 	currentDeploy,
 	type Deploy,
 	type DeployId,
+	deployableServices,
 	imageOf,
 	isCurrentTask,
 	latestDeploy,
@@ -34,9 +36,10 @@ export interface SummaryProps {
 	readonly stage: string
 	readonly app: string
 	/**
-	 * Del catálogo (lo conecta F2): el `kind` de la app. Muestra "Servicio" o "Compose" en el
-	 * encabezado y le dice al diálogo de deploy si manda `image` o `images`. Sin él, el tipo
-	 * no se muestra y el diálogo lo deduce de los servicios.
+	 * El `kind` de la app: muestra "Servicio" o "Compose" en el encabezado y le dice al
+	 * diálogo de deploy si manda `image` o `images`. Sin él, el de la app en el catálogo
+	 * (`appQuery`); si el catálogo no carga, el tipo no se muestra y el diálogo lo deduce de
+	 * los servicios.
 	 */
 	readonly kind?: AppKind | null
 	/** Del catálogo (F2): `pending_changes` de la app → la marca "Cambios sin desplegar". */
@@ -80,6 +83,8 @@ export class SummaryViewModel {
 	readonly status: CreateQueryResult<AppStatus, Error>
 	readonly deploys: CreateQueryResult<readonly Deploy[], Error>
 	readonly tasks: TaskRow[]
+	/** El kind y los servicios de la configuración (contrato §2.12). */
+	readonly #catalogApp: CreateQueryResult<CatalogApp, Error>
 
 	constructor(props: () => SummaryProps) {
 		this.#props = props
@@ -89,6 +94,10 @@ export class SummaryViewModel {
 		this.deploys = createQuery(() =>
 			deploysQuery(this.ref, { refreshEvery: this.refreshInterval }),
 		)
+		this.#catalogApp = createQuery(() => {
+			const { project, stage, app } = this.#props()
+			return appQuery(appRefFrom(project, stage, app))
+		})
 		this.tasks = $derived(
 			this.status.data
 				? allTasks(this.status.data).map(({ service, task }) => ({
@@ -117,7 +126,7 @@ export class SummaryViewModel {
 	}
 
 	get kind(): AppKind | null {
-		return this.#props().kind ?? null
+		return this.#props().kind ?? this.#catalogApp.data?.kind ?? null
 	}
 
 	get pendingChanges(): boolean {
@@ -162,8 +171,12 @@ export class SummaryViewModel {
 		return this.status.data?.services ?? []
 	}
 
-	get serviceNames(): string[] {
-		return this.services.map((service) => service.name)
+	/** Los servicios del diálogo de deploy: los de la configuración o, sin ella, los de Swarm. */
+	get deployServices(): readonly string[] {
+		return deployableServices(
+			this.#catalogApp.data?.services?.map((service) => service.name),
+			this.services.map((service) => service.name),
+		)
 	}
 
 	get history(): readonly Deploy[] {

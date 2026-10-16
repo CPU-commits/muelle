@@ -31,6 +31,11 @@ vi.mock('@/modules/deploy/container', () => ({
 
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }))
 
+// El kind y los servicios de la configuración salen del catálogo (contrato §2.12): se mockea
+// su container, no la red. Por defecto no carga, y todo sale de Swarm como antes.
+const catalog = vi.hoisted(() => ({ getApp: vi.fn() }))
+vi.mock('@/modules/catalog/container', () => ({ catalogUseCases: catalog }))
+
 const PROPS = { project: 'auditfy', stage: 'staging', app: 'api' }
 
 function setVisibility(state: 'visible' | 'hidden'): void {
@@ -50,6 +55,7 @@ describe('SummaryViewModel', () => {
 			}),
 		])
 		mocks.goto.mockResolvedValue(undefined)
+		catalog.getApp.mockRejectedValue(new UnavailableError('sin catálogo'))
 	})
 
 	afterEach(() => {
@@ -197,6 +203,22 @@ describe('SummaryViewModel', () => {
 		expect(vm.kind).toBe('service')
 		expect(vm.pendingChanges).toBe(true)
 		expect(vm.pendingChangesHref).toContain('/variables')
+	})
+
+	it('sin props, el kind y los servicios del diálogo salen del catálogo', async () => {
+		// Una compose que todavía no se desplegó: Swarm no tiene nada, el catálogo sí.
+		mocks.getAppStatus.mockResolvedValue(makeStatus([]))
+		catalog.getApp.mockResolvedValue({
+			kind: 'compose',
+			services: [
+				{ name: 'gateway', ports: [8080] },
+				{ name: 'runner', ports: [] },
+			],
+		})
+		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
+
+		await vi.waitFor(() => expect(vm.kind).toBe('compose'))
+		expect(vm.deployServices).toEqual(['gateway', 'runner'])
 	})
 
 	it('al encolar un deploy va a Deploys, que abre el más reciente (ese)', async () => {

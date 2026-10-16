@@ -34,6 +34,11 @@ vi.mock('@/modules/deploy/container', () => ({
 
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }))
 
+// El kind y los servicios de la configuración salen del catálogo (contrato §2.12): se mockea
+// su container, no la red. Por defecto no carga, y todo sale de Swarm como antes.
+const catalog = vi.hoisted(() => ({ getApp: vi.fn() }))
+vi.mock('@/modules/catalog/container', () => ({ catalogUseCases: catalog }))
+
 const PROPS = { project: 'auditfy', stage: 'staging', app: 'api' }
 
 const HISTORY = [
@@ -68,6 +73,7 @@ describe('DeploysViewModel', () => {
 		mocks.getAppStatus.mockResolvedValue(makeStatus())
 		mocks.goto.mockResolvedValue(undefined)
 		mocks.followDeployLog.mockImplementation(scripted([]))
+		catalog.getApp.mockRejectedValue(new UnavailableError('sin catálogo'))
 	})
 
 	it('abre el deploy de ?deploy= y lee su log entero si ya terminó', async () => {
@@ -211,7 +217,28 @@ describe('DeploysViewModel', () => {
 
 		expect(vm.deployOpen).toBe(false)
 		await vi.waitFor(() => expect(vm.selected?.id).toBe(145))
-		expect(vm.services).toEqual(['api'])
+		expect(vm.deployServices).toEqual(['api'])
+	})
+
+	it('el diálogo usa el kind y los servicios del catálogo: una compose con un solo servicio que se llama como la app sigue siendo compose', async () => {
+		// En Swarm solo corre `api`; el compose guardado ya suma `worker`.
+		catalog.getApp.mockResolvedValue({
+			kind: 'compose',
+			services: [
+				{ name: 'api', ports: [3000] },
+				{ name: 'worker', ports: [] },
+			],
+		})
+		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
+
+		await vi.waitFor(() => expect(vm.kind).toBe('compose'))
+		expect(vm.deployServices).toEqual(['api', 'worker'])
+
+		// Lo que llega por props gana.
+		const forced = await mountViewModel(
+			() => new DeploysViewModel(() => ({ ...PROPS, kind: 'service' })),
+		)
+		expect(forced.vm.kind).toBe('service')
 	})
 
 	it('un ?deploy= más viejo que el historial se pide aparte y se abre', async () => {
