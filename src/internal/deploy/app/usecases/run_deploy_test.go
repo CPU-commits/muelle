@@ -40,7 +40,7 @@ func TestRunDeployFormApp(t *testing.T) {
 		"Updating service auditfy_staging_api",
 		"esperando convergencia (hasta 5 s)",
 		"api: 1/1 réplicas corriendo",
-		"advertencia: no se pudo actualizar Caddy: ",
+		caddyWarning,
 		"succeeded en ",
 	); err != nil {
 		t.Fatal(err)
@@ -75,6 +75,33 @@ func TestRunDeployFormApp(t *testing.T) {
 		t.Fatalf("muelle.deploy en las etiquetas de los contenedores: %v", svc["labels"])
 	}
 	noComposeInDB(t, w, `"update_config"`)
+}
+
+// caddyWarning es la línea del paso 7 cuando SyncRoutes falla, sin su error.
+const caddyWarning = "advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)"
+
+// El error de SyncRoutes no llega al log del deploy, que puede leer un token
+// del proyecto: el de Caddy trae los hosts y los upstreams de todos los
+// proyectos. El log dice solo que no se pudo y dónde mirar (GET /proxy, con
+// sesión); el motivo lo guarda ingress en el estado del proxy y en su log.
+func TestRunDeployCaddyWarningIsGeneric(t *testing.T) {
+	w := newWorld(t)
+	w.ingress.syncErr = errors.New(`ingress: sincronizando Caddy: Caddy no aceptó la configuración: ` +
+		`loading config: host "secreto.otro.cl" → otro_prod_web_web:8080`)
+	id := w.deploy(t, apiRef, nil, nil)
+	d := w.runOK(t, w.apiID)
+	if d.Status != entity.StatusSucceeded {
+		t.Fatalf("deploy: %+v\n%s", d, w.log(t, id))
+	}
+	log := w.log(t, id)
+	for _, leak := range []string{"secreto.otro.cl", "otro_prod_web_web", "loading config", "sincronizando"} {
+		if strings.Contains(log, leak) {
+			t.Fatalf("el log del deploy trae %q del error de Caddy:\n%s", leak, log)
+		}
+	}
+	if !slices.Contains(w.texts(t, id), caddyWarning) {
+		t.Fatalf("falta la advertencia %q:\n%s", caddyWarning, log)
+	}
 }
 
 // noComposeInDB verifica que ninguna columna de ninguna tabla contiene marker

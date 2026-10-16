@@ -86,7 +86,8 @@ type Ingress interface {
 	// conectado (§7 paso 4). Si falla, el deploy falla y Swarm no se toca.
 	EnsureStageNetwork(ctx context.Context, project, stage string) error
 	// SyncRoutes regenera las rutas de Caddy (§7 paso 7). Un error es una
-	// advertencia en el log del deploy, nunca lo hace fallar (§13).
+	// advertencia en el log del deploy, sin el error (contrato §2.11), y
+	// nunca lo hace fallar (§13).
 	SyncRoutes(ctx context.Context) error
 }
 

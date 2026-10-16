@@ -573,6 +573,11 @@ func failedTask(tasks []service.SwarmTask, appliedAt time.Time, hint string) *se
 }
 
 // routes es el paso 7: un error de SyncRoutes es solo una advertencia (§13).
+//
+// La advertencia no lleva el error: el log del deploy lo lee un token del
+// proyecto, y el error de Caddy puede traer los hosts y los upstreams de
+// otros proyectos. El motivo lo guarda ingress en el estado del proxy (GET
+// /api/v1/proxy, solo con sesión) y en el log del servidor.
 func (r *run) routes(ctx context.Context) error {
 	rctx, cancel := context.WithTimeout(ctx, r.u.Timing.RoutesTimeout)
 	err := r.u.Ingress.SyncRoutes(rctx)
@@ -584,6 +589,6 @@ func (r *run) routes(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	r.line("advertencia: no se pudo actualizar Caddy: %v", err)
+	r.line("advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)")
 	return nil
 }
