@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { ACTOR_TYPES, DEPLOY_STATUSES, DEPLOY_TRIGGERS } from '../../domain'
 
 // Las formas del contrato HTTP de la Fase 2 (`docs/superpowers/specs/2026-10-10-contrato-
-// http-fases-2-3.md`, §2, en `fase-2-deploy`), resumido en ../../README.md. snake_case como
+// http-fases-2-3.md`, §2, en `fase-23-base`), resumido en ../../README.md. snake_case como
 // el resto de la API. Los objetos de Zod descartan los campos que no conocen: si el
 // backend suma algo, el panel no se rompe.
 
