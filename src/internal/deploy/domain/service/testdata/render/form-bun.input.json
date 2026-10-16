@@ -1,0 +1,27 @@
+{
+  "kind": "service",
+  "slug": "web",
+  "spec": {
+    "image": "oven/bun:1",
+    "port": 8080,
+    "replicas": 1,
+    "command": [
+      "bun",
+      "run",
+      "start"
+    ],
+    "healthcheck": {
+      "type": "bun-http",
+      "interval_s": 10,
+      "timeout_s": 5,
+      "retries": 3,
+      "start_period_s": 20,
+      "path": "/up?probe=1"
+    },
+    "volumes": []
+  },
+  "env": {},
+  "images": {
+    "web": "oven/bun:1@sha256:5e3c1d0b8f211111111111111111111111111111111111111111111111111111"
+  }
+}

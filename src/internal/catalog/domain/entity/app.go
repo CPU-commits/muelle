@@ -2,10 +2,10 @@ package entity
 
 import (
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/vo"
+	"github.com/CPU-commits/muelle/src/shared/domain/compose"
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
 
@@ -27,8 +27,8 @@ const (
 	MinDeployTimeoutS     = 30
 	MaxDeployTimeoutS     = 3600
 
-	// En la Fase 1 el compose solo se guarda; la Fase 2 lo valida con compose-go.
-	MaxComposeBytes = 256 << 10
+	// MaxComposeBytes es el tamaño máximo de un compose (shared/domain/compose).
+	MaxComposeBytes = compose.MaxBytes
 )
 
 // App es un servicio de formulario (Spec) o un compose (ComposeYAML), nunca ambos.
@@ -64,7 +64,7 @@ func NewServiceApp(stage Stage, slug string, spec vo.AppSpec, timeoutS int, now 
 
 // NewComposeApp crea una app compose. timeoutS 0 usa DefaultDeployTimeoutS.
 func NewComposeApp(stage Stage, slug, composeYAML string, timeoutS int, now time.Time) (App, error) {
-	if err := ValidateCompose(composeYAML); err != nil {
+	if _, err := ValidateCompose(composeYAML); err != nil {
 		return App{}, err
 	}
 	a, err := newApp(stage, slug, KindCompose, timeoutS, now)
@@ -91,15 +91,13 @@ func newApp(stage Stage, slug string, kind Kind, timeoutS int, now time.Time) (A
 	}, nil
 }
 
-// ValidateCompose exige un compose no vacío y de hasta 256 KiB.
-func ValidateCompose(yaml string) error {
-	if strings.TrimSpace(yaml) == "" {
-		return validate.Errorf("compose_yaml", "es obligatorio")
-	}
-	if len(yaml) > MaxComposeBytes {
-		return validate.Errorf("compose_yaml", "no puede superar 256 KiB")
-	}
-	return nil
+// ValidateCompose valida un compose con las reglas de §6.3 del diseño
+// (shared/domain/compose: no vacío, de hasta 256 KiB, la lista de permitidos,
+// los rechazos y los nombres), sin interpolar: las variables todavía no están.
+// Devuelve los nombres de sus servicios, ordenados. Los errores son
+// *validate.Error en compose_yaml.
+func ValidateCompose(yaml string) ([]string, error) {
+	return compose.Validate(yaml)
 }
 
 func ValidateDeployTimeout(s int) error {
@@ -129,7 +127,7 @@ func (a *App) ChangeCompose(yaml string, now time.Time) error {
 	if a.Kind != KindCompose {
 		return ErrWrongKind
 	}
-	if err := ValidateCompose(yaml); err != nil {
+	if _, err := ValidateCompose(yaml); err != nil {
 		return err
 	}
 	a.ComposeYAML = yaml

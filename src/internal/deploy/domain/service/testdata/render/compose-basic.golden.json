@@ -1,0 +1,104 @@
+{
+  "networks": {
+    "it2g_staging": {
+      "external": true,
+      "name": "it2g_staging"
+    }
+  },
+  "services": {
+    "api": {
+      "command": [
+        "node",
+        "server.js",
+        "--price=$$5"
+      ],
+      "deploy": {
+        "labels": {
+          "muelle.app": "front",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "replicas": 2,
+        "rollback_config": {
+          "order": "start-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 1
+        }
+      },
+      "environment": {
+        "DATABASE_URL": "postgres://u:p$$ss@db/x",
+        "FROM_APP": "de la app"
+      },
+      "expose": [
+        "3000"
+      ],
+      "image": "ghcr.io/x/api:sha-3f9c2e1@sha256:5e3c1d0b8f211111111111111111111111111111111111111111111111111111",
+      "labels": {
+        "muelle.app": "front",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging",
+        "team": "core"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ]
+    },
+    "web": {
+      "deploy": {
+        "labels": {
+          "muelle.app": "front",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "rollback_config": {
+          "order": "start-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 1
+        }
+      },
+      "environment": {
+        "API_URL": "http://api:3000",
+        "PRICE": "$$10"
+      },
+      "expose": [
+        "80"
+      ],
+      "image": "nginx:1.27@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000",
+      "labels": {
+        "muelle.app": "front",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging",
+        "team": "core"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ]
+    }
+  }
+}

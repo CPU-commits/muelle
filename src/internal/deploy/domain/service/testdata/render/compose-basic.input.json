@@ -1,0 +1,26 @@
+{
+  "kind": "compose",
+  "slug": "front",
+  "compose": "x-common: &common\n  restart: unless-stopped\n  labels:\n    team: core\n\nservices:\n  web:\n    <<: *common\n    image: nginx:1.27\n    depends_on:\n      - api\n    environment:\n      PRICE: $$10\n      API_URL: http://api:3000\n    expose:\n      - 80\n  api:\n    <<: *common\n    image: ghcr.io/x/api:${TAG}\n    command: [\"node\", \"server.js\", \"--price=$$5\"]\n    environment:\n      DATABASE_URL: ${DB_URL}\n      FROM_APP:\n    deploy:\n      replicas: 2\n    expose:\n      - \"3000\"\n",
+  "env": {
+    "TAG": "sha-3f9c2e1",
+    "DB_URL": "postgres://u:p$ss@db/x",
+    "FROM_APP": "de la app"
+  },
+  "images": {
+    "web": "nginx:1.27@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000",
+    "api": "ghcr.io/x/api:sha-3f9c2e1@sha256:5e3c1d0b8f211111111111111111111111111111111111111111111111111111"
+  },
+  "domains": [
+    {
+      "hostname": "front.auditfy.cl",
+      "service": "web",
+      "port": 80
+    },
+    {
+      "hostname": "api.auditfy.cl",
+      "service": "api",
+      "port": 3000
+    }
+  ]
+}

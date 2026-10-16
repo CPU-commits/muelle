@@ -1,0 +1,88 @@
+{
+  "networks": {
+    "it2g_staging": {
+      "external": true,
+      "name": "it2g_staging"
+    }
+  },
+  "services": {
+    "pg": {
+      "deploy": {
+        "labels": {
+          "muelle.app": "pg",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "placement": {
+          "constraints": [
+            "node.id == node-1"
+          ]
+        },
+        "replicas": 1,
+        "resources": {
+          "limits": {
+            "memory": "1073741824"
+          }
+        },
+        "rollback_config": {
+          "order": "stop-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "stop-first",
+          "parallelism": 1
+        }
+      },
+      "environment": {
+        "POSTGRES_PASSWORD": "s3cr3t-pg"
+      },
+      "healthcheck": {
+        "interval": "10s",
+        "retries": 3,
+        "start_period": "20s",
+        "test": [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "app"
+        ],
+        "timeout": "5s"
+      },
+      "image": "postgres:17@sha256:5e3c1d0b8f211111111111111111111111111111111111111111111111111111",
+      "labels": {
+        "muelle.app": "pg",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ],
+      "volumes": [
+        {
+          "source": "data",
+          "target": "/var/lib/postgresql/data",
+          "type": "volume"
+        },
+        {
+          "source": "backups",
+          "target": "/backups",
+          "type": "volume"
+        }
+      ]
+    }
+  },
+  "volumes": {
+    "backups": {},
+    "data": {}
+  }
+}

@@ -5,9 +5,11 @@ package dto
 
 import (
 	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/entity"
+	"github.com/CPU-commits/muelle/src/shared/domain/compose"
 )
 
 type CreateProjectInput struct {
@@ -78,6 +80,17 @@ type AppOutput struct {
 	LastDeployedAt  *time.Time     `json:"last_deployed_at"`
 	PendingChanges  bool           `json:"pending_changes"`
 	CreatedAt       time.Time      `json:"created_at"`
+	// Services son los servicios de la app (contrato §2.12), ordenados por
+	// nombre; nunca null.
+	Services []ServiceOutput `json:"services"`
+}
+
+// ServiceOutput es un servicio de una app y los puertos que declara: el port
+// del spec en una de formulario, los de expose en una compose. Solo una
+// sugerencia para el destino de un dominio: no se publican.
+type ServiceOutput struct {
+	Name  string `json:"name"`
+	Ports []int  `json:"ports"`
 }
 
 func AppFrom(a entity.App) AppOutput {
@@ -89,6 +102,30 @@ func AppFrom(a entity.App) AppOutput {
 	}
 	if a.Spec != nil {
 		out.Spec = jsontext.Value(a.Spec)
+	}
+	out.Services = servicesOf(a)
+	return out
+}
+
+// servicesOf lee los servicios de la configuración guardada, no de Swarm. En
+// una app de formulario es uno, con el slug; en una compose, los de su compose
+// ([] si no se puede leer, como uno guardado antes de validarlo).
+func servicesOf(a entity.App) []ServiceOutput {
+	out := []ServiceOutput{}
+	switch a.Kind {
+	case entity.KindService:
+		var spec struct {
+			Port int `json:"port"`
+		}
+		ports := []int{}
+		if jsonv2.Unmarshal(a.Spec, &spec) == nil && spec.Port > 0 {
+			ports = append(ports, spec.Port)
+		}
+		out = append(out, ServiceOutput{Name: a.Slug, Ports: ports})
+	case entity.KindCompose:
+		for _, s := range compose.Services(a.ComposeYAML) {
+			out = append(out, ServiceOutput{Name: s.Name, Ports: s.Ports})
+		}
 	}
 	return out
 }

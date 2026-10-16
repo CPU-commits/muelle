@@ -16,11 +16,11 @@ Etapa de contratos de las Fases 2, 3 y 5:
 - los ajustes del proxy y el DNS en `/settings`;
 - las migraciones reservadas.
 
+Fase 2 (Deploy): despliega apps de formulario y compose (render con las restricciones de §6.3, una cola por app, digests con las credenciales de los registries, `docker stack deploy`, espera de convergencia y rollback), con el log del deploy por polling y en vivo, los registries, y el estado y los logs en vivo de cada app. Las rutas de Caddy llegan con la Fase 3: mientras tanto, cada deploy deja una advertencia en su log.
+
 Fase 3 (ingress): muelle crea y mantiene el contenedor muelle-caddy y le manda las rutas (los dominios de cada app y el panel, con TLS por Cloudflare o por HTTP y las IPs permitidas del panel); maneja los dominios con su DNS en Cloudflare (crear, adoptar, reintentar, la IP pública) y el registro del panel; verifica los certificados, y expone `GET /api/v1/proxy`. Ver "Proxy y dominios".
 
 Fase 5 (distribución): el panel embebido en el binario (`-tags panel`), las imágenes `ghcr.io/cpu-commits/muelle` y `muelle-caddy` con su workflow de release, `muelle install`, `muelle settings reset-panel-ips` y la GitHub Action de deploy (`action/`).
-
-Todavía no despliega nada.
 
 ## Estructura (spec §4.1)
 
@@ -293,6 +293,32 @@ Compilado sin `-tags panel` (`go run . serve`, `go build`), muelle no trae el pa
 
 Crear y borrar un stage crea y borra su red overlay, y borrar una app hace `docker stack rm` (con el CLI `docker` en el `PATH`). Para eso, el Docker local tiene que ser manager de un Swarm (`docker swarm init`); si no, esas peticiones responden `503 docker_unavailable` y no cambian nada. El resto de la API anda sin Docker. Sin un Swarm, esos caminos se prueban con los tests, que usan el Docker en memoria (`dockertest`, que `container.WithDocker` inyecta).
 
+Un deploy necesita lo mismo (el CLI `docker` en el `PATH` y un Swarm del que el nodo sea manager) y, además, llegar al registry de cada imagen: el paso 2 consulta el digest de cada una, también de las que ya traen uno. Con Docker caído el deploy se encola igual (`202`) y falla en el paso 2.
+
+### Desplegar una app con curl
+
+Después de "Primer usuario" (con la sesión en `./cookies`), un stage, una app de formulario y un token del proyecto. El deploy, el log y el rollback van con el token, como en CI:
+
+```bash
+O=http://127.0.0.1:18080
+A=$O/api/v1/projects/auditfy/stages/staging/apps/web
+curl -b cookies -H "Origin: $O" -H 'Content-Type: application/json' \
+  -d '{"slug":"staging"}' $O/api/v1/projects/auditfy/stages          # crea la red auditfy_staging
+curl -b cookies -H "Origin: $O" -H 'Content-Type: application/json' \
+  -d '{"slug":"web","kind":"service","spec":{"image":"nginx:alpine","port":80,"healthcheck":{"type":"http","path":"/"}}}' \
+  $O/api/v1/projects/auditfy/stages/staging/apps
+T=mk_…                                                                # el token de "Primer usuario"
+curl -H "Authorization: Bearer $T" -X POST $A/deploys               # 202 {"id":1,"status":"queued",…}
+curl -H "Authorization: Bearer $T" "$A/deploys/1/log?offset=0"      # repetir con next_offset hasta status final y chunk ""
+curl -N -H "Authorization: Bearer $T" $A/deploys/1/log/stream       # o en vivo (SSE), hasta el status final
+curl -H "Authorization: Bearer $T" $A/status                        # servicios, tareas, CPU y memoria
+curl -N --max-time 5 -H "Authorization: Bearer $T" "$A/logs?service=web&tail=10"   # con &follow=1 sigue abierto
+curl -H "Authorization: Bearer $T" -X POST $A/rollback              # 409 no_previous_deploy hasta el segundo deploy
+curl -b cookies -H "Origin: $O" -X DELETE $A                         # docker stack rm (los volúmenes quedan)
+```
+
+Un deploy sin cuerpo repite las imágenes del deploy actual; `{"image":"nginx:1.27"}` (o `{"images":{"<servicio>":"…"}}` en una app compose) cambia la imagen. Las credenciales de un registry privado se guardan con la sesión: `POST /api/v1/registries` con `{"host":"ghcr.io","username":"…","password":"…"}`.
+
 ## Proxy y dominios
 
 ingress crea muelle-caddy y lo mantiene: el job `"proxy"`, al arrancar y cada 5 minutos, asegura el contenedor y las redes, y le reenvía la configuración. Cambiar los puertos del proxy en Ajustes lo recrea 2 s después de responder el `PATCH` (contrato §3.5).
@@ -423,26 +449,31 @@ Comentarios y mensajes de error en español; identificadores en inglés.
 Hallazgos de la revisión de código que las próximas fases deben respetar.
 
 **Fase 2, render**
-- Escapar `$` como `$$` en todo string que venga del spec de formulario (`command`, `healthcheck.command`, imagen, mounts, valores de env).
-- Generar el healthcheck `http` en forma exec (sin shell).
-- Fijar el nombre del proyecto compose explícitamente y usar variables de entorno solo para interpolación (las claves `COMPOSE_*` están reservadas).
-- La lista de permitidos y de rechazos de §6.3: entre otras, `secrets:`/`configs:` (con `file:` o `external` montarían la clave maestra en la app), volúmenes con `driver`/`driver_opts`/`external`/`name` (un `driver_opts` con `o: bind` monta `docker.sock`), `env_file`/`extends`/`include` y etiquetas `muelle.*` propias. Un test por cada rechazo.
-- Interpolar solo con las variables de `ResolveEnv` (nunca `os.Environ()`), y escapar todo `$` como `$$` en el compose final, porque `docker stack deploy` vuelve a interpolar.
-- Comprobar que el tamaño del env mezclado stage+app cabe en el `ARG_MAX` de Linux.
-- `secrets.ResolveEnv` ya está conectado al deploy (puerto `EnvResolver`), igual que `docker stack rm` al borrar una app.
-- Reemplazar `validateCompose` por la validación real de compose-go, incluyendo nombres de servicio únicos por stage. La parte pura (parsear, las restricciones de §6.3, los nombres de los servicios) va en un paquete de `shared/domain`, para que catalog la use al guardar y deploy al renderizar sin importarse.
+- ~~Escapar `$` como `$$` en todo string que venga del spec de formulario (`command`, `healthcheck.command`, imagen, mounts, valores de env).~~
+- ~~Generar el healthcheck `http` en forma exec (sin shell).~~
+- ~~Fijar el nombre del proyecto compose explícitamente y usar variables de entorno solo para interpolación (las claves `COMPOSE_*` están reservadas).~~
+- ~~La lista de permitidos y de rechazos de §6.3: entre otras, `secrets:`/`configs:` (con `file:` o `external` montarían la clave maestra en la app), volúmenes con `driver`/`driver_opts`/`external`/`name` (un `driver_opts` con `o: bind` monta `docker.sock`), `env_file`/`extends`/`include` y etiquetas `muelle.*` propias. Un test por cada rechazo.~~
+- ~~Interpolar solo con las variables de `ResolveEnv` (nunca `os.Environ()`), y escapar todo `$` como `$$` en el compose final, porque `docker stack deploy` vuelve a interpolar.~~
+- ~~Comprobar que el tamaño del env mezclado stage+app cabe en el `ARG_MAX` de Linux.~~
+- ~~`secrets.ResolveEnv` ya está conectado al deploy (puerto `EnvResolver`), igual que `docker stack rm` al borrar una app.~~
+- ~~Reemplazar `validateCompose` por la validación real de compose-go, incluyendo nombres de servicio únicos por stage. La parte pura (parsear, las restricciones de §6.3, los nombres de los servicios) va en un paquete de `shared/domain`, para que catalog la use al guardar y deploy al renderizar sin importarse.~~
+- compose-go puede escribir advertencias con logrus en stderr (por ejemplo, `version` obsoleta). No llevan valores de variables, y la configuración global de logrus no se toca.
 
 **Fase 2, worker de deploy**
-- Las goroutines nunca deben usar el ctx de una transacción después de que `InTx` retorna; derivar de un ctx externo (`context.WithoutCancel`).
-- La retención guarda siempre el deploy actual y el destino del rollback, además de los 20 más nuevos (contrato §2.3).
-- Enmascarar también cada línea de un secreto de varias líneas, y nada de menos de 8 bytes (contrato §2.5).
-- Los SSE revisan la credencial cada 60 s y tienen límites por principal y de duración (contrato §0.3).
-- Un deploy sin cuerpo le quita el digest a una ref con tag, pero una ref sin tag (`…@sha256:…`) queda fija: sin el digest, Docker la leería como `:latest` (contrato §2.2).
+- ~~Las goroutines nunca deben usar el ctx de una transacción después de que `InTx` retorna; derivar de un ctx externo (`context.WithoutCancel`).~~
+- ~~La retención guarda siempre el deploy actual y el destino del rollback, además de los 20 más nuevos (contrato §2.3).~~
+- ~~Enmascarar también cada línea de un secreto de varias líneas, y nada de menos de 8 bytes (contrato §2.5).~~
+- ~~Los SSE revisan la credencial cada 60 s y tienen límites por principal y de duración (contrato §0.3).~~
+- Un deploy sin cuerpo repite la ref **pedida** del deploy actual (`requested_images`): un tag se vuelve a resolver y un digest fijado a propósito (override, configuración o rollback) se mantiene; un rollback no se deshace con el próximo deploy sin cuerpo, y para volver a seguir un tag hace falta un override o cambiar la configuración (contrato §2.2).
+- `SyncRoutes` devuelve `ErrNotImplemented` hasta que se mergee la Fase 3: cada deploy deja `advertencia: no se pudo actualizar Caddy: …` en su log y termina igual (contrato §2.11). El test de contrato del contenedor acepta las dos líneas.
+- La convergencia de un servicio que ya existía y no cambió espera un margen de 5 s sin `UpdateStatus` nuevo (decisión 6 del plan de la Fase 2). Se podría reemplazar comparando el spec con `PreviousSpec`, con un método nuevo del cliente de Docker.
 
 **Fase 2, estado y logs**
-- `GET …/logs` acepta `since` en vez de `tail` (inclusivo, hasta 5000 líneas), con `time` truncado al milisegundo: el panel lo manda al reconectar (contrato §2.9).
-- El servicio de los logs se busca por `naming.Service(p, s, a, service)` y con las etiquetas de la app, nunca con el parámetro tal cual: Docker también acepta un id o un prefijo de id (contrato §2.9).
-- Las medidas de `GET …/status` (`ContainerStats`) se guardan 5 s por app (contrato §2.8).
+- ~~`GET …/logs` acepta `since` en vez de `tail` (inclusivo, hasta 5000 líneas), con `time` truncado al milisegundo: el panel lo manda al reconectar (contrato §2.9).~~
+- ~~El servicio de los logs se busca por `naming.Service(p, s, a, service)` y con las etiquetas de la app, nunca con el parámetro tal cual: Docker también acepta un id o un prefijo de id (contrato §2.9).~~
+- ~~Las medidas de `GET …/status` (`ContainerStats`) se guardan 5 s por app (contrato §2.8).~~
+- Los pedazos de una línea de más de 16 KiB que parte el cliente de Docker se unen antes de enmascarar, pero un secreto que cruza el corte de 16 KiB que hace el propio Docker en su `json-file` (dos líneas, cada una con su hora) no se detecta (contrato §2.5).
+- Un stream abierto mantiene viva la sesión: `Kit.Revalidate` usa el mismo `Authenticator`, que toca `last_seen_at` (a lo más una vez por minuto), así que la sesión no vence por las 12 h sin uso mientras el panel tenga un stream abierto. El tope de 7 días sigue valiendo y un stream dura a lo más 1 h.
 
 **Fase 3**
 - Crear un stage ya crea la red overlay y conecta Caddy (etapa de contratos).

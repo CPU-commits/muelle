@@ -13,10 +13,15 @@ CREATE TABLE deploys (
   -- del cuerpo del POST ({} si no hubo); desde que se resuelven (§7 paso 2),
   -- todos los servicios con ref@sha256:….
   images        TEXT    NOT NULL DEFAULT '{}',
+  -- JSON servicio → ref pedida, antes de resolver (contrato §2.2): un deploy
+  -- sin cuerpo repite la del deploy actual. Tiene digest solo si se fijó a
+  -- propósito (override, configuración, rollback). {} hasta el paso 2.
+  requested_images TEXT NOT NULL DEFAULT '{}',
   -- JSON servicio → ref de la configuración de la app (apps.spec o el
   -- compose) cuando este deploy la leyó, sin overrides. Un deploy sin
-  -- override usa la imagen del deploy actual, salvo en los servicios cuya ref
-  -- de la configuración cambió desde entonces (ver el contrato de las fases 2 y 3).
+  -- override repite la ref pedida del deploy actual (requested_images), salvo
+  -- en los servicios cuya ref de la configuración cambió desde entonces
+  -- (contrato de las fases 2 y 3, §2.2).
   config_images TEXT    NOT NULL DEFAULT '{}',
   trigger       TEXT    NOT NULL CHECK (trigger IN ('panel', 'api', 'rollback')),
   actor_type    TEXT    NOT NULL CHECK (actor_type IN ('user', 'token')),
@@ -29,6 +34,9 @@ CREATE TABLE deploys (
   error         TEXT,
   -- Texto con un timestamp por línea, ya enmascarado, truncado a 256 KB.
   log           TEXT    NOT NULL DEFAULT '',
+  -- 1 cuando el log llegó al tope y ya tiene la marca (contrato §2.5): así
+  -- sigue truncado después de un reinicio.
+  log_truncated INTEGER NOT NULL DEFAULT 0 CHECK (log_truncated IN (0, 1)),
   created_at    INTEGER NOT NULL,
   started_at    INTEGER,
   finished_at   INTEGER

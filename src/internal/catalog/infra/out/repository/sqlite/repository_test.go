@@ -217,12 +217,16 @@ func TestAppsCRUD(t *testing.T) {
 		t.Fatalf("esperaba ErrConflict, got %v", err)
 	}
 
-	nats, _ := entity.NewComposeApp(s, "nats", "services: {}\n", 60, t0)
+	const natsYAML = "services:\n  nats:\n    image: nats:2\n" // un compose válido (§6.3)
+	nats, err := entity.NewComposeApp(s, "nats", natsYAML, 60, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := r.apps.Create(ctx, &nats); err != nil {
 		t.Fatal(err)
 	}
 	gotNats, _ := r.apps.Get(ctx, "auditfy", "staging", "nats")
-	if gotNats.ComposeYAML != "services: {}\n" || gotNats.Spec != nil || gotNats.DeployTimeoutS != 60 || gotNats.Kind != entity.KindCompose {
+	if gotNats.ComposeYAML != natsYAML || gotNats.Spec != nil || gotNats.DeployTimeoutS != 60 || gotNats.Kind != entity.KindCompose {
 		t.Fatalf("nats=%+v", gotNats)
 	}
 

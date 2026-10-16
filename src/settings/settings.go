@@ -2,8 +2,11 @@
 package settings
 
 import (
+	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/netip"
 	"net/url"
@@ -32,8 +35,9 @@ type Settings struct {
 }
 
 // Init son las variables MUELLE_INIT_* que escribe install en el servicio de
-// muelle. Lo que no está queda en cero. El token va en claro: String,
-// GoString y LogValue lo ocultan, también dentro de Settings.
+// muelle. Lo que no está queda en cero. El token y la contraseña del registry
+// van en claro: String, GoString y LogValue los ocultan, también dentro de
+// Settings.
 type Init struct {
 	PublicIP        string // MUELLE_INIT_PUBLIC_IP (IPv4)
 	PublicIPv6      string // MUELLE_INIT_PUBLIC_IPV6
@@ -42,7 +46,55 @@ type Init struct {
 	ProxyHTTPSPort  int    // MUELLE_INIT_PROXY_HTTPS_PORT (443 si no está)
 	CloudflareToken string // el contenido de MUELLE_INIT_CLOUDFLARE_TOKEN_FILE (un secreto Swarm)
 	CaddyImage      string // MUELLE_INIT_CADDY_IMAGE: fija la imagen de muelle-caddy
+	// Registry es el registry inicial de install: el contenido de
+	// MUELLE_INIT_REGISTRY_FILE (un secreto Swarm). nil si no está. deploy lo
+	// guarda solo en el primer arranque de la base (SeedInitRegistry).
+	Registry *InitRegistry
 }
+
+// InitRegistry es la credencial de un registry que install le pasa a muelle
+// (las imágenes de muelle son privadas, contrato §2.10). La contraseña va en
+// claro: String, GoString, LogValue y MarshalJSON la ocultan, también dentro
+// de Init y de Settings (fmt usa el String de un campo exportado, también de
+// un puntero).
+type InitRegistry struct{ Host, Username, Password string }
+
+// hidden es r con la contraseña como "***" (si hay).
+func (r InitRegistry) hidden() InitRegistry {
+	if r.Password != "" {
+		r.Password = "***"
+	}
+	return r
+}
+
+// String es {Host:ghcr.io Username:bot Password:***}.
+func (r InitRegistry) String() string {
+	type plain InitRegistry // sin métodos: no vuelve a llamar a String
+	return fmt.Sprintf("%+v", plain(r.hidden()))
+}
+
+// GoString es String para %#v.
+func (r InitRegistry) GoString() string { return r.String() }
+
+// LogValue es String para slog: el JSONHandler serializaría el struct.
+func (r InitRegistry) LogValue() slog.Value { return slog.StringValue(r.String()) }
+
+// MarshalJSON es el JSON del archivo con la contraseña como "***" ("" si
+// está vacía): un json.Marshal de Settings no la filtra.
+func (r InitRegistry) MarshalJSON() ([]byte, error) {
+	h := r.hidden()
+	return json.Marshal(registryFile{Host: h.Host, Username: h.Username, Password: h.Password})
+}
+
+// registryFile es el JSON de MUELLE_INIT_REGISTRY_FILE.
+type registryFile struct {
+	Host     string `json:"host"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// maxRegistryFile es el tope del archivo del registry inicial.
+const maxRegistryFile = 16 << 10
 
 // String es Init con el token como "***" (si hay).
 func (i Init) String() string {
@@ -167,7 +219,52 @@ func loadInit() (Init, error) {
 		}
 		in.CloudflareToken = token
 	}
+	if path := os.Getenv("MUELLE_INIT_REGISTRY_FILE"); path != "" {
+		r, err := loadInitRegistry(path)
+		if err != nil {
+			return Init{}, err
+		}
+		in.Registry = r
+	}
 	return in, nil
+}
+
+// loadInitRegistry lee y valida el registry inicial (contrato §2.10): JSON
+// estricto {"host", "username", "password"} y las reglas de
+// shared/domain/validate. Se lee en cada arranque, aunque deploy ya no lo
+// use: un archivo roto no deja arrancar. Ningún error trae la contraseña ni el
+// contenido del archivo: el de decodificación no incluye el de json/v2, que
+// puede citar un pedazo.
+func loadInitRegistry(path string) (*InitRegistry, error) {
+	const key = "MUELLE_INIT_REGISTRY_FILE"
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", key, err)
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxRegistryFile+1))
+	if err != nil {
+		return nil, fmt.Errorf("%s: leyendo %s: %w", key, path, err)
+	}
+	if len(b) > maxRegistryFile {
+		return nil, fmt.Errorf("%s: %s pasa de 16 KiB", key, path)
+	}
+	// json/v2 rechaza los campos desconocidos y repetidos y lo que sigue al
+	// objeto; null deja los campos vacíos, que rechazan las reglas.
+	var v registryFile
+	if err := jsonv2.Unmarshal(b, &v, jsonv2.RejectUnknownMembers(true)); err != nil {
+		return nil, fmt.Errorf(`%s: %s no es un JSON {"host", "username", "password"} (sin otros campos)`, key, path)
+	}
+	if err := validate.RegistryHost(key+".host", v.Host); err != nil {
+		return nil, err
+	}
+	if err := validate.RegistryUsername(key+".username", v.Username); err != nil {
+		return nil, err
+	}
+	if err := validate.RegistryPassword(key+".password", v.Password); err != nil {
+		return nil, err
+	}
+	return &InitRegistry{Host: v.Host, Username: v.Username, Password: v.Password}, nil
 }
 
 // validateOrigin exige el origen canónico (esquema + host[:puerto]), tal como

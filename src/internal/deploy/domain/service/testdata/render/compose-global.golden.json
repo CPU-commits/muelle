@@ -1,0 +1,60 @@
+{
+  "networks": {
+    "it2g_staging": {
+      "external": true,
+      "name": "it2g_staging"
+    }
+  },
+  "services": {
+    "agent": {
+      "deploy": {
+        "labels": {
+          "muelle.app": "agent",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "mode": "global",
+        "resources": {
+          "limits": {
+            "cpus": "0.1",
+            "memory": "67108864"
+          },
+          "reservations": {
+            "memory": "33554432"
+          }
+        },
+        "restart_policy": {
+          "condition": "on-failure",
+          "max_attempts": 3
+        },
+        "rollback_config": {
+          "order": "start-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 1
+        }
+      },
+      "image": "ghcr.io/x/agent:1@sha256:5e3c1d0b8f211111111111111111111111111111111111111111111111111111",
+      "labels": {
+        "muelle.app": "agent",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ]
+    }
+  }
+}

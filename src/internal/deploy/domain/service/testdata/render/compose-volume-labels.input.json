@@ -1,0 +1,9 @@
+{
+  "kind": "compose",
+  "slug": "files",
+  "compose": "services:\n  files:\n    image: ghcr.io/x/files:2\n    read_only: true\n    tmpfs:\n      - /tmp\n    volumes:\n      - type: volume\n        source: uploads\n        target: /srv/uploads\n        read_only: false\n        volume:\n          nocopy: true\nvolumes:\n  uploads:\n    labels:\n      backup: daily\n      owner: files\n",
+  "images": {
+    "files": "ghcr.io/x/files:2@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000"
+  },
+  "storage_node_id": "abcdefghijklmnopqrstuvwxy"
+}

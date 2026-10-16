@@ -1,0 +1,146 @@
+{
+  "networks": {
+    "it2g_staging": {
+      "external": true,
+      "name": "it2g_staging"
+    }
+  },
+  "services": {
+    "cache": {
+      "deploy": {
+        "labels": {
+          "muelle.app": "stack",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "placement": {
+          "constraints": [
+            "node.id == node-1"
+          ]
+        },
+        "rollback_config": {
+          "order": "stop-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 1
+        }
+      },
+      "image": "redis:7@sha256:c0ffee0000002222222222222222222222222222222222222222222222222222",
+      "labels": {
+        "muelle.app": "stack",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ],
+      "volumes": [
+        {
+          "source": "cache",
+          "target": "/data",
+          "type": "volume"
+        }
+      ]
+    },
+    "db": {
+      "deploy": {
+        "labels": {
+          "muelle.app": "stack",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "placement": {
+          "constraints": [
+            "node.hostname == x"
+          ]
+        },
+        "rollback_config": {
+          "order": "stop-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "stop-first",
+          "parallelism": 1
+        }
+      },
+      "image": "postgres:17@sha256:5e3c1d0b8f211111111111111111111111111111111111111111111111111111",
+      "labels": {
+        "muelle.app": "stack",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ],
+      "volumes": [
+        {
+          "source": "data",
+          "target": "/var/lib/postgresql/data",
+          "type": "volume"
+        }
+      ]
+    },
+    "web": {
+      "deploy": {
+        "labels": {
+          "muelle.app": "stack",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "rollback_config": {
+          "order": "stop-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 2
+        }
+      },
+      "image": "nginx:1.27@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000",
+      "labels": {
+        "muelle.app": "stack",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-file": "3",
+          "max-size": "1m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ]
+    }
+  },
+  "volumes": {
+    "cache": {},
+    "data": {}
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "networks": {
+    "it2g_staging": {
+      "external": true,
+      "name": "it2g_staging"
+    }
+  },
+  "services": {
+    "api": {
+      "deploy": {
+        "labels": {
+          "muelle.app": "api",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "replicas": 2,
+        "resources": {
+          "limits": {
+            "cpus": "1.5",
+            "memory": "536870912"
+          }
+        },
+        "rollback_config": {
+          "order": "start-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 1
+        }
+      },
+      "environment": {
+        "DATABASE_URL": "postgres://app:pa55w0rd@db:5432/app",
+        "NODE_ENV": "production",
+        "PRICE": "$$5 por mes"
+      },
+      "healthcheck": {
+        "interval": "10s",
+        "retries": 3,
+        "start_period": "20s",
+        "test": [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:3000/health"
+        ],
+        "timeout": "5s"
+      },
+      "image": "ghcr.io/aumi-app/backend-app:staging@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000",
+      "labels": {
+        "muelle.app": "api",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ]
+    }
+  }
+}

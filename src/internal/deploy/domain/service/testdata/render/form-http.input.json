@@ -1,0 +1,38 @@
+{
+  "kind": "service",
+  "slug": "api",
+  "spec": {
+    "image": "ghcr.io/aumi-app/backend-app:staging",
+    "port": 3000,
+    "replicas": 2,
+    "command": [],
+    "healthcheck": {
+      "type": "http",
+      "interval_s": 10,
+      "timeout_s": 5,
+      "retries": 3,
+      "start_period_s": 20,
+      "path": "/health"
+    },
+    "volumes": [],
+    "resources": {
+      "memory_mb": 512,
+      "cpus": 1.5
+    }
+  },
+  "env": {
+    "DATABASE_URL": "postgres://app:pa55w0rd@db:5432/app",
+    "PRICE": "$5 por mes",
+    "NODE_ENV": "production"
+  },
+  "images": {
+    "api": "ghcr.io/aumi-app/backend-app:staging@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000"
+  },
+  "domains": [
+    {
+      "hostname": "api.auditfy.cl",
+      "service": "api",
+      "port": 3000
+    }
+  ]
+}

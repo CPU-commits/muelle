@@ -1,0 +1,11 @@
+{
+  "kind": "compose",
+  "slug": "stack",
+  "compose": "services:\n  web:\n    image: nginx:1.27\n    logging:\n      driver: local\n      options:\n        max-size: 1m\n    deploy:\n      update_config:\n        parallelism: 2\n      rollback_config:\n        order: stop-first\n  db:\n    image: postgres:17\n    volumes:\n      - data:/var/lib/postgresql/data\n    deploy:\n      placement:\n        constraints:\n          - node.hostname == x\n  cache:\n    image: redis:7\n    volumes:\n      - type: volume\n        source: cache\n        target: /data\n    deploy:\n      update_config:\n        order: start-first\nvolumes:\n  data: {}\n  cache: {}\n",
+  "images": {
+    "web": "nginx:1.27@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000",
+    "db": "postgres:17@sha256:5e3c1d0b8f211111111111111111111111111111111111111111111111111111",
+    "cache": "redis:7@sha256:c0ffee0000002222222222222222222222222222222222222222222222222222"
+  },
+  "storage_node_id": "node-1"
+}

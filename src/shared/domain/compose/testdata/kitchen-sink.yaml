@@ -1,0 +1,161 @@
+# Usa todas las claves que acepta §6.3 del diseño, en sus dos sintaxis cuando
+# hay dos. Si la lista de permitidos olvida una ruta, este archivo falla.
+version: "3.8"
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 5m
+      max-file: "2"
+
+services:
+  api:
+    <<: *common
+    image: ghcr.io/acme/api:${TAG:-1.0}
+    command: ["./api", "--port", "3000", "--price=$$5"]
+    entrypoint: /bin/entrypoint
+    environment:
+      DATABASE_URL: postgres://db/app
+      EMPTY: ""
+      NOVALUE:
+      SECRET: ${SECRET}
+    labels:
+      com.example.team: backend
+      com.example.price: "$$10"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
+      disable: false
+    deploy:
+      mode: replicated
+      replicas: 2
+      endpoint_mode: vip
+      labels:
+        com.example.tier: web
+      placement:
+        constraints:
+          - node.role == worker
+        preferences:
+          - spread: node.labels.zone
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: 0.1
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 2m
+      update_config:
+        parallelism: 2
+        delay: 10s
+        failure_action: rollback
+        monitor: 30s
+        max_failure_ratio: 0.25
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 0s
+        failure_action: pause
+        monitor: 10s
+        max_failure_ratio: 0
+        order: stop-first
+    volumes:
+      - data:/data
+      - type: volume
+        source: cache
+        target: /cache
+        read_only: true
+        volume:
+          nocopy: true
+      - type: tmpfs
+        target: /scratch
+        tmpfs:
+          size: 1048576
+          mode: 1777
+    tmpfs:
+      - /run
+      - /tmp
+    user: "1000:1000"
+    working_dir: /app
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    read_only: true
+    init: true
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 20000
+        hard: 40000
+    cap_drop:
+      - ALL
+    hostname: api
+    domainname: example.internal
+    extra_hosts:
+      - "somehost:162.242.195.82"
+      - "otherhost=50.31.209.229"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    dns_search: example.internal
+    expose:
+      - "3000"
+      - 9090
+    tty: true
+    stdin_open: true
+    depends_on:
+      - worker
+    platform: linux/amd64
+    x-notes: cualquier cosa
+
+  worker:
+    image: ghcr.io/acme/worker@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    command: ./worker --queue default
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      - A=1
+      - B
+      - C=con=igual
+    labels:
+      - com.example.role=worker
+      - com.example.flag
+    logging:
+      driver: local
+    deploy:
+      mode: global
+    extra_hosts:
+      host.one: 10.0.0.1
+      host.two: 10.0.0.2
+    dns: 9.9.9.9
+    dns_search:
+      - a.internal
+      - b.internal
+    tmpfs: /var/cache
+    restart: always
+
+  cron:
+    image: busybox:1.37
+    command: ["sh", "-c", "echo $$HOME"]
+    logging:
+      driver: none
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  data:
+    labels:
+      com.example.backup: daily
+  cache:
+    labels:
+      - com.example.backup=never
