@@ -229,7 +229,7 @@ proyecto (auditfy)
 | `sessions` | `id_hash`, `user_id`, `mfa_pending` (contraseña correcta, falta el código TOTP), `created_at`, `last_seen_at`, `expires_at`, `user_agent`, `ip` |
 | `api_tokens` | `id`, `name`, `token_hash`, `project_id`, `stage_id` (nulo = todo el proyecto), `created_by`, `last_used_at`, `expires_at` (opcional) |
 | `audit_events` | `id`, `actor_type`, `actor_id`, `action`, `target`, `details` (JSON, sin valores secretos), `at` |
-| `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `cloudflare_zones`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain` (el host de `MUELLE_PANEL_ORIGIN`, de solo lectura), `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` (vacío: la imagen de Caddy de la misma versión de muelle) y las del registro DNS del panel (`panel_cf_*`, de ingress) |
+| `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `cloudflare_zones`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain` (`MUELLE_PANEL_DOMAIN`, o el host de `MUELLE_PANEL_ORIGIN`; de solo lectura), `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` (vacío: la imagen de Caddy de la misma versión de muelle) y las del registro DNS del panel (`panel_cf_*`, de ingress) |
 
 La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con la migración `0002_deploy.sql`, y `domains` con `0003_ingress.sql`. Las dos las reservó la etapa de contratos; cada fase edita la suya, en vez de agregar otra, mientras no haya una versión publicada.
 
@@ -408,8 +408,8 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 
 ### 10.1 Autenticación y permisos
 
-- **Sesión del panel:** cookie `muelle_session` (`HttpOnly`, `Secure`, `SameSite=Strict`). Se cierra tras 12 h sin uso y dura 7 días como máximo. Las peticiones que modifican algo exigen que el `Origin` coincida con `MUELLE_PANEL_ORIGIN`, una variable de entorno, o con el origen en que muelle-caddy sirve el panel según los ajustes (`https://<panel_domain>`, con `:<proxy_https_port>` si no es 443). El origen lleva el esquema y el puerto: así el panel funciona en `https://panel…:8443` durante la migración (§16), y sigue funcionando en `https://panel…` cuando los puertos del proxy pasan a 80/443, sin tocar la variable (contrato §0.1). Como la comparación es literal, el origen configurado tiene que estar en forma canónica: esquema y host en minúsculas, sin puerto por defecto y con las IP en su forma estándar. Si no lo está, muelle no arranca y sugiere el valor correcto. Una sesión puede hacer todo.
-  - `MUELLE_SECURE_COOKIES=false` (la cookie sin `Secure`) existe solo para desarrollo por http: con un `MUELLE_PANEL_ORIGIN` https, muelle no arranca.
+- **Sesión del panel:** cookie `muelle_session` (`HttpOnly`, `Secure`, `SameSite=Strict`). Se cierra tras 12 h sin uso y dura 7 días como máximo. Las peticiones que modifican algo exigen que el `Origin` coincida exactamente con el origen en que muelle-caddy sirve el panel según los ajustes de ese momento (`https://<panel_domain>`, con `:<proxy_https_port>` si no es 443), o con `MUELLE_PANEL_ORIGIN`, una variable de entorno opcional para un origen más (detrás de otro proxy, o en desarrollo). install no la escribe: escribe `MUELLE_PANEL_DOMAIN`, el dominio sin puerto. El origen lleva el esquema y el puerto: así el panel funciona en `https://panel…:8443` durante la migración (§16), y en `https://panel…` en cuanto los puertos del proxy pasan a 80/443, sin tocar la configuración de muelle; desde ese momento `:8443` ya no pasa (contrato §0.1). Los links de setup y de las invitaciones usan el mismo origen (`MUELLE_PANEL_ORIGIN` si está). Como la comparación es literal, el origen configurado tiene que estar en forma canónica: esquema y host en minúsculas, sin puerto por defecto y con las IP en su forma estándar. Si no lo está, muelle no arranca y sugiere el valor correcto. Una sesión puede hacer todo.
+  - `MUELLE_SECURE_COOKIES=false` (la cookie sin `Secure`) existe solo para desarrollo por http: con un `MUELLE_PANEL_ORIGIN` https, o con `MUELLE_PANEL_DOMAIN`, muelle no arranca.
 - **Token de API:** `Authorization: Bearer mk_<43 caracteres base64url>` (32 bytes aleatorios). Se guarda su SHA-256 y se muestra una sola vez. Su alcance es un proyecto, o un proyecto + stage. **Solo permite:** leer proyecto/stage/app/estado/deploys/logs dentro del alcance, `GET/PUT/PATCH` de variables, crear deploys y hacer rollback. Cualquier otra operación responde `403`.
   - `GET /tokens` dice quién creó cada token (`created_by`: el username, o `null` si ese usuario se borró), para encontrar los tokens de una persona que se va.
   - **Borrar un usuario no revoca sus tokens:** un token es del proyecto, no de quien lo creó, y el CI depende de él. Al dar de baja a alguien, se revisan sus tokens en `GET /tokens` y se revocan a mano (`DELETE /tokens/{id}`) los que haga falta.
@@ -578,7 +578,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 Dokploy también usa Swarm, así que ambos pueden convivir en el mismo cluster. Lo único que choca son los puertos 80/443 que ocupa el Traefik de Dokploy. DNS-01 no necesita esos puertos, y eso permite preparar todo sin downtime:
 
 1. Probar muelle completo en una VM local con Swarm.
-2. En el servidor: `muelle install --cloudflare-token … --http-port 8080 --https-port 8443`. El panel queda en `https://panel…:8443`, con certificado por DNS-01, y `MUELLE_PANEL_ORIGIN` es ese origen.
+2. En el servidor: `muelle install --cloudflare-token … --http-port 8080 --https-port 8443`. El panel queda en `https://panel…:8443`, con certificado por DNS-01. La configuración de muelle lleva solo el dominio (`MUELLE_PANEL_DOMAIN`): el puerto sale de los ajustes.
 3. Crear proyectos, stages, apps (mismas imágenes de GHCR), variables y dominios en muelle.
    - Los registros DNS de Cloudflare ya existen (apuntan al mismo servidor), así que cada dominio queda en "el registro ya existe" → **Adoptar**.
    - Como la IP pública es la misma, adoptar no cambia hacia dónde va el tráfico: sigue entrando por 80/443 al Traefik de Dokploy. Conviene adoptar con el mismo `proxied` que tiene hoy el registro.
@@ -586,8 +586,7 @@ Dokploy también usa Swarm, así que ambos pueden convivir en el mismo cluster. 
 5. Cambio (segundos de downtime):
    - bajar el Traefik de Dokploy (`docker service scale dokploy-traefik=0`, o el nombre que corresponda)
    - en Ajustes de muelle, cambiar los puertos del proxy a 80/443. El `PATCH` responde, y 2 s después muelle recrea muelle-caddy en los puertos nuevos
-   - el panel pasa a `https://panel…`, con la misma sesión: ese origen ya se acepta, aunque `MUELLE_PANEL_ORIGIN` siga con `:8443`
-   - cuando convenga (reinicia muelle, no los sitios), actualizar la variable para que los links de invitación usen el origen nuevo: `docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel… muelle_muelle`
+   - el panel pasa a `https://panel…`, con la misma sesión: ese origen se acepta desde que responde el `PATCH`, y `:8443` ya no. Los links de invitación también salen con el origen nuevo; no hay que tocar la configuración de muelle
 6. Cambiar los workflows a la action de muelle.
 7. Dokploy queda detenido hasta confirmar que todo funciona y después se desinstala.
 

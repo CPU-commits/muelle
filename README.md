@@ -110,7 +110,7 @@ docker run -i --rm -v /var/run/docker.sock:/var/run/docker.sock \
   --cloudflare-token - --http-port 8080 --https-port 8443 < cf-token.txt > install.txt
 ```
 
-El panel queda en `https://panel.tudominio.cl:8443`. Cuando apagues Dokploy, cambia los puertos del proxy a 80/443 en Ajustes, y después `MUELLE_PANEL_ORIGIN` (abajo).
+El panel queda en `https://panel.tudominio.cl:8443`. Cuando apagues Dokploy, cambia los puertos del proxy a 80/443 en Ajustes: el panel pasa a `https://panel.tudominio.cl` con la misma sesión (el `:8443` deja de servir), sin tocar la configuración de muelle.
 
 ## Actualizar
 
@@ -158,11 +158,15 @@ docker service update --secret-rm muelle_init_registry --env-rm MUELLE_INIT_REGI
 docker secret rm muelle_init_registry
 ```
 
-**Cambiar `MUELLE_PANEL_ORIGIN`** (por ejemplo, después de pasar los puertos del proxy de 8443 a 443): el panel funciona enseguida en el origen nuevo, pero los links de las invitaciones salen con el viejo hasta que se actualiza la variable (reinicia muelle, no los sitios):
+**El origen del panel** sale de los ajustes: `https://<dominio del panel>`, con `:<puerto HTTPS del proxy>` si no es 443. install guarda solo el dominio (`MUELLE_PANEL_DOMAIN`), así que al cambiar los puertos en Ajustes el panel, sus links de invitación y el `Origin` que acepta muelle pasan al puerto nuevo desde que responde el cambio, y el puerto viejo deja de pasar.
+
+**Detrás de otro proxy** (el panel en un origen que muelle no conoce): agrega ese origen, que se acepta además del de los ajustes y pasa a ser el de los links (reinicia muelle, no los sitios):
 
 ```bash
-docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl muelle_muelle
+docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.otro-proxy.cl muelle_muelle
 ```
+
+Si instalaste con una versión que escribía `MUELLE_PANEL_ORIGIN` (con el puerto de entonces), ese origen sigue pasando aunque cambies el puerto. Para que el panel siga a los ajustes: `docker service update --env-rm MUELLE_PANEL_ORIGIN --env-add MUELLE_PANEL_DOMAIN=panel.tudominio.cl muelle_muelle`.
 
 ## GitHub Action
 
@@ -238,11 +242,12 @@ Con el binario, igual: `(umask 077; muelle genkey > muelle.key)`.
 
 | Variable | Por defecto | Qué es |
 |---|---|---|
-| `MUELLE_PANEL_ORIGIN` | (obligatoria) | Origen exacto del panel, en forma canónica (con el puerto si no es el por defecto); se compara con el header `Origin` (CSRF) y arma los links de setup e invitaciones |
+| `MUELLE_PANEL_DOMAIN` | — | Dominio del panel, sin esquema ni puerto (lo escribe install). El origen del panel sale de él y del puerto HTTPS de los ajustes: es el `Origin` que se acepta (CSRF) y el de los links de setup e invitaciones |
+| `MUELLE_PANEL_ORIGIN` | (obligatoria sin `MUELLE_PANEL_DOMAIN`) | Un origen exacto más, en forma canónica (con el puerto si no es el por defecto): en desarrollo, o detrás de otro proxy. Se compara con el header `Origin` (CSRF) y, si está, arma los links de setup e invitaciones. Sin `MUELLE_PANEL_DOMAIN`, su host (si es un dominio) es el dominio del panel |
 | `MUELLE_LISTEN` | `:8080` | Dirección HTTP. No publiques este puerto: solo se llega a muelle por el proxy (ver abajo) |
 | `MUELLE_DATA_DIR` | `/data` | Carpeta de `muelle.db` y `backups/` |
 | `MUELLE_MASTER_KEY_FILE` | `/run/secrets/muelle_master_key` | Clave maestra en base64 (32 bytes), con permisos 0600 |
-| `MUELLE_SECURE_COOKIES` | `true` | `false` solo en desarrollo por http; con un `MUELLE_PANEL_ORIGIN` https, muelle no arranca |
+| `MUELLE_SECURE_COOKIES` | `true` | `false` solo en desarrollo por http; con un `MUELLE_PANEL_ORIGIN` https, o con `MUELLE_PANEL_DOMAIN`, muelle no arranca |
 
 ### Primer usuario
 
@@ -252,7 +257,7 @@ Al arrancar sin usuarios, muelle imprime en el log un link de setup de un solo u
 {"level":"INFO","msg":"todavía no hay usuarios: abre este link para crear el primero (vence en 24 h)","event":"setup_url","url":"http://127.0.0.1:18080/setup?token=<TOKEN>"}
 ```
 
-La página `/setup` llega con el panel (Fase 4); mientras tanto, el usuario se crea con `curl`, con el `token` del link. Toda petición que modifica algo con la cookie de sesión tiene que traer el header `Origin` igual a `MUELLE_PANEL_ORIGIN` (si no, `403 bad_origin`):
+La página `/setup` llega con el panel (Fase 4); mientras tanto, el usuario se crea con `curl`, con el `token` del link. Toda petición que modifica algo con la cookie de sesión tiene que traer el header `Origin` igual a `MUELLE_PANEL_ORIGIN` (o al origen de los ajustes, con `MUELLE_PANEL_DOMAIN`; si no, `403 bad_origin`):
 
 ```bash
 O=http://127.0.0.1:18080
@@ -297,7 +302,7 @@ Crear y borrar un stage crea y borra su red overlay, y borrar una app hace `dock
 
 ingress crea muelle-caddy y lo mantiene: el job `"proxy"`, al arrancar y cada 5 minutos, asegura el contenedor y las redes, y le reenvía la configuración. Cambiar los puertos del proxy en Ajustes lo recrea 2 s después de responder el `PATCH` (contrato §3.5).
 
-- **En desarrollo** (un `MUELLE_PANEL_ORIGIN` con una IP o `localhost`, que deja `panel_domain` vacío, o un binario sin versión y sin `caddy_image`), muelle no crea muelle-caddy ni toca los puertos del host, y `GET /api/v1/proxy` dice `disabled`. Los dominios y su DNS en Cloudflare funcionan igual.
+- **En desarrollo** (un `MUELLE_PANEL_ORIGIN` con una IP o `localhost`, sin `MUELLE_PANEL_DOMAIN`, que deja `panel_domain` vacío, o un binario sin versión y sin `caddy_image`), muelle no crea muelle-caddy ni toca los puertos del host, y `GET /api/v1/proxy` dice `disabled`. Los dominios y su DNS en Cloudflare funcionan igual.
 - **El token de Cloudflare** (Ajustes) necesita los permisos Zone:Read y DNS:Edit sobre las zonas de tus dominios. muelle lo verifica al guardarlo, y con él crea los registros de los dominios y el del panel, y valida los certificados por DNS-01.
 - **Una `caddy_image` propia** (`MUELLE_INIT_CADDY_IMAGE`) tiene que ser Caddy 2.10 o más nuevo, con el módulo `dns.providers.cloudflare` (contrato §3.4). Antes de la 2.10, la admin API por socket unix revisa el header `Host` y rechaza el que manda muelle (caddy#6832), y todo `POST /load` falla. La imagen `muelle-caddy` de cada versión cumple las dos cosas.
 - **Imágenes privadas:** muelle baja la muelle-caddy de cada versión nueva con el registry `ghcr.io` de Ajustes → Registries, que siembra install. Si su token vence, muelle-caddy sigue con la imagen anterior y el error de `GET /api/v1/proxy` dice que hay que actualizar la credencial en Ajustes → Registries (el token de GitHub con `read:packages` que explica la parte de install, Fase 5).
