@@ -11,6 +11,7 @@
 //	deploy  → secrets  las variables de la app y sus secretos (EnvResolver)
 //	deploy  → ingress  la red antes del deploy y las rutas después (Ingress)
 //	admin   → ingress  verificar el token de Cloudflare y aplicar los ajustes (ProxyHook)
+//	ingress → admin    el origen del panel, al volver a los puertos anteriores (PortsRolledBack)
 //
 // Lo que un módulo lee de las tablas de otro va por sus adaptadores SQL:
 // deploy lee apps (y escribe solo storage_node_id y last_deployed_at) y
@@ -183,6 +184,8 @@ func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docke
 	// En orden de dependencias: cada módulo recibe los que ya están armados.
 	c.Ingress = ingress.New(ingress.Deps{
 		DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log, Docker: engine, Version: s.Version, Options: o.ingress,
+		// Admin se arma después; ingress solo vuelve los puertos desde Run.
+		PortsRolledBack: func() { c.Admin.InvalidatePanelOrigin() },
 	})
 	c.Secrets = secrets.New(secrets.Deps{DB: db, Cipher: ciph, Clock: clk, Audit: rec, Log: log})
 	c.Deploy = deploy.New(deploy.Deps{

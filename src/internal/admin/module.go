@@ -129,3 +129,9 @@ func (m *Module) PanelOrigin(ctx context.Context) string {
 	}
 	return o
 }
+
+// InvalidatePanelOrigin descarta el origen del panel en caché: la próxima
+// petición lo lee de la base. El contenedor la llama cuando ingress vuelve
+// los puertos del proxy a los anteriores (contrato §3.5), así el Origin del
+// puerto anterior pasa enseguida.
+func (m *Module) InvalidatePanelOrigin() { m.panelOrigin.Invalidate() }
