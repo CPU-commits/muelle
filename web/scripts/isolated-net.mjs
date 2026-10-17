@@ -10,9 +10,14 @@
 // Adentro del namespace Chromium solo ve `lo`: lo que pase en la red del host no lo toca. De
 // yapa, el puerto del navegador de vitest (63315) es siempre el propio.
 //
+// Lo usan `pnpm test` (vitest) y `pnpm test:e2e` (Playwright, con el servidor del build que
+// levanta adentro). En los e2e, de yapa, los puertos 4173/4174 son del namespace: dos
+// worktrees no chocan.
+//
 // Hace falta `unshare` (util-linux) con user namespaces sin privilegios e `ip` (iproute2). Si
 // no están (macOS, un CI que los bloquea), corre el comando con la red del host y lo avisa.
-// MUELLE_TEST_HOST_NET=1 lo saltea a propósito.
+// MUELLE_TEST_HOST_NET=1 lo saltea a propósito, y E2E_REUSE_SERVER=1 también: el servidor
+// que se reusa escucha en la red del host, y adentro del namespace no se lo ve.
 import { spawn, spawnSync } from 'node:child_process'
 
 const [cmd, ...args] = process.argv.slice(2)
@@ -24,7 +29,8 @@ if (!cmd) {
 // `-r` mapea el usuario a root dentro del user namespace: hace falta para levantar `lo`, y
 // afuera los archivos que se escriben siguen siendo del usuario.
 const UNSHARE = ['--user', '--map-root-user', '--net']
-const hostNet = process.env.MUELLE_TEST_HOST_NET === '1'
+const reuseServer = process.env.E2E_REUSE_SERVER === '1'
+const hostNet = process.env.MUELLE_TEST_HOST_NET === '1' || reuseServer
 
 function canIsolate() {
 	if (process.platform !== 'linux' || hostNet) return false
@@ -35,7 +41,9 @@ function canIsolate() {
 }
 
 const isolated = canIsolate()
-if (!isolated && process.platform === 'linux' && !hostNet) {
+if (reuseServer) {
+	console.warn('[isolated-net] E2E_REUSE_SERVER=1: corre con la red del host, la del servidor')
+} else if (!isolated && process.platform === 'linux' && !hostNet) {
 	console.warn(
 		'[isolated-net] no se pudo crear un network namespace (unshare -rn): corre con la red del host',
 	)

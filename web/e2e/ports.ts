@@ -1,6 +1,7 @@
-// Los puertos donde `pnpm test:e2e` sirve sus dos builds (playwright.config.ts). Se pueden
-// cambiar para correr varios a la vez, uno por worktree, sin chocar: con el mismo puerto,
-// Playwright reusa el servidor que ya está escuchando, aunque sea el build de otro.
+// Los puertos donde `pnpm test:e2e` sirve sus dos builds (playwright.config.ts). Adentro del
+// network namespace de `scripts/isolated-net.mjs` son de esa corrida. Con la red del host
+// (`MUELLE_TEST_HOST_NET=1`, o sin `unshare`) se cambian para correr varios a la vez, uno
+// por worktree, sin chocar:
 //
 //   E2E_MOCK_PORT=4183 E2E_PROD_PORT=4184 pnpm test:e2e
 

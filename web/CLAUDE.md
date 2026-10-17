@@ -239,7 +239,7 @@ pnpm dev:mock     # sin backend: MSW contesta en el navegador
 pnpm dev          # con un `muelle serve` local (ver web/README.md)
 pnpm verify       # antes de decir que terminaste
 pnpm test:e2e     # playwright contra build-e2e/ (con y sin MSW, bajo la CSP); no toca ./build
-                  # en paralelo: E2E_MOCK_PORT=4183 E2E_PROD_PORT=4184 pnpm test:e2e
+                  # aislado de la red como pnpm test (ver "Cosas que conviene saber")
 pnpm build        # el ./build que embebe el binario (sin MSW ni mockServiceWorker.js)
 ```
 
@@ -684,22 +684,26 @@ http.post(api('/projects'), async ({ request }) => {
 - **Puertos de los e2e:** `mock` en `E2E_MOCK_PORT` (4173, el `baseURL`) y `prod` en
   `E2E_PROD_PORT` (4174). Salen de `e2e/ports.ts`: un test que necesite una URL la importa
   de ahí (`PROD_URL`, `MOCK_URL`) o usa rutas relativas al `baseURL`, nunca un puerto
-  escrito a mano. Para correr varios a la vez (un worktree por agente), cada uno con los
-  suyos: `E2E_MOCK_PORT=4183 E2E_PROD_PORT=4184 pnpm test:e2e`. Si un puerto está ocupado,
+  escrito a mano. Con el aislamiento de red (abajo), los puertos son del namespace de cada
+  corrida y varios worktrees no chocan. Sin él (`MUELLE_TEST_HOST_NET=1`, o donde
+  `unshare -rn` no anda), cada uno con los suyos:
+  `E2E_MOCK_PORT=4183 E2E_PROD_PORT=4184 pnpm test:e2e`. Si un puerto está ocupado,
   Playwright corta con "already used" en vez de reusar lo que escucha ahí (que puede ser el
   build de otro worktree): elegí otro par. `E2E_REUSE_SERVER=1` reusa un servidor propio
-  que ya dejaste corriendo.
+  que ya dejaste corriendo (y corre con la red del host, que es donde escucha).
 - `static/mockServiceWorker.js` solo queda en un build con `VITE_USE_MOCKS=1`: el adapter
   (`svelte.config.js`) lo borra de cualquier otro.
-- **`pnpm test` corre en un network namespace propio**, con solo `lo`
-  (`scripts/isolated-net.mjs`, con `unshare -rn`). Chromium corta todas las peticiones en
+- **`pnpm test` y `pnpm test:e2e` corren en un network namespace propio**, con solo `lo`
+  (`scripts/isolated-net.mjs`, con `unshare -rn`; en los e2e, el servidor del build que
+  levanta Playwright también queda adentro). Chromium corta todas las peticiones en
   curso, también las de localhost, con `ERR_NETWORK_CHANGED` cada vez que cambia una IP del
   host, y Docker cambia una cada vez que arranca o borra un contenedor (otro worktree con
   tests de integración alcanza). En los tests de navegador salían archivos con "Failed to
   fetch dynamically imported module" (0 tests) y, si el corte caía en el arranque de un
   tester, vitest esperaba para siempre al 0 % de CPU. Adentro del namespace Chromium no ve
-  esos cambios (y el puerto 63315 es siempre el propio). Si `unshare -rn` no anda (macOS, un CI que lo bloquea) avisa y corre
-  con la red del host; `MUELLE_TEST_HOST_NET=1` lo saltea. `pnpm test:watch` no se aísla.
+  esos cambios (y el puerto 63315 es siempre el propio). Si `unshare -rn` no anda (macOS,
+  un CI que lo bloquea) avisa y corre con la red del host; `MUELLE_TEST_HOST_NET=1` lo
+  saltea. `pnpm test:watch` no se aísla.
 - Si igual una corrida se queda sin progreso, `scripts/vitest-stall-watchdog.mjs` (un
   reporter) la corta a los 120 s con la lista de archivos que no terminaron:
   `testTimeout`/`hookTimeout` no cubren un tester que no arrancó.
