@@ -243,8 +243,6 @@
 	"catalog_crumb_stage": "Stage {stage}, cambiar",
 	"catalog_crumb_app": "App {app}, cambiar",
 	"catalog_crumb_projects": "Proyectos",
-	"catalog_crumb_stages": "Stages de {project}",
-	"catalog_crumb_apps": "Apps de {project}/{stage}",
 
 	"catalog_config_other_card": "otra parte de la configuración",
 

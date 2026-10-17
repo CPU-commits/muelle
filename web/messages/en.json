@@ -54,7 +54,6 @@
 	"nav_app_domains": "Domains",
 	"nav_app_deploys": "Deploys",
 	"nav_app_logs": "Logs",
-	"nav_stage_variables": "Stage variables",
 
 	"pagination_page_of": "Page {page} of {total}",
 	"pagination_prev": "Previous",

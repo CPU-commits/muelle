@@ -243,8 +243,6 @@
 	"catalog_crumb_stage": "Stage {stage}, change",
 	"catalog_crumb_app": "App {app}, change",
 	"catalog_crumb_projects": "Projects",
-	"catalog_crumb_stages": "Stages of {project}",
-	"catalog_crumb_apps": "Apps in {project}/{stage}",
 
 	"catalog_config_other_card": "another part of the configuration",
 
