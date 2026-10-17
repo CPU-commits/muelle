@@ -158,6 +158,11 @@ describe('SettingsScreen', () => {
 			.toBeVisible()
 		expect(document.body.textContent).not.toContain('MUELLE_PANEL_ORIGIN')
 		expect(document.body.textContent).not.toContain('docker service update')
+		// El panel no puede saber si la dirección nueva responde (la CSP no deja pedir a otro
+		// origen): el aviso dice qué hacer si no (contrato §3.5).
+		await expect
+			.element(screen.getByText(/Si la nueva no responde en un minuto, vuelve a la anterior/))
+			.toBeVisible()
 	})
 
 	it('si muelle volvió a los puertos anteriores, lo dice en Puertos y ofrece la dirección anterior', async () => {

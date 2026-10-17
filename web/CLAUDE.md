@@ -635,7 +635,8 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
       pone los puertos de antes en los campos y, si el panel no está en la dirección
       anterior (`https://<panel_domain>[:<puerto anterior>]`), ofrece volver. El panel no
       puede saber si la dirección nueva responde (la CSP no deja pedir a otro origen): lo
-      sabe por `ports_rollback`, en una dirección que sí responde.
+      sabe por `ports_rollback`, en una dirección que sí responde. Por eso el aviso de la
+      dirección nueva dice qué hacer si no responde: volver a la anterior.
 - En MSW: `db/ingress.ts` lee el token, las IP, el dominio del panel y los puertos de
   `db/admin.ts` (un `PATCH` de los puertos llama a `ingressDb.recreateProxy`, e
   `ingressDb.settle` termina la recreación: con el 9443, muelle vuelve a los puertos
