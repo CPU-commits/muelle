@@ -1,9 +1,10 @@
 import { resolve } from '$app/paths'
+import { untrack } from 'svelte'
 import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { withQuery } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
-import { ingressKeys, proxyNotice, proxyQuery } from '@/modules/ingress'
+import { ingressKeys, proxyFollowQuery, proxyNotice, type ProxyStatus } from '@/modules/ingress'
 import {
 	removeCloudflareTokenMutation,
 	replaceCloudflareTokenMutation,
@@ -72,6 +73,13 @@ export interface CloudflareNotice {
 	readonly body: string | null
 }
 
+/**
+ * Cuánto se espera, después de cambiar los puertos, una respuesta de `GET /proxy` que diga
+ * cómo terminó la recreación (el `PATCH` ya volvió; recrear tarda unos segundos más, y si no
+ * arranca, volver a los puertos anteriores, otros tantos). Pasado eso, el aviso se va.
+ */
+export const PORTS_WATCH_TIMEOUT_MS = 2 * 60_000
+
 function currentOrigin(): string {
 	return typeof location === 'undefined' ? '' : location.origin
 }
@@ -111,10 +119,20 @@ export class ProxySettingsViewModel {
 	readonly #removeCloudflare = createMutation(() => removeCloudflareTokenMutation(this.#client))
 	/** Se prende al cambiar los puertos si el panel sigue en este origen. */
 	#watchingProxy = $state(false)
+	/** Pasó `PORTS_WATCH_TIMEOUT_MS` sin una respuesta que diga cómo terminó. */
+	#watchExpired = $state(false)
 	/** Cuándo se guardaron: un estado del proxy de antes (en el cache) no dice nada. */
 	#watchingSince = 0
-	// `GET /proxy` (ingress): mientras dice `recreating` lo vuelve a pedir solo.
-	readonly #proxyStatus = createQuery(() => ({ ...proxyQuery(), enabled: this.#watchingProxy }))
+	// `GET /proxy` (ingress): lo vuelve a pedir mientras no diga cómo terminó, aunque falle.
+	// `waiting` lo llama TanStack adentro del efecto que suscribe la query: leído con
+	// `untrack`, o cada respuesta haría que se vuelva a suscribir, y eso cancela el pedido
+	// en curso (y descarta su respuesta).
+	readonly #proxyStatus = createQuery(() =>
+		proxyFollowQuery({
+			enabled: this.#watchingProxy,
+			waiting: () => untrack(() => this.#awaitingProxy),
+		}),
+	)
 
 	constructor(proxy: () => ProxySettings) {
 		this.#proxy = proxy
@@ -122,6 +140,24 @@ export class ProxySettingsViewModel {
 		this.#loadIp(initial)
 		this.#loadAcme(initial)
 		this.#loadPorts(initial)
+		$effect(() => {
+			if (!this.#watchingProxy) return
+			const timer = setTimeout(() => (this.#watchExpired = true), PORTS_WATCH_TIMEOUT_MS)
+			return () => clearTimeout(timer)
+		})
+	}
+
+	/** El último `GET /proxy` pedido después de guardar los puertos, si llegó alguno. */
+	get #freshProxy(): ProxyStatus | undefined {
+		const query = this.#proxyStatus
+		return query.dataUpdatedAt >= this.#watchingSince ? query.data : undefined
+	}
+
+	/** Todavía no llegó un estado que diga cómo terminó la recreación (y no pasó el plazo). */
+	get #awaitingProxy(): boolean {
+		if (!this.#watchingProxy || this.#watchExpired) return false
+		const fresh = this.#freshProxy
+		return fresh === undefined || proxyNotice(fresh) === 'recreating'
 	}
 
 	get proxy(): ProxySettings {
@@ -181,21 +217,20 @@ export class ProxySettingsViewModel {
 	/**
 	 * muelle-caddy después de cambiar los puertos, si el panel sigue en este origen (contrato
 	 * §3.5: solo el HTTP, o se entró por otra dirección). null si no se cambiaron, si se mudó
-	 * (este origen deja de responder), sin el proxy de muelle (`disabled`) o si `GET /proxy`
-	 * no contesta: los puertos ya se guardaron, esto es solo el seguimiento.
+	 * (este origen deja de responder) o sin el proxy de muelle (`disabled`): los puertos ya se
+	 * guardaron, esto es solo el seguimiento. Mientras `GET /proxy` no diga cómo terminó
+	 * (también si falla: el panel puede pasar por el mismo muelle-caddy que se recrea), dice
+	 * `recreating`, hasta `PORTS_WATCH_TIMEOUT_MS`.
 	 */
 	get recreation(): PortsRecreation | null {
 		if (!this.#watchingProxy) return null
-		const query = this.#proxyStatus
-		if (query.isError) return null
-		if (query.isPending || query.dataUpdatedAt < this.#watchingSince) {
-			return { kind: 'recreating' }
-		}
-		const notice = proxyNotice(query.data)
+		const fresh = this.#freshProxy
+		if (this.#awaitingProxy) return { kind: 'recreating' }
+		if (fresh === undefined) return null
+		const notice = proxyNotice(fresh)
 		if (notice === null) return { kind: 'done' }
-		if (notice === 'recreating') return { kind: 'recreating' }
-		if (notice === 'disabled') return null
-		return { kind: 'failed', error: query.data.error }
+		if (notice === 'disabled' || notice === 'recreating') return null
+		return { kind: 'failed', error: fresh.error }
 	}
 
 	/** Si el aviso apunta a otro origen: "Ir al panel" lleva allá. */
@@ -283,6 +318,7 @@ export class ProxySettingsViewModel {
 		this.portsError = null
 		const before = this.proxy
 		this.#watchingProxy = false
+		this.#watchExpired = false
 		try {
 			const settings = await this.#ports.mutateAsync({
 				http: this.httpPort,

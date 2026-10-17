@@ -35,6 +35,27 @@ export function proxyQuery() {
 	})
 }
 
+export interface ProxyFollowOptions {
+	readonly enabled: boolean
+	/** Si todavía falta una respuesta que diga cómo terminó (se lee en cada vuelta). */
+	readonly waiting: () => boolean
+}
+
+/**
+ * `GET /proxy` para quien espera cómo termina una recreación de muelle-caddy (Ajustes,
+ * después de cambiar los puertos): lo mismo que `proxyQuery`, y además pregunta cada 10 s
+ * mientras `waiting()` diga que sí, aunque la última respuesta haya fallado o sea de antes
+ * del cambio. El panel puede pasar por el mismo muelle-caddy que se recrea.
+ */
+export function proxyFollowQuery({ enabled, waiting }: ProxyFollowOptions) {
+	return queryOptions({
+		...proxyQuery(),
+		enabled,
+		refetchInterval: (query) =>
+			waiting() || proxySettling(query.state.data) ? PROXY_SETTLING_REFRESH_MS : false,
+	})
+}
+
 /** Mientras muelle esté resolviendo un dominio (registro, certificado), la lista se refresca sola. */
 export const PENDING_REFRESH_MS = 5_000
 

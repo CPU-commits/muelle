@@ -4,7 +4,7 @@ import { render } from 'vitest-browser-svelte'
 import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { UnavailableError, ValidationError } from '@/shared/domain'
-import type { ProxySettingsViewModel } from '..'
+import { PORTS_WATCH_TIMEOUT_MS, type ProxySettingsViewModel } from '..'
 import { toast } from '@/shared/ui/stores'
 import {
 	CloudflareUnavailable,
@@ -501,6 +501,64 @@ describe('ProxySettingsViewModel', () => {
 		ingress.getProxyStatus.mockResolvedValue(proxyStatus())
 		await client.refetchQueries({ queryKey: ingressKeys.proxy })
 		await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'done' }))
+	})
+
+	it('si GET /proxy falla mientras muelle-caddy se recrea, sigue diciendo que se recrea', async () => {
+		ingress.getProxyStatus.mockResolvedValue(proxyStatus({ status: 'recreating' }))
+		const vm = await mountViewModel()
+		vm.setField('httpPort', '8080')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+
+		// El panel lo sirve el mismo muelle-caddy que se está recreando: la petición no llega.
+		ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
+		await client.refetchQueries({ queryKey: ingressKeys.proxy })
+		expect(vm.recreation).toEqual({ kind: 'recreating' })
+
+		ingress.getProxyStatus.mockResolvedValue(proxyStatus())
+		await client.refetchQueries({ queryKey: ingressKeys.proxy })
+		await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'done' }))
+	})
+
+	it('si GET /proxy falla desde el primer pedido, también: se sigue preguntando', async () => {
+		ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
+		const vm = await mountViewModel()
+		// Lo que dejó Dominios antes del cambio: no dice nada de la recreación.
+		client.setQueryData(ingressKeys.proxy, proxyStatus(), { updatedAt: Date.now() - 60_000 })
+		vm.setField('httpPort', '8080')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+		await vi.waitFor(() =>
+			expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('error'),
+		)
+		expect(vm.recreation).toEqual({ kind: 'recreating' })
+	})
+
+	it('pasado el plazo sin una respuesta que diga cómo terminó, deja de decir que se recrea', async () => {
+		ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
+		const vm = await mountViewModel()
+		vi.useFakeTimers({
+			toFake: ['setTimeout', 'clearTimeout', 'Date'],
+			shouldAdvanceTime: true,
+		})
+		try {
+			vm.setField('httpPort', '8080')
+			mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+			vm.askSavePorts()
+			await vm.savePorts()
+			await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+			expect(vm.recreation).toEqual({ kind: 'recreating' })
+
+			await vi.advanceTimersByTimeAsync(PORTS_WATCH_TIMEOUT_MS)
+			await vi.waitFor(() => expect(vm.recreation).toBeNull())
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it('un estado del proxy de antes del cambio (en el cache, de Dominios) no cuenta como "ya escucha"', async () => {
