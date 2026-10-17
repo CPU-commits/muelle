@@ -25,7 +25,7 @@ export interface Location {
 }
 
 function link(id: string, label: string, href: string, current: boolean): MenuEntry {
-	return { kind: 'link', id, label, href, ...(current ? { icon: 'check' as const } : {}) }
+	return { kind: 'link', id, label, href, ...(current ? { current: true } : {}) }
 }
 
 // "logo / proyecto ⇅ / stage ⇅ / app ⇅" (`App-*.dc.html`). Cada selector abre un menú con

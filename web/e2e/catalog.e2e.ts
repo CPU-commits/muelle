@@ -117,6 +117,14 @@ test('los selectores del breadcrumb cambian de app en el mismo tab', async ({ pa
 	const location = page.getByRole('navigation', { name: 'Ubicación' })
 
 	await location.getByRole('button', { name: 'Stage staging, cambiar' }).click()
+	// El stage actual lleva la marca y aria-current; los otros, no.
+	await expect(page.getByRole('menuitem', { name: 'staging', exact: true })).toHaveAttribute(
+		'aria-current',
+		'page',
+	)
+	await expect(page.getByRole('menuitem', { name: 'production' })).not.toHaveAttribute(
+		'aria-current',
+	)
 	await page.getByRole('menuitem', { name: 'production' }).click()
 	await expect(page).toHaveURL(/\/auditfy\/stages\/production\/apps\/api\/configuracion$/)
 

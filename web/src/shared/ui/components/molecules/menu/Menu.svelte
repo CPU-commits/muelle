@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte'
 	import type { Attachment } from 'svelte/attachments'
 	import Icon from '../../atoms/icon/Icon.svelte'
+	import type { IconName } from '../../atoms/icon/icons'
 	import {
 		header as headerClass,
 		item as itemClass,
@@ -56,6 +57,15 @@
 	const menuId = $props.id()
 	let open = $state(false)
 	let triggerElement: HTMLButtonElement | undefined
+
+	/** El ícono de un item: el suyo, o la marca si es el lugar actual. */
+	function iconOf(entry: MenuEntry): IconName | undefined {
+		if (entry.kind === 'separator') return undefined
+		return entry.icon ?? (entry.kind === 'link' && entry.current ? 'check' : undefined)
+	}
+
+	// Con algún ícono en el menú, los items sin ícono dejan el hueco (los textos se alinean).
+	const reserveIcon = $derived(items.some((entry) => iconOf(entry) !== undefined))
 
 	function menuItems(container: HTMLElement): HTMLElement[] {
 		return Array.from(
@@ -170,6 +180,15 @@
 	}
 </script>
 
+{#snippet entryIcon(entry: MenuEntry)}
+	{@const name = iconOf(entry)}
+	{#if name}
+		<span class={itemIcon}><Icon {name} /></span>
+	{:else if reserveIcon}
+		<span class={itemIcon} aria-hidden="true"></span>
+	{/if}
+{/snippet}
+
 <!-- eslint-disable svelte/no-navigation-without-resolve -- los href llegan ya resueltos (resolve()) desde quien usa el componente -->
 <div class={root} {@attach closeOnOutsideClick}>
 	<button
@@ -214,11 +233,10 @@
 								tabindex="-1"
 								href={entry.href}
 								class={itemClass}
+								aria-current={entry.current ? 'page' : undefined}
 								onclick={() => close(false)}
 							>
-								{#if entry.icon}
-									<span class={itemIcon}><Icon name={entry.icon} /></span>
-								{/if}
+								{@render entryIcon(entry)}
 								{entry.label}
 							</a>
 						</li>
@@ -232,9 +250,7 @@
 								class={[itemClass, entry.tone === 'danger' && itemDanger]}
 								onclick={() => select(entry)}
 							>
-								{#if entry.icon}
-									<span class={itemIcon}><Icon name={entry.icon} /></span>
-								{/if}
+								{@render entryIcon(entry)}
 								{entry.label}
 							</button>
 						</li>

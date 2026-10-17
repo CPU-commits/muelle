@@ -80,7 +80,7 @@ function menu(items: BreadcrumbItem[], index: number): BreadcrumbMenu {
 const links = (entries: readonly MenuEntry[]) =>
 	entries.flatMap((entry) =>
 		entry.kind === 'link'
-			? [{ label: entry.label, href: entry.href, current: entry.icon === 'check' }]
+			? [{ label: entry.label, href: entry.href, current: entry.current === true }]
 			: [],
 	)
 

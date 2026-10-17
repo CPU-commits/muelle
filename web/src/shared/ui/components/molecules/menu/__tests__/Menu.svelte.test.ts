@@ -3,6 +3,7 @@ import { page, userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-svelte'
 import MenuConfirmHarness from './MenuConfirmHarness.svelte'
 import MenuHarness from './MenuHarness.svelte'
+import SelectorMenuHarness from './SelectorMenuHarness.svelte'
 import TallMenuHarness from './TallMenuHarness.svelte'
 
 function itemRects(): DOMRect[] {
@@ -154,6 +155,68 @@ describe('Menu largo a 360×640', () => {
 		await last.click()
 
 		expect(onSelect).toHaveBeenCalledWith('proyecto-20')
+	})
+})
+
+// Dónde empieza el texto de un item (sin el ícono): el rect de su último nodo de texto.
+function labelLeft(item: Element): number {
+	const text = [...item.childNodes].findLast(
+		(node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '',
+	)
+	if (!text) throw new Error(`sin texto: ${item.outerHTML}`)
+	const range = document.createRange()
+	range.selectNodeContents(text)
+	return range.getBoundingClientRect().left
+}
+
+function labelLefts(): number[] {
+	return [...document.querySelectorAll('[role="menuitem"]')].map(labelLeft)
+}
+
+// Un menú con íconos en algunos items (la marca del actual en un selector del breadcrumb, el
+// + y la papelera de las opciones de un proyecto): los textos empiezan todos en la misma x.
+describe('Menu con y sin íconos', () => {
+	it('en un selector, el texto del actual (con la marca) y el de los otros se alinean', async () => {
+		const screen = await render(SelectorMenuHarness)
+
+		await screen.getByRole('button', { name: 'Proyecto auditfy, cambiar' }).click()
+		const lefts = labelLefts()
+
+		expect(lefts).toHaveLength(3)
+		for (const left of lefts) expect(left).toBeCloseTo(lefts[0] ?? Number.NaN, 0)
+	})
+
+	it('el actual lleva aria-current="page" y la marca; los otros, ninguno de los dos', async () => {
+		const screen = await render(SelectorMenuHarness)
+
+		await screen.getByRole('button', { name: 'Proyecto auditfy, cambiar' }).click()
+		const current = screen.getByRole('menuitem', { name: 'auditfy' })
+		const other = screen.getByRole('menuitem', { name: 'extractor' })
+
+		await expect.element(current).toHaveAttribute('aria-current', 'page')
+		await expect.element(other).not.toHaveAttribute('aria-current')
+		expect(current.element().querySelector('svg')).not.toBeNull()
+		expect(other.element().querySelector('svg')).toBeNull()
+	})
+
+	it('en las opciones de un proyecto, "Renombrar" (sin ícono) se alinea con los otros', async () => {
+		const screen = await render(SelectorMenuHarness)
+
+		await screen.getByRole('button', { name: 'Opciones de auditfy' }).click()
+		const lefts = labelLefts()
+
+		expect(lefts).toHaveLength(3)
+		for (const left of lefts) expect(left).toBeCloseTo(lefts[0] ?? Number.NaN, 0)
+	})
+
+	it('sin ningún ícono no reserva el lugar: el texto va pegado al borde del item', async () => {
+		const screen = await render(SelectorMenuHarness)
+
+		await screen.getByRole('button', { name: 'Opciones de FOO' }).click()
+		const item = document.querySelector('[role="menuitem"]') as HTMLElement
+
+		// 10 px de padding: sin un hueco de 16 px + 8 px de separación delante.
+		expect(labelLeft(item) - item.getBoundingClientRect().left).toBeLessThan(16)
 	})
 })
 

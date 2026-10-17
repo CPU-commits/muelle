@@ -94,8 +94,12 @@ export const itemDanger = style({
 	color: theme.colors.status.errorText,
 })
 
+// El ícono de un item. Si algún item del menú tiene uno, los que no tienen dejan el mismo
+// hueco vacío: así todos los textos empiezan en la misma x.
 export const itemIcon = style({
 	display: 'flex',
+	flex: 'none',
+	width: '16px',
 	color: theme.colors.text.tertiary,
 })
 
