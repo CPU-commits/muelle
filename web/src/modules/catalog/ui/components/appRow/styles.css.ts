@@ -1,4 +1,4 @@
-import { style } from '@vanilla-extract/css'
+import { style, styleVariants } from '@vanilla-extract/css'
 import { theme } from '@/shared/ui/themes/theme.css'
 
 // Una app en Proyectos: toda la fila es un link. Las columnas tienen el ancho del
@@ -44,6 +44,15 @@ export const status = style({
 	color: theme.colors.text.secondary,
 })
 
+// El texto del estado lleva el color de su punto cuando hay algo que mirar (el diseño):
+// ámbar una degradada, rojo una caída.
+export const statusTones = styleVariants({
+	ok: {},
+	idle: {},
+	warn: { color: theme.colors.status.warnText },
+	bad: { color: theme.colors.status.errorText },
+})
+
 export const image = style({
 	flex: '2 1 220px',
 	minWidth: 0,
@@ -60,6 +69,9 @@ export const deploy = style({
 	fontSize: theme.typography.fontSize[13],
 	color: theme.colors.text.secondary,
 })
+
+// "· falló" después del último deploy.
+export const failed = style({ color: theme.colors.status.errorText })
 
 export const chevron = style({
 	display: 'inline-flex',

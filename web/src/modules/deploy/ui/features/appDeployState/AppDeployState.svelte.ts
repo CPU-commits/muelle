@@ -17,12 +17,12 @@ import {
 } from '../../../domain'
 import { healthLabel, healthTone } from '../../components/labels/deployLabels'
 
-// Para la fila de una app en Proyectos (F2, Main.dc.html): las columnas "estado" e
-// "imagen" (de `GET …/status` y del último deploy exitoso) y "último deploy". Se crea en
-// el componente de la fila, como un viewModel:
+// Para la fila de una app en Proyectos (Main.dc.html): las columnas "estado" e "imagen"
+// (de `GET …/status` y del último deploy exitoso) y "último deploy". Cumple el
+// `AppRowDeploy` de catalog: la ruta `(app)/+page.svelte` se la pasa a `ProjectsScreen`
+// como `appDeploy`, y el `AppRow` de catalog la crea al montarse, como un viewModel:
 //
-//   const state = new AppDeployState(() => ({ project, stage, app }))
-//   <StatusDot status={state.tone} />  {state.statusText}  {state.lastDeployText}
+//   new AppDeployState(() => ({ project, stage, app }), () => laFilaSeVe)
 //
 // Si el backend no tiene la Fase 2 (o falla), todo dice "—" y no hay error: la lista de
 // proyectos funciona igual. No se refresca solo.

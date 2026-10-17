@@ -1,48 +1,52 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte'
+	import { untrack } from 'svelte'
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import { Badge, formatRelative, Icon, StatusDot } from '@/shared/ui'
-	import { type App, appContents } from '../../../domain'
+	import type { App } from '../../../domain'
 	import { kindLabel } from '../catalogMessages'
+	import type { AppRowDeployFactory } from './appRowDeploy'
+	import { AppRowViewModel } from './AppRow.viewModel.svelte.ts'
 	import {
 		chevron,
-		deploy,
+		deploy as deployClass,
 		dot as dotClass,
+		failed,
 		image,
 		name,
 		row,
 		slug,
 		status as statusClass,
+		statusTones,
 	} from './styles.css'
+	import { whenVisible } from './whenVisible'
 
-	// Una app en Proyectos. El estado ("Corriendo · 2/2") y el último deploy ("#143 · hace
-	// 12 min") son de la Fase 2: llegan por los snippets. Sin ellos, el punto marca las
-	// apps sin desplegar, la columna de estado dice el tipo y la del deploy, cuándo fue.
+	// Una app en Proyectos. El estado ("Corriendo · 2/2"), la imagen que corre y el último
+	// deploy ("#143 · hace 12 min") son de la Fase 2: llegan con `deploy` (lo crea la fila al
+	// montarse y pide recién cuando la fila se ve). Sin él, el punto marca las apps sin
+	// desplegar, la columna de estado dice el tipo y la del deploy, cuándo fue.
 	type Props = {
 		app: App
 		href: string
-		statusDot?: Snippet<[App]> | undefined
-		status?: Snippet<[App]> | undefined
-		lastDeploy?: Snippet<[App]> | undefined
+		deploy?: AppRowDeployFactory | undefined
 	}
 
-	let { app, href, statusDot, status, lastDeploy }: Props = $props()
+	let { app, href, deploy }: Props = $props()
 
-	const contents = $derived(appContents(app))
-	const what = $derived(
-		contents.kind === 'image'
-			? contents.image
-			: contents.services.join(' · ') || m.catalog_app_no_services(),
+	// `untrack`: `deploy` se lee una vez, a propósito. La fila crea su estado al montarse,
+	// como un viewModel, y no lo vuelve a crear.
+	const vm = new AppRowViewModel(
+		() => app,
+		untrack(() => deploy),
 	)
 </script>
 
 <!-- eslint-disable svelte/no-navigation-without-resolve -- el href llega ya resuelto (resolve()) desde el viewModel -->
 <li>
-	<a {href} class={row}>
+	<a {href} class={row} {@attach vm.deploy && whenVisible(vm.markSeen)}>
 		<span class={name}>
 			<span class={dotClass}>
-				{#if statusDot}
-					{@render statusDot(app)}
+				{#if vm.deploy}
+					<StatusDot status={vm.deploy.tone} />
 				{:else if app.lastDeployedAt === null}
 					<StatusDot status="idle" label={m.catalog_badge_never()} />
 				{/if}
@@ -55,17 +59,18 @@
 				<Badge tone="warn" shape="pill" dot>{m.catalog_app_pending()}</Badge>
 			{/if}
 		</span>
-		<span class={statusClass}>
-			{#if status}
-				{@render status(app)}
-			{:else}
-				{kindLabel(app.kind)}
-			{/if}
-		</span>
-		<span class={image} title={what}>{what}</span>
-		<span class={deploy}>
-			{#if lastDeploy}
-				{@render lastDeploy(app)}
+		{#if vm.deploy}
+			<span class={[statusClass, statusTones[vm.deploy.tone]]}>{vm.deploy.statusText}</span>
+		{:else}
+			<span class={statusClass}>{kindLabel(app.kind)}</span>
+		{/if}
+		<span class={image} title={vm.image}>{vm.image}</span>
+		<span class={deployClass}>
+			{#if vm.deploy}
+				{vm.deploy.lastDeployText}
+				{#if vm.deploy.lastDeployFailed}
+					<span class={failed}>· {vm.deploy.lastDeployFailedText}</span>
+				{/if}
 			{:else if app.lastDeployedAt}
 				{formatRelative(app.lastDeployedAt)}
 			{:else}

@@ -16,6 +16,7 @@ export type {
 	StageSlug,
 } from './domain'
 export { appRefFrom, appStackName, serviceTargets, stageNetwork } from './domain'
+export type { AppRowDeploy, AppRowDeployFactory } from './ui'
 export {
 	AppBreadcrumb,
 	AppChangesBadge,

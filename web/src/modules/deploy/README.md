@@ -327,10 +327,12 @@ logfmt o `level`/`severity` de un JSON).
   `kind`, `pendingChanges`, `pendingChangesHref` y `healthcheck` como texto: sin ellos los
   saca de la app en el catálogo, con `appQuery`),
   `DeploysScreen` (`deployParam` = el `?deploy=` de la URL, y `kind`) y `LogsScreen`.
-- Para Proyectos (F2): `AppDeployState`, una clase que se crea en la fila:
+- Para Proyectos: `AppDeployState`, una clase que se crea en la fila:
   `new AppDeployState(() => ref, () => enabled)` (`enabled` opcional: false no pide nada
   y todo dice "—"). Da `tone`, `statusText`, `lastDeployText`, `lastDeployFailed`,
-  `image` e `imageShort`; "—" si la Fase 2 no está o falla, sin reintentos.
+  `image` e `imageShort`; "—" si la Fase 2 no está o falla, sin reintentos. La ruta
+  `(app)/+page.svelte` se la pasa a `ProjectsScreen` de `catalog` como `appDeploy` (un
+  `AppRowDeployFactory`), y cada fila la crea con `enabled` en false hasta que se ve.
 - Queries: `appStatusQuery(ref, options)`, `deploysQuery(ref, options)` y
   `lastDeployQuery(ref, options)` (comparte el cache de `deploysQuery`), con
   `options = { refreshEvery?, enabled?, noRetry? }`; `deployKeys` para invalidar.

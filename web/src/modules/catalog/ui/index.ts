@@ -1,3 +1,4 @@
+export type { AppRowDeploy, AppRowDeployFactory } from './components/appRow'
 export { AppChangesBadge, AppIdentity } from './components/appIdentity'
 export { AppBreadcrumb, StageBreadcrumb } from './features/locationBreadcrumb'
 export { AppConfigScreen } from './screens/appConfig'

@@ -565,6 +565,14 @@ desconocidos): mientras no existan, no se mandan.
 
 **Lo que un módulo usa de otro** (siempre por el barrel):
 
+- Proyectos (`catalog`) no importa `deploy`: la ruta `(app)/+page.svelte` le pasa
+  `appDeploy`, un `AppRowDeployFactory` que crea un `AppDeployState` (barrel de `deploy`) por
+  fila. Cada fila lo crea al montarse y le pasa `enabled`, que se prende una sola vez cuando
+  la fila entra en la pantalla (`IntersectionObserver`, `whenVisible`): el estado se pide una
+  vez por fila (contrato §2.8) y las filas que no se ven no piden nada. Usa el cache de
+  `appStatusQuery` (5 s) y `deploysQuery` (10 s), el mismo del Resumen y Deploys, sin
+  refrescos ni reintentos. Si la Fase 2 no está o falla, la fila dice "—" y la imagen es la
+  del spec (o los servicios del compose).
 - Dominios pide los destinos al catálogo: `appTargetsQuery(ref)` de `catalog` (un
   `servicio:puerto` por cada puerto que declara cada servicio, comparte el cache de
   `appQuery`).

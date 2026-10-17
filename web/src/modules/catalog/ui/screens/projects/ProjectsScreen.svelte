@@ -14,8 +14,8 @@
 		PageHeader,
 		SearchInput,
 	} from '@/shared/ui'
-	import { type App, projectInitial, type Stage, stageNetwork } from '../../../domain'
-	import { AppRow } from '../../components/appRow'
+	import { projectInitial, type Stage, stageNetwork } from '../../../domain'
+	import { AppRow, type AppRowDeployFactory } from '../../components/appRow'
 	import {
 		NewAppDialog,
 		NewProjectDialog,
@@ -44,17 +44,17 @@
 		variablesLink,
 	} from './styles.css'
 
-	// Lo de la Fase 2 entra por snippets, para que F2 los llene con el módulo `deploy` sin
-	// tocar esta pantalla: el punto y el texto del estado ("Corriendo · 2/2"), el último
-	// deploy ("#143 · hace 12 min") y la cantidad de variables del stage (de `secrets`).
+	// Lo de otros módulos entra desde la ruta, porque el catálogo no los importa:
+	// - `appDeploy` (Fase 2, `AppDeployState` de `deploy`): el estado de cada app ("Corriendo
+	//   · 2/2"), la imagen que corre y el último deploy ("#143 · hace 12 min"). Cada fila lo
+	//   crea al montarse y pide recién cuando se ve;
+	// - `stageVariablesCount`: la cantidad de variables del stage (de `secrets`).
 	type Props = {
-		appStatusDot?: Snippet<[App]>
-		appStatus?: Snippet<[App]>
-		appLastDeploy?: Snippet<[App]>
+		appDeploy?: AppRowDeployFactory
 		stageVariablesCount?: Snippet<[Stage]>
 	}
 
-	let { appStatusDot, appStatus, appLastDeploy, stageVariablesCount }: Props = $props()
+	let { appDeploy, stageVariablesCount }: Props = $props()
 
 	const vm = new ProjectsViewModel()
 </script>
@@ -175,13 +175,7 @@
 								})}
 							>
 								{#each stageNode.apps as app (app.slug)}
-									<AppRow
-										{app}
-										href={vm.appHref(app)}
-										statusDot={appStatusDot}
-										status={appStatus}
-										lastDeploy={appLastDeploy}
-									/>
+									<AppRow {app} href={vm.appHref(app)} deploy={appDeploy} />
 								{/each}
 							</ul>
 						{:else}
