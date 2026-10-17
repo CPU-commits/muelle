@@ -190,6 +190,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
   "actor_name": "github-actions",
   "error": null,
   "superseded_by": null,
+  "routes_warning": false,
   "created_at": "2026-10-10T14:19:49.12Z",
   "started_at": "2026-10-10T14:19:49.3Z",
   "finished_at": "2026-10-10T14:20:41.002Z"
@@ -208,6 +209,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
 | `actor_name` | string | El username o el nombre del token **al crear el deploy**: sigue aunque se borren. Nunca es null |
 | `error` | string o null | Por qué falló, en una línea de hasta 500 caracteres, ya enmascarada. Null si no falló |
 | `superseded_by` | int o null | El deploy que lo dejó `superseded` |
+| `routes_warning` | bool | `true` si el paso 7 (§7 del diseño) no pudo actualizar las rutas de Caddy y escribió la advertencia de §2.11. Un error de Caddy no hace fallar el deploy (§13 del diseño): la app corre, pero Caddy puede no tener sus rutas nuevas, y el motivo está en `GET /proxy` (`error`, §3.3, solo con sesión). Se marca antes de escribir la línea: quien la ve en el log ya la encuentra en el deploy. `false` en los demás, también mientras corre y en uno que no llegó al paso 7. Nunca null |
 | `created_at` | RFC 3339 | |
 | `started_at`, `finished_at` | RFC 3339 o null | Null mientras no empezó o no terminó. Un `superseded` tiene `finished_at` y no `started_at` |
 
@@ -513,7 +515,7 @@ Se valida en su forma canónica, sin normalizar: minúsculas, etiquetas `[a-z0-9
 
 ### 2.11 Lo que escribe el deploy en el log
 
-No es un contrato de texto (los clientes deciden por `status`), pero cada paso de §7 deja al menos una línea, en este orden:
+No es un contrato de texto (los clientes deciden por `status`, y por `routes_warning` para la advertencia de Caddy), pero cada paso de §7 deja al menos una línea, en este orden:
 
 ```
 … deploy #145 de auditfy/staging/api (api · github-actions)
@@ -535,6 +537,7 @@ No es un contrato de texto (los clientes deciden por `status`), pero cada paso d
   - "La última tarea fallida" es la que nombra Swarm en el mensaje de la actualización (`… early termination of task <id>`); si no nombra ninguna, la más nueva de **ese** deploy que falló o fue rechazada (una de antes, que Swarm ya reintentó, no cuenta).
   - Una tarea que no pasó el healthcheck termina `complete` y sin `Status.Err`: el log lo dice (`web: última tarea fallida: terminó en complete, sin un motivo de Swarm`) y trae igual sus líneas.
 - Un error de `SyncRoutes` es solo una advertencia (§13). `SyncRoutes` es el `Sync` de ingress (§3.4): con el proxy deshabilitado no manda nada y no falla, así que la línea es `rutas de Caddy actualizadas`.
+  - El deploy lleva la advertencia también como dato, `routes_warning: true` (§2.1): el panel la muestra por ese campo, no por el texto de la línea. Una línea que no entra en el log (el tope de 256 KB, §2.5) no le quita la marca.
   - La advertencia no trae el error. El log del deploy lo lee un token del proyecto, y el mensaje de Caddy puede nombrar los hosts y los upstreams de otros proyectos. El motivo queda en `GET /proxy` (`error`, §3.3, solo con sesión) y en el log del servidor.
 - Un deploy que cerró la reconciliación (§1.2) suma "muelle se reinició durante el deploy" antes de su resultado.
 - Todo lo que se escribe pasa por el enmascarado (§2.5), también la salida del CLI y los mensajes de error del render.
@@ -1146,6 +1149,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Estado y logs | Fase 2 | Fase 2 (§17 del diseño decía 3) | Mismo cliente de Docker que el deploy |
 | `actor_name` | Null si el actor ya no existe | Siempre string: se copia al crear el deploy | No se pierde al borrar el usuario o el token |
 | Deploy | — | Campos nuevos `actor_id` y `superseded_by` | La Action informa el deploy que lo reemplazó (§14) |
+| Advertencia de Caddy del paso 7 | El panel la reconoce por el texto de la línea del log (`advertencia: no se pudo actualizar Caddy`) | El deploy suma `routes_warning` (bool, §2.1), `true` cuando escribió esa advertencia | El texto del log no es un contrato (§2.11) |
 | Qué servicios fija un rollback | El panel lo adivina comparando la ref y el digest de los deploys | El deploy suma `requested_images` (servicio → ref pedida, §2.1): un servicio cuya ref pedida trae `@sha256:` está fijo en ese digest | Sin adivinar: comparar daba un falso positivo cuando la configuración o un override volvía al mismo digest, y perdía el digest fijo cuando el rollback salía del historial de 22 |
 | `images` en cola | Todos los servicios, sin digest | Solo los overrides del cuerpo; todos con digest desde el paso 2 | La configuración se lee al correr, no al encolar |
 | `POST …/deploys` | — | La respuesta suma `status: "queued"` y el header `Location` | Compatible |

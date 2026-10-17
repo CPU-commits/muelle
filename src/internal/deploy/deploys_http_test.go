@@ -148,6 +148,10 @@ func TestDeploysListAndGet(t *testing.T) {
 	h.clock.Advance(180 * time.Millisecond)
 	ref := "ghcr.io/x/api:1@sha256:" + strings.Repeat("a", 64)
 	h.finishWith(t, d1.ID, entity.StatusSucceeded, map[string]string{"api": "ghcr.io/x/api:1"}, map[string]string{"api": ref})
+	// El paso 7 de d1 no pudo actualizar Caddy.
+	if err := depsqlite.NewDeployRepository(h.db).SetRoutesWarning(context.Background(), d1.ID); err != nil {
+		t.Fatal(err)
+	}
 	d2 := expectQueued(t, h.c.Do("POST", apiPath+"/deploys", map[string]string{"image": "ghcr.io/x/api:2"}, session()), apiPath)
 	d3 := expectQueued(t, h.c.Do("POST", apiPath+"/deploys", nil, session()), apiPath)
 	x := expectQueued(t, h.c.Do("POST", infraPath+"/deploys", nil, session()), infraPath)
@@ -159,15 +163,15 @@ func TestDeploysListAndGet(t *testing.T) {
 		t.Fatalf("lista: %s", w.Body)
 	}
 	for _, d := range list {
-		if len(d) != 13 {
+		if len(d) != 14 {
 			t.Fatalf("faltan o sobran campos (contrato §2.1): %v", d)
 		}
 	}
-	// El succeeded: imágenes resueltas y las pedidas, el actor del token, las
-	// tres fechas.
+	// El succeeded: imágenes resueltas y las pedidas, la advertencia de
+	// Caddy, el actor del token, las tres fechas.
 	want := map[string]any{
 		"id": float64(d1.ID), "status": "succeeded", "trigger": "api", "images": map[string]any{"api": ref},
-		"requested_images": map[string]any{"api": "ghcr.io/x/api:1"}, "error": nil, "superseded_by": nil,
+		"requested_images": map[string]any{"api": "ghcr.io/x/api:1"}, "error": nil, "superseded_by": nil, "routes_warning": true,
 		"actor_type": "token", "actor_id": float64(4), "actor_name": "github-actions",
 		"created_at": "2026-10-10T14:19:49.12Z", "started_at": "2026-10-10T14:19:49.3Z", "finished_at": "2026-10-10T14:19:50.3Z",
 	}
@@ -177,14 +181,15 @@ func TestDeploysListAndGet(t *testing.T) {
 	// resolver).
 	assertJSON(t, list[1], map[string]any{
 		"id": float64(d2.ID), "status": "superseded", "trigger": "panel", "images": map[string]any{"api": "ghcr.io/x/api:2"},
-		"requested_images": map[string]any{}, "error": nil, "superseded_by": float64(d3.ID),
+		"requested_images": map[string]any{}, "error": nil, "superseded_by": float64(d3.ID), "routes_warning": false,
 		"actor_type": "user", "actor_id": float64(1), "actor_name": "felipe",
 		"created_at": "2026-10-10T14:19:49.3Z", "started_at": nil, "finished_at": "2026-10-10T14:19:49.3Z",
 	})
-	// El queued: images y requested_images {} (nunca null).
+	// El queued: images y requested_images {} (nunca null), y routes_warning
+	// false.
 	assertJSON(t, list[0], map[string]any{
 		"id": float64(d3.ID), "status": "queued", "trigger": "panel", "images": map[string]any{},
-		"requested_images": map[string]any{}, "error": nil, "superseded_by": nil,
+		"requested_images": map[string]any{}, "error": nil, "superseded_by": nil, "routes_warning": false,
 		"actor_type": "user", "actor_id": float64(1), "actor_name": "felipe",
 		"created_at": "2026-10-10T14:19:49.3Z", "started_at": nil, "finished_at": nil,
 	})

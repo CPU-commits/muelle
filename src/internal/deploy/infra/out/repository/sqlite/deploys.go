@@ -29,7 +29,7 @@ var _ repository.DeployRepository = (*DeployRepository)(nil)
 func NewDeployRepository(db *sqlitedb.DB) *DeployRepository { return &DeployRepository{db: db} }
 
 const deploySelect = `SELECT id, app_id, status, trigger, images, requested_images, config_images,
-	actor_type, actor_id, actor_name, superseded_by, error, created_at, started_at, finished_at FROM deploys`
+	actor_type, actor_id, actor_name, superseded_by, error, routes_warning, created_at, started_at, finished_at FROM deploys`
 
 // encodeImages serializa un mapa servicio → ref con las claves ordenadas;
 // nil es {}.
@@ -58,7 +58,7 @@ func scanDeploy(s scanner) (entity.Deploy, error) {
 	var errText sql.NullString
 	var created int64
 	if err := s.Scan(&d.ID, &d.AppID, &status, &trigger, &images, &requested, &config,
-		&d.ActorType, &actorID, &d.ActorName, &superseded, &errText, &created, &started, &finished); err != nil {
+		&d.ActorType, &actorID, &d.ActorName, &superseded, &errText, &d.RoutesWarning, &created, &started, &finished); err != nil {
 		return entity.Deploy{}, err
 	}
 	d.Status, d.Trigger = entity.Status(status), entity.Trigger(trigger)
@@ -238,6 +238,11 @@ func (r *DeployRepository) SetImages(ctx context.Context, id int64, requested, c
 	res, err := r.db.Conn(ctx).ExecContext(ctx,
 		`UPDATE deploys SET requested_images = ?, config_images = ?, images = ? WHERE id = ?`,
 		cols[0], cols[1], cols[2], id)
+	return affected(res, err)
+}
+
+func (r *DeployRepository) SetRoutesWarning(ctx context.Context, id int64) error {
+	res, err := r.db.Conn(ctx).ExecContext(ctx, `UPDATE deploys SET routes_warning = 1 WHERE id = ?`, id)
 	return affected(res, err)
 }
 

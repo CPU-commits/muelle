@@ -43,6 +43,7 @@ type DeployRes struct {
 	ActorName       string            `json:"actor_name"`
 	Error           *string           `json:"error"`
 	SupersededBy    *int64            `json:"superseded_by"`
+	RoutesWarning   bool              `json:"routes_warning"`
 	CreatedAt       time.Time         `json:"created_at"`
 	StartedAt       *time.Time        `json:"started_at"`
 	FinishedAt      *time.Time        `json:"finished_at"`
@@ -61,7 +62,7 @@ func newDeployRes(d entity.Deploy) DeployRes {
 		ID: d.ID, Status: string(d.Status), Trigger: string(d.Trigger),
 		Images: orEmpty(d.Images), RequestedImages: orEmpty(d.RequestedImages),
 		ActorType: d.ActorType, ActorID: d.ActorID, ActorName: d.ActorName,
-		Error: d.Error, SupersededBy: d.SupersededBy,
+		Error: d.Error, SupersededBy: d.SupersededBy, RoutesWarning: d.RoutesWarning,
 		CreatedAt: millis(d.CreatedAt), StartedAt: millisPtr(d.StartedAt), FinishedAt: millisPtr(d.FinishedAt),
 	}
 }

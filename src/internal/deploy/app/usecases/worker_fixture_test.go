@@ -67,11 +67,13 @@ func (e *fakeEnv) ResolveEnv(ctx context.Context, appID int64) (map[string]strin
 
 // fakeIngress cuenta las llamadas; SyncRoutes devuelve syncErr o, si es nil,
 // ErrNotImplemented, así los tests del worker pasan por la advertencia del
-// paso 7 (un error de SyncRoutes no hace fallar el deploy).
+// paso 7 (un error de SyncRoutes no hace fallar el deploy). Con syncOK
+// devuelve nil.
 type fakeIngress struct {
 	mu        sync.Mutex
 	ensureErr error
 	syncErr   error
+	syncOK    bool
 	onEnsure  func()
 	ensured   []string
 	synced    int
@@ -92,8 +94,11 @@ func (i *fakeIngress) SyncRoutes(ctx context.Context) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.synced++
-	if i.syncErr != nil {
+	switch {
+	case i.syncErr != nil:
 		return i.syncErr
+	case i.syncOK:
+		return nil
 	}
 	return shared.ErrNotImplemented
 }

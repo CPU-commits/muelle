@@ -151,6 +151,45 @@ func TestDeployCreateAppGone(t *testing.T) {
 	}
 }
 
+// SetRoutesWarning marca que el paso 7 no pudo actualizar Caddy (contrato
+// §2.1): un deploy nace sin la marca, y la lee cualquier consulta.
+func TestDeploySetRoutesWarning(t *testing.T) {
+	db := sqlitetest.New(t)
+	r := NewDeployRepository(db)
+	ctx := context.Background()
+	app := seedApp(t, db, "api")
+	d := queued(t, r, app, t0, nil)
+	other := queued(t, r, seedApp(t, db, "web"), t0, nil)
+	if mustGet(t, r, d.ID).RoutesWarning {
+		t.Fatal("un deploy nuevo ya trae routes_warning")
+	}
+	closeAs(t, r, d, entity.StatusRunning)
+	if err := r.SetRoutesWarning(ctx, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Finish(ctx, d.ID, entity.StatusSucceeded, nil, t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGet(t, r, d.ID); !got.RoutesWarning || got.Status != entity.StatusSucceeded {
+		t.Fatalf("GetByID: %+v", got)
+	}
+	if got, err := r.Get(ctx, app, d.ID); err != nil || !got.RoutesWarning {
+		t.Fatalf("Get: %+v %v", got, err)
+	}
+	if list, err := r.List(ctx, app); err != nil || len(list) != 1 || !list[0].RoutesWarning {
+		t.Fatalf("List: %+v %v", list, err)
+	}
+	if cur, err := r.Current(ctx, app); err != nil || cur == nil || !cur.RoutesWarning {
+		t.Fatalf("Current: %+v %v", cur, err)
+	}
+	if mustGet(t, r, other.ID).RoutesWarning {
+		t.Fatal("la marca pasó a otro deploy")
+	}
+	if err := r.SetRoutesWarning(ctx, 9999); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("un deploy que no existe: %v", err)
+	}
+}
+
 func TestDeployGetListAndLifecycle(t *testing.T) {
 	db := sqlitetest.New(t)
 	r := NewDeployRepository(db)

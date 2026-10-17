@@ -102,6 +102,25 @@ func TestRunDeployCaddyWarningIsGeneric(t *testing.T) {
 	if !slices.Contains(w.texts(t, id), caddyWarning) {
 		t.Fatalf("falta la advertencia %q:\n%s", caddyWarning, log)
 	}
+	// La advertencia también va como dato (contrato §2.1): el panel no decide
+	// por el texto del log.
+	if !d.RoutesWarning {
+		t.Fatalf("routes_warning false con la advertencia en el log: %+v", d)
+	}
+}
+
+// Si Caddy se actualizó, el deploy no trae routes_warning (contrato §2.1).
+func TestRunDeployRoutesUpdatedNoWarning(t *testing.T) {
+	w := newWorld(t)
+	w.ingress.syncOK = true
+	id := w.deploy(t, apiRef, nil, nil)
+	d := w.runOK(t, w.apiID)
+	if d.Status != entity.StatusSucceeded || d.RoutesWarning {
+		t.Fatalf("deploy: %+v\n%s", d, w.log(t, id))
+	}
+	if !slices.Contains(w.texts(t, id), "rutas de Caddy actualizadas") || slices.Contains(w.texts(t, id), caddyWarning) {
+		t.Fatalf("log:\n%s", w.log(t, id))
+	}
 }
 
 // noComposeInDB verifica que ninguna columna de ninguna tabla contiene marker

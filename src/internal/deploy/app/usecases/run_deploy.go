@@ -80,8 +80,9 @@ type run struct {
 	m     service.Masker
 	log   *DeployLog
 	creds map[string]entity.Registry // host → credencial (paso 2), para el paso 5
-	// logErr es el primer error al escribir una línea: el deploy sigue (la
-	// línea es solo informativa) y Execute lo devuelve al final.
+	// logErr es el primer error al escribir una línea o la marca de
+	// routes_warning: el deploy sigue (son solo informativas) y Execute lo
+	// devuelve al final.
 	logErr error
 }
 
@@ -572,7 +573,9 @@ func failedTask(tasks []service.SwarmTask, appliedAt time.Time, hint string) *se
 	return nil
 }
 
-// routes es el paso 7: un error de SyncRoutes es solo una advertencia (§13).
+// routes es el paso 7: un error de SyncRoutes es solo una advertencia (§13),
+// en el log y en deploys.routes_warning (contrato §2.1), así el panel no
+// decide por el texto del log.
 //
 // La advertencia no lleva el error: el log del deploy lo lee un token del
 // proyecto, y el error de Caddy puede traer los hosts y los upstreams de
@@ -588,6 +591,11 @@ func (r *run) routes(ctx context.Context) error {
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	// La marca va antes que la línea: quien ve la advertencia por el stream
+	// ya la encuentra en el deploy. Sin cancelación, como las líneas.
+	if err := r.u.Deploys.SetRoutesWarning(context.WithoutCancel(ctx), r.d.ID); err != nil && r.logErr == nil {
+		r.logErr = err
 	}
 	r.line("advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)")
 	return nil

@@ -64,7 +64,10 @@ type Deploy struct {
 	ActorName                     string
 	SupersededBy                  *int64
 	Error                         *string
-	CreatedAt                     time.Time
-	StartedAt                     *time.Time
-	FinishedAt                    *time.Time
+	// RoutesWarning: el paso 7 no pudo actualizar las rutas de Caddy y
+	// escribió la advertencia en el log (contrato §2.1 y §2.11).
+	RoutesWarning bool
+	CreatedAt     time.Time
+	StartedAt     *time.Time
+	FinishedAt    *time.Time
 }
