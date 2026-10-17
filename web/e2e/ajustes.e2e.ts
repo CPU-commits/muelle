@@ -195,6 +195,83 @@ test('cambiar el HTTPS avisa a dónde se muda el panel, y el aviso sobrevive a r
 	expect(errors).toEqual([])
 })
 
+test('un puerto ocupado en el host (422) queda en su campo y no se guarda nada', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await login(page)
+	await page.goto('/ajustes')
+
+	// El mock tiene el 8081 ocupado: el PATCH lo prueba antes de guardar (contrato §3.5).
+	const ports = page.getByRole('region', { name: 'Puertos del proxy' })
+	const httpPort = ports.getByLabel('HTTP', { exact: true })
+	await httpPort.fill('8081')
+	await ports.getByRole('button', { name: 'Guardar' }).click()
+	const dialog = page.getByRole('dialog', { name: '¿Cambiar los puertos?' })
+	await dialog.getByRole('button', { name: 'Cambiar puertos' }).click()
+
+	await expect(dialog).toHaveCount(0)
+	await expect(
+		ports.getByText('el puerto 8081 del host ya está en uso: libéralo o elige otro'),
+	).toBeVisible()
+	await expect(httpPort).toHaveAttribute('aria-invalid', 'true')
+	await expect(page.getByText('Puertos guardados')).toHaveCount(0)
+	await expect(ports.getByText('Recreando muelle-caddy con los puertos nuevos…')).toHaveCount(0)
+
+	await page.reload()
+	await expect(
+		page.getByRole('region', { name: 'Puertos del proxy' }).getByLabel('HTTP', { exact: true }),
+	).toHaveValue('80')
+
+	expect(errors).toEqual([])
+})
+
+test('si muelle-caddy no arranca con el HTTPS nuevo, muelle vuelve al anterior y Ajustes ofrece esa dirección', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await login(page)
+	await page.goto('/ajustes')
+
+	// El 9443 pasa la prueba del PATCH, pero otro lo toma antes de recrear muelle-caddy.
+	const ports = page.getByRole('region', { name: 'Puertos del proxy' })
+	await ports.getByLabel('HTTPS', { exact: true }).fill('9443')
+	await ports.getByRole('button', { name: 'Guardar' }).click()
+	const dialog = page.getByRole('dialog', { name: '¿Cambiar los puertos?' })
+	await dialog.getByRole('button', { name: 'Cambiar puertos' }).click()
+	await expect(dialog).toHaveCount(0)
+	const notice = 'La dirección del panel ahora es https://panel.tudominio.cl:9443'
+	await expect(ports.getByText(notice)).toBeVisible()
+
+	// El panel sigue GET /proxy (cada 10 s): muelle volvió a 80/443 (ports_rollback).
+	await expect(
+		ports.getByText('muelle volvió a los puertos anteriores (HTTP 80, HTTPS 443).'),
+	).toBeVisible({ timeout: 25_000 })
+	await expect(
+		ports.getByText(/HTTPS 9443: los puertos 80 o 9443 del host ya están en uso/),
+	).toBeVisible()
+	await expect(
+		ports.getByText(/La dirección del panel sigue siendo https:\/\/panel\.tudominio\.cl\./),
+	).toBeVisible()
+	await expect(
+		ports.getByRole('link', { name: 'Volver a la dirección anterior' }),
+	).toHaveAttribute('href', 'https://panel.tudominio.cl/ajustes')
+	await expect(ports.getByText(notice)).toHaveCount(0)
+	await expect(ports.getByLabel('HTTPS', { exact: true })).toHaveValue('443')
+
+	// Lo sigue diciendo al recargar (GET /proxy lo trae hasta el próximo cambio de puertos),
+	// sin el aviso de la dirección que falló.
+	await page.reload()
+	const reloaded = page.getByRole('region', { name: 'Puertos del proxy' })
+	await expect(
+		reloaded.getByText('muelle volvió a los puertos anteriores (HTTP 80, HTTPS 443).'),
+	).toBeVisible()
+	await expect(reloaded.getByText(notice)).toHaveCount(0)
+	await expect(reloaded.getByLabel('HTTPS', { exact: true })).toHaveValue('443')
+
+	expect(errors).toEqual([])
+})
+
 test('Cloudflare caído (502) es un aviso en el modal para reintentar; un token mal formado se queda en el campo', async ({
 	page,
 }) => {
