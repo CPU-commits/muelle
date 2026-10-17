@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/CPU-commits/muelle/src/shared/domain/naming"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker/dockertest"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
 )
 
 // Los nombres de muelle-caddy en estos tests: nunca los fijos.
@@ -51,6 +53,8 @@ type lifecycleFixture struct {
 	ops      *Ops
 	panel    *EnsurePanelDNS
 	slog     *slog.Logger
+	// rolledBack cuenta las veces que EnsureCaddy volvió los puertos (Done).
+	rolledBack atomic.Int32
 }
 
 func newLifecycleFixture(t *testing.T) *lifecycleFixture {
@@ -64,11 +68,26 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 	d := dockertest.New()
 	rt := caddy.NewRuntime(d, testCaddyNames, log)
 	cf, ops := cftest.New(t), &Ops{}
-	return &lifecycleFixture{
+	f := &lifecycleFixture{
 		syncFixture: sf, docker: d, runtime: rt, settings: settings, catalog: catalog, slog: log, cf: cf, ops: ops,
-		ensure: NewEnsureCaddy(rt, settings, catalog, outservice.NewRegistriesReader(sf.db, sf.cipher), sf.state, defCaddyImage, log),
-		panel:  NewEnsurePanelDNS(settings, cloudflare.New(cf.URL()), ops, 30*time.Second, log),
+		panel: NewEnsurePanelDNS(settings, cloudflare.New(cf.URL()), ops, 30*time.Second, log),
 	}
+	f.ensure = f.newEnsure(rt)
+	return f
+}
+
+// newEnsure arma EnsureCaddy sobre rt, con la auditoría en la base, el reloj
+// manual y Done contando en rolledBack.
+func (f *lifecycleFixture) newEnsure(rt service.CaddyRuntime) *EnsureCaddy {
+	return NewEnsureCaddy(rt, f.settings, f.catalog, outservice.NewRegistriesReader(f.db, f.cipher), f.state, defCaddyImage,
+		PortsRollbackDeps{Audit: sqlite.NewAuditRecorder(f.db, f.clock, f.slog), Clock: f.clock, Done: func() { f.rolledBack.Add(1) }},
+		f.slog)
+}
+
+// audits son las filas de la auditoría (auditRows).
+func (f *lifecycleFixture) audits(t *testing.T) []string {
+	t.Helper()
+	return auditRows(t, f.db)
 }
 
 // enableCaddy deja el proxy habilitado con panel_domain, los puertos 8080 y
@@ -131,6 +150,14 @@ func (r *recordingRuntime) Status(ctx context.Context) (string, bool, bool, erro
 	return "", false, false, nil
 }
 
+func (r *recordingRuntime) Serving(ctx context.Context) (service.CaddyServing, bool, error) {
+	return service.CaddyServing{}, false, nil
+}
+
+func (r *recordingRuntime) ProbePorts(ctx context.Context, image string, ports []service.HostPort) error {
+	return nil
+}
+
 func (r *recordingRuntime) last(t *testing.T) service.CaddyWant {
 	t.Helper()
 	r.mu.Lock()
@@ -144,7 +171,7 @@ func (r *recordingRuntime) last(t *testing.T) service.CaddyWant {
 // withRecorder reemplaza el runtime de EnsureCaddy por uno que anota.
 func (f *lifecycleFixture) withRecorder() *recordingRuntime {
 	r := &recordingRuntime{}
-	f.ensure = NewEnsureCaddy(r, f.settings, f.catalog, outservice.NewRegistriesReader(f.db, f.cipher), f.state, defCaddyImage, f.slog)
+	f.ensure = f.newEnsure(r)
 	return r
 }
 
@@ -407,8 +434,7 @@ func TestEnsureCaddyConnectsStageAddedWhileRecreating(t *testing.T) {
 	f.changePorts(t, 8081)
 
 	eng := &hookEngine{Fake: f.docker}
-	f.ensure = NewEnsureCaddy(caddy.NewRuntime(eng, testCaddyNames, f.slog), f.settings, f.catalog,
-		outservice.NewRegistriesReader(f.db, f.cipher), f.state, defCaddyImage, f.slog)
+	f.ensure = f.newEnsure(caddy.NewRuntime(eng, testCaddyNames, f.slog))
 	networks := NewEnsureStageNetwork(outservice.NewDockerNetworks(f.docker), testCaddyNames.Container, f.slog)
 	web := naming.Network("web", "dev")
 	eng.beforeCreate = func() {

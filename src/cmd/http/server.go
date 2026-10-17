@@ -15,16 +15,19 @@ import (
 )
 
 type Config struct {
-	PanelOrigin   string // ej. "https://panel.tudominio.cl", en forma canónica (settings lo valida)
+	// PanelOrigin es MUELLE_PANEL_ORIGIN, ej. "https://panel.tudominio.cl",
+	// en forma canónica (settings lo valida), o "" si no está (install
+	// escribe MUELLE_PANEL_DOMAIN): entonces solo pasa el de ProxyOrigin.
+	PanelOrigin   string
 	SecureCookies bool
 	Auth          utils.Authenticator
 	Logger        *slog.Logger
-	// ProxyOrigin, opcional, es el origen en que muelle-caddy sirve el panel
-	// según los ajustes (entity.ProxySettings.PanelOrigin), o "". Se acepta
-	// además de PanelOrigin: después de cambiar los puertos del proxy (spec
-	// §16) el panel queda en otro puerto, y sin esto ninguna escritura con
-	// cookie pasaría, ni el login, hasta actualizar MUELLE_PANEL_ORIGIN. Se
-	// consulta solo cuando el Origin no es PanelOrigin.
+	// ProxyOrigin es el origen en que muelle-caddy sirve el panel según los
+	// ajustes (entity.ProxySettings.PanelOrigin), o "" sin dominio del panel.
+	// Se pregunta en cada petición (admin lo tiene en caché), así sigue al
+	// puerto HTTPS del proxy: después de cambiarlo (spec §16) pasa el origen
+	// nuevo, y el viejo ya no. Se acepta además de PanelOrigin, y se consulta
+	// solo cuando el Origin no es PanelOrigin. Opcional si hay PanelOrigin.
 	ProxyOrigin func(ctx context.Context) string
 	// Panel, opcional, sirve el panel (cmd/http/panel) en toda ruta fuera de
 	// /api que no tiene una ruta registrada (contrato §5.5). Con nil, esas
@@ -45,14 +48,14 @@ type Server struct {
 // entity.ErrUnauthenticated 401 unauthenticated, entity.ErrForbidden 403 forbidden,
 // entity.ErrDockerUnavailable 503 docker_unavailable, entity.ErrNotImplemented 501 not_implemented,
 // entity.ErrCloudflareUnavailable 502 cloudflare_unavailable.
-// Hace panic si falta Auth o PanelOrigin: sin ellos ningún endpoint
-// autenticado ni ninguna escritura del panel podría funcionar.
+// Hace panic si falta Auth, o PanelOrigin y ProxyOrigin a la vez: sin ellos
+// ningún endpoint autenticado ni ninguna escritura del panel podría funcionar.
 func NewServer(c Config) *Server {
 	if c.Auth == nil {
 		panic("http: NewServer sin Config.Auth")
 	}
-	if c.PanelOrigin == "" {
-		panic("http: NewServer sin Config.PanelOrigin")
+	if c.PanelOrigin == "" && c.ProxyOrigin == nil {
+		panic("http: NewServer sin Config.PanelOrigin ni Config.ProxyOrigin")
 	}
 	log := c.Logger
 	if log == nil {
@@ -127,12 +130,11 @@ func isAPIPath(p string) bool {
 }
 
 // originAllowed protege contra CSRF: toda petición que modifica algo y no
-// trae un token Bearer tiene que venir del origen exacto del panel
-// (PanelOrigin, o el de ProxyOrigin: los dos son https://<panel_domain>, en
-// el puerto de MUELLE_PANEL_ORIGIN o en el de los ajustes, y en ese host
-// solo muelle-caddy sirve el panel). Un navegador no puede agregar
-// Authorization a una petición de otro origen sin CORS, y muelle no lo
-// habilita.
+// trae un token Bearer tiene que venir del origen exacto del panel: el de
+// ProxyOrigin (https://<panel_domain>, en el puerto HTTPS de los ajustes, y
+// en ese host solo muelle-caddy sirve el panel) o PanelOrigin, que se
+// configura a mano. Un navegador no puede agregar Authorization a una
+// petición de otro origen sin CORS, y muelle no lo habilita.
 func (s *Server) originAllowed(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:

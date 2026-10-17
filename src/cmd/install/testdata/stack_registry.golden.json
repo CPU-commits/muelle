@@ -11,7 +11,7 @@
         "MUELLE_INIT_REGISTRY_FILE": "/run/secrets/muelle_init_registry",
         "MUELLE_LISTEN": ":8080",
         "MUELLE_MASTER_KEY_FILE": "/run/secrets/muelle_master_key",
-        "MUELLE_PANEL_ORIGIN": "https://panel.tudominio.cl:8443"
+        "MUELLE_PANEL_DOMAIN": "panel.tudominio.cl"
       },
       "volumes": [
         {

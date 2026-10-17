@@ -35,8 +35,8 @@ func TestAPITokens(t *testing.T) {
 		t.Fatalf("p=%+v err=%v", p, err)
 	}
 	kind, id := p.Actor()
-	if kind != shared.ActorToken || *id != tok.ID {
-		t.Fatalf("actor=%s %v", kind, id)
+	if kind != shared.ActorToken || *id != tok.ID || p.ActorName() != "ci" {
+		t.Fatalf("actor=%s %v %q", kind, id, p.ActorName())
 	}
 	if _, err := f.authToken.Execute(ctx, "mk_inventado"); !errors.Is(err, shared.ErrUnauthenticated) {
 		t.Fatalf("got %v", err)

@@ -27,15 +27,18 @@ type Deps struct {
 	Clock  clock.Clock
 	Audit  audit.Recorder
 	Log    *slog.Logger
-	// PanelOrigin es el origen del panel (settings.PanelOrigin), con el que se
-	// arman los links de las invitaciones (<PanelOrigin>/invite/<token>).
-	PanelOrigin string
+	// PanelOrigin da el origen del panel, con el que se arman los links de
+	// las invitaciones (<origen>/invite/<token>). Se llama en cada invitación:
+	// el contenedor pasa MUELLE_PANEL_ORIGIN si está o, si no, el origen de
+	// los ajustes, que sigue al puerto HTTPS del proxy. Obligatorio para
+	// RegisterRoutes.
+	PanelOrigin func(ctx context.Context) string
 }
 
 type Module struct {
 	auth        inhttp.Authenticator
 	routes      inhttp.Usecases
-	panelOrigin string
+	panelOrigin func(ctx context.Context) string
 	cleanup     *usecases.CleanupSessions
 	ensureSetup *usecases.EnsureSetupInvite
 	log         *slog.Logger
@@ -112,7 +115,7 @@ func (m *Module) Jobs() []cron.Job {
 // EnsureSetupInvite crea el link de setup si todavía no hay usuarios, e
 // invalida el de un arranque anterior (solo se guarda su hash, así que no se
 // puede volver a mostrar). Devuelve el token en claro y si se creó uno; quien
-// llama arma la URL (<PanelOrigin>/setup?token=<token>).
+// llama arma la URL (<origen del panel>/setup?token=<token>).
 func (m *Module) EnsureSetupInvite(ctx context.Context) (token string, created bool, err error) {
 	return m.ensureSetup.Execute(ctx)
 }

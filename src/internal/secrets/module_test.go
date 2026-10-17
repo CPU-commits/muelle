@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -64,14 +65,14 @@ func newTestEnv(t *testing.T) *testEnv {
 }
 
 type auditEvent struct {
-	actorType, action, target, details string
+	actorType, actorName, action, target, details string
 }
 
 // audit devuelve los eventos del más nuevo al más viejo.
 func (e *testEnv) audit(t *testing.T) []auditEvent {
 	t.Helper()
 	ctx := context.Background()
-	rows, err := e.db.Conn(ctx).QueryContext(ctx, `SELECT actor_type, action, target, details FROM audit_events ORDER BY id DESC`)
+	rows, err := e.db.Conn(ctx).QueryContext(ctx, `SELECT actor_type, actor_name, action, target, details FROM audit_events ORDER BY id DESC`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func (e *testEnv) audit(t *testing.T) []auditEvent {
 	var out []auditEvent
 	for rows.Next() {
 		var ev auditEvent
-		if err := rows.Scan(&ev.actorType, &ev.action, &ev.target, &ev.details); err != nil {
+		if err := rows.Scan(&ev.actorType, &ev.actorName, &ev.action, &ev.target, &ev.details); err != nil {
 			t.Fatal(err)
 		}
 		out = append(out, ev)
@@ -124,7 +125,7 @@ func TestEnvAPI(t *testing.T) {
 		t.Fatalf("events=%+v", events)
 	}
 	if events[1].action != "env.patch" || events[1].details != `{"set":["LOG_LEVEL"],"unset":["JWT_KEY"]}` ||
-		events[1].target != "app:auditfy/staging/api" || events[1].actorType != "user" {
+		events[1].target != "app:auditfy/staging/api" || events[1].actorType != "user" || events[1].actorName != "felipe" {
 		t.Fatalf("evento=%+v", events[1])
 	}
 	if events[0].action != "env.replace" || events[0].target != "stage:auditfy/staging" || events[0].details != `{"keys":["NATS_SERVERS"]}` {
@@ -484,7 +485,7 @@ func TestEnvAPITokenScopes(t *testing.T) {
 		t.Fatalf("events=%+v", events)
 	}
 	for _, ev := range events {
-		if ev.actorType != "token" {
+		if ev.actorType != "token" || !slices.Contains([]string{"ci", "ci-staging", "ci-otro"}, ev.actorName) {
 			t.Fatalf("evento sin el token como actor: %+v", ev)
 		}
 	}

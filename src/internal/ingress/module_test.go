@@ -22,6 +22,7 @@ import (
 	"github.com/CPU-commits/muelle/src/package/clock"
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/domain/naming"
+	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker/dockertest"
@@ -167,6 +168,36 @@ func TestModuleCheckCloudflareToken(t *testing.T) {
 	}
 	if n := len(tm.cf.Calls()); n != 4 {
 		t.Fatalf("llamadas a Cloudflare: %v", tm.cf.Calls())
+	}
+}
+
+// CheckProxyPorts (admin, contrato §4.1) está cableado al Docker del módulo:
+// un puerto nuevo que otro contenedor tiene es un 422 en su campo, y el
+// muelle-caddy que sirve no cambia.
+func TestModuleCheckProxyPorts(t *testing.T) {
+	tm := newTestModule(t)
+	tm.enableProxy(t)
+	ctx := context.Background()
+	tm.docker.SetImagePresent(naming.CaddyImageFor("v0.1.0"))
+	if err := tm.Jobs()[0].Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	old, err := outservice.NewProxySettingsReader(tm.db, tm.cipher).ProxySettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := old
+	next.HTTPSPort = 9443
+	if err := tm.CheckProxyPorts(ctx, old, next); err != nil {
+		t.Fatalf("libre: %v", err)
+	}
+	tm.docker.BusyHostPort(9443)
+	err = tm.CheckProxyPorts(ctx, old, next)
+	if ve, ok := errors.AsType[*validate.Error](err); !ok || ve.Field != "proxy_https_port" {
+		t.Fatalf("ocupado: %v", err)
+	}
+	if c, err := tm.docker.InspectContainer(ctx, naming.CaddyContainer); err != nil || !c.Running || c.Ports[0].HostPort != 8080 {
+		t.Fatalf("muelle-caddy: %+v %v", c, err)
 	}
 }
 
@@ -429,7 +460,9 @@ func TestModuleDomainsFlow(t *testing.T) {
 
 	ctx := context.Background()
 	var n int
-	if err := tm.db.Conn(ctx).QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE action LIKE 'domain.%'`).Scan(&n); err != nil || n != 3 {
+	// A nombre de la sesión: actor_name es su username.
+	if err := tm.db.Conn(ctx).QueryRowContext(ctx,
+		`SELECT count(*) FROM audit_events WHERE action LIKE 'domain.%' AND actor_type = 'user' AND actor_name = 'felipe'`).Scan(&n); err != nil || n != 3 {
 		t.Fatalf("auditoría: %d %v", n, err)
 	}
 }

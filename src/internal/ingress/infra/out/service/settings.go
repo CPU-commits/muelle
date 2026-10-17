@@ -173,3 +173,48 @@ func (r *ProxySettingsReader) SaveZones(ctx context.Context, token string, zones
 	}
 	return saved, nil
 }
+
+// RollbackPorts vuelve los puertos del proxy a to solo si los guardados
+// siguen siendo from (contrato §3.5): lee y escribe en la misma transacción,
+// así un PATCH /settings que los cambió mientras muelle-caddy se recreaba
+// gana. Una clave sin guardar vale lo de por defecto (80 y 443), como en
+// ProxySettings.
+func (r *ProxySettingsReader) RollbackPorts(ctx context.Context, from, to service.ProxyPorts) (bool, error) {
+	saved := false
+	err := r.db.InTx(ctx, func(ctx context.Context) error {
+		cur := service.ProxyPorts{HTTPPort: entity.DefaultProxyHTTPPort, HTTPSPort: entity.DefaultProxyHTTPSPort}
+		for key, dst := range map[string]*int{entity.SettingProxyHTTPPort: &cur.HTTPPort, entity.SettingProxyHTTPSPort: &cur.HTTPSPort} {
+			var value string
+			err := r.db.Conn(ctx).QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				continue
+			case err != nil:
+				return err
+			}
+			if value == "" {
+				continue
+			}
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("settings: %s = %q no es un puerto", key, value)
+			}
+			*dst = n
+		}
+		if cur != from {
+			return nil
+		}
+		for key, v := range map[string]int{entity.SettingProxyHTTPPort: to.HTTPPort, entity.SettingProxyHTTPSPort: to.HTTPSPort} {
+			if _, err := r.db.Conn(ctx).ExecContext(ctx, `INSERT INTO settings (key, value, encrypted) VALUES (?, ?, 0)
+				ON CONFLICT (key) DO UPDATE SET value = excluded.value, encrypted = 0`, key, strconv.Itoa(v)); err != nil {
+				return err
+			}
+		}
+		saved = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return saved, nil
+}

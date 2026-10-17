@@ -26,6 +26,15 @@ type fakeHook struct {
 	checkErr error
 	checked  []string
 	changes  [][2]entity.ProxySettings
+	portsErr error
+	probed   [][2]entity.ProxySettings
+}
+
+func (h *fakeHook) CheckProxyPorts(ctx context.Context, old, next entity.ProxySettings) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.probed = append(h.probed, [2]entity.ProxySettings{old, next})
+	return h.portsErr
 }
 
 func (h *fakeHook) CheckCloudflareToken(ctx context.Context, token string) (*int, error) {
@@ -47,6 +56,7 @@ type proxyEnv struct {
 	cipher *crypto.Cipher
 	hook   *fakeHook
 	get    *GetSettings
+	origin *GetPanelOrigin
 	patch  *PatchSettings
 	user   int64
 }
@@ -61,10 +71,11 @@ func newProxyEnv(t *testing.T) *proxyEnv {
 	repo := adminrepo.NewSettingsRepository(e.db)
 	two := 2
 	hook := &fakeHook{zones: &two}
+	origin := NewGetPanelOrigin(repo, e.clk)
 	return &proxyEnv{
-		env: e, repo: repo, cipher: c, hook: hook,
+		env: e, repo: repo, cipher: c, hook: hook, origin: origin,
 		get:   NewGetSettings(repo, c),
-		patch: NewPatchSettings(repo, adminsvc.NewTOTPStatus(e.db), c, hook, e.rec, e.db),
+		patch: NewPatchSettings(repo, adminsvc.NewTOTPStatus(e.db), c, hook, origin, e.rec, e.db),
 		user:  admintest.InsertUser(t, e.db, "admin", true),
 	}
 }
@@ -279,6 +290,47 @@ func TestPatchCloudflareToken(t *testing.T) {
 	}
 }
 
+// Otros puertos del proxy se prueban antes de guardar nada (contrato §4.1):
+// uno ocupado es un 422 en su campo y no guarda nada del PATCH; Docker caído
+// pasa tal cual (503). Un PATCH que no cambia los puertos no prueba nada.
+func TestPatchProxyPortsChecked(t *testing.T) {
+	e := newProxyEnv(t)
+	if _, err := e.do(t, dto.PatchSettingsInput{PublicIP: ptr("203.0.113.7"), ProxyHTTPPort: ptr(80)}); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.hook.probed) != 0 {
+		t.Fatalf("sin cambio de puertos no se prueba: %+v", e.hook.probed)
+	}
+
+	_, err := e.do(t, dto.PatchSettingsInput{ProxyHTTPSPort: ptr(8443)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.hook.probed) != 1 || e.hook.probed[0][0].HTTPSPort != 443 || e.hook.probed[0][1].HTTPSPort != 8443 ||
+		e.hook.probed[0][1].PublicIP != "203.0.113.7" {
+		t.Fatalf("la prueba recibe los ajustes de antes y los nuevos: %+v", e.hook.probed)
+	}
+
+	e.hook.portsErr = validate.Errorf("proxy_http_port", "el puerto 9080 del host ya está en uso: libéralo o elige otro")
+	_, err = e.do(t, dto.PatchSettingsInput{ProxyHTTPPort: ptr(9080), ACMEEmail: ptr("tu@correo.cl")})
+	wantField(t, err, "proxy_http_port")
+	if got, _ := e.raw(t, entity.SettingProxyHTTPPort); got == "9080" {
+		t.Fatalf("un puerto ocupado no se guarda: %q", got)
+	}
+	if _, ok := e.raw(t, entity.SettingACMEEmail); ok {
+		t.Fatal("si los puertos fallan no se guarda nada del PATCH")
+	}
+	changes := len(e.hook.changes)
+
+	e.hook.portsErr = fmt.Errorf("probando: %w", entity.ErrDockerUnavailable)
+	if _, err := e.do(t, dto.PatchSettingsInput{ProxyHTTPPort: ptr(9080)}); !errors.Is(err, entity.ErrDockerUnavailable) {
+		t.Fatalf("Docker caído: %v", err)
+	}
+	if len(e.hook.changes) != changes {
+		t.Fatal("un PATCH que no guardó nada no avisa a ingress")
+	}
+}
+
 // Una lista de IPs permitidas que deja fuera la IP de quien la guarda lo
 // encerraría (Caddy lo bloquea, §8): 409 salvo que lo confirme.
 func TestPatchPanelAllowedCIDRsLockout(t *testing.T) {
@@ -309,7 +361,7 @@ func TestPatchPanelAllowedCIDRsLockout(t *testing.T) {
 // Sin ingress conectado (Hook nil), los ajustes solo se guardan.
 func TestPatchProxySettingsWithoutHook(t *testing.T) {
 	e := newProxyEnv(t)
-	patch := NewPatchSettings(e.repo, adminsvc.NewTOTPStatus(e.db), e.cipher, nil, e.rec, e.db)
+	patch := NewPatchSettings(e.repo, adminsvc.NewTOTPStatus(e.db), e.cipher, nil, nil, e.rec, e.db)
 	out, err := patch.Execute(asUser(e.user), dto.PatchSettingsInput{PublicIP: ptr("203.0.113.7"), CloudflareToken: ptr("cf-token-1234567890abcdef")})
 	if err != nil || out.PublicIP != "203.0.113.7" || !out.CloudflareTokenSet || out.CloudflareZones != nil {
 		t.Fatalf("sin hook: %+v %v", out, err)
@@ -343,7 +395,7 @@ func TestApplyStartupSettings(t *testing.T) {
 		t.Fatal("el token va cifrado con su AAD")
 	}
 	events := admintestEvents(t, e)
-	if len(events) != 1 || events[0].Action != "settings.init" || events[0].ActorType != "system" || bytes.Contains(events[0].Details, []byte("cf-token")) {
+	if len(events) != 1 || events[0].Action != "settings.init" || events[0].ActorType != "system" || events[0].ActorName != "system" || bytes.Contains(events[0].Details, []byte("cf-token")) {
 		t.Fatalf("events=%+v", events)
 	}
 
@@ -433,45 +485,5 @@ func TestApplyStartupSettingsLateInitIsIgnored(t *testing.T) {
 	}
 	if n := len(admintestEvents(t, e)); n != 0 {
 		t.Fatalf("eventos: %d", n)
-	}
-}
-
-// El origen en que muelle-caddy sirve el panel sigue a los ajustes: install
-// con --https-port 8443 (spec §16 paso 2) y después 443 en el panel (paso 5).
-func TestGetPanelOrigin(t *testing.T) {
-	e := newProxyEnv(t)
-	ctx := context.Background()
-	get := NewGetPanelOrigin(e.repo)
-	origin := func() string {
-		t.Helper()
-		o, err := get.Execute(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return o
-	}
-	if o := origin(); o != "" {
-		t.Fatalf("sin dominio del panel: %q", o)
-	}
-	apply := NewApplyStartupSettings(e.repo, e.cipher, e.rec, e.db)
-	init := dto.InitialSettings{ProxyHTTPPort: 8080, ProxyHTTPSPort: 8443}
-	if err := apply.Execute(ctx, dto.StartupSettings{PanelDomain: "panel.tudominio.cl", Init: init}); err != nil {
-		t.Fatal(err)
-	}
-	if o := origin(); o != "https://panel.tudominio.cl:8443" {
-		t.Fatalf("después de install: %q", o)
-	}
-	if _, err := e.do(t, dto.PatchSettingsInput{ProxyHTTPPort: ptr(80), ProxyHTTPSPort: ptr(443)}); err != nil {
-		t.Fatal(err)
-	}
-	if o := origin(); o != "https://panel.tudominio.cl" {
-		t.Fatalf("después de cambiar los puertos: %q", o)
-	}
-	// Un valor guardado que no se entiende es un error, no un origen inventado.
-	if err := e.repo.Set(ctx, entity.SettingProxyHTTPSPort, []byte("x"), false); err != nil {
-		t.Fatal(err)
-	}
-	if o, err := get.Execute(ctx); err == nil || o != "" {
-		t.Fatalf("puerto inválido: %q %v", o, err)
 	}
 }

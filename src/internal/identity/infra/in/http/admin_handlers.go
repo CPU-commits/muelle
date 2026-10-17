@@ -48,7 +48,7 @@ func (h *handler) createInvite(w http.ResponseWriter, r *http.Request) {
 		h.k.Fail(w, r, err)
 		return
 	}
-	url := h.panelOrigin + "/invite/" + inv.Token
+	url := h.panelOrigin(r.Context()) + "/invite/" + inv.Token
 	utils.WriteJSON(w, http.StatusCreated, inviteRes{URL: url, ExpiresAt: inv.ExpiresAt})
 }
 

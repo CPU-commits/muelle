@@ -10,6 +10,24 @@ type ProxyOutput struct {
 	Error    *string     `json:"error"`     // solo con out_of_sync
 	SyncedAt *time.Time  `json:"synced_at"` // el último POST /load exitoso, en UTC y con a lo más ms
 	Caddy    CaddyOutput `json:"caddy"`
+	// PortsRollback es la última vez que muelle volvió a los puertos
+	// anteriores porque muelle-caddy no arrancó con los nuevos; null si no
+	// hubo (contrato §3.5).
+	PortsRollback *PortsRollbackOutput `json:"ports_rollback"`
+}
+
+// PortsRollbackOutput es una vuelta a los puertos anteriores del proxy.
+type PortsRollbackOutput struct {
+	Attempted ProxyPortsOutput `json:"attempted"` // los que no arrancaron
+	Restored  ProxyPortsOutput `json:"restored"`  // a los que volvió (los de los ajustes)
+	Error     string           `json:"error"`     // por qué no arrancó, en español
+	At        time.Time        `json:"at"`        // en UTC y con a lo más ms
+}
+
+// ProxyPortsOutput son los puertos del host del proxy.
+type ProxyPortsOutput struct {
+	HTTPPort  int `json:"http_port"`
+	HTTPSPort int `json:"https_port"`
 }
 
 // CaddyOutput es lo que corre de verdad (InspectContainer) y los puertos de

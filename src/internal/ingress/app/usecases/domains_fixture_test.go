@@ -195,8 +195,14 @@ func (f *ucFixture) scheduled() []string {
 // audits son las acciones de auditoría, con su target y details, en orden.
 func (f *ucFixture) audits(t *testing.T) []string {
 	t.Helper()
+	return auditRows(t, f.db)
+}
+
+// auditRows son las filas de audit_events como "acción target details", en orden.
+func auditRows(t *testing.T, db *sqlite.DB) []string {
+	t.Helper()
 	ctx := context.Background()
-	rows, err := f.db.Conn(ctx).QueryContext(ctx, `SELECT action, target, details FROM audit_events ORDER BY id`)
+	rows, err := db.Conn(ctx).QueryContext(ctx, `SELECT action, target, details FROM audit_events ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,14 +16,16 @@ type ProxySettingsChanged struct {
 	records   *UpdateManagedRecords
 	panel     *EnsurePanelDNS
 	syncer    *Syncer
+	state     *ProxyState
 	timeout   time.Duration
 	log       *slog.Logger
 }
 
 // NewProxySettingsChanged recibe el plazo del hook (Timing.Hook, 2 min).
 func NewProxySettingsChanged(recreator *Recreator, records *UpdateManagedRecords, panel *EnsurePanelDNS, syncer *Syncer,
-	timeout time.Duration, log *slog.Logger) *ProxySettingsChanged {
-	return &ProxySettingsChanged{recreator: recreator, records: records, panel: panel, syncer: syncer, timeout: timeout, log: log}
+	state *ProxyState, timeout time.Duration, log *slog.Logger) *ProxySettingsChanged {
+	return &ProxySettingsChanged{recreator: recreator, records: records, panel: panel, syncer: syncer, state: state,
+		timeout: timeout, log: log}
 }
 
 // Execute aplica lo que cambió (next.ChangedKeys(old)), con su propio plazo
@@ -32,7 +34,8 @@ func NewProxySettingsChanged(recreator *Recreator, records *UpdateManagedRecords
 //  1. puertos → release := recreator.Hold() y defer release(): GET
 //     /proxy dice recreating desde ya, y los 2 s de RecreateDelay empiezan
 //     recién cuando Execute vuelve (D15). No recrea acá: la respuesta del
-//     PATCH sale por ese mismo contenedor;
+//     PATCH sale por ese mismo contenedor. Además olvida la última vuelta
+//     atrás (ports_rollback): es un intento nuevo;
 //  2. public_ip o public_ipv6 → UpdateManagedRecords (cada dominio con
 //     DomainOp, dentro del plazo del hook: D6);
 //  3. public_ip, public_ipv6 o un token nuevo (no vacío) → EnsurePanelDNS
@@ -54,6 +57,7 @@ func (u *ProxySettingsChanged) Execute(ctx context.Context, old, next shared.Pro
 
 	recreate := changed(shared.SettingProxyHTTPPort, shared.SettingProxyHTTPSPort)
 	if recreate {
+		u.state.ClearPortsRollback()
 		release := u.recreator.Hold()
 		defer release()
 	}

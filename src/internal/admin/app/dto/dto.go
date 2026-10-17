@@ -21,7 +21,8 @@ type SettingsOutput struct {
 	PublicIP   string `json:"public_ip"`
 	PublicIPv6 string `json:"public_ipv6"`
 	ACMEEmail  string `json:"acme_email"`
-	// PanelDomain es de solo lectura: sale de MUELLE_PANEL_ORIGIN ("" en desarrollo).
+	// PanelDomain es de solo lectura: sale de MUELLE_PANEL_DOMAIN o del host
+	// de MUELLE_PANEL_ORIGIN ("" en desarrollo).
 	PanelDomain string `json:"panel_domain"`
 	// PanelAllowedCIDRs nunca es null: [] es cualquier IP.
 	PanelAllowedCIDRs []string `json:"panel_allowed_cidrs"`
@@ -88,7 +89,8 @@ func (i InitialSettings) LogValue() slog.Value { return slog.StringValue(i.Strin
 
 // StartupSettings es lo que el contenedor le pasa a admin al arrancar.
 type StartupSettings struct {
-	// PanelDomain es el host de MUELLE_PANEL_ORIGIN si es un dominio; si no, "".
+	// PanelDomain es MUELLE_PANEL_DOMAIN o, si no está, el host de
+	// MUELLE_PANEL_ORIGIN si es un dominio; si no, "" (settings.PanelDomain).
 	PanelDomain string
 	Init        InitialSettings
 }
@@ -110,6 +112,7 @@ type AuditEventOutput struct {
 	ID        int64          `json:"id"`
 	ActorType string         `json:"actor_type"`
 	ActorID   *int64         `json:"actor_id"`
+	ActorName string         `json:"actor_name"` // siempre string (ver entity.AuditEvent)
 	Action    string         `json:"action"`
 	Target    string         `json:"target"`
 	Details   jsontext.Value `json:"details"`

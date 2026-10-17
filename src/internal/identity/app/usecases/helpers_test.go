@@ -194,15 +194,20 @@ func (f *fixture) setRequire2FA(t *testing.T, on bool) {
 type auditRow struct {
 	ActorType string
 	ActorID   *int64
+	ActorName string
 	Action    string
 	Target    string
 	Details   string
+	// Username es el username actual del actor de un evento de usuario, o ""
+	// si ya no existe: lo que actor_name tiene que copiar mientras existe.
+	Username string
 }
 
 func (f *fixture) auditRows(t *testing.T) []auditRow {
 	t.Helper()
 	rows, err := f.db.Conn(context.Background()).QueryContext(context.Background(),
-		`SELECT actor_type, actor_id, action, target, details FROM audit_events ORDER BY id`)
+		`SELECT a.actor_type, a.actor_id, a.actor_name, a.action, a.target, a.details, COALESCE(u.username, '')
+		 FROM audit_events a LEFT JOIN users u ON a.actor_type = 'user' AND u.id = a.actor_id ORDER BY a.id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +216,7 @@ func (f *fixture) auditRows(t *testing.T) []auditRow {
 	for rows.Next() {
 		var r auditRow
 		var id sql.NullInt64
-		if err := rows.Scan(&r.ActorType, &id, &r.Action, &r.Target, &r.Details); err != nil {
+		if err := rows.Scan(&r.ActorType, &id, &r.ActorName, &r.Action, &r.Target, &r.Details, &r.Username); err != nil {
 			t.Fatal(err)
 		}
 		if id.Valid {

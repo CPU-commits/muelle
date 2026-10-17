@@ -2,6 +2,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
@@ -31,12 +32,16 @@ type Usecases struct {
 type handler struct {
 	k           *utils.Kit
 	uc          Usecases
-	panelOrigin string
+	panelOrigin func(ctx context.Context) string
 }
 
 // RegisterRoutes registra los errores y las rutas de identity en el Kit.
-// panelOrigin es el origen del panel, para los links de las invitaciones.
-func RegisterRoutes(k *utils.Kit, uc Usecases, panelOrigin string) {
+// panelOrigin da el origen del panel, para los links de las invitaciones; se
+// llama en cada una. Hace panic si es nil.
+func RegisterRoutes(k *utils.Kit, uc Usecases, panelOrigin func(ctx context.Context) string) {
+	if panelOrigin == nil {
+		panic("identity: RegisterRoutes sin el origen del panel (Deps.PanelOrigin)")
+	}
 	registerErrors(k)
 	h := &handler{k: k, uc: uc, panelOrigin: panelOrigin}
 

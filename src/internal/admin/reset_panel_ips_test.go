@@ -107,16 +107,16 @@ func TestResetPanelAllowedCIDRsAudit(t *testing.T) {
 	if n := countAudit(t, e.db); n != before+1 {
 		t.Fatalf("se agregaron %d eventos, esperaba 1", n-before)
 	}
-	var actor, action, target, details string
+	var actor, actorName, action, target, details string
 	var actorID *int64
 	if err := e.db.Conn(ctx).QueryRowContext(ctx,
-		`SELECT actor_type, actor_id, action, target, details FROM audit_events ORDER BY id DESC LIMIT 1`).
-		Scan(&actor, &actorID, &action, &target, &details); err != nil {
+		`SELECT actor_type, actor_id, actor_name, action, target, details FROM audit_events ORDER BY id DESC LIMIT 1`).
+		Scan(&actor, &actorID, &actorName, &action, &target, &details); err != nil {
 		t.Fatal(err)
 	}
-	if actor != "system" || actorID != nil || action != "settings.update" || target != "settings" ||
+	if actor != "system" || actorID != nil || actorName != "system" || action != "settings.update" || target != "settings" ||
 		details != `{"panel_allowed_cidrs":[],"via":"cli"}` {
-		t.Fatalf("evento: actor=%s/%v action=%s target=%s details=%s", actor, actorID, action, target, details)
+		t.Fatalf("evento: actor=%s/%v/%q action=%s target=%s details=%s", actor, actorID, actorName, action, target, details)
 	}
 
 	// Ya vacía: ningún evento más.

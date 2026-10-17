@@ -107,19 +107,19 @@ func TestProjectsAndStagesAPI(t *testing.T) {
 	// Todo quedó en la auditoría.
 	want := []string{"project.delete", "stage.delete", "stage.create", "project.update", "project.create"}
 	rows, err := e.db.Conn(context.Background()).QueryContext(context.Background(),
-		`SELECT actor_type, action FROM audit_events ORDER BY id DESC`)
+		`SELECT actor_type, actor_name, action FROM audit_events ORDER BY id DESC`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
 	i := 0
 	for rows.Next() {
-		var actor, action string
-		if err := rows.Scan(&actor, &action); err != nil {
+		var actor, name, action string
+		if err := rows.Scan(&actor, &name, &action); err != nil {
 			t.Fatal(err)
 		}
-		if i >= len(want) || action != want[i] || actor != "user" {
-			t.Errorf("evento %d = %s/%s, esperaba user/%v", i, actor, action, want)
+		if i >= len(want) || action != want[i] || actor != "user" || name != "ana" {
+			t.Errorf("evento %d = %s/%s/%s, esperaba user/ana/%v", i, actor, name, action, want)
 		}
 		i++
 	}

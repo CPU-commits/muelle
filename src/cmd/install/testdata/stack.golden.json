@@ -12,7 +12,7 @@
         "MUELLE_INIT_PUBLIC_IPV6": "2001:db8::24",
         "MUELLE_LISTEN": ":8080",
         "MUELLE_MASTER_KEY_FILE": "/run/secrets/muelle_master_key",
-        "MUELLE_PANEL_ORIGIN": "https://panel.tudominio.cl"
+        "MUELLE_PANEL_DOMAIN": "panel.tudominio.cl"
       },
       "volumes": [
         {

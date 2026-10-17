@@ -49,6 +49,11 @@ type Deps struct {
 	// Options cambian los nombres de Docker, cómo se llega a Caddy y a
 	// Cloudflare, y los plazos. El cero es producción; solo los tests las cambian.
 	Options Options
+	// PortsRolledBack, opcional, se llama cuando ingress vuelve los puertos
+	// del proxy a los anteriores porque muelle-caddy no arrancó con los
+	// nuevos (contrato §3.5). El contenedor invalida ahí el origen del panel
+	// en caché de admin.
+	PortsRolledBack func()
 }
 
 type Module struct {
@@ -64,6 +69,7 @@ type Module struct {
 	ops           *usecases.Ops
 	panelDNS      *usecases.EnsurePanelDNS
 	checkToken    *usecases.CheckCloudflareToken
+	checkPorts    *usecases.CheckProxyPorts
 	settingsHook  *usecases.ProxySettingsChanged
 	certs         *usecases.CertChecker
 	jobs          []cron.Job
@@ -109,7 +115,8 @@ func New(d Deps) *Module {
 		o.Timing.RetryMin, o.Timing.RetryMax)
 	m.ensureNetwork = usecases.NewEnsureStageNetwork(nets, o.CaddyContainer, d.Log)
 	m.removeNetwork = usecases.NewRemoveStageNetwork(nets, o.CaddyContainer, d.Log)
-	m.caddy = usecases.NewEnsureCaddy(runtime, settings, catalog, registries, m.state, defImage, d.Log)
+	m.caddy = usecases.NewEnsureCaddy(runtime, settings, catalog, registries, m.state, defImage,
+		usecases.PortsRollbackDeps{Audit: d.Audit, Clock: d.Clock, Done: d.PortsRolledBack}, d.Log)
 	m.orphans = usecases.NewRemoveOrphanNetworks(nets, catalog, o.CaddyContainer, o.NetworkPrefix, d.Log)
 	m.ops = &usecases.Ops{}
 	dns := cloudflare.New(o.CloudflareURL)
@@ -127,8 +134,9 @@ func New(d Deps) *Module {
 		DomainOp: o.Timing.DomainOp, DomainRetry: o.Timing.DomainRetry,
 	}
 	m.checkToken = usecases.NewCheckCloudflareToken(dns)
+	m.checkPorts = usecases.NewCheckProxyPorts(runtime, defImage, d.Log)
 	m.settingsHook = usecases.NewProxySettingsChanged(m.recreator, usecases.NewUpdateManagedRecords(dd), m.panelDNS, m.syncer,
-		o.Timing.Hook, d.Log)
+		m.state, o.Timing.Hook, d.Log)
 	m.httpUC = inhttp.UseCases{
 		ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage),
 		ListDomains: usecases.NewListDomains(dd), CreateDomain: usecases.NewCreateDomain(dd),
@@ -155,8 +163,10 @@ func (m *Module) Jobs() []cron.Job { return m.jobs }
 // Run corre lo que ingress necesita en segundo plano hasta que ctx se cancela,
 // y vuelve cuando terminó: los reintentos con backoff (1 s, 2 s… 60 s) de una
 // configuración que Caddy no aceptó, la recreación de muelle-caddy que
-// agenda ProxySettingsChanged, la verificación de un dominio 30 s después de
-// crearlo, adoptarlo o reintentarlo, y la de los pending cada minuto (§8).
+// agenda ProxySettingsChanged (si no arranca con los puertos nuevos, vuelve
+// a los anteriores: contrato §3.5), la verificación de un dominio 30 s
+// después de crearlo, adoptarlo o reintentarlo, y la de los pending cada
+// minuto (§8).
 func (m *Module) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Go(func() { m.retrier.Run(ctx) })
@@ -207,15 +217,29 @@ func (m *Module) CheckCloudflareToken(ctx context.Context, token string) (zones 
 	return m.checkToken.Execute(ctx, token)
 }
 
+// CheckProxyPorts prueba, antes de que admin guarde otros puertos del proxy
+// (PATCH /settings, contrato §4.1), que muelle-caddy los pueda tomar en el
+// host, con un contenedor descartable y un plazo de 30 s sobre el ctx de la
+// petición. Prueba solo los que cambian y que el muelle-caddy que sirve no
+// tiene ya. Uno ocupado devuelve un *validate.Error en proxy_http_port o
+// proxy_https_port (422); Docker caído, un error que envuelve
+// entity.ErrDockerUnavailable (503). Con el proxy deshabilitado (desarrollo)
+// no toca Docker.
+func (m *Module) CheckProxyPorts(ctx context.Context, old, next entity.ProxySettings) error {
+	return m.checkPorts.Execute(ctx, old, next)
+}
+
 // ProxySettingsChanged aplica los ajustes nuevos después de que admin los
 // guardó (PATCH /settings): Caddy (email ACME, IPs del panel, token) y los
 // registros DNS que maneja muelle (IP pública) (§3.1, §9). Corre antes de que
 // el PATCH responda, con su propio plazo (no el ctx de la petición: un cliente
-// que se va no puede dejar el cambio a medias). Si cambiaron los puertos, no recrea muelle-caddy acá: lo agenda
-// en Run, 2 s después de volver, porque la respuesta del PATCH sale por ese mismo contenedor (contrato
-// §3.5). No devuelve error: un fallo queda en el estado del proxy (GET
-// /api/v1/proxy) y en el de cada dominio. Un token nuevo, o la IP pública,
-// también llevan el registro DNS del panel (§3.4).
+// que se va no puede dejar el cambio a medias). Si cambiaron los puertos, no
+// recrea muelle-caddy acá: lo agenda en Run, 2 s después de volver, porque la
+// respuesta del PATCH sale por ese mismo contenedor (contrato §3.5); si no
+// arranca con los puertos nuevos, Run vuelve a los anteriores y llama a
+// Deps.PortsRolledBack. No devuelve error: un fallo queda en el estado del
+// proxy (GET /api/v1/proxy) y en el de cada dominio. Un token nuevo, o la IP
+// pública, también llevan el registro DNS del panel (§3.4).
 func (m *Module) ProxySettingsChanged(ctx context.Context, old, next entity.ProxySettings) {
 	m.settingsHook.Execute(ctx, old, next)
 }

@@ -125,13 +125,16 @@ type PatchSettings struct {
 	totp     service.TOTPStatus
 	cipher   cipher.Cipher
 	hook     service.ProxyHook
+	origin   *GetPanelOrigin
 	audit    audit.Recorder
 	tx       sharedrepo.Transactor
 }
 
-// NewPatchSettings: hook puede ser nil (los ajustes del proxy solo se guardan).
-func NewPatchSettings(settings repository.SettingsRepository, totp service.TOTPStatus, c cipher.Cipher, hook service.ProxyHook, rec audit.Recorder, tx sharedrepo.Transactor) *PatchSettings {
-	return &PatchSettings{settings: settings, totp: totp, cipher: c, hook: hook, audit: rec, tx: tx}
+// NewPatchSettings: hook puede ser nil (los ajustes del proxy solo se
+// guardan). origin, si no es nil, es el origen del panel en caché que se
+// invalida cuando cambia algún ajuste del proxy.
+func NewPatchSettings(settings repository.SettingsRepository, totp service.TOTPStatus, c cipher.Cipher, hook service.ProxyHook, origin *GetPanelOrigin, rec audit.Recorder, tx sharedrepo.Transactor) *PatchSettings {
+	return &PatchSettings{settings: settings, totp: totp, cipher: c, hook: hook, origin: origin, audit: rec, tx: tx}
 }
 
 // tokenRe es un token de API de Cloudflare: ASCII visible, sin espacios.
@@ -221,8 +224,12 @@ func locksOut(cidrs []string, clientIP string) bool {
 //     guarda devuelve service.ErrWouldLockOut, salvo con ConfirmLockout.
 //   - Un token de Cloudflare nuevo se verifica con el hook antes de guardar
 //     nada (cuántas zonas ve); "" lo borra.
+//   - Otros puertos del proxy se prueban con el hook antes de guardar nada:
+//     uno ocupado en el host no se guarda (muelle-caddy no arrancaría).
 //   - Todo se guarda en una transacción, y después, si cambió algún ajuste
-//     del proxy, se avisa al hook (ingress los aplica) antes de responder.
+//     del proxy, se invalida el origen del panel en caché (el Origin del
+//     puerto nuevo pasa enseguida, y el del viejo ya no) y se avisa al hook
+//     (ingress los aplica) antes de responder.
 func (u *PatchSettings) Execute(ctx context.Context, in dto.PatchSettingsInput) (dto.SettingsOutput, error) {
 	p, ok := shared.PrincipalFrom(ctx)
 	if !ok {
@@ -250,6 +257,13 @@ func (u *PatchSettings) Execute(ctx context.Context, in dto.PatchSettingsInput) 
 	if tokenChanged && next.CloudflareToken != "" && u.hook != nil {
 		// Fuera de la transacción: es una llamada a Cloudflare.
 		if zones, err = u.hook.CheckCloudflareToken(ctx, next.CloudflareToken); err != nil {
+			return dto.SettingsOutput{}, err
+		}
+	}
+	portsChanged := next.HTTPPort != old.Proxy.HTTPPort || next.HTTPSPort != old.Proxy.HTTPSPort
+	if portsChanged && u.hook != nil {
+		// También fuera: prueba los puertos del host en Docker.
+		if err := u.hook.CheckProxyPorts(ctx, old.Proxy, next); err != nil {
 			return dto.SettingsOutput{}, err
 		}
 	}
@@ -297,6 +311,9 @@ func (u *PatchSettings) Execute(ctx context.Context, in dto.PatchSettingsInput) 
 	})
 	if err != nil {
 		return dto.SettingsOutput{}, err
+	}
+	if len(changed) > 0 && u.origin != nil {
+		u.origin.Invalidate()
 	}
 	if len(changed) > 0 && u.hook != nil {
 		u.hook.ProxySettingsChanged(ctx, old.Proxy, next)

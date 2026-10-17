@@ -26,9 +26,11 @@ El panel (`web/`, Fase 4) ya está hecho contra una versión supuesta de este co
 | sesión | `utils.AccessSession` | Solo la cookie `muelle_session` (sesión completa). Un token recibe `403 token_not_allowed`. |
 | token | `utils.AccessToken` | La sesión, o un token de API dentro de su alcance. `GET` es lectura; cualquier otro método es escritura (`Principal.Allows`). |
 
-Las peticiones con cookie que modifican algo exigen un `Origin` permitido; si no, `403 bad_origin`. Los tokens no lo necesitan. Hay dos permitidos (`cmd/http`, hecho):
-- `MUELLE_PANEL_ORIGIN`;
-- el origen en que muelle-caddy sirve el panel según los ajustes: `https://<panel_domain>`, con `:<proxy_https_port>` si no es 443 (`ProxySettings.PanelOrigin`, que da `admin.Module.PanelOrigin`). Así, cambiar los puertos del proxy (`PATCH /settings`, §4.1) no deja fuera del panel. Solo se consulta cuando el `Origin` no es `MUELLE_PANEL_ORIGIN`.
+Las peticiones con cookie que modifican algo exigen un `Origin` permitido, que se compara exacto (esquema, host y puerto); si no, `403 bad_origin`. Los tokens no lo necesitan. Hay dos permitidos (`cmd/http`, hecho):
+- el origen en que muelle-caddy sirve el panel según los ajustes **de ese momento**: `https://<panel_domain>`, con `:<proxy_https_port>` si no es 443 (`ProxySettings.PanelOrigin`, que da `admin.Module.PanelOrigin`). `""` sin `panel_domain` (en desarrollo), y entonces no pasa ninguno por acá. Va en memoria: `PATCH /settings` lo invalida cuando cambia algún ajuste del proxy, así después de cambiar `proxy_https_port` (§4.1) el origen nuevo pasa desde que responde el `PATCH`, y el viejo ya no. Un cambio hecho fuera de muelle (el `UPDATE` a mano de §4.1) se ve en 30 s como mucho (`usecases.PanelOriginTTL`);
+- `MUELLE_PANEL_ORIGIN`, si está: una variable opcional para un origen más, puesto a mano (detrás de otro proxy, o en desarrollo, con una IP o `localhost`). install no la escribe: escribe `MUELLE_PANEL_DOMAIN` (§5.2). Con ella, los ajustes solo se consultan cuando el `Origin` no es ese.
+
+Los links de setup (`<origen>/setup?token=…`) y de las invitaciones (`POST /invites`, `url`) se arman con `MUELLE_PANEL_ORIGIN` si está y, si no, con el origen de los ajustes, en cada uno: siguen al puerto HTTPS igual.
 
 ### 0.2 Códigos de error comunes
 
@@ -96,7 +98,8 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 | catalog → deploy | `catalog/domain/service.AppRuntime`: `RemoveApp(ctx, p, s, a)` | `deploy.Module` (hecho: `docker stack rm`) | Al borrar una app. Fase 2: antes del `stack rm`, deja de aceptar deploys de la app por 2 min (`409 conflict`, lo que tarda catalog en borrar la fila), cancela el deploy en curso (`failed`: "la app se borró durante el deploy") y marca `failed` los `queued`. Si el `stack rm` falla, vuelve a aceptar deploys enseguida. Si el deploy en curso no se detiene en 15 s, no sigue (ni `queued` ni `stack rm`): vuelve a aceptar deploys y el `DELETE` de la app responde `409 conflict` ("un deploy de la app todavía no se detiene"), sin borrarla; se reintenta. Opcional |
 | deploy → secrets | `deploy/domain/service.EnvResolver`: `ResolveEnv(ctx, appID) (vars, secretValues, err)` | `secrets.Module` (hecho) | Las variables del stage con las de la app encima, y los valores secretos para enmascarar el log |
 | deploy → ingress | `deploy/domain/service.Ingress`: `EnsureStageNetwork`, `SyncRoutes(ctx) error` | `ingress.Module` (hecho) | §7 pasos 4 y 7 |
-| admin → ingress | `admin/domain/service.ProxyHook`: `CheckCloudflareToken`, `ProxySettingsChanged(ctx, old, next)` | `ingress.Module` (hecho) | Ver §3.5 |
+| admin → ingress | `admin/domain/service.ProxyHook`: `CheckCloudflareToken`, `CheckProxyPorts(ctx, old, next)`, `ProxySettingsChanged(ctx, old, next)` | `ingress.Module` (hecho) | Ver §3.5 |
+| ingress → admin | `ingress.Deps.PortsRolledBack func()` (opcional) | `container.go`, con `admin.Module.InvalidatePanelOrigin` (hecho) | Al volver a los puertos anteriores del proxy, el origen del panel en caché se descarta (§3.5) |
 
 **Lecturas por SQL** (un adaptador en `infra/out/service` del que lee, que puede leer la tabla de otro módulo):
 
@@ -105,7 +108,7 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 | deploy | `apps` (catalog) | Solo `storage_node_id` (si está vacío) y `last_deployed_at` (solo hacia adelante) | `deploy/infra/out/service.NewCatalogApps` → `service.Apps` (hecho) |
 | deploy | `domains` (ingress): los destinos, para validar el render (§6.3) | — | `NewDomainTargets` → `service.DomainTargets` (hecho) |
 | deploy | `settings.manager_node_id` y `settings.init_registry_applied` | `manager_node_id` al arrancar; `init_registry_applied`, la marca del registry inicial de install (§2.10), en el primer arranque de la base | Fase 2 |
-| ingress | `settings` (admin): `entity.ProxySettings`, con el token descifrado | `cloudflare_zones` y las claves reservadas de §3.6 | `ingress/infra/out/service.NewProxySettingsReader` (hecho) |
+| ingress | `settings` (admin): `entity.ProxySettings`, con el token descifrado | `cloudflare_zones`, las claves reservadas de §3.6 y, solo al volver a los puertos anteriores (§3.5), `proxy_http_port` y `proxy_https_port` | `ingress/infra/out/service.NewProxySettingsReader` (hecho) |
 | ingress | `apps`, `stages` y `projects` (catalog), para el kind de la app y los nombres de los servicios | — | `ingress/infra/out/service.NewCatalogReader` (hecho) |
 | ingress | `registries` (deploy): la credencial del host de la imagen de Caddy, si hay una (las imágenes de muelle son privadas, §3.4) | — | `NewRegistriesReader` (hecho) |
 | catalog | `domains`: cuántos tiene una app antes de borrarla | — | Hecho |
@@ -136,13 +139,13 @@ Un `docker stack deploy` cortado por el apagado se resuelve en el próximo arran
 **`ingress`** (Fase 3, hecho):
 - El job `"proxy"`, cada 5 min y al arrancar, en este orden (con el proxy deshabilitado no hace nada, §3.4):
   - asegura las redes de todos los stages y conecta Caddy;
-  - asegura muelle-caddy (§3.4) y la red `muelle_panel`, salvo que haya una recreación agendada por `ProxySettingsChanged`: esa la hace `ingress.Run`, después de que vuelve el hook (§3.5);
+  - asegura muelle-caddy (§3.4) y la red `muelle_panel`, salvo que haya una recreación agendada por `ProxySettingsChanged`: esa la hace `ingress.Run`, después de que vuelve el hook (§3.5). El job nunca vuelve a otros puertos: si los de los ajustes no arrancan, reintenta con los mismos;
   - borra las redes con etiquetas de stage (`muelle.project`/`muelle.stage`) cuyo stage ya no existe. Solo las que se llaman `naming.Network` de esas etiquetas, y recién **la segunda vez seguida** que el job las ve huérfanas: catalog crea la red antes de guardar el stage, y así no se borra la de un stage que se está creando. Una red en uso queda para la próxima vez;
   - reenvía la configuración completa. Si acaba de crear muelle-caddy, espera a que su admin API responda;
   - con token, actualiza `cloudflare_zones` y el registro DNS del panel (§3.4, §3.6), y si cambió la zona del panel (y con ella su TLS), reenvía la configuración otra vez. Va al final: un Cloudflare lento no atrasa la configuración de los sitios.
   - Un paso que falla no corta los que siguen.
 - El job `"certificados"`, cada hora (§3.1).
-- `ingress.Run` lleva los reintentos con backoff (1 s, 2 s… 60 s) de una configuración que Caddy no aceptó, las verificaciones de un dominio 30 s después de crearlo, adoptarlo o reintentarlo y la de los `pending` cada minuto (§3.1), y la recreación de muelle-caddy que agenda `ProxySettingsChanged` (§3.5).
+- `ingress.Run` lleva los reintentos con backoff (1 s, 2 s… 60 s) de una configuración que Caddy no aceptó, las verificaciones de un dominio 30 s después de crearlo, adoptarlo o reintentarlo y la de los `pending` cada minuto (§3.1), y la recreación de muelle-caddy que agenda `ProxySettingsChanged`, que vuelve a los puertos anteriores si los nuevos no arrancan (§3.5).
 
 Un error de Docker al arrancar nunca detiene a muelle.
 
@@ -670,7 +673,8 @@ El estado del proxy, para el banner "proxy desincronizado" (§8, §13):
   "status": "synced",
   "error": null,
   "synced_at": "2026-10-10T14:20:41Z",
-  "caddy": { "image": "ghcr.io/cpu-commits/muelle-caddy:v0.1.0", "running": true, "http_port": 80, "https_port": 443 }
+  "caddy": { "image": "ghcr.io/cpu-commits/muelle-caddy:v0.1.0", "running": true, "http_port": 80, "https_port": 443 },
+  "ports_rollback": null
 }
 ```
 
@@ -681,6 +685,7 @@ El estado del proxy, para el banner "proxy desincronizado" (§8, §13):
 | `synced_at` | El último `POST /load` exitoso; null si todavía no hubo uno desde que arrancó muelle |
 | `caddy.image`, `caddy.running` | Lo que corre de verdad, según `InspectContainer`. Si el contenedor no existe: `image: null` y `running: false` |
 | `caddy.http_port`, `caddy.https_port` | Los puertos de los ajustes |
+| `ports_rollback` | La última vez que muelle volvió a los puertos anteriores porque muelle-caddy no arrancó con los nuevos (§3.5), o null. `{"attempted": {"http_port": 80, "https_port": 443}, "restored": {"http_port": 8080, "https_port": 8443}, "error": "…", "at": "2026-10-16T20:41:07.12Z"}`: los que fallaron, a los que volvió (los de los ajustes desde entonces), por qué (en español, sin secretos) y cuándo. Va en memoria: se pierde al reiniciar muelle (queda en la auditoría), y se limpia con el próximo `PATCH /settings` que cambia los puertos. El `status` sigue las reglas de siempre: `synced` si el contenedor volvió con los puertos anteriores y Caddy tiene la configuración |
 
 Es un estado en memoria, más `InspectContainer`. Con Docker caído: `503 docker_unavailable`. Con `disabled` no se consulta Docker: responde `200` con `image: null` y `running: false`, también sin Docker (desarrollo). Al arrancar muelle, hasta el primer `POST /load` (el job `"proxy"` corre enseguida), dice `out_of_sync` con el mensaje "muelle todavía no le mandó la configuración a Caddy".
 
@@ -734,7 +739,10 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
     - catalog guarda un stage nuevo recién después de asegurar su red, así que puede llegar tarde a esa lectura. No importa: el stage no tiene rutas que servir hasta su primer deploy, cuyo paso 4 conecta la red, y si no, la conecta el job `"proxy"`.
   - **Cuándo se recrea:** si cambian la imagen, los puertos, el comando (`Container.Cmd`) o los volúmenes, si no está corriendo, o si corre sin publicar sus puertos (`len(PublishedPorts) == 0` con `Ports` no vacío).
   - **Recrear es** bajar la imagen si falta, y recién entonces detenerlo (`StopContainer`, 10 s: Caddy cierra bien y suelta el socket), borrarlo y crear uno nuevo, **nunca rearrancar el mismo.** Si la imagen no baja, el contenedor anterior sigue sirviendo los sitios y el panel, y el error queda en `GET /proxy`. Docker 29 arranca sin puertos un contenedor cuyo arranque falló con `ErrPortInUse` (el fake lo imita). Uno detenido o caído también se recrea, en vez de arrancarlo.
-  - **Puerto ocupado** (`docker.ErrPortInUse`): el contenedor anterior ya no existe. Se reintenta con los mismos ajustes en el job `"proxy"` y el error queda en `GET /proxy`. No se vuelve solo a los puertos viejos.
+  - **Puerto ocupado** (`docker.ErrPortInUse`): el contenedor anterior ya no existe.
+    - Si fue la recreación de un cambio de puertos (§3.5), muelle vuelve a los puertos con que servía.
+    - Si no (el job `"proxy"`: el primer arranque, un contenedor que no servía, un cambio hecho a mano con el `UPDATE` de §4.1), se reintenta con los mismos ajustes en el job, y el error queda en `GET /proxy`.
+    - `PATCH /settings` prueba los puertos nuevos antes de guardarlos (§4.1), así que esto pasa solo si alguien los toma entre el `PATCH` y la recreación.
     - Los puertos se prueban antes de crear el contenedor nuevo, con uno descartable, `muelle-caddy-probe`: la misma imagen, en la red `bridge` y sin redes de Swarm, corre `caddy version` y se borra siempre. Si no, un arranque que falla por un puerto deja en Docker 29 una IP de `muelle_panel` tomada que no se suelta, y los reintentos cada 5 min agotarían la red.
 - **Imagen:** `caddy_image` si está, o `naming.CaddyImageFor(version)`. Se baja con `PullImage` si `InspectImage` da `ErrNotFound`: con la credencial de `registries` de su host si hay una (§1.1), y si no, anónima.
   - Las imágenes de muelle son privadas (decisión del dueño, 2026-10-15): install baja la primera y siembra el registry `ghcr.io`, y con ese registry se bajan las versiones nuevas.
@@ -751,7 +759,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - El registro DNS del panel se crea solo si no existe, con `proxied: false`. Uno existente nunca se toca, y en la v1 no se adopta. Sin `public_ip`, no se crea ni se actualiza ninguno.
   - Su `AAAA` se crea solo si muelle maneja el `A`, con el `proxied` que tenga el `A`; sin `public_ipv6`, muelle borra el suyo.
   - Sus ids se guardan en las claves reservadas de §3.6. Si cambia la IP pública, muelle actualiza solo el contenido de los suyos: nunca cambia su `proxied`, que se puede cambiar en Cloudflare.
-  - Antes de tocar un registro guardado, muelle lo lee: si ya no existe, ya no es de `panel_domain` (cambió `MUELLE_PANEL_ORIGIN`) o el token ya no lo puede leer (Cloudflare rechaza la lectura: un token de otra cuenta, o una zona que ya no ve), olvida su id sin borrarlo, y vuelve a crear uno solo si no hay otro. Si Cloudflare no responde, no olvida nada.
+  - Antes de tocar un registro guardado, muelle lo lee: si ya no existe, ya no es de `panel_domain` (cambió `MUELLE_PANEL_DOMAIN` o `MUELLE_PANEL_ORIGIN`) o el token ya no lo puede leer (Cloudflare rechaza la lectura: un token de otra cuenta, o una zona que ya no ve), olvida su id sin borrarlo, y vuelve a crear uno solo si no hay otro. Si Cloudflare no responde, no olvida nada.
   - La excepción: si el `A` guardado ya no existe y su `AAAA` sí, el `AAAA` se borra. Si no, contaría como un registro que muelle no creó, y el panel quedaría sin `A`.
 
 ### 3.5 Los hooks de admin
@@ -762,6 +770,13 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - un token rechazado (también uno desactivado o vencido), uno que no puede listar las zonas, o uno sin zonas, devuelve un `*validate.Error` en `cloudflare_token` (`422`), con un mensaje que dice qué pasó o qué permisos faltan (Zone:Read y DNS:Edit), sin el token;
   - si Cloudflare no responde (sin red, un 5xx o un 429), `entity.ErrCloudflareUnavailable` (`502`);
   - si falla, no se guarda nada del `PATCH`.
+- **`CheckProxyPorts(ctx, old, next)`** (antes de guardar, si cambió `proxy_http_port` o `proxy_https_port`):
+  - con el proxy deshabilitado (desarrollo) no toca Docker y devuelve `nil`;
+  - prueba solo los puertos que cambian, de a un campo: `proxy_http_port` en TCP, y `proxy_https_port` en TCP y en UDP (HTTP/3). No prueba los que ya publica el muelle-caddy que sirve, que los suelta al recrearse (cambiar 80/443 por 443/80 prueba solo el 80 en UDP);
+  - la prueba es la de §3.4: un contenedor descartable, `muelle-caddy-probe`, con la imagen del muelle-caddy que sirve (o la de los ajustes, si no hay uno), en la red `bridge` y sin redes de Swarm, que corre `caddy version` y se borra siempre. Nunca toca muelle-caddy;
+  - un puerto ocupado (por otro contenedor o un proceso del host) devuelve un `*validate.Error` en ese campo (`422`): `proxy_https_port: el puerto 443 del host ya está en uso (en TCP o en UDP): libéralo o elige otro`;
+  - Docker caído: `entity.ErrDockerUnavailable` (`503 docker_unavailable`). Si la prueba no se puede hacer por otra cosa (la imagen no está en el nodo), queda en el log y se guarda igual: la protección de fondo es volver atrás (abajo);
+  - con un plazo de 30 s sobre el ctx de la petición; si falla, no se guarda nada del `PATCH`.
 - **`ProxySettingsChanged(ctx, old, next)`** (después de guardar, antes de responder):
   - corre con su propio plazo de 2 min, derivado con `context.WithoutCancel`;
   - aplica, según `next.ChangedKeys(old)`:
@@ -772,14 +787,22 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
       - un `public_ipv6` nuevo crea el `AAAA` de cada dominio cuyo `A` maneja muelle (si ya hay un `AAAA` ajeno, ese dominio queda en `error`/`cloudflare`) y cambia los que ya maneja; borrarla borra los `AAAA` que maneja muelle;
       - sin token, los dominios cuyos registros maneja muelle quedan en `error`/`cloudflare`, porque no se pueden actualizar;
     - token nuevo → busca la zona del panel y su registro (§3.4), como el job `"proxy"`. Los dominios que se crearon sin token no cambian solos: el reintento busca su zona (§3.2);
-    - puertos → **agenda** la recreación de muelle-caddy, y no la hace antes de volver;
+    - puertos → **agenda** la recreación de muelle-caddy, y no la hace antes de volver. Además limpia `ports_rollback` de `GET /proxy`: es un intento nuevo;
     - la imagen nunca cambia por un `PATCH`: `caddy_image` no está en `/settings` (§4.1), y solo la escribe la configuración inicial (`--caddy-image`, `MUELLE_INIT_CADDY_IMAGE`, §5.2). La imagen es esa `caddy_image` fijada o, si está vacía, la de la versión de muelle: cambia con una versión nueva de muelle, y la aplica el job `"proxy"` del arranque (§3.4 y §5.4);
   - no devuelve error: el resultado se ve en `GET /proxy` y en cada dominio.
 - **Por qué la recreación va después:** el `PATCH` mismo pasa por muelle-caddy. Si el hook lo borrara antes de responder, el cliente recibiría una conexión cortada por un cambio que sí se guardó.
   - `ingress.Run` recrea el contenedor 2 s después de que el hook volvió, que alcanza para que la respuesta salga por el Caddy viejo. Mientras tanto, y hasta que termina, `GET /proxy` dice `recreating`.
   - Dos cambios seguidos se juntan en una sola recreación, con los ajustes que estén guardados en ese momento.
-  - Si muelle se reinicia antes, el job `"proxy"` del arranque recrea el contenedor igual (las diferencias de puertos, §3.4).
-  - El panel ya avisa que cambiar los puertos corta unos segundos. Si cambió solo el puerto HTTP, sigue en el mismo origen y pregunta `GET /proxy` hasta que deja de decir `recreating`. Si cambió `proxy_https_port`, el origen actual deja de responder: el panel muestra el nuevo, `https://<panel_domain>[:<proxy_https_port>]` (con los valores de la respuesta del `PATCH`), y lleva ahí al usuario. La sesión sigue, porque la cookie no depende del puerto, y ese `Origin` pasa (§0.1).
+  - Si muelle se reinicia antes, el job `"proxy"` del arranque recrea el contenedor igual (las diferencias de puertos, §3.4), pero sin volver atrás.
+  - El panel ya avisa que cambiar los puertos corta unos segundos. Si cambió solo el puerto HTTP, sigue en el mismo origen y pregunta `GET /proxy` hasta que deja de decir `recreating`. Si cambió `proxy_https_port`, el origen actual deja de responder: el panel muestra el nuevo, `https://<panel_domain>[:<proxy_https_port>]` (con los valores de la respuesta del `PATCH`), y lleva ahí al usuario. La sesión sigue, porque la cookie no depende del puerto, y ese `Origin` pasa (§0.1); el del puerto viejo ya no.
+- **Si muelle-caddy no arranca con los puertos nuevos, la recreación vuelve a los anteriores.** Cuando muelle-caddy servía (corría publicando sus puertos) con otros puertos y la recreación falla (por ejemplo, un puerto ocupado, o el contenedor que no se crea o no arranca), ingress:
+  1. vuelve `proxy_http_port` y `proxy_https_port` a los puertos con que servía, solo si los guardados siguen siendo los que fallaron (en una transacción): si un `PATCH` los cambió mientras tanto, gana ese, y su recreación viene después;
+  2. descarta el origen del panel en caché (`PortsRolledBack`): el `Origin` del puerto anterior pasa enseguida, y el del nuevo ya no (§0.1);
+  3. lo audita (`settings.ports_rollback`, actor `system`, con `{"proxy_http_port": …, "proxy_https_port": …, "attempted": {"proxy_http_port": …, "proxy_https_port": …}, "error": "…"}`), lo registra en el log y lo deja en `GET /proxy` (`ports_rollback`, §3.3);
+  4. recrea muelle-caddy con los puertos anteriores y le manda la configuración. Si tampoco arranca (alguien los tomó mientras tanto), el error queda en `GET /proxy` y el job lo reintenta con esos.
+  - Con Docker caído no vuelve atrás: no es culpa de los puertos, y el job reintenta con los nuevos. El job `"proxy"` tampoco vuelve atrás (§1.2).
+  - Un Caddy que arranca pero no responde en su admin API no cuenta como "no arrancó": los puertos ya se tomaron, y queda `out_of_sync` como siempre.
+  - Lo que ve el panel: si cambió solo el puerto HTTP, sigue en el mismo origen, y `GET /proxy` deja de decir `recreating` y trae `ports_rollback` con el motivo. Si cambió `proxy_https_port` y el origen nuevo no responde, lo más probable es que muelle haya vuelto al anterior: el panel le ofrece al usuario volver a `https://<panel_domain>[:<puerto anterior>]` (lo sabe: es el que tenía antes del `PATCH`), donde `GET /proxy` trae `ports_rollback`. La vuelta tarda lo que tarda en detenerse el Caddy viejo (hasta 10 s) más el arranque.
 
 ### 3.6 Claves de settings que escribe ingress
 
@@ -790,6 +813,8 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
 | `panel_cf_record_id`, `panel_cf_record_id_aaaa` | El registro `A` y el `AAAA` del panel que creó muelle; vacías si no creó ninguno |
 
 Las tres `panel_cf_*` las escribe solo ingress (constantes en `shared/domain/entity`, `panel_dns.go`); `GET /settings` no las muestra y `PATCH /settings` no las acepta.
+
+Además, ingress reescribe `proxy_http_port` y `proxy_https_port`, que son de admin, en un solo caso: al volver a los puertos anteriores (§3.5), y solo si siguen siendo los que fallaron.
 
 ## 4. Settings (`GET/PATCH /settings`) · sesión — ya implementado
 
@@ -816,7 +841,7 @@ Las tres `panel_cf_*` las escribe solo ingress (constantes en `shared/domain/ent
 | `cloudflare_token_set` | Si hay token. **El token nunca vuelve** |
 | `cloudflare_zones` | Valor guardado (no se consulta a Cloudflare en cada `GET`); null si no se sabe o no hay token |
 | `public_ip`, `public_ipv6`, `acme_email` | `""` si no están |
-| `panel_domain` | **Solo lectura**: el host de `MUELLE_PANEL_ORIGIN` si es un dominio, o `""` (una IP o `localhost`, en desarrollo). Se escribe en cada arranque |
+| `panel_domain` | **Solo lectura**: `MUELLE_PANEL_DOMAIN` (lo que escribe install) o, si no está, el host de `MUELLE_PANEL_ORIGIN` si es un dominio, o `""` (una IP o `localhost`, en desarrollo). Se escribe en cada arranque |
 | `panel_allowed_cidrs` | Prefijos normalizados (`validate.CIDRs`). Nunca null; `[]` es cualquier IP |
 | `client_ip` | La IP con que muelle ve esta petición (`utils.ClientIP`). No es un ajuste |
 
@@ -829,6 +854,8 @@ Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `public_ip
 | `public_ip` no es una IPv4 canónica, `public_ipv6` una IPv6 (RFC 5952), o `acme_email` un email | `422` en ese campo. `""` borra el valor |
 | Un puerto fuera de 1–65535 | `422` en ese campo |
 | `proxy_http_port` = `proxy_https_port` (con los valores resultantes) | `422` en `proxy_https_port` |
+| Un puerto nuevo del proxy ya en uso en el host (`CheckProxyPorts`, §3.5) | `422` en ese campo; no se guarda nada |
+| Docker no responde al probar los puertos nuevos | `503 docker_unavailable`; no se guarda nada |
 | Un rango inválido en `panel_allowed_cidrs` | `422` en `panel_allowed_cidrs` |
 | `cloudflare_token` con otra forma (de 20 a 512 caracteres visibles, sin espacios) | `422 cloudflare_token` |
 | `cloudflare_token` rechazado por Cloudflare | `422 cloudflare_token` |
@@ -838,9 +865,9 @@ Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `public_ip
 | Una lista de `panel_allowed_cidrs` que deja fuera `client_ip` | `409 would_lock_out`, salvo que venga `"confirm_lockout": true` |
 
 - Todo se guarda en una transacción. Después, si cambió algo del proxy, se llama a `ProxySettingsChanged`. El `PATCH` responde cuando el hook vuelve, y eso es antes de recrear muelle-caddy (§3.5).
-- **Cambiar `proxy_https_port` mueve el panel** a `https://<panel_domain>[:<puerto>]`. Ese origen se acepta en `Origin` aunque `MUELLE_PANEL_ORIGIN` siga con el puerto viejo (§0.1). Pero los links de las invitaciones se arman con `MUELLE_PANEL_ORIGIN`, así que conviene actualizarlo después (la configuración de install, §5.2).
+- **Cambiar `proxy_https_port` mueve el panel** a `https://<panel_domain>[:<puerto>]`. Desde que responde el `PATCH`, ese es el `Origin` que pasa y el de los links de las invitaciones; el del puerto viejo ya no pasa (§0.1). No hay que tocar la configuración de muelle. Si hay un `MUELLE_PANEL_ORIGIN` puesto a mano, ese sigue pasando y sigue siendo el de los links.
 - Un error de DNS al cambiar la IP pública nunca hace fallar el `PATCH` (§9).
-- **Auditoría:** `settings.update` con las claves y sus valores. El token solo aparece como `"set"` o `"removed"`.
+- **Auditoría:** `settings.update` con las claves y sus valores. El token solo aparece como `"set"` o `"removed"`. Si después muelle vuelve a los puertos anteriores (§3.5), va otro evento, `settings.ports_rollback`, del actor `system`.
 
 **Recuperar el acceso** después de guardar una lista que te deja fuera, desde el servidor. La imagen de muelle no trae `sqlite3`, así que se usa un contenedor aparte sobre el mismo volumen (SQLite en modo WAL admite la escritura con muelle corriendo):
 
@@ -851,7 +878,36 @@ docker run --rm -v muelle_data:/data alpine sh -c \
 
 Después se reinicia muelle (`docker service update --force muelle_muelle`), o se espera al job `"proxy"`, que reenvía la configuración cada 5 min. La Fase 5 agrega el subcomando `muelle settings reset-panel-ips`, que hace lo mismo con `docker exec` en el contenedor de muelle.
 
-Lo mismo sirve si los puertos nuevos del proxy estaban ocupados: muelle-caddy no vuelve solo a los viejos (§3.4), y sin Caddy no se llega al panel. Se vuelven a poner los de antes (`UPDATE settings SET value='8443' WHERE key='proxy_https_port'`, y lo mismo con `proxy_http_port`), y el job `"proxy"` recrea el contenedor.
+Lo mismo sirve si muelle-caddy quedó sin arrancar por los puertos y muelle no volvió solo a los anteriores (§3.5: no había un muelle-caddy sirviendo, o los anteriores también estaban tomados), y sin Caddy no se llega al panel. Se ponen otros que estén libres (`UPDATE settings SET value='8443' WHERE key='proxy_https_port'`, y lo mismo con `proxy_http_port`), y el job `"proxy"` recrea el contenedor.
+
+### 4.2 `GET /audit?limit=N&before=<id>` → 200 · sesión
+
+Los eventos de la auditoría, del más nuevo al más viejo, paginados por id: `limit` va de 1 a 500 (100 por defecto) y `before` es el id más chico ya visto, para la página siguiente. Fuera de rango, o algo que no es un número, es `422` en ese campo. No dice si hay más: una página llena puede tener otra detrás. Se conservan 180 días (§5.2 del diseño).
+
+```json
+[
+  {
+    "id": 812,
+    "actor_type": "token",
+    "actor_id": 5,
+    "actor_name": "github-actions",
+    "action": "env.replace",
+    "target": "stage:auditfy/staging",
+    "details": {"keys": ["DATABASE_URL"]},
+    "at": "2026-10-16T20:41:07.12Z"
+  }
+]
+```
+
+| Campo | Qué |
+|---|---|
+| `actor_type` | `user`, `token` o `system`: los jobs, el arranque, la CLI y lo que provoca alguien sin autenticarse (una contraseña incorrecta en el login; un código TOTP incorrecto ya es del usuario) |
+| `actor_id` | El id del usuario o del token; null con `system` |
+| `actor_name` | El username, el nombre del token o `"system"`, **copiado al escribir el evento**: sigue aunque se borren el usuario o el token, como el `actor_name` de un deploy (§2.1). Nunca es null. Es `""` solo en un evento de antes de la migración 0004 cuyo autor ya no existía al migrar y no dejó su nombre (un token borrado, o un usuario borrado sin su `auth.login` ni su `user.create` en la auditoría); el panel muestra entonces el tipo y el id |
+| `details` | Un objeto JSON (`{}` si no hay). Nunca trae valores secretos |
+| `at` | RFC 3339 (§0) |
+
+**Quien audita no pasa el nombre:** `audit.Recorder.Record(ctx, action, target, details)` lo copia del Principal del ctx (`Principal.ActorName`), del mismo del que sale el actor. Así lo reciben todos los módulos, también los eventos del deploy (Fase 2: `deploy.create` y `registry.*`), sin cambiar una línea. Un Principal armado a mano (el de `auth.login` y el de `user.create`) trae `Username`.
 
 ## 5. Fase 5: install, imágenes y el panel embebido
 
@@ -872,7 +928,7 @@ Lo mismo sirve si los puertos nuevos del proxy estaban ocupados: muelle-caddy no
 install acepta tres flags ocultos, solo para los tests de integración (no salen en la ayuda):
 - `--name-prefix <p>` cambia el `muelle` de todos estos nombres: `<p>` (stack), `<p>_muelle`, `<p>_panel`, `<p>_data`, `<p>_caddy_admin`, `<p>_master_key`, `<p>_init_cloudflare_token`, `<p>_init_registry`, `<p>-install-probe` y `<p>-caddy` (el contenedor que mira `--reinstall`). Los arma `naming.InstallNamesFor(p)`; con `muelle` da los nombres fijos de arriba. Con otro prefijo, muelle-caddy, que ingress crea con los nombres fijos, no comparte la red ni el socket con ese muelle.
 - `--image <ref>`: la imagen de muelle que se despliega y con la que se prueba los puertos (§5.4), en vez de `naming.MuelleImageFor(version)`. Así el test usa una imagen construida en el nodo.
-- `--panel-origin <origen>`: reemplaza el `MUELLE_PANEL_ORIGIN` que arma `--panel-domain` (con él, `--panel-domain` no hace falta). El test pasa una IP (`https://127.0.0.1:<puerto>`): sin `panel_domain`, `ProxySettings.Enabled` es falso e ingress queda `disabled` (§3.3), así el muelle del test nunca crea muelle-caddy ni la red `muelle_panel`, que tienen nombres fijos. El test lo verifica: si alguno de los dos aparece durante el test, falla (no los borra).
+- `--panel-origin <origen>`: escribe `MUELLE_PANEL_ORIGIN` en vez del `MUELLE_PANEL_DOMAIN` de `--panel-domain` (con él, `--panel-domain` no hace falta y, si viene, no se escribe). El test pasa una IP (`https://127.0.0.1:<puerto>`): sin `panel_domain`, `ProxySettings.Enabled` es falso e ingress queda `disabled` (§3.3), así el muelle del test nunca crea muelle-caddy ni la red `muelle_panel`, que tienen nombres fijos. El test lo verifica: si alguno de los dos aparece durante el test, falla (no los borra).
 
 ### 5.2 La configuración inicial: `MUELLE_INIT_*`
 
@@ -885,7 +941,7 @@ install despliega el servicio con estas variables. `settings.Load` las valida en
 
 | Flag de install | Variable | Clave de settings |
 |---|---|---|
-| `--panel-domain D` (+ `--https-port`), obligatorio salvo con `--panel-origin` (§5.1) | `MUELLE_PANEL_ORIGIN=https://D`, o `https://D:<puerto>` si el puerto HTTPS no es 443 | `panel_domain` (en cada arranque; ver abajo) |
+| `--panel-domain D`, obligatorio salvo con `--panel-origin` (§5.1) | `MUELLE_PANEL_DOMAIN=D`, sin esquema ni puerto (no es `MUELLE_INIT_*`: vale en cada arranque) | `panel_domain` (en cada arranque; ver abajo) |
 | `--email`, obligatorio | `MUELLE_INIT_ACME_EMAIL` | `acme_email` |
 | `--public-ip` (o la detectada, §3.3 paso 2 del diseño) | `MUELLE_INIT_PUBLIC_IP` | `public_ip` |
 | `--public-ipv6` (opcional) | `MUELLE_INIT_PUBLIC_IPV6` | `public_ipv6` |
@@ -899,13 +955,15 @@ install despliega el servicio con estas variables. `settings.Load` las valida en
 
 Los flags se validan antes de tocar Docker, con las mismas reglas que `PATCH /settings` (§4.1): `validate.Hostname`, `Email`, `IPv4`, `IPv6`, `Port` e `ImageRef`; los dos puertos distintos; y el token con la forma de un token de Cloudflare (de 20 a 512 caracteres visibles, sin espacios). Uno que no sirve termina con código 2 y el nombre del flag.
 
-**`MUELLE_PANEL_ORIGIN` después de cambiar los puertos:** install lo fija con el puerto HTTPS de ese momento. Si después se cambia `proxy_https_port` en el panel (la migración de §16 del diseño pasa de 8443 a 443), el panel sigue funcionando en el origen nuevo (§0.1), pero los links de las invitaciones salen con el viejo hasta que se actualiza la variable, lo que reinicia muelle:
+**El origen del panel no va en la configuración de muelle:** install escribe el dominio (`MUELLE_PANEL_DOMAIN`) y el puerto HTTPS inicial (`MUELLE_INIT_PROXY_HTTPS_PORT`). El origen sale de los ajustes, `https://<panel_domain>[:<proxy_https_port>]`: si después se cambia `proxy_https_port` en el panel (la migración de §16 del diseño pasa de 8443 a 443), el `Origin` permitido y los links pasan al puerto nuevo, sin reiniciar muelle (§0.1).
+
+`MUELLE_PANEL_ORIGIN` es opcional, para un origen más que install no conoce (el panel detrás de otro proxy). Se agrega a mano, lo que reinicia muelle, y pasa a ser también el origen de los links:
 
 ```bash
-docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl muelle_muelle
+docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.otro-proxy.cl muelle_muelle
 ```
 
-En la v1 no hay un subcomando para esto: se usa ese `docker service update`, que el README documenta.
+Una instalación anterior a `MUELLE_PANEL_DOMAIN` tiene `MUELLE_PANEL_ORIGIN` con el puerto de entonces, y ese origen sigue pasando aunque el puerto cambie. Para que siga a los ajustes: `docker service update --env-rm MUELLE_PANEL_ORIGIN --env-add MUELLE_PANEL_DOMAIN=panel.tudominio.cl muelle_muelle`.
 
 **Fijas:**
 - `MUELLE_LISTEN=:8080`
@@ -940,7 +998,7 @@ services:
   muelle:
     image: ghcr.io/cpu-commits/muelle:v0.1.0
     environment:
-      MUELLE_PANEL_ORIGIN: https://panel.tudominio.cl
+      MUELLE_PANEL_DOMAIN: panel.tudominio.cl
       MUELLE_LISTEN: ":8080"
       MUELLE_DATA_DIR: /data
       MUELLE_MASTER_KEY_FILE: /run/secrets/muelle_master_key
@@ -1072,6 +1130,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 - **0003** (ingress): `domains`, con:
   - `cf_record_id_aaaa`, `last_error_code`, `created_at` y `updated_at`;
   - `app_id` con `ON DELETE RESTRICT`: catalog no borra una app con dominios, `409 not_empty`.
+- **0004** (Fase 1, un pendiente de su revisión final): `audit_events.actor_name` (§4.2), con los eventos que ya había llenados con lo que se sabe de su autor. Es una migración nueva, y no un cambio a `0001_init.sql` (que no se edita, §1.3), para que corra también sobre una base de la Fase 1. La próxima migración nueva es la 0005.
 
 ## 7. Diferencias con lo que supuso el panel
 
@@ -1121,9 +1180,10 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Settings: cambio de IP pública | — | Los registros que maneja muelle siguen a la IP (solo el contenido); un dominio en `error`/`cloudflare` que se actualiza bien vuelve a `pending`, y uno que falla queda en `error`/`cloudflare`. El `PATCH` responde `200` igual | Compatible: el panel vuelve a leer los dominios |
 | Settings: lista que te deja fuera | Guarda sugerida | `409 would_lock_out`; se guarda con `confirm_lockout: true` | La pide la revisión del panel |
 | Settings: cambio de puertos | Abierto | El `PATCH` responde antes de recrear Caddy, que se recrea 2 s después; `GET /proxy` dice `recreating` mientras tanto. Si cambió `proxy_https_port`, el panel lleva al usuario al origen nuevo | La respuesta pasa por el Caddy que se recrea: si no, el cliente vería una conexión cortada |
-| `Origin` después de cambiar los puertos | — | Pasa también `https://<panel_domain>[:<proxy_https_port>]` | Si no, todo el panel, el login incluido, quedaría en `403 bad_origin` hasta actualizar `MUELLE_PANEL_ORIGIN` |
+| Settings: puerto del proxy ocupado | — | El `PATCH` prueba los puertos nuevos antes de guardar: uno ocupado es `422` en su campo (`proxy_http_port` o `proxy_https_port`), y Docker caído `503`. Si se ocupa después, la recreación vuelve a los anteriores y `GET /proxy` suma `ports_rollback`; si el origen nuevo no responde, el panel ofrece volver al anterior | Un puerto ocupado dejaba el panel sin Caddy hasta arreglarlo a mano desde el servidor |
+| `Origin` después de cambiar los puertos | — | Pasa `https://<panel_domain>[:<proxy_https_port>]` con el puerto de ese momento (y el del puerto viejo ya no), además de `MUELLE_PANEL_ORIGIN` si está; los links de setup e invitaciones usan el mismo origen. install escribe `MUELLE_PANEL_DOMAIN` en vez de `MUELLE_PANEL_ORIGIN` | Si no, todo el panel, el login incluido, quedaría en `403 bad_origin`, y los links en el puerto viejo, hasta actualizar la configuración de muelle |
 | Settings: `client_ip` | String o null | Siempre string | Compatible |
 | Registries: `PATCH` | `{username, password}` | Los dos obligatorios: reemplaza | Igual al payload del panel |
 | Registries: host | Normalizado por el panel | El backend exige la forma canónica y no normaliza; Docker Hub es `docker.io`, y sus alias (`index.docker.io`…) son `422` | Una credencial con un alias nunca se usaría |
 | Registries: respuesta | `{host, username}` | Suma `created_at` y `updated_at` | Compatible |
-| Auditoría: `actor_name` | Lo pide en `GET /audit` | Sigue pendiente (README, revisión final de la Fase 1); no es de este contrato | |
+| Auditoría: `actor_name` | Lo pide en `GET /audit` | Siempre string, copiado al escribir el evento: el username, el nombre del token o `system` (§4.2) | Como el de un deploy: no se pierde al borrar el usuario o el token |

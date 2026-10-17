@@ -26,7 +26,8 @@ func NewGetProxyStatus(settings service.Settings, runtime service.CaddyRuntime, 
 
 // Execute lee los ajustes y, con el proxy habilitado, inspecciona
 // muelle-caddy: con Docker caído devuelve su error (503). Deshabilitado
-// (desarrollo) no consulta Docker.
+// (desarrollo) no consulta Docker. ports_rollback es la última vuelta a los
+// puertos anteriores que registró el estado.
 func (u *GetProxyStatus) Execute(ctx context.Context) (dto.ProxyOutput, error) {
 	p, err := u.settings.ProxySettings(ctx)
 	if err != nil {
@@ -51,6 +52,14 @@ func (u *GetProxyStatus) Execute(ctx context.Context) (dto.ProxyOutput, error) {
 	if syncedAt != nil {
 		t := syncedAt.UTC().Truncate(time.Millisecond)
 		out.SyncedAt = &t
+	}
+	if r := u.state.LastPortsRollback(); r != nil {
+		out.PortsRollback = &dto.PortsRollbackOutput{
+			Attempted: dto.ProxyPortsOutput{HTTPPort: r.Attempted.HTTPPort, HTTPSPort: r.Attempted.HTTPSPort},
+			Restored:  dto.ProxyPortsOutput{HTTPPort: r.Restored.HTTPPort, HTTPSPort: r.Restored.HTTPSPort},
+			Error:     r.Error,
+			At:        r.At.UTC().Truncate(time.Millisecond),
+		}
 	}
 	return out, nil
 }

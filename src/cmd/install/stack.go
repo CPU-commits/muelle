@@ -12,12 +12,12 @@ import (
 type stackInput struct {
 	Names    naming.InstallNames
 	Image    string // la imagen de muelle que se despliega
-	Origin   string // MUELLE_PANEL_ORIGIN
 	PublicIP string // la de --public-ip o la detectada; vacía no va
 	NodeID   string // el nodo donde corrió install (node.id)
 	Token    bool   // monta el secreto del token de Cloudflare
 	Registry bool   // monta el secreto del registry inicial
-	// Opts aporta Email, PublicIPv6, HTTPPort, HTTPSPort y CaddyImage.
+	// Opts aporta PanelDomain, PanelOrigin, Email, PublicIPv6, HTTPPort,
+	// HTTPSPort y CaddyImage.
 	Opts Options
 }
 
@@ -108,9 +108,17 @@ type composeExternal struct {
 // serviceEnv son las variables del servicio de muelle (contrato §5.2): las
 // fijas, MUELLE_INIT_PROXY_* siempre, y las demás solo con valor.
 // MUELLE_SECURE_COOKIES no va (true).
+//
+// El panel va en MUELLE_PANEL_DOMAIN (--panel-domain), sin el puerto: el
+// origen del panel sale de los ajustes, así sigue al puerto HTTPS cuando se
+// cambia en el panel. --panel-origin (solo los tests) lo reemplaza por
+// MUELLE_PANEL_ORIGIN.
 func serviceEnv(in stackInput) map[string]string {
+	domain, origin := in.Opts.PanelDomain, in.Opts.PanelOrigin
+	if origin != "" {
+		domain = ""
+	}
 	env := map[string]string{
-		"MUELLE_PANEL_ORIGIN":          in.Origin,
 		"MUELLE_LISTEN":                muelleListen,
 		"MUELLE_DATA_DIR":              muelleDataDir,
 		"MUELLE_MASTER_KEY_FILE":       secretsDir + naming.MasterKeySecret,
@@ -119,6 +127,8 @@ func serviceEnv(in stackInput) map[string]string {
 		"MUELLE_INIT_PROXY_HTTPS_PORT": strconv.Itoa(in.Opts.HTTPSPort),
 	}
 	optional := map[string]string{
+		"MUELLE_PANEL_DOMAIN":     domain,
+		"MUELLE_PANEL_ORIGIN":     origin,
 		"MUELLE_INIT_PUBLIC_IP":   in.PublicIP,
 		"MUELLE_INIT_PUBLIC_IPV6": in.Opts.PublicIPv6,
 		"MUELLE_INIT_CADDY_IMAGE": in.Opts.CaddyImage,

@@ -58,7 +58,16 @@ type Settings interface {
 	// SaveZones guarda cloudflare_zones solo si el token guardado sigue siendo
 	// token (en una transacción); saved dice si lo guardó.
 	SaveZones(ctx context.Context, token string, zones int) (saved bool, err error)
+	// RollbackPorts vuelve proxy_http_port y proxy_https_port a to solo si
+	// los guardados siguen siendo from (en una transacción): así no pisa un
+	// PATCH /settings que los cambió mientras tanto (contrato §3.5). saved
+	// dice si los volvió.
+	RollbackPorts(ctx context.Context, from, to ProxyPorts) (saved bool, err error)
 }
+
+// ProxyPorts son los puertos del host del proxy (proxy_http_port y
+// proxy_https_port).
+type ProxyPorts struct{ HTTPPort, HTTPSPort int }
 
 // Zone es una zona de Cloudflare visible para el token.
 type Zone struct{ ID, Name string }
@@ -169,6 +178,20 @@ type CaddyWant struct {
 	Auth *Credential
 }
 
+// HostPort es un puerto del host con su protocolo ("tcp" o "udp").
+type HostPort struct {
+	Port     int
+	Protocol string
+}
+
+// CaddyServing es el muelle-caddy que corre publicando sus puertos: la
+// imagen con que se creó y los puertos del host de su 80/tcp (HTTP) y su
+// 443/tcp (HTTPS).
+type CaddyServing struct {
+	Image               string
+	HTTPPort, HTTPSPort int
+}
+
 // CaddyRuntime es el contenedor muelle-caddy (adaptador: caddy.Runtime, D2
 // del plan de la Fase 3).
 type CaddyRuntime interface {
@@ -183,4 +206,13 @@ type CaddyRuntime interface {
 	// Status es lo que corre de verdad: la imagen con que se creó y si corre;
 	// found false si el contenedor no existe.
 	Status(ctx context.Context) (image string, running, found bool, err error)
+	// Serving es el muelle-caddy que sirve: ok false si no existe, no corre
+	// o corre sin publicar sus puertos.
+	Serving(ctx context.Context) (s CaddyServing, ok bool, err error)
+	// ProbePorts prueba que se puedan tomar esos puertos del host, con un
+	// contenedor descartable de image y sin tocar muelle-caddy (contrato
+	// §4.1). Errores: ErrPortInUse si alguno está tomado, o Docker caído.
+	// Si la prueba no se puede hacer por otra cosa (la imagen no está en el
+	// nodo), lo registra y devuelve nil.
+	ProbePorts(ctx context.Context, image string, ports []HostPort) error
 }

@@ -91,7 +91,8 @@ func TestSettingsAndAuditAPI(t *testing.T) {
 	w = e.c.Do("GET", "/api/v1/audit?limit=1", nil, con)
 	httptestutil.Expect(t, w, http.StatusOK)
 	events := httptestutil.Decode[[]map[string]any](t, w)
-	if len(events) != 1 || events[0]["action"] != "settings.update" || events[0]["actor_type"] != "user" {
+	if len(events) != 1 || events[0]["action"] != "settings.update" || events[0]["actor_type"] != "user" ||
+		events[0]["actor_name"] != "con-totp" {
 		t.Fatalf("events=%v", events)
 	}
 	if d, _ := events[0]["details"].(map[string]any); d["require_2fa"] != true {
@@ -121,6 +122,34 @@ func TestAuditPagination(t *testing.T) {
 	}
 	for _, q := range []string{"limit=501", "limit=abc", "before=0", "before=x"} {
 		httptestutil.Expect(t, e.c.Do("GET", "/api/v1/audit?"+q, nil, con), http.StatusUnprocessableEntity)
+	}
+}
+
+// actor_name siempre es un string: también en los eventos del sistema y en
+// los de un usuario que ya se borró (contrato §4.2).
+func TestAuditActorNameAPI(t *testing.T) {
+	e := newEnv(t)
+	con := httptestutil.WithSession("con")
+	ctx := context.Background()
+	rec := sqlite.NewAuditRecorder(e.db, e.clk, nil)
+	rec.Record(ctx, "settings.ports_rollback", "settings", nil)
+	gone := admintest.InsertUser(t, e.db, "ana", false)
+	rec.Record(entity.WithPrincipal(ctx, entity.Principal{UserID: gone, Username: "ana"}), "project.delete", "project:a", nil)
+	if _, err := e.db.Conn(ctx).ExecContext(ctx, `DELETE FROM users WHERE id = ?`, gone); err != nil {
+		t.Fatal(err)
+	}
+
+	events := httptestutil.Decode[[]map[string]any](t, e.c.Do("GET", "/api/v1/audit", nil, con))
+	if len(events) != 2 {
+		t.Fatalf("events=%v", events)
+	}
+	for i, want := range []string{"ana", "system"} {
+		if got, ok := events[i]["actor_name"].(string); !ok || got != want {
+			t.Errorf("evento %d: actor_name=%#v, esperaba %q", i, events[i]["actor_name"], want)
+		}
+	}
+	if events[0]["actor_type"] != "user" || events[0]["actor_id"] != float64(gone) {
+		t.Errorf("el actor borrado conserva su tipo y su id: %v", events[0])
 	}
 }
 

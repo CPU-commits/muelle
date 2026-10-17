@@ -6,10 +6,11 @@
 //	go test -tags integration -count=1 -run Integration -v ./src/internal/ingress/...
 //
 // Todo lo que crean se llama it3<id>… o it3-<id>-… (id: 4 hex al azar por
-// test) y se borra en t.Cleanup, también si el test falla. Nunca usan los
-// nombres fijos de producción (muelle_panel, muelle-caddy, muelle_caddy_*,
+// test; it6 en los de la vuelta atrás de los puertos del proxy, itGroup) y
+// se borra en t.Cleanup, también si el test falla. Nunca usan los nombres
+// fijos de producción (muelle_panel, muelle-caddy, muelle_caddy_*,
 // muelle_muelle…) ni los puertos 80, 443 o 2019: solo los del host entre
-// 21000 y 21999, por ranuras. Usan imágenes que ya estén en el nodo
+// 21000 y 21999 (it6: entre 23000 y 23999), por ranuras. Usan imágenes que ya estén en el nodo
 // (caddy:2-alpine y alpine/socat:latest); si faltan, el test se salta en vez
 // de bajarlas. Ninguno llega a la API real de Cloudflare: opts.CloudflareURL
 // es siempre un cftest. No usan t.Parallel.
@@ -50,18 +51,30 @@ const (
 	itCaddyImage  = "caddy:2-alpine"
 	itSocatImage  = "alpine/socat:latest"
 	itTestLabel   = "muelle.test"
-	itPortsFirst  = 21000
-	itPortsLast   = 21999
 	itRemoveRetry = 30 * time.Second
 )
 
-// slot son los puertos del host de una ranura n: 21000+100n+1 (http), +2
+// itGroup es el prefijo de los nombres y los puertos del host de un grupo de
+// tests: cada grupo corre sin chocar con los de otras ramas.
+type itGroup struct {
+	prefix      string
+	first, last int
+}
+
+var (
+	// itPhase3 son los tests de la Fase 3.
+	itPhase3 = itGroup{prefix: "it3", first: 21000, last: 21999}
+	// itPorts6 son los de la vuelta atrás de los puertos del proxy.
+	itPorts6 = itGroup{prefix: "it6", first: 23000, last: 23999}
+)
+
+// slot son los puertos del host de una ranura n: first+100n+1 (http), +2
 // (https), +3 (el puente de la admin API), +4/+5 (http/https de repuesto,
 // para la recreación) y +6 (ocupado a propósito). Cada test usa su ranura.
 type slot struct{ HTTP, HTTPS, Admin, HTTP2, HTTPS2, Busy int }
 
-func slotPorts(n int) slot {
-	b := itPortsFirst + 100*n
+func slotPorts(g itGroup, n int) slot {
+	b := g.first + 100*n
 	return slot{HTTP: b + 1, HTTPS: b + 2, Admin: b + 3, HTTP2: b + 4, HTTPS2: b + 5, Busy: b + 6}
 }
 
@@ -78,8 +91,9 @@ func slotPorts(n int) slot {
 type itEnv struct {
 	t       *testing.T
 	docker  *docker.Client
+	group   itGroup
 	id      string // 4 hex
-	project string // "it3"+id
+	project string // "it3"+id (el prefijo del grupo)
 	ports   slot
 	// opts son los nombres de arriba, el dial al puente, CaddyTLSAddr
 	// 127.0.0.1:<https>, InternalCA, NetworkPrefix it3<id> y la URL de cf.
@@ -93,10 +107,16 @@ type itEnv struct {
 	containers []string // los que creó el test, para la limpieza
 }
 
-// newITEnv arma el entorno de la ranura slotN y registra su limpieza (antes
-// que cualquier run). Se salta sin un Swarm activo con este nodo de manager,
-// o sin las imágenes en el nodo.
+// newITEnv arma el entorno de la ranura slotN de los tests de la Fase 3
+// (it3) y registra su limpieza (antes que cualquier run). Se salta sin un
+// Swarm activo con este nodo de manager, o sin las imágenes en el nodo.
 func newITEnv(t *testing.T, slotN int) *itEnv {
+	t.Helper()
+	return newITEnvIn(t, itPhase3, slotN)
+}
+
+// newITEnvIn es newITEnv con los nombres y los puertos del grupo g.
+func newITEnvIn(t *testing.T, g itGroup, slotN int) *itEnv {
 	t.Helper()
 	c, err := docker.New(docker.Options{})
 	if err != nil {
@@ -116,9 +136,9 @@ func newITEnv(t *testing.T, slotN int) *itEnv {
 			t.Skipf("falta la imagen %s en el nodo (%v); bájala con docker pull", img, err)
 		}
 	}
-	ports := slotPorts(slotN)
-	if ports.HTTP < itPortsFirst || ports.Busy > itPortsLast {
-		t.Fatalf("la ranura %d se sale de los puertos %d-%d", slotN, itPortsFirst, itPortsLast)
+	ports := slotPorts(g, slotN)
+	if ports.HTTP < g.first || ports.Busy > g.last {
+		t.Fatalf("la ranura %d se sale de los puertos %d-%d", slotN, g.first, g.last)
 	}
 	b := make([]byte, 2)
 	if _, err := rand.Read(b); err != nil {
@@ -130,7 +150,7 @@ func newITEnv(t *testing.T, slotN int) *itEnv {
 		t.Fatal(err)
 	}
 	e := &itEnv{
-		t: t, docker: c, id: id, project: "it3" + id, ports: ports,
+		t: t, docker: c, group: g, id: id, project: g.prefix + id, ports: ports,
 		cf: cftest.New(t), db: sqlitetest.New(t), cipher: key, clock: clock.System{},
 	}
 	adminAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports.Admin))
@@ -154,11 +174,11 @@ func newITEnv(t *testing.T, slotN int) *itEnv {
 }
 
 // name es it3-<id>-<suffix>.
-func (e *itEnv) name(suffix string) string { return "it3-" + e.id + "-" + suffix }
+func (e *itEnv) name(suffix string) string { return e.group.prefix + "-" + e.id + "-" + suffix }
 
 // owned dice si un nombre es de este test.
 func (e *itEnv) owned(name string) bool {
-	return strings.HasPrefix(name, e.project+"_") || strings.HasPrefix(name, "it3-"+e.id+"-")
+	return strings.HasPrefix(name, e.project+"_") || strings.HasPrefix(name, e.group.prefix+"-"+e.id+"-")
 }
 
 func (e *itEnv) logger() *slog.Logger {
@@ -231,7 +251,7 @@ func (e *itEnv) createAndStart(spec docker.ContainerSpec, extraNetworks ...strin
 	e.mu.Lock()
 	e.containers = append(e.containers, spec.Name)
 	e.mu.Unlock()
-	spec.Labels = map[string]string{itTestLabel: "it3"}
+	spec.Labels = map[string]string{itTestLabel: e.group.prefix}
 	for _, n := range append([]string{spec.Network}, extraNetworks...) {
 		if n != "" {
 			e.waitNetwork(n)
@@ -345,7 +365,7 @@ func (e *itEnv) ensurePanelNetwork() {
 		e.t.Fatal(err)
 	}
 	if _, err := e.docker.CreateNetwork(ctx, docker.NetworkSpec{
-		Name: e.opts.PanelNetwork, Driver: "overlay", Attachable: true, Labels: map[string]string{itTestLabel: "it3"},
+		Name: e.opts.PanelNetwork, Driver: "overlay", Attachable: true, Labels: map[string]string{itTestLabel: e.group.prefix},
 	}); err != nil && !errors.Is(err, docker.ErrConflict) {
 		e.t.Fatal(err)
 	}
