@@ -1,6 +1,7 @@
 import { resolve } from '$app/paths'
 import { untrack } from 'svelte'
 import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query'
+import { holdWrites } from '@/shared/data/http/client'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { withQuery } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
@@ -23,6 +24,7 @@ import {
 	type Settings,
 } from '../../../domain'
 import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
+import { currentOrigin } from './currentOrigin'
 import { clearPanelMove, loadPanelMove, PANEL_MOVED_PARAM, savePanelMove } from './panelMoveNotice'
 
 /** Los campos de las cuatro tarjetas, con el nombre que usan los errores del dominio. */
@@ -78,10 +80,6 @@ export interface CloudflareNotice {
  * arranca, volver a los puertos anteriores, otros tantos). Pasado eso, el aviso se va.
  */
 export const PORTS_WATCH_TIMEOUT_MS = 2 * 60_000
-
-function currentOrigin(): string {
-	return typeof location === 'undefined' ? '' : location.origin
-}
 
 // "Proxy y DNS" de Ajustes (Fase 3): Cloudflare, IP pública, certificados y puertos. Cada
 // tarjeta guarda lo suyo por separado; su botón se activa cuando algo cambió.
@@ -321,14 +319,18 @@ export class ProxySettingsViewModel {
 			if (settings.proxy) {
 				this.#loadPorts(settings.proxy)
 				const moved = this.#movedTo(settings.proxy, before)
+				// Se entró por la dirección que sirve Caddy y cambió el HTTPS: esta dirección ya
+				// no pasa el chequeo de Origin (contrato §0.1 y §3.5), y en unos segundos deja
+				// de responder. No sale ninguna escritura más desde acá.
+				const leaving = moved !== null && currentOrigin() === panelOrigin(before)
 				if (moved !== null) {
 					this.movedTo = moved
 					savePanelMove(moved)
+					if (leaving) holdWrites(moved)
 				}
-				// Si se entró por el origen que sirve Caddy y cambió el HTTPS, este origen deja
-				// de responder: no hay nada que seguir desde acá. Si no, se sigue la recreación.
+				// Si se fue, no hay nada que seguir desde acá. Si no, se sigue la recreación.
 				this.#watchingSince = Date.now()
-				this.#watchingProxy = moved === null || currentOrigin() !== panelOrigin(before)
+				this.#watchingProxy = !leaving
 			}
 			this.#refreshIngress()
 			toast.success(m.admin_ports_saved())

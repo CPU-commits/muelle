@@ -507,6 +507,12 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
       puerto HTTPS si no es 443, o `MUELLE_PANEL_ORIGIN` si alguien la puso a mano (detrás de
       otro proxy, o en desarrollo). install ya no escribe `MUELLE_PANEL_ORIGIN`
       (`MUELLE_PANEL_DOMAIN`, §5.2): el texto la nombra solo para el caso del otro proxy.
+    - Después de cambiar el puerto HTTPS desde la dirección en que muelle-caddy servía el
+      panel, el backend ya no acepta escrituras con ese `Origin` (§0.1 y §3.5). Ajustes llama
+      `holdWrites(<origen nuevo>)` del cliente: desde esa página ningún `POST`, `PUT`,
+      `PATCH` ni `DELETE` sale, y tira `PanelMovedError` (un `BadOriginError` con `origin`;
+      `describeError` dice a dónde seguir). Las lecturas siguen. `releaseWrites()` las deja
+      salir otra vez (muelle volvió a los puertos anteriores).
     - Sin mapa: 401 `UnauthorizedError`, 403 `ForbiddenError`, 404 `NotFoundError`,
       409 `ConflictError`, 423/429 `RateLimitedError`, 5xx, red y timeout `UnavailableError`,
       el resto `UnexpectedError`. Una respuesta con otra forma es `ContractError`

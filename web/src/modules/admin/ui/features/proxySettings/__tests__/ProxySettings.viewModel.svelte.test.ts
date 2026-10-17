@@ -1,9 +1,10 @@
 import { onlineManager, type QueryClient } from '@tanstack/svelte-query'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { http, releaseWrites } from '@/shared/data/http/client'
 import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { UnavailableError, ValidationError } from '@/shared/domain'
+import { PanelMovedError, UnavailableError, ValidationError } from '@/shared/domain'
 import { PORTS_WATCH_TIMEOUT_MS, type ProxySettingsViewModel } from '..'
 import { toast } from '@/shared/ui/stores'
 import {
@@ -27,6 +28,12 @@ const mocks = vi.hoisted(() => ({
 // `GET /proxy` (de ingress, por su barrel): Ajustes lo sigue mientras se recrea muelle-caddy.
 const ingress = vi.hoisted(() => ({ getProxyStatus: vi.fn() }))
 vi.mock('@/modules/ingress/container', () => ({ ingressUseCases: ingress }))
+
+// El origen de la página: el de vitest, salvo que un test entre "por la dirección de Caddy".
+const page = vi.hoisted(() => ({ origin: null as string | null }))
+vi.mock('../currentOrigin', () => ({
+	currentOrigin: () => page.origin ?? location.origin,
+}))
 
 function proxyStatus(overrides: Partial<ProxyStatus> = {}): ProxyStatus {
 	return {
@@ -89,10 +96,13 @@ async function mountViewModel(proxy: ProxySettings = PROXY): Promise<ProxySettin
 }
 
 describe('ProxySettingsViewModel', () => {
+	afterEach(() => releaseWrites())
+
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.restoreAllMocks()
 		localStorage.clear()
+		page.origin = null
 		ingress.getProxyStatus.mockResolvedValue(proxyStatus())
 		mocks.updatePublicIp.mockResolvedValue(saved({ publicIpv4: '203.0.113.30' }))
 		mocks.updateAcmeEmail.mockResolvedValue(saved({}))
@@ -467,6 +477,36 @@ describe('ProxySettingsViewModel', () => {
 		// pestaña no ve este localStorage: es de otro origen).
 		expect(vm.canGoToMovedPanel).toBe(true)
 		expect(vm.movedPanelHref).toBe('https://panel.tudominio.cl:8443/ajustes?panel_moved=1')
+	})
+
+	it('si se entró por la dirección de Caddy y cambió el HTTPS, no salen más escrituras desde acá', async () => {
+		// Esa dirección ya no pasa el chequeo de Origin (contrato §0.1 y §3.5).
+		page.origin = 'https://panel.tudominio.cl'
+		const vm = await mountViewModel()
+		vm.setField('httpsPort', '8443')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpsPort: 8443 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		const sent = vi.spyOn(globalThis, 'fetch')
+		const error = await http.post('/projects').catch((caught: unknown) => caught)
+		expect(error).toBeInstanceOf(PanelMovedError)
+		expect((error as PanelMovedError).origin).toBe('https://panel.tudominio.cl:8443')
+		expect(sent).not.toHaveBeenCalled()
+	})
+
+	it('si se entró por otra dirección (otro proxy, desarrollo), las escrituras siguen', async () => {
+		const vm = await mountViewModel()
+		vm.setField('httpsPort', '8443')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpsPort: 8443 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		const sent = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response(null, { status: 204 }))
+		await expect(http.post('/projects')).resolves.toBeNull()
+		expect(sent).toHaveBeenCalledOnce()
 	})
 
 	it('un aviso guardado que no es un origen https se ignora', async () => {
