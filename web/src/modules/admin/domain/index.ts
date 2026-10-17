@@ -9,7 +9,13 @@ export type {
 	Settings,
 	SettingsPatch,
 } from './entities/settings'
-export { PROXY_SETTINGS_PHASE, RESET_PANEL_IPS_COMMAND } from './entities/settings'
+export {
+	movedPanelOrigin,
+	panelOrigin,
+	PROXY_SETTINGS_PHASE,
+	RESET_PANEL_IPS_COMMAND,
+	updatePanelOriginCommand,
+} from './entities/settings'
 export type {
 	CloudflareTokenProblem,
 	PortProblem,

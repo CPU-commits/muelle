@@ -11,6 +11,7 @@ import {
 } from '../../../data'
 import {
 	CloudflareUnavailable,
+	movedPanelOrigin,
 	parseProxyPorts,
 	type ProxySettings,
 	type Settings,
@@ -45,12 +46,6 @@ function isProxyField(field: string): field is ProxyField {
 export interface CloudflareNotice {
 	readonly title: string
 	readonly body: string | null
-}
-
-/** `https://<panel_domain>[:<puerto>]`: dónde sirve muelle-caddy el panel (contrato §3.5). */
-function panelOrigin(proxy: ProxySettings): string {
-	const port = proxy.httpsPort === 443 ? '' : `:${String(proxy.httpsPort)}`
-	return `https://${proxy.panelDomain}${port}`
 }
 
 function currentOrigin(): string {
@@ -196,7 +191,7 @@ export class ProxySettingsViewModel {
 	savePorts = async (): Promise<void> => {
 		if (this.#ports.isPending) return
 		this.portsError = null
-		const before = this.proxy.httpsPort
+		const before = this.proxy
 		try {
 			const settings = await this.#ports.mutateAsync({
 				http: this.httpPort,
@@ -316,9 +311,8 @@ export class ProxySettingsViewModel {
 		void this.#client.invalidateQueries({ queryKey: ingressKeys.all })
 	}
 
-	#movedTo(proxy: ProxySettings, httpsBefore: number): string | null {
-		if (proxy.httpsPort === httpsBefore || proxy.panelDomain === '') return null
-		const origin = panelOrigin(proxy)
+	#movedTo(proxy: ProxySettings, before: ProxySettings): string | null {
+		const origin = movedPanelOrigin(before, proxy)
 		return origin === currentOrigin() ? null : origin
 	}
 

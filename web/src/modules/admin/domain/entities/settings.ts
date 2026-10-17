@@ -62,6 +62,36 @@ export interface SettingsPatch {
 }
 
 /**
+ * Dónde sirve muelle-caddy el panel: `https://<panel_domain>`, con `:<puerto>` si el HTTPS no
+ * es 443 (`ProxySettings.PanelOrigin`, contrato §0.1 y §3.5). null sin dominio del panel (una
+ * IP o `localhost`, en desarrollo): ahí Caddy no sirve el panel.
+ */
+export function panelOrigin(
+	proxy: Pick<ProxySettings, 'panelDomain' | 'httpsPort'>,
+): string | null {
+	if (proxy.panelDomain === '') return null
+	const port = proxy.httpsPort === 443 ? '' : `:${String(proxy.httpsPort)}`
+	return `https://${proxy.panelDomain}${port}`
+}
+
+/**
+ * El origen nuevo del panel después de cambiar los puertos, o null si sigue donde estaba:
+ * solo lo mueve el puerto HTTPS, y solo si Caddy sirve el panel (contrato §3.5).
+ */
+export function movedPanelOrigin(before: ProxySettings, after: ProxySettings): string | null {
+	if (before.httpsPort === after.httpsPort) return null
+	return panelOrigin(after)
+}
+
+/**
+ * Lo que actualiza `MUELLE_PANEL_ORIGIN` en el servidor (contrato §5.2): install lo fijó con
+ * el puerto HTTPS de entonces. Reinicia muelle unos segundos.
+ */
+export function updatePanelOriginCommand(origin: string): string {
+	return `docker service update --env-add MUELLE_PANEL_ORIGIN=${origin} muelle_muelle`
+}
+
+/**
  * Volver a entrar después de una lista de IPs que deja fuera (contrato §5.4): corre adentro
  * del contenedor de muelle, vacía `panel_allowed_cidrs` y reinicia el servicio, que al
  * arrancar le reenvía la configuración a Caddy.
