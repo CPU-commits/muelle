@@ -235,6 +235,10 @@ func TestContractDeployFlow(t *testing.T) {
 	if len(list) != 1 || list[0]["images"].(map[string]any)["web"] != "nginx:alpine@"+digestWeb1 || list[0]["actor_type"] != "token" {
 		t.Fatalf("GET …/deploys: %s", w.Body)
 	}
+	// La ref pedida, sin digest, y sin la advertencia de Caddy (contrato §2.1).
+	if list[0]["requested_images"].(map[string]any)["web"] != "nginx:alpine" || list[0]["routes_warning"] != false {
+		t.Fatalf("GET …/deploys: %s", w.Body)
+	}
 	w = e.bearer(tok, "GET", webPath, nil)
 	httptestutil.Expect(t, w, http.StatusOK)
 	if app := httptestutil.Decode[map[string]any](t, w); app["last_deployed_at"] == nil || app["pending_changes"] != false {
@@ -263,8 +267,13 @@ func TestContractDeployFlow(t *testing.T) {
 	}
 	w = e.bearer(tok, "GET", fmt.Sprintf("%s/deploys/%d", webPath, rb), nil)
 	httptestutil.Expect(t, w, http.StatusOK)
-	if d := httptestutil.Decode[map[string]any](t, w); d["trigger"] != "rollback" || d["images"].(map[string]any)["web"] != "nginx:alpine@"+digestWeb1 {
+	d := httptestutil.Decode[map[string]any](t, w)
+	if d["trigger"] != "rollback" || d["images"].(map[string]any)["web"] != "nginx:alpine@"+digestWeb1 {
 		t.Fatalf("el rollback: %s", w.Body)
+	}
+	// El rollback pide la ref con digest: el panel ve que fija ese servicio.
+	if d["requested_images"].(map[string]any)["web"] != "nginx:alpine@"+digestWeb1 {
+		t.Fatalf("requested_images del rollback: %s", w.Body)
 	}
 	svc, err := e.f.InspectService(context.Background(), "p_staging_web_web")
 	if err != nil || svc.Image != "nginx:alpine@"+digestWeb1 {
