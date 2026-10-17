@@ -497,6 +497,36 @@ describe('ProxySettingsViewModel', () => {
 		expect((await mountViewModel()).movedTo).toBeNull()
 	})
 
+	it('el aviso de la dirección nueva nombra la anterior: a dónde volver si la nueva no responde', async () => {
+		const vm = await mountViewModel()
+		expect(vm.movedBody).toBe(m.admin_ports_moved_body())
+		vm.setField('httpsPort', '8443')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpsPort: 8443 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		const previous = 'https://panel.tudominio.cl'
+		expect(vm.movedFrom).toBe(previous)
+		expect(vm.movedBody).toBe(m.admin_ports_moved_body_previous({ previous }))
+		expect(m.admin_ports_moved_body_previous({ previous })).toContain(previous)
+
+		// Al recargar también; cerrar el aviso la olvida.
+		const reloaded = await mountViewModel({ ...PROXY, httpsPort: 8443 })
+		expect(reloaded.movedFrom).toBe(previous)
+		reloaded.dismissMove()
+		expect(reloaded.movedFrom).toBeNull()
+		expect(localStorage.getItem('muelle:admin:panel-moved-from')).toBeNull()
+	})
+
+	it('una dirección anterior guardada que no es un origen https se ignora', async () => {
+		localStorage.setItem('muelle:admin:panel-moved', 'https://panel.tudominio.cl:8443')
+		localStorage.setItem('muelle:admin:panel-moved-from', 'javascript:alert(1)')
+		const vm = await mountViewModel({ ...PROXY, httpsPort: 8443 })
+		expect(vm.movedTo).toBe('https://panel.tudominio.cl:8443')
+		expect(vm.movedFrom).toBeNull()
+		expect(vm.movedBody).toBe(m.admin_ports_moved_body())
+	})
+
 	it('el aviso lleva al panel nuevo con el aviso', async () => {
 		const vm = await mountViewModel()
 		vm.setField('httpsPort', '8443')

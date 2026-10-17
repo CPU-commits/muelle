@@ -56,9 +56,13 @@ describe('SettingsViewModel', () => {
 	})
 
 	it('llegar con "Ir al panel" (?panel_moved=1) deja el aviso de la dirección nueva acá y saca el parámetro', async () => {
+		// Lo de un aviso anterior de este origen no vale para este: acá no se sabe cuál era la
+		// dirección anterior.
+		localStorage.setItem('muelle:admin:panel-moved-from', 'https://panel.tudominio.cl')
 		await mountViewModel(true)
 
 		expect(localStorage.getItem('muelle:admin:panel-moved')).toBe(location.origin)
+		expect(localStorage.getItem('muelle:admin:panel-moved-from')).toBeNull()
 		await expect.poll(() => mocks.replaceState).toHaveBeenCalledWith('/ajustes', {})
 	})
 

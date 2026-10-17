@@ -673,7 +673,10 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   de la sesión en localStorage. Ahí solo van comodidades de la vista: el idioma (Paraglide) y
   el aviso de Ajustes "La dirección del panel ahora es …" después de cambiar el puerto HTTPS
   (`proxySettings/panelMoveNotice.ts`, hasta que se cierra; "Ir al panel" lo lleva al origen
-  nuevo con `?panel_moved=1`, porque allá el localStorage es otro).
+  nuevo con `?panel_moved=1`, porque allá el localStorage es otro). El aviso nombra la
+  dirección anterior (`panelOrigin` de antes del `PATCH`, contrato §3.5): a dónde volver si
+  la nueva no responde. Allá no se sabe cuál era, y no la nombra. Los dos orígenes pasan por
+  `parsePanelOrigin` al leerlos.
 - Para saber quién es el usuario: `createQuery(() => meQuery())` con `meQuery` del barrel
   de `auth`. Devuelve `Me`: `username`, `totpEnabled` y `needsTotpSetup`. El guard ya lo dejó
   en el cache.

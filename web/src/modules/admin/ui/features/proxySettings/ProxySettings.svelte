@@ -176,7 +176,7 @@
 			<Banner
 				tone="info"
 				title={m.admin_ports_moved_title({ origin: vm.movedTo })}
-				body={m.admin_ports_moved_body()}
+				body={vm.movedBody}
 			>
 				{#snippet action()}
 					{#if vm.canGoToMovedPanel}

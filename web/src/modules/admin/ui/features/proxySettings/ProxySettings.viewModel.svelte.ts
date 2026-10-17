@@ -126,7 +126,12 @@ export class ProxySettingsViewModel {
 	 * anterior, deja de responder cuando se recrea muelle-caddy). Queda guardado hasta que
 	 * se cierra el aviso: sobrevive a recargar. null si no hay aviso.
 	 */
-	movedTo = $state<string | null>(loadPanelMove())
+	movedTo = $state<string | null>(null)
+	/**
+	 * Dónde estaba el panel antes de ese cambio (contrato §3.5): a dónde volver si la nueva
+	 * no responde. null si no se sabe (se llegó a la nueva con "Ir al panel").
+	 */
+	movedFrom = $state<string | null>(null)
 	/** Por qué no se pudieron cambiar los puertos; se muestra adentro de la confirmación. */
 	portsError = $state<string | null>(null)
 	errors = $state<FieldErrors>({})
@@ -165,6 +170,9 @@ export class ProxySettingsViewModel {
 
 	constructor(proxy: () => ProxySettings) {
 		this.#proxy = proxy
+		const move = loadPanelMove()
+		this.movedTo = move?.origin ?? null
+		this.movedFrom = move?.previous ?? null
 		const initial = proxy()
 		this.#loadIp(initial)
 		this.#loadAcme(initial)
@@ -339,8 +347,16 @@ export class ProxySettingsViewModel {
 		})
 	}
 
+	/** Qué hacer si la dirección nueva no responde: volver a la anterior, nombrada si se sabe. */
+	get movedBody(): string {
+		return this.movedFrom === null
+			? m.admin_ports_moved_body()
+			: m.admin_ports_moved_body_previous({ previous: this.movedFrom })
+	}
+
 	dismissMove = (): void => {
 		this.movedTo = null
+		this.movedFrom = null
 		clearPanelMove()
 	}
 
@@ -425,8 +441,11 @@ export class ProxySettingsViewModel {
 				// de responder. No sale ninguna escritura más desde acá.
 				const leaving = moved !== null && currentOrigin() === panelOrigin(before)
 				if (moved !== null) {
+					// La de antes del `PATCH`: a dónde volver si la nueva no responde (§3.5).
+					const previous = panelOrigin(before)
 					this.movedTo = moved
-					savePanelMove(moved)
+					this.movedFrom = previous
+					savePanelMove(moved, previous)
 					if (leaving) holdWrites(moved)
 				}
 				// Se sigue `GET /proxy`: cómo termina la recreación y, si muelle-caddy no
