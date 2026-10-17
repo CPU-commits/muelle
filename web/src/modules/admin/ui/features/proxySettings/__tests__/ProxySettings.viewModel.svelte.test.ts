@@ -500,6 +500,21 @@ describe('ProxySettingsViewModel', () => {
 		await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'done' }))
 	})
 
+	it('un estado del proxy de antes del cambio (en el cache, de Dominios) no cuenta como "ya escucha"', async () => {
+		ingress.getProxyStatus.mockReturnValue(new Promise<ProxyStatus>(() => {}))
+		const vm = await mountViewModel()
+		// Lo que dejó Dominios hace un minuto.
+		client.setQueryData(ingressKeys.proxy, proxyStatus(), { updatedAt: Date.now() - 60_000 })
+
+		vm.setField('httpPort', '8080')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+		expect(vm.recreation).toEqual({ kind: 'recreating' })
+	})
+
 	it('si muelle-caddy no arranca con los puertos nuevos, dice por qué (el error de GET /proxy)', async () => {
 		ingress.getProxyStatus.mockResolvedValue(
 			proxyStatus({

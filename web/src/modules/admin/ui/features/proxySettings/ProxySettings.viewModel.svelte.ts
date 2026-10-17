@@ -111,6 +111,8 @@ export class ProxySettingsViewModel {
 	readonly #removeCloudflare = createMutation(() => removeCloudflareTokenMutation(this.#client))
 	/** Se prende al cambiar los puertos si el panel sigue en este origen. */
 	#watchingProxy = $state(false)
+	/** Cuándo se guardaron: un estado del proxy de antes (en el cache) no dice nada. */
+	#watchingSince = 0
 	// `GET /proxy` (ingress): mientras dice `recreating` lo vuelve a pedir solo.
 	readonly #proxyStatus = createQuery(() => ({ ...proxyQuery(), enabled: this.#watchingProxy }))
 
@@ -186,7 +188,9 @@ export class ProxySettingsViewModel {
 		if (!this.#watchingProxy) return null
 		const query = this.#proxyStatus
 		if (query.isError) return null
-		if (query.isPending) return { kind: 'recreating' }
+		if (query.isPending || query.dataUpdatedAt < this.#watchingSince) {
+			return { kind: 'recreating' }
+		}
 		const notice = proxyNotice(query.data)
 		if (notice === null) return { kind: 'done' }
 		if (notice === 'recreating') return { kind: 'recreating' }
@@ -293,6 +297,7 @@ export class ProxySettingsViewModel {
 				}
 				// Si se entró por el origen que sirve Caddy y cambió el HTTPS, este origen deja
 				// de responder: no hay nada que seguir desde acá. Si no, se sigue la recreación.
+				this.#watchingSince = Date.now()
 				this.#watchingProxy = moved === null || currentOrigin() !== panelOrigin(before)
 			}
 			this.#refreshIngress()
