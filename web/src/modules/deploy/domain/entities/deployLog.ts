@@ -67,10 +67,19 @@ export const EMPTY_LOG: LogBuffer = { lines: [], partial: '', count: 0 }
 
 const TIMESTAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))\s+(.*)$/s
 
+/**
+ * El paso 7 del deploy cuando Caddy no tomó las rutas (contrato §2.11): `advertencia: no se
+ * pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)`. La
+ * línea no trae el error (un token del proyecto lee el log, y el mensaje de Caddy puede
+ * nombrar hosts de otros proyectos): el motivo está en `GET /proxy`, solo con sesión.
+ */
+export const PROXY_SYNC_WARNING = 'advertencia: no se pudo actualizar Caddy'
+
 const TONES: readonly [RegExp, LogTone][] = [
 	[/^\$\s/, 'command'],
 	[/\b(deploy fallido|non-zero exit|fatal)\b|^error\b/i, 'error'],
 	[/\b(unhealthy|rollback_started|rollback_completed|paused|timeout esperando)\b/i, 'warn'],
+	[/^advertencia\b/i, 'warn'],
 	[/\b(deploy exitoso|UpdateStatus: completed)\b/i, 'ok'],
 ]
 
@@ -113,6 +122,14 @@ export function appendLogChunk(buffer: LogBuffer, chunk: string, cap = LOG_LINE_
 /** Cierra el log: una última línea sin `\n` también cuenta. */
 export function flushLog(buffer: LogBuffer, cap = LOG_LINE_CAP): LogBuffer {
 	return buffer.partial ? appendLogChunk(buffer, '\n', cap) : buffer
+}
+
+/**
+ * Si el log tiene la advertencia del paso 7 (Caddy no tomó las rutas). Es una línea propia
+ * del deploy, no la salida de un servicio: tiene que empezar con ella.
+ */
+export function hasProxySyncWarning(buffer: LogBuffer): boolean {
+	return buffer.lines.some((line) => line.text.startsWith(PROXY_SYNC_WARNING))
 }
 
 /** El texto entero, para copiar. */

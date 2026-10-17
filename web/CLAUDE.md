@@ -586,6 +586,10 @@ desconocidos): mientras no existan, no se mandan.
   el cache del catálogo (`refetchType: 'none'`): Proyectos y el Resumen dejan de mostrar los
   cambios pendientes al volver, sin esperar a que venza el cache. Un test de viewModel de
   esas pantallas mockea también `@/modules/catalog/container`.
+- Deploys pide el estado del proxy a `ingress` (`proxyQuery` y `proxyNotice` del barrel)
+  solo cuando el log del deploy elegido tiene la advertencia del paso 7 ("no se pudo
+  actualizar Caddy"): la línea no trae el error (contrato §2.11) y el motivo sale de
+  `GET /proxy`. Su test de viewModel mockea también `@/modules/ingress/container`.
 - Variables (`secrets`), después de guardar un cambio de verdad, marca viejo todo
   `catalogKeys.all` con `refetchType: 'none'`: el backend dejó con cambios pendientes a la
   app o a todas las apps del stage (§5.2 regla 4 del diseño), y Proyectos, el Resumen y

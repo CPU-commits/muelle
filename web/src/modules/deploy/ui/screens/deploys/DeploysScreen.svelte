@@ -8,6 +8,7 @@
 		EmptyState,
 		ErrorState,
 		formatRelative,
+		LinkButton,
 		LoadingState,
 		PageHeader,
 		srOnly,
@@ -161,6 +162,25 @@
 							<span class={failureDot}><StatusDot status="bad" /></span>
 							<p class={failureText}>{sentence(vm.selected.error)}</p>
 						</div>
+					{/if}
+					{#if vm.proxyWarning?.kind === 'failing'}
+						<!-- El paso 7 no trae el motivo (lo lee un token del proyecto): sale de
+						     GET /proxy, que solo ve la sesión (contrato §2.11). -->
+						<Banner
+							tone="warn"
+							title={m.deploy_proxy_warning_title()}
+							body={vm.proxyWarning.error
+								? m.deploy_proxy_warning_body({ error: vm.proxyWarning.error })
+								: m.deploy_proxy_warning_generic()}
+						>
+							{#snippet action()}
+								<LinkButton href={vm.domainsHref} variant="secondary" size="sm">
+									{m.deploy_proxy_warning_domains()}
+								</LinkButton>
+							{/snippet}
+						</Banner>
+					{:else if vm.proxyWarning?.kind === 'synced'}
+						<Banner tone="info" dot="ok" title={m.deploy_proxy_warning_synced()} />
 					{/if}
 					{#if vm.polling && vm.isActive}
 						<p class={notice} role="status">{m.deploy_log_polling()}</p>

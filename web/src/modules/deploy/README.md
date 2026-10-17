@@ -227,6 +227,13 @@ El polling: lo usa el panel para un deploy terminado y como respaldo cuando el S
   debería pasar; si pasa, vuelve a leer el log desde 0 (una vez) y descarta lo que tenía.
 - El panel pide de nuevo enseguida si vino un chunk, y cada 1 s si no. Termina cuando
   `status` es final y `chunk` viene vacío.
+- El paso 7 es `rutas de Caddy actualizadas` o, si Caddy no tomó la configuración,
+  `advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET
+/api/v1/proxy)`: sin el error, porque el log lo lee un token del proyecto y el mensaje de
+  Caddy puede nombrar hosts de otros proyectos (contrato §2.11). Cuando Deploys ve esa línea
+  (`hasProxySyncWarning`, que la pinta en ámbar), pide `GET /proxy` (`proxyQuery` del barrel
+  de `ingress`, solo con sesión) y muestra arriba del log el `error` y un link a Dominios, o
+  que el proxy ya se sincronizó.
 
 ## `GET {app}/deploys/{id}/log/stream` → `text/event-stream`
 
@@ -353,6 +360,9 @@ se abre una app se siembra el historial del diseño (#139–#143) y un #144 que 
 - "Desplegar" con una imagen que contenga `fail` o `broken` termina `failed` por
   healthcheck; con `missing`, por imagen inexistente.
 - Desplegar dos veces seguidas deja el primero `superseded` (con `superseded_by`).
+- Si Caddy no acepta la configuración cuando se crea el deploy (`GET /proxy` en
+  `out_of_sync`: un dominio con `caddy-rechaza`, o el puerto `8081` en Ajustes), el paso 7 es
+  la advertencia, y el deploy termina bien igual.
 - El tipo y los servicios salen del catálogo (`db/catalog.ts`, `catalogDb.configured`),
   como en el backend: `image` solo en una app de formulario (en una compose,
   `422 image: una app compose recibe images, por servicio`) e `images.<servicio>` solo con

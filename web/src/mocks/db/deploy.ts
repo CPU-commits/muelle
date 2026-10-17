@@ -13,7 +13,9 @@ import { loadPersisted, savePersisted } from './persist'
 // se resuelve la imagen). Un deploy en cola que recibe otro encima queda `superseded`.
 //
 // Para probar desde el panel: "Desplegar" con una imagen que contenga `fail` o `broken`
-// termina `failed` por healthcheck; con `missing`, por imagen inexistente.
+// termina `failed` por healthcheck; con `missing`, por imagen inexistente. Si Caddy no acepta
+// la configuración (un dominio con `caddy-rechaza`, db/ingress.ts), el paso 7 es la
+// advertencia "no se pudo actualizar Caddy" y el deploy termina bien igual.
 //
 // El tipo y los servicios de una app salen del catálogo (db/catalog.ts), como en el backend
 // (contrato §2.2): contra esos se valida `images`, y de ahí sale la ref de un servicio que
@@ -48,6 +50,11 @@ export interface MockDeploy {
 	rollbackOf?: number
 	supersededBy?: number
 	supersededAt?: number
+	/**
+	 * Caddy no aceptaba la configuración cuando se creó (`GET /proxy` en `out_of_sync`): el
+	 * paso 7 es la advertencia, sin el error (contrato §2.11).
+	 */
+	caddyRejects?: boolean
 }
 
 export interface MockApp {
@@ -239,7 +246,12 @@ function scriptFor(app: MockApp, deploy: MockDeploy): Script {
 		steps.push({ at: s(7900), text: `${first}.2 healthy · 2 de ${total} actualizadas` })
 	}
 	steps.push({ at: s(8500), text: 'UpdateStatus: completed' })
-	steps.push({ at: s(8800), text: 'rutas de Caddy actualizadas' })
+	steps.push({
+		at: s(8800),
+		text: deploy.caddyRejects
+			? 'advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)'
+			: 'rutas de Caddy actualizadas',
+	})
 	steps.push({ at: s(9100), text: `deploy exitoso en ${secondsLabel(s(9100))}` })
 	return { steps, status: 'succeeded', error: null, resolvedAt: s(700), newTaskAt: s(3100) }
 }
@@ -509,6 +521,7 @@ export interface CreateInput {
 	actorName: string
 	rollbackOf?: number
 	scenario?: MockScenario
+	caddyRejects?: boolean
 }
 
 /**
@@ -637,6 +650,7 @@ export const deployDb = {
 			actorType: 'user',
 			actorName: input.actorName,
 			...(input.rollbackOf !== undefined ? { rollbackOf: input.rollbackOf } : {}),
+			...(input.caddyRejects ? { caddyRejects: true } : {}),
 		}
 		app.deploys.push(deploy)
 		app.deploys = retained(app, now)

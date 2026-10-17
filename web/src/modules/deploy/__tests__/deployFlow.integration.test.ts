@@ -4,6 +4,7 @@ import { api, apiError } from '@/mocks/api'
 import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { catalogDb } from '@/mocks/db/catalog'
 import { deployDb } from '@/mocks/db/deploy'
+import { appKey, ingressDb } from '@/mocks/db/ingress'
 import { server } from '@/mocks/server'
 import { appRefFrom, catalogUseCases } from '@/modules/catalog'
 import { http as client } from '@/shared/data/http/client'
@@ -45,6 +46,7 @@ beforeEach(() => {
 	catalogDb.reset()
 	// Los deploys nuevos duran ~100 ms en vez de ~9 s; sin el #144 en curso de la siembra.
 	deployDb.reset({ liveScale: 0.01, seedLive: false })
+	ingressDb.reset()
 	vi.stubGlobal('EventSource', FetchEventSource)
 })
 afterEach(() => {
@@ -151,6 +153,36 @@ describe('desplegar y seguir el log', () => {
 		const deploy = await deployUseCases.getDeploy(APP, id)
 		expect(deploy.status).toBe('succeeded')
 		expect(deploy.trigger).toBe('panel')
+	})
+
+	it('si Caddy no acepta la configuración, el paso 7 es una advertencia sin el error (contrato §2.11)', async () => {
+		ingressDb.create(appKey('auditfy', 'staging', 'api'), {
+			hostname: 'caddy-rechaza.tudominio.cl',
+			targetService: 'api',
+			targetPort: 3000,
+			proxied: false,
+		})
+		const { id } = await deployUseCases.createDeploy({
+			app: APP,
+			services: ['api'],
+			overrides: {},
+		})
+
+		const events = await collect(
+			deployUseCases.followDeployLog(
+				{ app: APP, id, live: true },
+				new AbortController().signal,
+			),
+		)
+
+		expect(statusesOf(events)).toContain('succeeded')
+		const log = logOf(events)
+		expect(log).toContain(
+			'advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)\n',
+		)
+		expect(log).not.toContain('rutas de Caddy actualizadas')
+		// El motivo no va en el log (lo lee un token del proyecto).
+		expect(log).not.toContain('caddy-rechaza')
 	})
 
 	it('una imagen rota termina failed por healthcheck, con el secreto enmascarado', async () => {

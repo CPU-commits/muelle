@@ -1,9 +1,11 @@
+import { resolve } from '$app/paths'
 import { createQuery, type CreateQueryResult, useQueryClient } from '@tanstack/svelte-query'
 import { untrack } from 'svelte'
 import type { Attachment } from 'svelte/attachments'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { pendingPhase, type RoadmapPhase } from '@/shared/domain'
 import { type App as CatalogApp, appQuery, appRefFrom, catalogKeys } from '@/modules/catalog'
+import { type ProxyStatus, proxyNotice, proxyQuery } from '@/modules/ingress'
 import {
 	appStatusQuery,
 	deployQuery,
@@ -25,6 +27,7 @@ import {
 	type DeployStatus,
 	EMPTY_LOG,
 	flushLog,
+	hasProxySyncWarning,
 	isActiveStatus,
 	isTerminalStatus,
 	type LogBuffer,
@@ -43,6 +46,15 @@ export interface DeploysProps {
 	/** Para el diálogo de deploy. Sin él, el de la app en el catálogo (`appQuery`). */
 	readonly kind?: AppKind | null
 }
+
+/**
+ * Lo que dice el panel de la advertencia del paso 7 ("no se pudo actualizar Caddy"): la
+ * línea no trae el motivo, que sale de `GET /proxy` (contrato §2.11). `failing`: el proxy
+ * sigue sin la configuración (con el `error`, si lo dice); `synced`: ya se arregló.
+ */
+export type ProxyWarning =
+	| { readonly kind: 'failing'; readonly error: string | null }
+	| { readonly kind: 'synced' }
 
 /** Debajo de esto el historial y el log van uno arriba del otro (el `flex-wrap` del layout). */
 const STACKED_MAX_WIDTH = 980
@@ -93,6 +105,10 @@ export class DeploysViewModel {
 	readonly #catalogApp: CreateQueryResult<CatalogApp, Error>
 	/** El `?deploy=` que no está en el historial (más viejo que la retención, o borrado). */
 	readonly linked: CreateQueryResult<Deploy, Error>
+	/** Si el log del elegido tiene la advertencia del paso 7 (Caddy no tomó las rutas). */
+	readonly hasProxyWarning: boolean
+	/** `GET /proxy`, solo si hace falta el motivo de esa advertencia. */
+	readonly #proxy: CreateQueryResult<ProxyStatus, Error>
 
 	readonly selected: Deploy | null
 	// Lo único que reinicia el seguimiento del log: cambiar de deploy (no su estado).
@@ -141,6 +157,8 @@ export class DeploysViewModel {
 			return list[0] ?? null
 		})
 		this.#selectedKey = $derived(this.selected?.id ?? null)
+		this.hasProxyWarning = $derived(hasProxySyncWarning(this.log))
+		this.#proxy = createQuery(() => ({ ...proxyQuery(), enabled: this.hasProxyWarning }))
 
 		$effect(() => {
 			const id = this.#selectedKey
@@ -216,6 +234,29 @@ export class DeploysViewModel {
 	get durationMs(): number | null {
 		const deploy = this.selected
 		return deploy ? deployDurationMs(deploy, this.now) : null
+	}
+
+	/**
+	 * La advertencia del paso 7 con su motivo, o null si el log no la tiene. Si `GET /proxy`
+	 * todavía no contestó, o no contesta, se avisa igual, sin el motivo.
+	 */
+	get proxyWarning(): ProxyWarning | null {
+		if (!this.hasProxyWarning) return null
+		const proxy = this.#proxy.data
+		if (this.#proxy.isError || !proxy) return { kind: 'failing', error: null }
+		return proxyNotice(proxy) === null
+			? { kind: 'synced' }
+			: { kind: 'failing', error: proxy.error }
+	}
+
+	/** Dominios de la app: ahí está el estado del proxy, con el link a Ajustes. */
+	get domainsHref(): string {
+		const { project, stage, app } = this.#props()
+		return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/dominios', {
+			p: project,
+			s: stage,
+			a: app,
+		})
 	}
 
 	get logText(): string {

@@ -4,6 +4,7 @@ import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 import { isValidImageRef } from '@/modules/deploy/domain/value-objects/imageRef'
 import { api, apiError, invalid } from '../api'
 import { deployDb, type DeployView, hashHex, type MockApp, type MockDeploy } from '../db/deploy'
+import { ingressDb } from '../db/ingress'
 import { requireSession, sessionUser } from '../session'
 
 // Estado, deploys y logs (Fase 2) del backend simulado, con el contrato de
@@ -460,6 +461,11 @@ function latency(): number {
 	return Math.round(150 * Math.min(1, deployDb.state.liveScale))
 }
 
+/** `SyncRoutes` falla si Caddy no acepta la configuración (el paso 7, contrato §2.11). */
+function caddyRejects(now: number): boolean {
+	return ingressDb.proxy(now).status === 'out_of_sync'
+}
+
 export const deployHandlers: RequestHandler[] = [
 	http.get(api(`${APP}/status`), ({ params }) => {
 		const denied = requireSession()
@@ -504,6 +510,7 @@ export const deployHandlers: RequestHandler[] = [
 				overrides: overridesOf(app, body as DeployBody),
 				trigger: 'panel',
 				actorName: sessionUser()?.username ?? 'felipe',
+				caddyRejects: caddyRejects(now),
 			},
 			now,
 		)
@@ -535,6 +542,7 @@ export const deployHandlers: RequestHandler[] = [
 				actorName: sessionUser()?.username ?? 'felipe',
 				rollbackOf: source.id,
 				scenario: 'success',
+				caddyRejects: caddyRejects(now),
 			},
 			now,
 		)

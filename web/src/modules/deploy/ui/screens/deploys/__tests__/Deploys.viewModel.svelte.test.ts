@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { UnavailableError } from '@/shared/domain'
 import { appRefFrom, catalogKeys } from '@/modules/catalog'
+import type { ProxyStatus } from '@/modules/ingress'
 import {
 	asDeployId,
 	asLogOffset,
@@ -34,6 +35,24 @@ vi.mock('@/modules/deploy/container', () => ({
 }))
 
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }))
+
+// El motivo de la advertencia del paso 7 sale de GET /proxy (ingress, contrato §2.11).
+const ingress = vi.hoisted(() => ({ getProxyStatus: vi.fn() }))
+vi.mock('@/modules/ingress/container', () => ({ ingressUseCases: ingress }))
+
+const CADDY = {
+	image: 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0',
+	running: true,
+	httpPort: 80,
+	httpsPort: 443,
+}
+
+function proxyStatus(overrides: Partial<ProxyStatus> = {}): ProxyStatus {
+	return { status: 'synced', error: null, syncedAt: new Date(), caddy: CADDY, ...overrides }
+}
+
+const CADDY_WARNING =
+	'2026-10-16T12:00:08.800Z advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)\n'
 
 // El kind y los servicios de la configuración salen del catálogo (contrato §2.12): se mockea
 // su container, no la red. Por defecto no carga, y todo sale de Swarm como antes.
@@ -75,6 +94,63 @@ describe('DeploysViewModel', () => {
 		mocks.goto.mockResolvedValue(undefined)
 		mocks.followDeployLog.mockImplementation(scripted([]))
 		catalog.getApp.mockRejectedValue(new UnavailableError('sin catálogo'))
+		ingress.getProxyStatus.mockResolvedValue(proxyStatus())
+	})
+
+	it('la advertencia del paso 7 no trae el error de Caddy: lo busca en GET /proxy', async () => {
+		ingress.getProxyStatus.mockResolvedValue(
+			proxyStatus({
+				status: 'out_of_sync',
+				error: 'Caddy rechazó la configuración: la ruta de x.tudominio.cl no es válida',
+			}),
+		)
+		mocks.followDeployLog.mockImplementation(
+			scripted([chunk(CADDY_WARNING, 120), { kind: 'status', status: 'succeeded' }]),
+		)
+		const { vm } = await mountViewModel(
+			() => new DeploysViewModel(() => ({ ...PROPS, deployParam: '143' })),
+		)
+
+		await vi.waitFor(() =>
+			expect(vm.proxyWarning).toEqual({
+				kind: 'failing',
+				error: 'Caddy rechazó la configuración: la ruta de x.tudominio.cl no es válida',
+			}),
+		)
+		expect(vm.log.lines[0]?.tone).toBe('warn')
+	})
+
+	it('si el proxy ya se sincronizó, lo dice; si GET /proxy no contesta, avisa sin el motivo', async () => {
+		mocks.followDeployLog.mockImplementation(
+			scripted([chunk(CADDY_WARNING, 120), { kind: 'status', status: 'succeeded' }]),
+		)
+		const { vm } = await mountViewModel(
+			() => new DeploysViewModel(() => ({ ...PROPS, deployParam: '143' })),
+		)
+		await vi.waitFor(() => expect(vm.proxyWarning).toEqual({ kind: 'synced' }))
+
+		ingress.getProxyStatus.mockRejectedValue(new UnavailableError('caído'))
+		const other = await mountViewModel(
+			() => new DeploysViewModel(() => ({ ...PROPS, deployParam: '143' })),
+		)
+		await vi.waitFor(() => expect(other.vm.log.lines).toHaveLength(1))
+		expect(other.vm.proxyWarning).toEqual({ kind: 'failing', error: null })
+	})
+
+	it('sin la advertencia no pide el estado del proxy', async () => {
+		mocks.followDeployLog.mockImplementation(
+			scripted([
+				chunk('2026-10-16T12:00:08Z rutas de Caddy actualizadas\n', 60),
+				{ kind: 'status', status: 'succeeded' },
+			]),
+		)
+		const { vm } = await mountViewModel(
+			() => new DeploysViewModel(() => ({ ...PROPS, deployParam: '143' })),
+		)
+
+		await vi.waitFor(() => expect(vm.log.lines).toHaveLength(1))
+		expect(vm.proxyWarning).toBeNull()
+		expect(ingress.getProxyStatus).not.toHaveBeenCalled()
 	})
 
 	it('abre el deploy de ?deploy= y lee su log entero si ya terminó', async () => {

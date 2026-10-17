@@ -3,6 +3,7 @@ import {
 	appendLogChunk,
 	EMPTY_LOG,
 	flushLog,
+	hasProxySyncWarning,
 	logLineTone,
 	logText,
 	maskedSegments,
@@ -40,6 +41,11 @@ describe('logLineTone', () => {
 		['UpdateStatus: completed', 'ok'],
 		['deploy exitoso en 52 s', 'ok'],
 		['timeout esperando convergencia', 'warn'],
+		[
+			'advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)',
+			'warn',
+		],
+		['rutas de Caddy actualizadas', 'normal'],
 		['esperando convergencia · timeout 300 s', 'normal'],
 		['render ok · 1 servicio · 14 variables (6 secretas)', 'normal'],
 	])('%s → %s', (text, tone) => {
@@ -107,5 +113,41 @@ describe('maskedSegments', () => {
 
 	it('sin secretos es un solo segmento', () => {
 		expect(maskedSegments('render ok')).toEqual([{ text: 'render ok', masked: false }])
+	})
+})
+
+// La advertencia del paso 7 (contrato §2.11) no trae el error de Caddy: el panel lo busca
+// en GET /proxy cuando la ve en el log.
+describe('hasProxySyncWarning', () => {
+	const warning =
+		'2026-10-16T12:00:08.800Z advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)\n'
+
+	it('la ve en el log, con o sin el texto que sigue al ";"', () => {
+		expect(hasProxySyncWarning(appendLogChunk(EMPTY_LOG, warning))).toBe(true)
+		expect(
+			hasProxySyncWarning(
+				appendLogChunk(
+					EMPTY_LOG,
+					'2026-10-16T12:00:08Z advertencia: no se pudo actualizar Caddy\n',
+				),
+			),
+		).toBe(true)
+	})
+
+	it('un deploy que actualizó las rutas, o una línea que solo la cita, no la tiene', () => {
+		expect(
+			hasProxySyncWarning(
+				appendLogChunk(EMPTY_LOG, '2026-10-16T12:00:08Z rutas de Caddy actualizadas\n'),
+			),
+		).toBe(false)
+		expect(
+			hasProxySyncWarning(
+				appendLogChunk(
+					EMPTY_LOG,
+					'web.1 | echo "advertencia: no se pudo actualizar Caddy"\n',
+				),
+			),
+		).toBe(false)
+		expect(hasProxySyncWarning(EMPTY_LOG)).toBe(false)
 	})
 })
