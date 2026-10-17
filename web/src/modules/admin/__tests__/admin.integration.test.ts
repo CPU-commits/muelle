@@ -191,15 +191,30 @@ describe('settings', () => {
 		})
 	})
 
-	it('con un puerto ocupado (8081 en el mock), muelle-caddy no arranca y GET /proxy dice por qué', async () => {
-		ingressDb.reset({ recreateMs: 0 })
-		await adminUseCases.updateProxyPorts({ http: '8081', https: '443' })
-
-		await expect(ingressUseCases.getProxyStatus()).resolves.toMatchObject({
-			status: 'out_of_sync',
-			error: expect.stringContaining('8081'),
-			caddy: { running: false },
+	it('un puerto ocupado en el host (8081 en el mock) es 422 en su campo, con el motivo, y no se guarda nada', async () => {
+		// CheckProxyPorts (contrato §3.5) prueba los puertos nuevos antes de guardar.
+		const http = await adminUseCases
+			.updateProxyPorts({ http: '8081', https: '8443' })
+			.catch((caught: unknown) => caught)
+		expect(http).toBeInstanceOf(ValidationError)
+		expect(http).toMatchObject({
+			field: 'httpPort',
+			message: 'el puerto 8081 del host ya está en uso: libéralo o elige otro',
 		})
+
+		// El HTTPS se prueba en TCP y en UDP (HTTP/3).
+		const https = await adminUseCases
+			.updateProxyPorts({ http: '80', https: '8081' })
+			.catch((caught: unknown) => caught)
+		expect(https).toMatchObject({
+			field: 'httpsPort',
+			message:
+				'el puerto 8081 del host ya está en uso (en TCP o en UDP): libéralo o elige otro',
+		})
+
+		const settings = await adminUseCases.getSettings()
+		expect(settings.proxy).toMatchObject({ httpPort: 80, httpsPort: 443 })
+		await expect(ingressUseCases.getProxyStatus()).resolves.toMatchObject({ status: 'synced' })
 	})
 
 	it('Docker caído al probar los puertos nuevos (503 docker_unavailable) es PortsDockerUnavailable', async () => {

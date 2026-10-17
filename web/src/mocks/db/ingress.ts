@@ -19,8 +19,7 @@ import { loadPersisted, savePersisted } from './persist'
 //   configuración: `GET /proxy` dice `out_of_sync` (el aviso "proxy desincronizado");
 // - cambiar los puertos en Ajustes recrea muelle-caddy: `GET /proxy` dice `recreating` unos
 //   segundos (`recreateMs`) y después `synced`. El puerto 8081 está "ocupado" en el host:
-//   con él, muelle-caddy no arranca y `GET /proxy` dice `out_of_sync` con el puerto en el
-//   `error`, hasta que se cambia (no vuelve solo a los viejos, contrato §3.4);
+//   el `PATCH` lo prueba antes de guardar y responde `422` en ese campo (contrato §3.5);
 // - cualquier otro hostname está fuera de Cloudflare (`tls_mode: http`): queda `pending`
 //   ("Esperando DNS") hasta que se toca Verificar (retry), que lo pasa a `active`;
 // - lo de Cloudflare y las IP públicas salen de los ajustes del mock (`db/admin.ts`), como
@@ -36,7 +35,7 @@ const DAY = 24 * 60 * 60 * 1000
 const PROVISION_MS = 3000
 /** Lo que tarda en recrearse muelle-caddy después de cambiar los puertos. */
 const RECREATE_MS = 4000
-/** Un puerto que algo ya usa en el host simulado: muelle-caddy no arranca con él. */
+/** Un puerto que algo ya usa en el host simulado: el `PATCH` de los puertos lo rechaza. */
 export const MOCK_BUSY_PORT = 8081
 const CADDY_IMAGE = 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0'
 
@@ -261,17 +260,6 @@ function proxyState(now: number) {
 		return {
 			status: 'recreating' as const,
 			error: null,
-			synced_at: new Date(now - 60_000).toISOString(),
-			caddy: noContainer,
-		}
-	}
-	const busy = [settings.proxyHttpPort, settings.proxyHttpsPort].find(
-		(port) => port === MOCK_BUSY_PORT,
-	)
-	if (busy !== undefined) {
-		return {
-			status: 'out_of_sync' as const,
-			error: `no se pudo crear muelle-caddy: el puerto ${String(busy)} ya está en uso en el host`,
 			synced_at: new Date(now - 60_000).toISOString(),
 			caddy: noContainer,
 		}

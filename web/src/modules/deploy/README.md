@@ -361,8 +361,8 @@ que pasa `queued → running → succeeded` en ~10 s.
   healthcheck; con `missing`, por imagen inexistente.
 - Desplegar dos veces seguidas deja el primero `superseded` (con `superseded_by`).
 - Si Caddy no acepta la configuración cuando se crea el deploy (`GET /proxy` en
-  `out_of_sync`: un dominio con `caddy-rechaza`, o el puerto `8081` en Ajustes), el paso 7 es
-  la advertencia, y el deploy termina bien igual.
+  `out_of_sync`: un dominio con `caddy-rechaza`), el paso 7 es la advertencia, y el deploy
+  termina bien igual.
 - El tipo y los servicios salen del catálogo (`db/catalog.ts`, `catalogDb.configured`),
   como en el backend: `image` solo en una app de formulario (en una compose,
   `422 image: una app compose recibe images, por servicio`) e `images.<servicio>` solo con

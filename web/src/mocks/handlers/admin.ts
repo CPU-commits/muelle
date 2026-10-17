@@ -2,7 +2,7 @@ import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent, notFound } from '../api'
 import { adminDb, type MockRegistry } from '../db/admin'
 import { authDb } from '../db/auth'
-import { ingressDb } from '../db/ingress'
+import { ingressDb, MOCK_BUSY_PORT } from '../db/ingress'
 import { requireSession, sessionUser } from '../session'
 
 // `/settings` y `/audit` (admin/infra/in/http), y lo que agregan las Fases 2 y 3 según el
@@ -147,6 +147,30 @@ function checkCloudflareToken(token: string) {
 		return invalid('cloudflare_token', 'Cloudflare rechazó el token')
 	if (token.includes('sinzonas'))
 		return invalid('cloudflare_token', 'el token no ve ninguna zona')
+	return undefined
+}
+
+// `CheckProxyPorts` (contrato §3.5): antes de guardar, prueba en el host solo los puertos que
+// cambian, el HTTP en TCP y el HTTPS en TCP y en UDP. En el mock, `MOCK_BUSY_PORT` está
+// ocupado.
+function checkProxyPorts(body: SettingsBody) {
+	const s = adminDb.state
+	const fields = [
+		{ key: 'proxy_http_port', next: body.proxy_http_port, old: s.proxyHttpPort, label: '' },
+		{
+			key: 'proxy_https_port',
+			next: body.proxy_https_port,
+			old: s.proxyHttpsPort,
+			label: ' (en TCP o en UDP)',
+		},
+	]
+	for (const { key, next, old, label } of fields) {
+		if (next === undefined || next === old || next !== MOCK_BUSY_PORT) continue
+		return invalid(
+			key,
+			`el puerto ${String(next)} del host ya está en uso${label}: libéralo o elige otro`,
+		)
+	}
 	return undefined
 }
 
@@ -297,6 +321,8 @@ export const adminHandlers: RequestHandler[] = [
 			const rejected = checkCloudflareToken(body.cloudflare_token)
 			if (rejected) return rejected
 		}
+		const busy = checkProxyPorts(body)
+		if (busy) return busy
 		const portsChange =
 			body.proxy_http_port !== undefined || body.proxy_https_port !== undefined
 		// El hook del proxy corre antes de responder (contrato §3.5): en el navegador se nota.

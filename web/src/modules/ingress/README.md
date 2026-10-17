@@ -232,8 +232,8 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
   `error` + `cloudflare`; sin dominio del panel, `GET /proxy` dice `disabled`.
 - Cambiar los puertos en Ajustes recrea muelle-caddy: `GET /proxy` dice `recreating` unos 4 s
   (sin contenedor: `image: null`, `running: false`) y después `synced`. El puerto `8081`
-  está ocupado en el host del mock: con él, `out_of_sync` con el puerto en el `error`, hasta
-  que se cambia (no vuelve solo a los viejos, §3.4).
+  está ocupado en el host del mock: el `PATCH` lo prueba antes de guardar y responde `422`
+  en ese campo, sin guardar nada (§3.5).
 - Un `PATCH` de Proxied que sale bien saca un `error` + `cloudflare` (vuelve a `pending`).
   Sin token (se quitó en Ajustes), se guarda y el dominio queda en `error` + `cloudflare`
   con "agrega el token de Cloudflare en Ajustes", como en el backend.
