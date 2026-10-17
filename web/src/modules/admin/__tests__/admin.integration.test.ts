@@ -181,6 +181,8 @@ describe('settings', () => {
 		await adminUseCases.updateProxyPorts({ http: '8080', https: '443' })
 		await expect(ingressUseCases.getProxyStatus()).resolves.toMatchObject({
 			status: 'recreating',
+			// Sin contenedor, pero los puertos son siempre los de los ajustes (contrato §3.3).
+			caddy: { image: null, running: false, httpPort: 8080, httpsPort: 443 },
 		})
 
 		ingressDb.reset({ recreateMs: 0 })

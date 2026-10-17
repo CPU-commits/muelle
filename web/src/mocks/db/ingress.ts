@@ -280,8 +280,14 @@ function proxyState(now: number) {
 			},
 		}
 	}
-	// Sin contenedor (se está recreando, o no arrancó): nada corre (contrato §3.3).
-	const noContainer = { image: null, running: false, http_port: null, https_port: null }
+	// Sin contenedor (se está recreando): nada corre, y los puertos son los de los ajustes
+	// (contrato §3.3).
+	const noContainer = {
+		image: null,
+		running: false,
+		http_port: settings.proxyHttpPort,
+		https_port: settings.proxyHttpsPort,
+	}
 	if (state.recreatingUntil != null && now < state.recreatingUntil) {
 		return {
 			status: 'recreating' as const,
