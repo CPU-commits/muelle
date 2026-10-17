@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/CPU-commits/muelle/src/internal/admin/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/admin/domain/entity"
@@ -140,6 +141,11 @@ func NewPatchSettings(settings repository.SettingsRepository, totp service.TOTPS
 // tokenRe es un token de API de Cloudflare: ASCII visible, sin espacios.
 var tokenRe = regexp.MustCompile(`^[\x21-\x7e]{20,512}$`)
 
+// placeholderMsg es el 422 de un acme_email o un cloudflare_token con { o }:
+// Caddy expande placeholders en el email del emisor ACME y en el token, y
+// ingress no le mandaría la configuración (contrato §3.4).
+const placeholderMsg = "no puede tener { ni }: Caddy los toma como placeholders"
+
 // applyProxy valida los campos presentes y los aplica sobre p. Los errores
 // nombran el campo simple del cuerpo (nunca panel_allowed_cidrs[1]).
 func applyProxy(p shared.ProxySettings, in dto.PatchSettingsInput) (shared.ProxySettings, error) {
@@ -163,6 +169,9 @@ func applyProxy(p shared.ProxySettings, in dto.PatchSettingsInput) (shared.Proxy
 		if *in.ACMEEmail != "" {
 			if err := validate.Email("acme_email", *in.ACMEEmail); err != nil {
 				return p, err
+			}
+			if strings.ContainsAny(*in.ACMEEmail, "{}") {
+				return p, validate.Errorf("acme_email", placeholderMsg)
 			}
 		}
 		p.ACMEEmail = *in.ACMEEmail
@@ -190,8 +199,13 @@ func applyProxy(p shared.ProxySettings, in dto.PatchSettingsInput) (shared.Proxy
 		p.PanelAllowedCIDRs = list
 	}
 	if in.CloudflareToken != nil {
-		if t := *in.CloudflareToken; t != "" && !tokenRe.MatchString(t) {
-			return p, validate.Errorf("cloudflare_token", "no parece un token de API de Cloudflare (de 20 a 512 caracteres visibles, sin espacios)")
+		if t := *in.CloudflareToken; t != "" {
+			if !tokenRe.MatchString(t) {
+				return p, validate.Errorf("cloudflare_token", "no parece un token de API de Cloudflare (de 20 a 512 caracteres visibles, sin espacios)")
+			}
+			if strings.ContainsAny(t, "{}") {
+				return p, validate.Errorf("cloudflare_token", placeholderMsg)
+			}
 		}
 		p.CloudflareToken = *in.CloudflareToken
 	}

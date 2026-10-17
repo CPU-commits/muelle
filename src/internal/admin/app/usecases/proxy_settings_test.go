@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -231,6 +232,47 @@ func TestPatchProxySettingsValidation(t *testing.T) {
 	}
 	if _, ok := e.raw(t, entity.SettingPublicIP); ok {
 		t.Fatal("un PATCH inválido no guarda nada")
+	}
+}
+
+// Caddy expande placeholders en el email del emisor ACME y en el token de
+// Cloudflare (contrato §3.4): con { o }, muelle dejaría de mandarle la
+// configuración (out_of_sync). PATCH /settings los rechaza con un 422 en ese
+// campo, sin verificar el token con Cloudflare y sin guardar nada del PATCH.
+func TestPatchSettingsRejectsPlaceholders(t *testing.T) {
+	e := newProxyEnv(t)
+	const email, token = "tu@correo.cl", "cf-token-1234567890abcdef"
+	if _, err := e.do(t, dto.PatchSettingsInput{ACMEEmail: ptr(email), CloudflareToken: ptr(token)}); err != nil {
+		t.Fatal(err)
+	}
+	e.hook.checked, e.hook.changes = nil, nil
+	cases := []struct {
+		in    dto.PatchSettingsInput
+		field string
+	}{
+		{dto.PatchSettingsInput{ACMEEmail: ptr("a{x}@b.cl")}, "acme_email"},
+		{dto.PatchSettingsInput{ACMEEmail: ptr("a}b@c.cl"), PublicIP: ptr("203.0.113.7")}, "acme_email"},
+		{dto.PatchSettingsInput{CloudflareToken: ptr("cf-token-{http.vars.x}-123")}, "cloudflare_token"},
+		{dto.PatchSettingsInput{CloudflareToken: ptr("cf-token-1234567890abcdef}"), PublicIP: ptr("203.0.113.7")}, "cloudflare_token"},
+	}
+	for _, c := range cases {
+		_, err := e.do(t, c.in)
+		wantField(t, err, c.field)
+		if ve, _ := errors.AsType[*validate.Error](err); !strings.Contains(ve.Error(), "placeholder") {
+			t.Errorf("el mensaje no dice por qué: %v", err)
+		}
+	}
+	if len(e.hook.checked) != 0 || len(e.hook.changes) != 0 {
+		t.Fatalf("un PATCH con placeholders no llega a ingress: %+v", e.hook)
+	}
+	if got, _ := e.raw(t, entity.SettingACMEEmail); got != email {
+		t.Fatalf("acme_email = %q", got)
+	}
+	if got, _ := e.raw(t, entity.SettingCloudflareToken); got != token {
+		t.Fatalf("cloudflare_token = %q", got)
+	}
+	if _, ok := e.raw(t, entity.SettingPublicIP); ok {
+		t.Fatal("un PATCH con placeholders no guarda nada")
 	}
 }
 

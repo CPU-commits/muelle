@@ -751,7 +751,9 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - `cloudflare`: el emisor `acme` con `challenges.dns.provider` = `{"name": "cloudflare", "api_token": …}` y `resolvers: ["1.1.1.1:53", "1.0.0.1:53"]` (la propagación se mira en Cloudflare, no en el DNS del host). Un dominio con `tls_mode: cloudflare` va por `http` si ya no hay token.
   - `http`: el emisor `acme`, sin desafío DNS (Let's Encrypt, HTTP-01 o TLS-ALPN-01).
   - `email` es `acme_email`, y no va si está vacío.
-- **Sin placeholders en los ajustes:** Caddy expande placeholders en el email del emisor `acme` y en `api_token` (`a{x}@b.cl` hace fallar el `POST /load` entero). Si `acme_email` o el token tienen `{` o `}`, muelle no manda la configuración, y `GET /proxy` dice `out_of_sync` con el motivo.
+- **Sin placeholders en los ajustes:** Caddy expande placeholders en el email del emisor `acme` y en `api_token` (`a{x}@b.cl` hace fallar el `POST /load` entero).
+  - `PATCH /settings` rechaza un `acme_email` o un `cloudflare_token` con `{` o `}`: `422` en ese campo, y no guarda nada (§4.1).
+  - Si igual llegan a los ajustes por otro lado (la configuración inicial de install, `MUELLE_INIT_*`, o un `UPDATE` a mano), muelle no manda la configuración, y `GET /proxy` dice `out_of_sync` con el motivo.
 - **Errores de Caddy:** el mensaje de un `POST /load` rechazado se guarda (y se registra en el log) con el token de Cloudflare reemplazado por `***`, cortado a 500 caracteres. La configuración misma nunca va al log.
 - **Ruta del panel:** `panel_domain → naming.MuelleService:naming.MuellePort` (`muelle_muelle:8080`), con `X-Real-IP` = `{http.vars.client_ip}` en `headers.request.set` del `reverse_proxy` (el JSON de arriba).
 - **TLS del panel:**
@@ -858,6 +860,7 @@ Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `public_ip
 | Docker no responde al probar los puertos nuevos | `503 docker_unavailable`; no se guarda nada |
 | Un rango inválido en `panel_allowed_cidrs` | `422` en `panel_allowed_cidrs` |
 | `cloudflare_token` con otra forma (de 20 a 512 caracteres visibles, sin espacios) | `422 cloudflare_token` |
+| `acme_email` o `cloudflare_token` con `{` o `}`, que Caddy toma como placeholders (§3.4) | `422` en ese campo (`acme_email: no puede tener { ni }: Caddy los toma como placeholders`); no se guarda nada |
 | `cloudflare_token` rechazado por Cloudflare | `422 cloudflare_token` |
 | Cloudflare no responde al verificar el token | `502 cloudflare_unavailable` |
 | `cloudflare_token: ""` | Borra el token y `cloudflare_zones` |
@@ -1178,6 +1181,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Settings: `""` en `public_ip` | El mock lo rechaza | `""` borra `public_ip`, `public_ipv6` y `acme_email` | Hay que poder quitar un valor |
 | Settings: quitar el token | Abierto (el mock rechaza `""`) | `cloudflare_token: ""` lo borra | |
 | Settings: token rechazado o Cloudflare caído | — | `422 cloudflare_token` / `502 cloudflare_unavailable` | El panel tiene que mostrar el 502 como reintentable |
+| Settings: `{` o `}` en `acme_email` o en el token | Los rechaza el panel, en el cliente | El backend también: `422` en ese campo (§4.1) | Guardados, Caddy deja de recibir la configuración (`out_of_sync`, §3.4); así tampoco los guarda otro cliente de la API |
 | Settings: cambio de IP pública | — | Los registros que maneja muelle siguen a la IP (solo el contenido); un dominio en `error`/`cloudflare` que se actualiza bien vuelve a `pending`, y uno que falla queda en `error`/`cloudflare`. El `PATCH` responde `200` igual | Compatible: el panel vuelve a leer los dominios |
 | Settings: lista que te deja fuera | Guarda sugerida | `409 would_lock_out`; se guarda con `confirm_lockout: true` | La pide la revisión del panel |
 | Settings: cambio de puertos | Abierto | El `PATCH` responde antes de recrear Caddy, que se recrea 2 s después; `GET /proxy` dice `recreating` mientras tanto. Si cambió `proxy_https_port`, el panel lleva al usuario al origen nuevo | La respuesta pasa por el Caddy que se recrea: si no, el cliente vería una conexión cortada |
