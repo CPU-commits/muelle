@@ -219,6 +219,13 @@ describe('settings', () => {
 		await expect(ingressUseCases.getProxyStatus()).resolves.toMatchObject({ status: 'synced' })
 	})
 
+	it('sin el proxy de muelle (sin dominio del panel), CheckProxyPorts no prueba nada: se guarda', async () => {
+		// Contrato §3.5: con el proxy deshabilitado no toca Docker y devuelve nil.
+		adminDb.reset({ panelDomain: '' })
+		const settings = await adminUseCases.updateProxyPorts({ http: '8081', https: '8443' })
+		expect(settings.proxy).toMatchObject({ httpPort: 8081, httpsPort: 8443 })
+	})
+
 	it('si el puerto se ocupa después de la prueba (9443 en el mock), muelle vuelve a los anteriores (contrato §3.5)', async () => {
 		ingressDb.reset({ recreateMs: 0 })
 		// El PATCH lo prueba y está libre: se guarda.

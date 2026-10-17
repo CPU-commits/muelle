@@ -19,7 +19,8 @@ import { loadPersisted, savePersisted } from './persist'
 //   configuración: `GET /proxy` dice `out_of_sync` (el aviso "proxy desincronizado");
 // - cambiar los puertos en Ajustes recrea muelle-caddy: `GET /proxy` dice `recreating` unos
 //   segundos (`recreateMs`) y después `synced`. El puerto 8081 está "ocupado" en el host:
-//   el `PATCH` lo prueba antes de guardar y responde `422` en ese campo (contrato §3.5). El
+//   el `PATCH` lo prueba antes de guardar y responde `422` en ese campo (contrato §3.5; sin
+//   dominio del panel, con el proxy deshabilitado, no prueba nada). El
 //   9443 pasa la prueba, pero otro lo toma antes de recrear: muelle-caddy no arranca con él,
 //   y muelle vuelve a los puertos anteriores (`ports_rollback` en `GET /proxy`, los ajustes
 //   de antes y `settings.ports_rollback` en la auditoría);

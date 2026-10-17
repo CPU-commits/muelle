@@ -152,9 +152,10 @@ function checkCloudflareToken(token: string) {
 
 // `CheckProxyPorts` (contrato §3.5): antes de guardar, prueba en el host solo los puertos que
 // cambian, el HTTP en TCP y el HTTPS en TCP y en UDP. En el mock, `MOCK_BUSY_PORT` está
-// ocupado.
+// ocupado. Con el proxy deshabilitado (sin dominio del panel) no prueba nada.
 function checkProxyPorts(body: SettingsBody) {
 	const s = adminDb.state
+	if (s.panelDomain === '') return undefined
 	const fields = [
 		{ key: 'proxy_http_port', next: body.proxy_http_port, old: s.proxyHttpPort, label: '' },
 		{

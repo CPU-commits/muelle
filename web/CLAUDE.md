@@ -652,7 +652,8 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
 - En MSW: `db/ingress.ts` lee el token, las IP, el dominio del panel y los puertos de
   `db/admin.ts` (un `PATCH` de los puertos llama a `ingressDb.recreateProxy`, e
   `ingressDb.settle` termina la recreación: con el 9443, muelle vuelve a los puertos
-  anteriores y escribe `ports_rollback`; el 8081 lo rechaza el `PATCH` con `422`), y el
+  anteriores y escribe `ports_rollback`; el 8081 lo rechaza el `PATCH` con `422`, salvo sin
+  dominio del panel: con el proxy deshabilitado no se prueba nada), y el
   `DELETE` de una app (`handlers/catalog.ts`) mira los dominios de `db/ingress.ts` con
   `ingressDb.list` (una app con dominios es `409 not_empty`). `list` siembra los tres
   dominios del diseño la primera vez que se piden los de una app, así que una app del mock
