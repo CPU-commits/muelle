@@ -44,6 +44,7 @@ pnpm check            # codegen + svelte-check
 pnpm lint             # prettier --check + eslint
 pnpm format           # prettier --write
 pnpm test             # vitest: node (dominio, mappers, MSW) + Chromium (viewModels)
-pnpm test:e2e         # playwright contra un build CON mocks (después, pnpm build)
+pnpm test:e2e         # playwright: construye build-e2e/ (con MSW y sin) y lo sirve con la CSP;
+                      # no toca ./build. Corre en su propio network namespace, como pnpm test
 pnpm verify           # lint + check + test, lo mismo que CI
 ```

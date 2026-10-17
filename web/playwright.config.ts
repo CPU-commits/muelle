@@ -7,7 +7,9 @@ import { MOCK_PORT, MOCK_URL, PROD_PORT } from './e2e/ports'
 // - `mock` (E2E_MOCK_PORT, 4173; el baseURL): con MSW, para recorrer el panel sin backend;
 // - `prod` (E2E_PROD_PORT, 4174): el mismo build que `pnpm build`, para ver que arranca
 //   bajo la CSP (e2e/csp.e2e.ts).
-// Los puertos se cambian para correr varios `pnpm test:e2e` en paralelo (e2e/ports.ts).
+// `pnpm test:e2e` corre en un network namespace propio (scripts/isolated-net.mjs): los
+// puertos son de esa corrida y varios worktrees no chocan. Con la red del host se cambian
+// con E2E_MOCK_PORT y E2E_PROD_PORT (e2e/ports.ts).
 export default defineConfig({
 	webServer: {
 		command: `pnpm build:e2e && node scripts/serve-build.mjs build-e2e/prod:${PROD_PORT} build-e2e/mock:${MOCK_PORT}`,
