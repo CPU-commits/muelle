@@ -1,4 +1,4 @@
-import { onlineManager, type QueryClient } from '@tanstack/svelte-query'
+import { onlineManager, QueryClient } from '@tanstack/svelte-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { http, releaseWrites } from '@/shared/data/http/client'
@@ -854,6 +854,22 @@ describe('ProxySettingsViewModel', () => {
 				.mockResolvedValue(new Response(null, { status: 204 }))
 			await expect(http.post('/projects')).resolves.toBeNull()
 			expect(sent).toHaveBeenCalledOnce()
+		})
+
+		it('con los ajustes del cache en los puertos que fallaron (otra visita a Ajustes), los campos vuelven y se piden de nuevo', async () => {
+			const invalidate = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+
+			// Los ajustes ya son los de antes: no hay nada que corregir.
+			const current = await mountViewModel()
+			await vi.waitFor(() => expect(current.rollback).not.toBeNull())
+			expect(invalidate).not.toHaveBeenCalledWith({ queryKey: adminKeys.settings() })
+
+			// Se cambió el HTTPS en otra visita, y el cache sigue con el 8443 que falló.
+			const vm = await mountViewModel({ ...PROXY, httpsPort: 8443 })
+			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
+			expect([vm.httpPort, vm.httpsPort]).toEqual(['80', '443'])
+			expect(invalidate).toHaveBeenCalledWith({ queryKey: adminKeys.settings() })
 		})
 
 		it('una vuelta atrás de otra dirección no suelta el freno de esta mudanza', async () => {

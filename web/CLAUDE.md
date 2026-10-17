@@ -641,7 +641,8 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
       los anteriores, contrato §3.5) la tarjeta lo dice con el motivo, saca el aviso de la
       dirección que falló (también uno guardado, al recargar), deja salir las escrituras
       frenadas por la mudanza a esa dirección (también si se salió de Ajustes y se volvió),
-      pone los puertos de antes en los campos y, si el panel no está en la dirección
+      pone los puertos de antes en los campos (si el cambio fue desde acá, o si los ajustes
+      del cache todavía son los que fallaron) y, si el panel no está en la dirección
       anterior (`https://<panel_domain>[:<puerto anterior>]`), ofrece volver. El panel no
       puede saber si la dirección nueva responde (la CSP no deja pedir a otro origen): lo
       sabe por `ports_rollback`, en una dirección que sí responde. Por eso el aviso de la

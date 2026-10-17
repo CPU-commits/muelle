@@ -560,7 +560,8 @@ export class ProxySettingsViewModel {
 	/**
 	 * muelle volvió a los puertos anteriores (una sola vez por vuelta): el aviso de una
 	 * dirección que falló se va, esta dirección acepta escrituras otra vez y, si el cambio fue
-	 * desde acá, los campos y los ajustes vuelven a los puertos de antes.
+	 * desde acá o los ajustes que se ven todavía son los que fallaron (el cache de otra visita
+	 * a Ajustes), los campos y los ajustes vuelven a los puertos de antes.
 	 */
 	#afterRollback(rollback: PortsRollback): void {
 		const key = rollback.at.getTime()
@@ -576,7 +577,10 @@ export class ProxySettingsViewModel {
 		// visita a Ajustes (se salió y se volvió sin recargar). Se suelta si es el de la
 		// mudanza a la dirección que falló.
 		if (failed !== null && heldWritesOrigin() === failed) releaseWrites()
-		if (this.#watchingProxy) {
+		const showsFailed =
+			this.proxy.httpPort === rollback.attempted.httpPort &&
+			this.proxy.httpsPort === rollback.attempted.httpsPort
+		if (this.#watchingProxy || showsFailed) {
 			this.httpPort = String(rollback.restored.httpPort)
 			this.httpsPort = String(rollback.restored.httpsPort)
 			void this.#client.invalidateQueries({ queryKey: adminKeys.settings() })
