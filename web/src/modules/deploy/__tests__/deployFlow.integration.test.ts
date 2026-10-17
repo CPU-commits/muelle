@@ -25,12 +25,15 @@ import {
 	appHealth,
 	asDeployId,
 	asLogOffset,
+	type Deploy,
+	type DeployId,
 	type DeployLogEvent,
 	DeployNotFound,
 	DockerUnavailable,
 	ImageRejected,
 	LogStreamFailed,
 	NoPreviousDeploy,
+	pinnedImages,
 } from '../domain'
 import { FetchEventSource } from './fetchEventSource'
 
@@ -116,6 +119,14 @@ describe('estado e historial', () => {
 		expect(failed?.actor).toEqual({ type: 'token', name: 'github-actions' })
 		expect(list[0]?.images[0]?.digest).toMatch(/^sha256:[a-f0-9]{64}$/)
 		expect(list[2]?.startedAt).toBeNull()
+		// La ref pedida (§2.1): #143 sigue un tag; #141 se reemplazó antes de resolver, así
+		// que no tiene; el rollback #139 pidió las de #137 con digest.
+		expect(list[0]?.requestedImages).toEqual([
+			{ service: 'api', ref: 'ghcr.io/auditfy/api:sha-3f9c2e1', digest: null },
+		])
+		expect(list[2]?.requestedImages).toEqual([])
+		expect(list[4]?.requestedImages?.[0]?.digest).toMatch(/^sha256:[a-f0-9]{64}$/)
+		expect(list.every((deploy) => !deploy.routesWarning)).toBe(true)
 	})
 
 	it('un deploy que no existe es DeployNotFound, no la fase', async () => {
@@ -183,6 +194,30 @@ describe('desplegar y seguir el log', () => {
 		expect(log).not.toContain('rutas de Caddy actualizadas')
 		// El motivo no va en el log (lo lee un token del proyecto).
 		expect(log).not.toContain('caddy-rechaza')
+		// El deploy lo trae como dato (§2.1): el panel avisa por esto, no por la línea.
+		expect((await deployUseCases.getDeploy(APP, id)).routesWarning).toBe(true)
+	})
+
+	it('routes_warning es false mientras no llegó al paso 7, y en uno que actualizó las rutas', async () => {
+		deployDb.reset({ liveScale: 1, seedLive: false })
+		ingressDb.create(appKey('auditfy', 'staging', 'api'), {
+			hostname: 'caddy-rechaza.tudominio.cl',
+			targetService: 'api',
+			targetPort: 3000,
+			proxied: false,
+		})
+		const queued = await deployUseCases.createDeploy({
+			app: APP,
+			services: ['api'],
+			overrides: {},
+		})
+		expect(await deployUseCases.getDeploy(APP, queued.id)).toMatchObject({
+			status: 'queued',
+			routesWarning: false,
+		})
+
+		const list = await deployUseCases.listDeploys(APP)
+		expect(list.find((deploy) => deploy.id === 143)?.routesWarning).toBe(false)
 	})
 
 	it('una imagen rota termina failed por healthcheck, con el secreto enmascarado', async () => {
@@ -470,6 +505,84 @@ describe('rollback', () => {
 		const deploy = await deployUseCases.getDeploy(APP, id)
 		expect(deploy.trigger).toBe('rollback')
 		expect(deploy.images[0]?.ref).toBe('ghcr.io/auditfy/api:sha-e52b8f0')
+	})
+})
+
+describe('requested_images: la ref pedida y lo que queda fijo (contrato §2.1 y §2.2)', () => {
+	async function finish(id: DeployId): Promise<Deploy> {
+		await collect(
+			deployUseCases.followDeployLog(
+				{ app: APP, id, live: true },
+				new AbortController().signal,
+			),
+		)
+		return deployUseCases.getDeploy(APP, id)
+	}
+
+	it('en cola es {}: todavía no se resolvieron las imágenes', async () => {
+		deployDb.reset({ liveScale: 1, seedLive: false })
+		const { id } = await deployUseCases.createDeploy({
+			app: APP,
+			services: ['api'],
+			overrides: { api: 'ghcr.io/auditfy/api:v2' },
+		})
+		expect(await deployUseCases.getDeploy(APP, id)).toMatchObject({
+			status: 'queued',
+			requestedImages: [],
+		})
+	})
+
+	it('un rollback pide las refs con digest, un deploy sin cuerpo las repite y un tag las suelta', async () => {
+		const target = (await deployUseCases.listDeploys(APP)).find((deploy) => deploy.id === 140)
+		const rollback = await finish((await deployUseCases.rollback(APP)).id)
+		expect(rollback.requestedImages).toEqual(target?.images)
+		expect(pinnedImages(await deployUseCases.listDeploys(APP))).toEqual({
+			rollback: rollback.id,
+			services: ['api'],
+		})
+
+		const again = await finish(
+			(await deployUseCases.createDeploy({ app: APP, services: ['api'], overrides: {} })).id,
+		)
+		expect(again.requestedImages).toEqual(target?.images)
+		expect(again.images).toEqual(target?.images)
+		expect(pinnedImages(await deployUseCases.listDeploys(APP))?.services).toEqual(['api'])
+
+		const released = await finish(
+			(
+				await deployUseCases.createDeploy({
+					app: APP,
+					services: ['api'],
+					overrides: { api: 'ghcr.io/auditfy/api:sha-e52b8f0' },
+				})
+			).id,
+		)
+		// El mismo tag, que resuelve al mismo digest: ya no está fijo.
+		expect(released.images).toEqual(target?.images)
+		expect(released.requestedImages).toEqual([
+			{ service: 'api', ref: 'ghcr.io/auditfy/api:sha-e52b8f0', digest: null },
+		])
+		expect(pinnedImages(await deployUseCases.listDeploys(APP))).toBeNull()
+	})
+
+	it('un override con digest queda fijo en ese digest', async () => {
+		const digest = `sha256:${'ab'.repeat(32)}`
+		const deploy = await finish(
+			(
+				await deployUseCases.createDeploy({
+					app: APP,
+					services: ['api'],
+					overrides: { api: `ghcr.io/auditfy/api:v3@${digest}` },
+				})
+			).id,
+		)
+		const pinned = { service: 'api', ref: 'ghcr.io/auditfy/api:v3', digest }
+		expect(deploy.requestedImages).toEqual([pinned])
+		expect(deploy.images).toEqual([pinned])
+		expect(pinnedImages(await deployUseCases.listDeploys(APP))).toEqual({
+			rollback: null,
+			services: ['api'],
+		})
 	})
 
 	it('sin un succeeded anterior es NoPreviousDeploy (409)', async () => {

@@ -17,6 +17,12 @@ import { loadPersisted, savePersisted } from './persist'
 // la configuración (un dominio con `caddy-rechaza`, db/ingress.ts), el paso 7 es la
 // advertencia "no se pudo actualizar Caddy" y el deploy termina bien igual.
 //
+// Cada deploy guarda la ref pedida de cada servicio (`requested_images`, contrato §2.1): la
+// ref sin digest en `images` y, si se pidió con digest (un rollback, un override o la
+// configuración con digest), el digest en `pins`. Un deploy sin override repite la ref pedida
+// del actual, así que lo fijado por un rollback sigue fijo hasta un override o un cambio de
+// la configuración (§2.2).
+//
 // El tipo y los servicios de una app salen del catálogo (db/catalog.ts), como en el backend
 // (contrato §2.2): contra esos se valida `images`, y de ahí sale la ref de un servicio que
 // el deploy actual no tiene. Lo que corre en Swarm (el estado, los logs) son los servicios
@@ -35,8 +41,10 @@ export interface MockDeploy {
 	/** Multiplica los tiempos del guion: el historial dura ~1 min, uno nuevo ~9 s. */
 	scale: number
 	scenario: MockScenario
-	/** servicio → ref (sin digest; el digest sale de la ref). */
+	/** servicio → ref (sin digest; el digest sale de la ref, salvo que esté en `pins`). */
 	images: Record<string, string>
+	/** servicio → digest que se pidió (la ref pedida lo trae: queda fijo, §2.2). */
+	pins?: Record<string, string>
 	/** Lo que pidió el cuerpo (contrato §2.1: es lo que muestra `images` hasta resolver). */
 	overrides?: Record<string, string>
 	/**
@@ -81,6 +89,10 @@ export interface DeployView {
 	error: string | null
 	/** servicio → ref@digest (o la ref sola si todavía no se resolvió). */
 	images: Record<string, string>
+	/** servicio → ref pedida (con digest solo si se fijó); `{}` hasta resolver (§2.1). */
+	requestedImages: Record<string, string>
+	/** El paso 7 escribió la advertencia de Caddy (§2.1, `routes_warning`). */
+	routesWarning: boolean
 }
 
 interface Step {
@@ -96,6 +108,8 @@ interface Script {
 	resolvedAt: number | null
 	/** Desde qué momento hay una tarea nueva arrancando. */
 	newTaskAt: number | null
+	/** Desde qué momento el deploy tiene `routes_warning` (el paso 7 no actualizó Caddy). */
+	routesWarningAt: number | null
 }
 
 const STORAGE_KEY = 'deploy'
@@ -141,6 +155,29 @@ export function hashHex(input: string, length: number): string {
 
 export function digestOf(ref: string): string {
 	return `sha256:${hashHex(ref, 64)}`
+}
+
+/** El digest al que resuelve un servicio del deploy: el fijado, o el de su ref. */
+function resolvedDigest(deploy: MockDeploy, service: string): string {
+	return deploy.pins?.[service] ?? digestOf(deploy.images[service] ?? '')
+}
+
+/** Una ref pedida (`repo:tag` o `repo:tag@sha256:…`) en la ref y el digest, si trae. */
+function splitRequested(raw: string): { ref: string; digest: string | null } {
+	const at = raw.indexOf('@')
+	return at < 0
+		? { ref: raw, digest: null }
+		: { ref: raw.slice(0, at), digest: raw.slice(at + 1) }
+}
+
+/** servicio → ref pedida: con el digest de `pins` si se fijó (contrato §2.1). */
+function requestedOf(deploy: MockDeploy): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(deploy.images).map(([service, ref]) => {
+			const pin = deploy.pins?.[service]
+			return [service, pin ? `${ref}@${pin}` : ref]
+		}),
+	)
 }
 
 function shortDigest(digest: string): string {
@@ -189,12 +226,16 @@ function scriptFor(app: MockApp, deploy: MockDeploy): Script {
 			error: `no se pudo resolver la imagen ${ref}`,
 			resolvedAt: null,
 			newTaskAt: null,
+			routesWarningAt: null,
 		}
 	}
 
 	for (const service of services) {
 		const ref = deploy.images[service] ?? ''
-		steps.push({ at: s(700), text: `${service}  ${ref} → ${shortDigest(digestOf(ref))}` })
+		steps.push({
+			at: s(700),
+			text: `${service}  ${ref} → ${shortDigest(resolvedDigest(deploy, service))}`,
+		})
 	}
 	const plural = services.length === 1 ? 'servicio' : 'servicios'
 	steps.push({
@@ -236,6 +277,7 @@ function scriptFor(app: MockApp, deploy: MockDeploy): Script {
 			error: 'la versión nueva no pasó el healthcheck',
 			resolvedAt: s(700),
 			newTaskAt: s(3100),
+			routesWarningAt: null,
 		}
 	}
 
@@ -253,7 +295,15 @@ function scriptFor(app: MockApp, deploy: MockDeploy): Script {
 			: 'rutas de Caddy actualizadas',
 	})
 	steps.push({ at: s(9100), text: `deploy exitoso en ${secondsLabel(s(9100))}` })
-	return { steps, status: 'succeeded', error: null, resolvedAt: s(700), newTaskAt: s(3100) }
+	return {
+		steps,
+		status: 'succeeded',
+		error: null,
+		resolvedAt: s(700),
+		newTaskAt: s(3100),
+		// Se marca antes de escribir la línea (§2.1): el mismo momento que el paso 7.
+		routesWarningAt: deploy.caddyRejects ? s(8800) : null,
+	}
 }
 
 function scriptDuration(script: Script): number {
@@ -265,9 +315,13 @@ function queuedLine(deploy: MockDeploy): string {
 	return `${iso(deploy.createdAt)} deploy #${deploy.id} encolado · ${triggerLabel(deploy.trigger)} · ${who}`
 }
 
-function withDigests(images: Record<string, string>): Record<string, string> {
+/** servicio → ref@digest: lo que resolvió el paso 2 (el digest fijado, o el de la ref). */
+export function resolvedOf(deploy: MockDeploy): Record<string, string> {
 	return Object.fromEntries(
-		Object.entries(images).map(([service, ref]) => [service, `${ref}@${digestOf(ref)}`]),
+		Object.entries(deploy.images).map(([service, ref]) => [
+			service,
+			`${ref}@${resolvedDigest(deploy, service)}`,
+		]),
 	)
 }
 
@@ -299,6 +353,8 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 			finishedAt: deploy.supersededAt,
 			error: null,
 			images: { ...(deploy.overrides ?? deploy.images) },
+			requestedImages: {},
+			routesWarning: false,
 		}
 	}
 	const elapsed = now - deploy.startAt
@@ -310,6 +366,8 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 			finishedAt: null,
 			error: null,
 			images: { ...(deploy.overrides ?? deploy.images) },
+			requestedImages: {},
+			routesWarning: false,
 		}
 	}
 	const script = scriptFor(app, deploy)
@@ -319,9 +377,10 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 	}
 	const resolved = script.resolvedAt !== null && elapsed >= script.resolvedAt
 	// Hasta resolver (y si falló antes), los overrides; desde ahí, todos con digest.
-	const images = resolved
-		? withDigests(deploy.images)
-		: { ...(deploy.overrides ?? deploy.images) }
+	const images = resolved ? resolvedOf(deploy) : { ...(deploy.overrides ?? deploy.images) }
+	// La ref pedida, desde que se resolvió (§2.1); `{}` antes, o si falló antes.
+	const requestedImages = resolved ? requestedOf(deploy) : {}
+	const routesWarning = script.routesWarningAt !== null && elapsed >= script.routesWarningAt
 	if (elapsed < duration) {
 		return {
 			status: 'running',
@@ -330,6 +389,8 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 			finishedAt: null,
 			error: null,
 			images,
+			requestedImages,
+			routesWarning,
 		}
 	}
 	return {
@@ -339,6 +400,8 @@ export function view(app: MockApp, deploy: MockDeploy, now: number): DeployView 
 		finishedAt: deploy.startAt + duration,
 		error: script.error,
 		images,
+		requestedImages,
+		routesWarning,
 	}
 }
 
@@ -445,6 +508,13 @@ function seededImages(app: MockApp, config: ConfiguredApp, tag: string): Record<
 	)
 }
 
+/** servicio → el digest al que resuelve su ref. */
+function digestsOf(images: Record<string, string>): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(images).map(([service, ref]) => [service, digestOf(ref)]),
+	)
+}
+
 function seedApp(project: string, stage: string, slug: string, now: number): MockApp {
 	const app: MockApp = { project, stage, app: slug, replicas: 2, deploys: [] }
 	// En el catálogo, la que no tiene `last_deployed_at`; si no está, por el nombre.
@@ -474,13 +544,16 @@ function seedApp(project: string, stage: string, slug: string, now: number): Moc
 
 	for (const entry of RICH_HISTORY) {
 		const createdAt = now - entry.ago
+		const images = seededImages(app, config, entry.tag)
 		app.deploys.push({
 			id: entry.id,
 			createdAt,
 			startAt: createdAt + 800 * HISTORY_SCALE,
 			scale: HISTORY_SCALE,
 			scenario: entry.scenario,
-			images: seededImages(app, config, entry.tag),
+			images,
+			// Un rollback pide las refs resueltas del deploy al que vuelve, con digest (§2.7).
+			...(entry.trigger === 'rollback' ? { pins: digestsOf(images) } : {}),
 			configImages,
 			trigger: entry.trigger,
 			actorType: entry.actor[0],
@@ -514,6 +587,7 @@ function seedApp(project: string, stage: string, slug: string, now: number): Moc
 // --- Operaciones ------------------------------------------------------------
 
 export interface CreateInput {
+	/** servicio → ref pedida; con `@sha256:…` queda fija en ese digest. */
 	images: Record<string, string>
 	/** Lo que vino en el cuerpo (`{}` si nada). */
 	overrides?: Record<string, string>
@@ -608,15 +682,16 @@ export const deployDb = {
 
 	/**
 	 * Las refs de un deploy sin override (contrato §2.2), para cada servicio de la
-	 * configuración: la del deploy actual, salvo que la de la configuración cambió desde ese
-	 * deploy; si el deploy actual no lo tiene (primer deploy, un servicio nuevo del compose),
-	 * la de la configuración.
+	 * configuración: la ref pedida del deploy actual (con su digest, si lo fijó), salvo que la
+	 * de la configuración cambió desde ese deploy; si el deploy actual no lo tiene (primer
+	 * deploy, un servicio nuevo del compose), la de la configuración.
 	 */
 	baseImages(app: MockApp, now: number): Record<string, string> {
 		const current = this.current(app, now)
+		const requested = current ? requestedOf(current) : {}
 		return Object.fromEntries(
 			Object.entries(configOf(app).images).map(([service, configRef]) => {
-				const deployed = current?.images[service]
+				const deployed = requested[service]
 				const readConfig = current?.configImages?.[service]
 				const configChanged = readConfig !== undefined && readConfig !== configRef
 				return [service, deployed !== undefined && !configChanged ? deployed : configRef]
@@ -637,13 +712,21 @@ export const deployDb = {
 				startAt = Math.max(startAt, finishOf(app, deploy))
 			}
 		}
+		const images: Record<string, string> = {}
+		const pins: Record<string, string> = {}
+		for (const [service, raw] of Object.entries(input.images)) {
+			const { ref, digest } = splitRequested(raw)
+			images[service] = ref
+			if (digest) pins[service] = digest
+		}
 		const deploy: MockDeploy = {
 			id,
 			createdAt: now,
 			startAt,
 			scale: state.liveScale,
-			scenario: input.scenario ?? scenarioFor(input.images),
-			images: input.images,
+			scenario: input.scenario ?? scenarioFor(images),
+			images,
+			...(Object.keys(pins).length > 0 ? { pins } : {}),
 			overrides: input.overrides ?? {},
 			configImages: { ...configOf(app).images },
 			trigger: input.trigger,

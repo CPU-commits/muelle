@@ -3,7 +3,14 @@ import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 // el archivo del dominio y no el barrel, que trae la UI.
 import { isValidImageRef } from '@/modules/deploy/domain/value-objects/imageRef'
 import { api, apiError, invalid } from '../api'
-import { deployDb, type DeployView, hashHex, type MockApp, type MockDeploy } from '../db/deploy'
+import {
+	deployDb,
+	type DeployView,
+	hashHex,
+	type MockApp,
+	type MockDeploy,
+	resolvedOf,
+} from '../db/deploy'
 import { ingressDb } from '../db/ingress'
 import { requireSession, sessionUser } from '../session'
 
@@ -42,6 +49,8 @@ function deployDto(deploy: MockDeploy, current: DeployView) {
 		started_at: iso(current.startedAt),
 		finished_at: iso(current.finishedAt),
 		superseded_by: current.status === 'superseded' ? (deploy.supersededBy ?? null) : null,
+		requested_images: current.requestedImages,
+		routes_warning: current.routesWarning,
 	}
 }
 
@@ -171,11 +180,6 @@ function statusDto(app: MockApp, now: number) {
 
 type DeployBody = { image?: unknown; images?: unknown }
 
-/** Una ref sin digest: el mock lo calcula de la ref al resolver. */
-function withoutDigest(ref: string): string {
-	return ref.split('@')[0] ?? ref
-}
-
 /**
  * Las imágenes del deploy nuevo (contrato §2.2): el override de cada servicio que lo trae
  * y, para el resto, `baseImages`. Valida contra la configuración de ahora (el catálogo):
@@ -200,7 +204,7 @@ function imagesFromBody(
 		if (typeof body.image !== 'string' || !isValidImageRef(body.image)) {
 			return invalid('image', 'no es una referencia de imagen válida')
 		}
-		return { ...images, [app.app]: withoutDigest(body.image) }
+		return { ...images, [app.app]: body.image }
 	}
 	if (body.images !== undefined) {
 		if (typeof body.images !== 'object' || body.images === null) {
@@ -213,7 +217,7 @@ function imagesFromBody(
 			if (typeof ref !== 'string' || !isValidImageRef(ref)) {
 				return invalid(`images.${service}`, 'no es una referencia de imagen válida')
 			}
-			images[service] = withoutDigest(ref)
+			images[service] = ref
 		}
 	}
 	return images
@@ -532,12 +536,14 @@ export const deployHandlers: RequestHandler[] = [
 				'no hay un deploy exitoso anterior al actual',
 			)
 		}
+		// Un rollback pide las refs resueltas del succeeded anterior, con digest (§2.7): son
+		// sus overrides y quedan fijas.
+		const requested = resolvedOf(source)
 		const deploy = deployDb.create(
 			app,
 			{
-				images: { ...source.images },
-				// Las imágenes del succeeded anterior son lo que "pide" un rollback.
-				overrides: { ...source.images },
+				images: requested,
+				overrides: { ...requested },
 				trigger: 'rollback',
 				actorName: sessionUser()?.username ?? 'felipe',
 				rollbackOf: source.id,
