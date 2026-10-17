@@ -379,6 +379,28 @@ describe('ProxySettingsViewModel', () => {
 		expect(vm.confirmingPorts).toBe(false)
 	})
 
+	it('la confirmación avisa a dónde se muda el panel si cambia el HTTPS, y qué puerto abrir', async () => {
+		const vm = await mountViewModel()
+		expect(vm.portsMove).toBeNull()
+
+		vm.setField('httpsPort', '8443')
+		vm.askSavePorts()
+		expect(vm.portsMove).toEqual({ origin: 'https://panel.tudominio.cl:8443', port: 8443 })
+
+		// Solo el HTTP: el panel no se muda.
+		vm.cancelPorts()
+		vm.setField('httpsPort', '443')
+		vm.setField('httpPort', '8080')
+		vm.askSavePorts()
+		expect(vm.portsMove).toBeNull()
+
+		// Sin dominio del panel, Caddy no lo sirve: tampoco se muda.
+		const local = await mountViewModel({ ...PROXY, panelDomain: '' })
+		local.setField('httpsPort', '8443')
+		local.askSavePorts()
+		expect(local.portsMove).toBeNull()
+	})
+
 	it('si cambió el puerto HTTPS, avisa a dónde se muda el panel', async () => {
 		const vm = await mountViewModel()
 		vm.setField('httpsPort', '8443')

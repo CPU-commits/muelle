@@ -305,6 +305,12 @@
 >
 	{#if vm.isSavingPorts}
 		<Banner tone="info" title={m.admin_ports_applying()} body={m.admin_ports_applying_body()} />
+	{:else if vm.portsMove}
+		<Banner
+			tone="warn"
+			title={m.admin_ports_move_title({ origin: vm.portsMove.origin })}
+			body={m.admin_ports_move_body({ port: vm.portsMove.port })}
+		/>
 	{/if}
 </ConfirmDialog>
 

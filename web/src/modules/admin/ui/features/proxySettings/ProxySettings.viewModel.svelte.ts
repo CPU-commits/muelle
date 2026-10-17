@@ -14,6 +14,7 @@ import {
 	movedPanelOrigin,
 	parseCloudflareToken,
 	parseProxyPorts,
+	type ProxyPorts,
 	type ProxySettings,
 	type Settings,
 } from '../../../domain'
@@ -41,6 +42,13 @@ const PROXY_FIELDS: readonly string[] = [
 
 function isProxyField(field: string): field is ProxyField {
 	return PROXY_FIELDS.includes(field)
+}
+
+/** A dónde se mudaría el panel con los puertos que se están confirmando. */
+export interface PortsMove {
+	readonly origin: string
+	/** El puerto HTTPS nuevo: el que tiene que estar abierto en el firewall. */
+	readonly port: number
 }
 
 /** Un aviso adentro del modal del token: título y, si hace falta, qué hacer. */
@@ -129,6 +137,23 @@ export class ProxySettingsViewModel {
 
 	get isSavingAcme(): boolean {
 		return this.#acme.isPending
+	}
+
+	/**
+	 * Si los puertos que se están confirmando mudan el panel (cambia el HTTPS y Caddy lo
+	 * sirve): a dónde, y qué puerto tiene que estar abierto para volver a entrar. null si no
+	 * se muda, o si los puertos todavía no son válidos.
+	 */
+	get portsMove(): PortsMove | null {
+		let ports: ProxyPorts
+		try {
+			ports = parseProxyPorts(this.httpPort, this.httpsPort)
+		} catch {
+			return null
+		}
+		const next = { ...this.proxy, httpPort: ports.http, httpsPort: ports.https }
+		const origin = movedPanelOrigin(this.proxy, next)
+		return origin === null ? null : { origin, port: ports.https }
 	}
 
 	get isSavingPorts(): boolean {

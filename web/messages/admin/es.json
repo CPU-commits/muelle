@@ -62,6 +62,8 @@
 	"admin_ports_confirm_title": "¿Cambiar los puertos?",
 	"admin_ports_confirm_body": "muelle-caddy se recrea escuchando en {http} (HTTP) y {https} (HTTPS). Los sitios se caen unos segundos.",
 	"admin_ports_confirm": "Cambiar puertos",
+	"admin_ports_move_title": "El panel pasa a {origin}",
+	"admin_ports_move_body": "Abre el puerto {port} en el firewall antes de confirmar: si está cerrado, no vas a poder entrar al panel, y los puertos solo se vuelven a cambiar desde el servidor.",
 	"admin_ports_applying": "Aplicando los puertos…",
 	"admin_ports_applying_body": "Puede tardar hasta 2 minutos mientras muelle prepara muelle-caddy.",
 	"admin_ports_saved": "Puertos guardados",
