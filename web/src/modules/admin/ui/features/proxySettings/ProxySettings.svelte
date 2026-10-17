@@ -192,13 +192,20 @@
 		{/if}
 		{#if vm.rollback}
 			<!-- muelle-caddy no arrancó con los puertos nuevos y muelle volvió a los de antes
-			     (contrato §3.5). Si el panel no está en esa dirección, la ofrece. -->
-			<Banner
-				tone="warn"
-				title={vm.rollbackTitle}
-				body={vm.rollbackBody}
-				{...vm.rollbackHref ? { action: goBack } : {}}
-			/>
+			     (contrato §3.5). Si el panel no está en esa dirección, la ofrece. Cerrado, el
+			     aviso de esa vuelta no vuelve a salir. -->
+			<Banner tone="warn" title={vm.rollbackTitle} body={vm.rollbackBody}>
+				{#snippet action()}
+					{#if vm.rollbackHref}
+						<LinkButton href={vm.rollbackHref} variant="secondary" size="sm">
+							{m.admin_ports_rollback_action()}
+						</LinkButton>
+					{/if}
+					<Button variant="ghost" size="sm" onclick={vm.dismissRollback}>
+						{m.admin_ports_rollback_dismiss()}
+					</Button>
+				{/snippet}
+			</Banner>
 		{:else if vm.recreation?.kind === 'recreating'}
 			<Banner
 				tone="info"
@@ -268,14 +275,6 @@
 		{/snippet}
 	</Card>
 </div>
-
-{#snippet goBack()}
-	{#if vm.rollbackHref}
-		<LinkButton href={vm.rollbackHref} variant="secondary" size="sm">
-			{m.admin_ports_rollback_action()}
-		</LinkButton>
-	{/if}
-{/snippet}
 
 <Modal
 	open={vm.cloudflareOpen}

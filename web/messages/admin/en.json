@@ -78,6 +78,7 @@
 	"admin_ports_rollback_reason": "muelle-caddy didn't start with HTTP {http} and HTTPS {https}: {error}.",
 	"admin_ports_rollback_origin": "The panel's address is still {origin}.",
 	"admin_ports_rollback_action": "Go back to the previous address",
+	"admin_ports_rollback_dismiss": "Got it",
 	"admin_ports_moved_title": "The panel's address is now {origin}",
 	"admin_ports_moved_body": "If you came in through the previous address, it stops responding in a few seconds; your session stays open at the new one. If the new one doesn't respond within a minute, go back to the previous one: if muelle-caddy didn't start on the new port, muelle goes back to the old ports on its own.",
 	"admin_ports_moved_body_previous": "If you came in through the previous address, it stops responding in a few seconds; your session stays open at the new one. If the new one doesn't respond within a minute, go back to the previous one, {previous}: if muelle-caddy didn't start on the new port, muelle goes back to the old ports on its own.",

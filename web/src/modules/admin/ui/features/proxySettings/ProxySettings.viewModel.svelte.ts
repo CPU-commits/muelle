@@ -34,6 +34,7 @@ import {
 import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
 import { currentOrigin } from './currentOrigin'
 import { clearPanelMove, loadPanelMove, PANEL_MOVED_PARAM, savePanelMove } from './panelMoveNotice'
+import { loadDismissedRollback, saveDismissedRollback } from './rollbackNotice'
 
 /** Los campos de las cuatro tarjetas, con el nombre que usan los errores del dominio. */
 export type ProxyField =
@@ -154,6 +155,8 @@ export class ProxySettingsViewModel {
 	#leaving = $state(false)
 	/** La vuelta atrás que ya se atendió (su `at`): se atiende una sola vez. */
 	#handledRollback: number | null = null
+	/** La vuelta atrás cuyo aviso se cerró en este navegador (su `at`): no vuelve a salir. */
+	#dismissedRollback = $state<number | null>(loadDismissedRollback())
 	/** Pasó `PORTS_WATCH_TIMEOUT_MS` sin una respuesta que diga cómo terminó. */
 	#watchExpired = $state(false)
 	/** Cuándo se guardaron: un estado del proxy de antes (en el cache) no dice nada. */
@@ -294,11 +297,11 @@ export class ProxySettingsViewModel {
 
 	/**
 	 * muelle volvió a los puertos anteriores (contrato §3.5): con qué no arrancó, a cuáles
-	 * volvió y por qué. null si `GET /proxy` no lo dice.
+	 * volvió y por qué. null si `GET /proxy` no lo dice, o si su aviso ya se cerró.
 	 */
 	get rollback(): PortsRollbackView | null {
 		const rollback = this.#rollbackStatus
-		if (!rollback) return null
+		if (!rollback || rollback.at.getTime() === this.#dismissedRollback) return null
 		const httpsChanged = rollback.attempted.httpsPort !== rollback.restored.httpsPort
 		return {
 			attempted: rollback.attempted,
@@ -347,6 +350,18 @@ export class ProxySettingsViewModel {
 		const origin = this.rollback?.origin ?? null
 		if (origin === null || origin === currentOrigin()) return null
 		return `${origin}${resolve('/(app)/ajustes')}`
+	}
+
+	/**
+	 * Cierra el aviso de esta vuelta atrás, también para las próximas visitas: `GET /proxy` la
+	 * trae hasta el próximo cambio de puertos. Lo demás de la vuelta (soltar las escrituras,
+	 * los campos) se atiende igual.
+	 */
+	dismissRollback = (): void => {
+		const rollback = this.#rollbackStatus
+		if (!rollback) return
+		this.#dismissedRollback = rollback.at.getTime()
+		saveDismissedRollback(rollback.at)
 	}
 
 	/** Si el aviso apunta a otro origen: "Ir al panel" lleva allá. */

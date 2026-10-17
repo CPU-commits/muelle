@@ -639,7 +639,8 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
       sigue preguntando solo por si muelle vuelve atrás (la dirección vuelve a responder).
     - Con `ports_rollback` (muelle-caddy no arrancó con los puertos nuevos y muelle volvió a
       los anteriores, contrato §3.5) la tarjeta lo dice con el motivo y cuándo (`GET /proxy`
-      lo trae hasta el próximo cambio de puertos o un reinicio de muelle), saca el aviso de la
+      lo trae hasta el próximo cambio de puertos o un reinicio de muelle; cerrado, el aviso de
+      esa vuelta no vuelve a salir, pero lo demás se atiende igual), saca el aviso de la
       dirección que falló (también uno guardado, al recargar), deja salir las escrituras
       frenadas por la mudanza a esa dirección (también si se salió de Ajustes y se volvió),
       pone los puertos de antes en los campos (si el cambio fue desde acá, o si los ajustes
@@ -677,7 +678,8 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   nuevo con `?panel_moved=1`, porque allá el localStorage es otro). El aviso nombra la
   dirección anterior (`panelOrigin` de antes del `PATCH`, contrato §3.5): a dónde volver si
   la nueva no responde. Allá no se sabe cuál era, y no la nombra. Los dos orígenes pasan por
-  `parsePanelOrigin` al leerlos.
+  `parsePanelOrigin` al leerlos. También va ahí el `at` de la vuelta a los puertos anteriores
+  cuyo aviso se cerró (`proxySettings/rollbackNotice.ts`); los dos usan `noticeStorage.ts`.
 - Para saber quién es el usuario: `createQuery(() => meQuery())` con `meQuery` del barrel
   de `auth`. Devuelve `Me`: `username`, `totpEnabled` y `needsTotpSetup`. El guard ya lo dejó
   en el cache.

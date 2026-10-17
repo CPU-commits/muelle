@@ -800,6 +800,40 @@ describe('ProxySettingsViewModel', () => {
 			)
 		})
 
+		it('el aviso se cierra: esa vuelta no vuelve a salir (tampoco al recargar), una nueva sí', async () => {
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			const vm = await mountViewModel()
+			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
+
+			vm.dismissRollback()
+			expect(vm.rollback).toBeNull()
+			expect(vm.rollbackTitle).toBe('')
+			expect(vm.rollbackHref).toBeNull()
+			expect(vm.recreation).toBeNull()
+
+			// Al recargar, GET /proxy la sigue trayendo: no sale, pero se atiende igual (el aviso
+			// guardado de la dirección que falló se va).
+			localStorage.setItem('muelle:admin:panel-moved', 'https://panel.tudominio.cl:8443')
+			const reloaded = await mountViewModel()
+			await vi.waitFor(() => expect(reloaded.movedTo).toBeNull())
+			expect(reloaded.rollback).toBeNull()
+
+			// Otra vuelta (otro `at`) sí sale.
+			const at = new Date(ROLLBACK.at.getTime() + 60_000)
+			ingress.getProxyStatus.mockResolvedValue(
+				proxyStatus({ portsRollback: { ...ROLLBACK, at } }),
+			)
+			const later = await mountViewModel()
+			await vi.waitFor(() => expect(later.rollback?.at).toEqual(at))
+		})
+
+		it('una vuelta cerrada guardada que no es un momento se ignora', async () => {
+			localStorage.setItem('muelle:admin:ports-rollback-dismissed', 'nope')
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			const vm = await mountViewModel()
+			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
+		})
+
 		it('después de cambiar el HTTPS: el aviso de la dirección nueva se va y los campos vuelven', async () => {
 			const vm = await mountViewModel()
 			await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())

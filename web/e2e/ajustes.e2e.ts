@@ -279,6 +279,16 @@ test('si muelle-caddy no arranca con el HTTPS nuevo, muelle vuelve al anterior y
 	await expect(reloaded.getByText(notice)).toHaveCount(0)
 	await expect(reloaded.getByLabel('HTTPS', { exact: true })).toHaveValue('443')
 
+	// Se cierra, y esa vuelta no vuelve a salir aunque GET /proxy la siga trayendo.
+	await reloaded.getByRole('button', { name: 'Entendido' }).click()
+	await expect(reloaded.getByText(rolledBack)).toHaveCount(0)
+	const proxyAgain = page.waitForResponse((response) => response.url().endsWith('/api/v1/proxy'))
+	await page.reload()
+	await proxyAgain
+	const again = page.getByRole('region', { name: 'Puertos del proxy' })
+	await expect(again.getByLabel('HTTPS', { exact: true })).toHaveValue('443')
+	await expect(again.getByText(rolledBack)).toHaveCount(0)
+
 	expect(errors).toEqual([])
 })
 
