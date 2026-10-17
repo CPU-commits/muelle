@@ -38,7 +38,7 @@ vi.mock('@/modules/admin/container', () => ({
 const ingress = vi.hoisted(() => ({ getProxyStatus: vi.fn() }))
 vi.mock('@/modules/ingress/container', () => ({ ingressUseCases: ingress }))
 
-// Usuarios es de identity y la auditoría lee los nombres de sus tokens.
+// Usuarios es de identity.
 vi.mock('@/modules/identity/container', () => ({
 	identityUseCases: {
 		listUsers: mocks.listUsers,

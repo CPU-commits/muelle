@@ -1,5 +1,4 @@
-import { createInfiniteQuery, createQuery, useQueryClient } from '@tanstack/svelte-query'
-import { tokensQuery } from '@/modules/identity'
+import { createInfiniteQuery, useQueryClient } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { formatDateTime } from '@/shared/ui'
 import { flattenCursorPages, UnavailableError } from '@/shared/domain'
@@ -21,9 +20,12 @@ export interface AuditRow {
 	readonly target: string
 }
 
-function actorLabel(actor: AuditActor, tokenNames: Readonly<Record<number, string>>): ActorLabel {
+// El nombre viene en el evento (`actor_name`, contrato §4.2). Sin él (un evento viejo cuyo
+// autor ya no estaba, o un backend sin `actor_name`), el tipo y el id.
+function actorLabel(actor: AuditActor): ActorLabel {
 	switch (actor.kind) {
 		case 'user':
+			if (actor.name) return { kind: 'text', text: actor.name }
 			return {
 				kind: 'text',
 				text:
@@ -32,8 +34,7 @@ function actorLabel(actor: AuditActor, tokenNames: Readonly<Record<number, strin
 						: m.admin_audit_actor_user({ id: actor.id }),
 			}
 		case 'token': {
-			const name = actor.id === null ? undefined : tokenNames[actor.id]
-			if (name) return { kind: 'token', name }
+			if (actor.name) return { kind: 'token', name: actor.name }
 			return {
 				kind: 'text',
 				text:
@@ -49,39 +50,29 @@ function actorLabel(actor: AuditActor, tokenNames: Readonly<Record<number, strin
 	}
 }
 
-function toRow(event: AuditEvent, tokenNames: Readonly<Record<number, string>>): AuditRow {
+function toRow(event: AuditEvent): AuditRow {
 	return {
 		id: event.id,
 		when: formatDateTime(event.at),
 		iso: event.at.toISOString(),
-		actor: actorLabel(event.actor, tokenNames),
+		actor: actorLabel(event.actor),
 		action: event.action,
 		target: event.target,
 	}
 }
 
 // La auditoría de Ajustes: quién, qué, sobre qué y cuándo, de la más nueva a la más vieja,
-// de a una página con "Cargar más" (`before`). Nunca muestra los `details`. El nombre de un
-// token sale de la lista de tokens de identity mientras el token exista.
+// de a una página con "Cargar más" (`before`). Nunca muestra los `details`.
 export class AuditLogViewModel {
 	readonly #client = useQueryClient()
 	readonly #audit = createInfiniteQuery(() => auditQuery())
-	readonly #tokens = createQuery(() => tokensQuery())
 
 	constructor() {
 		// Mientras la sección está montada, lo que se hace en el panel aparece arriba.
 		$effect(() => refreshAuditOnWrites(this.#client))
 	}
 
-	readonly #tokenNames = $derived(
-		Object.fromEntries((this.#tokens.data ?? []).map((token) => [token.id, token.name])),
-	)
-
-	readonly rows = $derived(
-		flattenCursorPages(this.#audit.data?.pages ?? []).map((event) =>
-			toRow(event, this.#tokenNames),
-		),
-	)
+	readonly rows = $derived(flattenCursorPages(this.#audit.data?.pages ?? []).map(toRow))
 
 	get isLoading(): boolean {
 		return this.#audit.isPending

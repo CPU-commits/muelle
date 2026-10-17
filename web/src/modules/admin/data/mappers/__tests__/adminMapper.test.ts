@@ -82,6 +82,7 @@ describe('adminMapper', () => {
 			id: 9,
 			actor_type: 'token',
 			actor_id: 3,
+			actor_name: 'github-actions',
 			action: 'env.patch',
 			target: 'app:auditfy/staging/api',
 			details: { set: ['DATABASE_URL'] },
@@ -91,21 +92,42 @@ describe('adminMapper', () => {
 		expect(dto).not.toHaveProperty('details')
 		expect(auditEventFromDto(dto)).toEqual({
 			id: 9,
-			actor: { kind: 'token', id: 3 },
+			actor: { kind: 'token', id: 3, name: 'github-actions' },
 			action: 'env.patch',
 			target: 'app:auditfy/staging/api',
 			at: new Date('2026-10-10T19:36:53.770Z'),
 		})
 	})
 
-	it('traduce cada tipo de actor', () => {
+	it('traduce cada tipo de actor, con el nombre copiado al escribir el evento (contrato §4.2)', () => {
 		const base = { id: 1, action: 'a', target: 't', at: '2026-10-10T12:00:00-03:00' }
-		const actor = (actor_type: string, actor_id: number | null) =>
-			auditEventFromDto({ ...base, actor_type, actor_id }).actor
+		const actor = (actor_type: string, actor_id: number | null, actor_name: string) =>
+			auditEventFromDto({ ...base, actor_type, actor_id, actor_name }).actor
 
-		expect(actor('user', 1)).toEqual({ kind: 'user', id: 1 })
-		expect(actor('system', null)).toEqual({ kind: 'system' })
-		expect(actor('cron', null)).toEqual({ kind: 'other', type: 'cron' })
+		expect(actor('user', 1, 'felipe')).toEqual({ kind: 'user', id: 1, name: 'felipe' })
+		expect(actor('token', 5, 'github-actions')).toEqual({
+			kind: 'token',
+			id: 5,
+			name: 'github-actions',
+		})
+		expect(actor('system', null, 'system')).toEqual({ kind: 'system' })
+		expect(actor('cron', null, 'cron')).toEqual({ kind: 'other', type: 'cron' })
+		// Un evento de antes de la migración 0004 cuyo autor ya no estaba: "".
+		expect(actor('token', 9, '')).toEqual({ kind: 'token', id: 9, name: '' })
+	})
+
+	it('un backend sin actor_name (la Fase 1 de main) no tiene nombres', () => {
+		const dto = auditEventDtoSchema.parse({
+			id: 1,
+			actor_type: 'user',
+			actor_id: 1,
+			action: 'auth.login',
+			target: 'user:felipe',
+			at: '2026-10-10T12:00:00Z',
+		})
+		expect(auditEventFromDto(dto).actor).toEqual({ kind: 'user', id: 1, name: '' })
+		// Si viene, es un string: nunca null.
+		expect(auditEventDtoSchema.safeParse({ ...dto, actor_name: null }).success).toBe(false)
 	})
 
 	it('client_ip es siempre un string (contrato §4): ya no admite null', () => {

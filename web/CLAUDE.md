@@ -573,6 +573,11 @@ opcionales y que falten quiere decir "fase pendiente". Así están los campos de
 de `GET /settings` (en el contrato, §4, vienen siempre; opcionales solo por un backend de
 `main`, que tiene nada más que `require_2fa`) y los `services` de una app de catalog
 (§2.12, Fase 2: sin ellos, Dominios sugiere solo los destinos que ya usan sus dominios).
+También el `actor_name` de cada evento de `GET /audit` (§4.2): la Auditoría muestra el
+nombre que trae el evento (el username, el del token; `system` es "sistema"), copiado al
+escribirlo, así sigue aunque se borre el usuario o el token. Sin nombre (`""`: un evento de
+antes de la migración 0004 cuyo autor ya no estaba, o un backend de `main`), el tipo y el id
+("token #9").
 Mandarlos en un `PATCH` a ese backend responde 400 `invalid_json` (rechaza campos
 desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es un ajuste
 (§4.1: solo lo fija install): Ajustes no lo muestra ni lo manda, y el mock lo rechaza.

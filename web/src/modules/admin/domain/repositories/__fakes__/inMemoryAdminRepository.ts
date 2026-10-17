@@ -113,7 +113,7 @@ export function fakeAuditEvents(
 		const id = count - index
 		return {
 			id: id as AuditEventId,
-			actor: { kind: 'user', id: 1 },
+			actor: { kind: 'user', id: 1, name: 'felipe' },
 			action: 'project.update',
 			target: `project:p${id}`,
 			at: new Date(at.getTime() - index * 60_000),

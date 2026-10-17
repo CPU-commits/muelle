@@ -71,11 +71,12 @@ export function settingsPatchPayload(patch: SettingsPatch): SettingsPatchPayload
 }
 
 function actorFromDto(dto: AuditEventDto): AuditActor {
+	const name = dto.actor_name ?? ''
 	switch (dto.actor_type) {
 		case 'user':
-			return { kind: 'user', id: dto.actor_id }
+			return { kind: 'user', id: dto.actor_id, name }
 		case 'token':
-			return { kind: 'token', id: dto.actor_id }
+			return { kind: 'token', id: dto.actor_id, name }
 		case 'system':
 			return { kind: 'system' }
 		default:

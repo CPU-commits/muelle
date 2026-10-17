@@ -3,12 +3,14 @@ import type { Brand, CursorPage } from '@/shared/domain'
 export type AuditEventId = Brand<number, 'AuditEventId'>
 
 /**
- * Quién hizo algo. El backend solo guarda el tipo y el id: el panel no puede saber el
- * nombre de un usuario por su id, y el de un token solo mientras el token exista.
+ * Quién hizo algo. `name` es el username o el nombre del token, copiado al escribir el
+ * evento (contrato §4.2): sigue aunque se borren el usuario o el token. Es `''` solo en un
+ * evento viejo cuyo autor ya no estaba al migrar (o con un backend sin `actor_name`): ahí
+ * se muestra el tipo y el id.
  */
 export type AuditActor =
-	| { readonly kind: 'user'; readonly id: number | null }
-	| { readonly kind: 'token'; readonly id: number | null }
+	| { readonly kind: 'user'; readonly id: number | null; readonly name: string }
+	| { readonly kind: 'token'; readonly id: number | null; readonly name: string }
 	| { readonly kind: 'system' }
 	| { readonly kind: 'other'; readonly type: string }
 

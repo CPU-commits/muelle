@@ -7,7 +7,7 @@ import type { AuditLogViewModel } from '..'
 import type { AuditEvent, AuditEventId, AuditPage } from '../../../../domain'
 import AuditLogHarness from './AuditLogHarness.svelte'
 
-const mocks = vi.hoisted(() => ({ listAudit: vi.fn(), listTokens: vi.fn() }))
+const mocks = vi.hoisted(() => ({ listAudit: vi.fn() }))
 
 vi.mock('@/modules/admin/container', () => ({
 	adminUseCases: {
@@ -26,21 +26,6 @@ vi.mock('@/modules/admin/container', () => ({
 	},
 }))
 
-// El nombre de los tokens sale de identity (por su barrel): también se mockea su container.
-vi.mock('@/modules/identity/container', () => ({
-	identityUseCases: {
-		listUsers: vi.fn(),
-		deleteUser: vi.fn(),
-		resetUserTotp: vi.fn(),
-		createInvite: vi.fn(),
-		listTokens: mocks.listTokens,
-		createToken: vi.fn(),
-		revokeToken: vi.fn(),
-		listScopeProjects: vi.fn(),
-		listScopeStages: vi.fn(),
-	},
-}))
-
 function event(id: number, actor: AuditEvent['actor']): AuditEvent {
 	return {
 		id: id as AuditEventId,
@@ -53,9 +38,11 @@ function event(id: number, actor: AuditEvent['actor']): AuditEvent {
 
 const FIRST: AuditPage = {
 	items: [
-		event(4, { kind: 'user', id: 1 }),
-		event(3, { kind: 'token', id: 7 }),
-		event(2, { kind: 'token', id: 99 }),
+		event(5, { kind: 'user', id: 1, name: 'felipe' }),
+		event(4, { kind: 'token', id: 7, name: 'github-actions' }),
+		// Eventos de antes de la migración 0004 cuyo autor ya no estaba: sin nombre.
+		event(3, { kind: 'token', id: 99, name: '' }),
+		event(2, { kind: 'user', id: 8, name: '' }),
 	],
 	nextCursor: '2',
 }
@@ -79,17 +66,16 @@ describe('AuditLogViewModel', () => {
 		mocks.listAudit.mockImplementation((input: { before: string | null }) =>
 			Promise.resolve(input.before === null ? FIRST : LAST),
 		)
-		mocks.listTokens.mockResolvedValue([{ id: 7, name: 'github-actions' }])
 	})
 
-	it('muestra quién con el nombre del token si existe, o su id', async () => {
+	it('muestra quién con el nombre que trae el evento; sin nombre, el tipo y el id', async () => {
 		const vm = await mountViewModel()
-		await vi.waitUntil(() => vm.rows[1]?.actor.kind === 'token')
 
 		expect(vm.rows.map((row) => row.actor)).toEqual([
-			{ kind: 'text', text: m.admin_audit_actor_user({ id: 1 }) },
+			{ kind: 'text', text: 'felipe' },
 			{ kind: 'token', name: 'github-actions' },
 			{ kind: 'text', text: m.admin_audit_actor_token_id({ id: 99 }) },
+			{ kind: 'text', text: m.admin_audit_actor_user({ id: 8 }) },
 		])
 		expect(vm.rows[0]).toMatchObject({
 			action: 'env.patch',
@@ -103,7 +89,7 @@ describe('AuditLogViewModel', () => {
 		expect(vm.hasMore).toBe(true)
 
 		vm.loadMore()
-		await vi.waitUntil(() => vm.rows.length === 4)
+		await vi.waitUntil(() => vm.rows.length === 5)
 
 		expect(mocks.listAudit).toHaveBeenLastCalledWith({ before: '2' }, expect.anything())
 		expect(vm.rows.at(-1)?.actor).toEqual({ kind: 'text', text: m.admin_audit_actor_system() })
