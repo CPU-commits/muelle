@@ -619,13 +619,27 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   de IPs permitidas, invalida `ingressKeys.all`: los `records` de cada dominio se calculan
   con los ajustes de ahora, y todos regeneran (o recrean) la configuración de Caddy, así
   que el estado del proxy puede cambiar (contrato §3.5). Guardar solo el 2FA no la toca.
-  Después de cambiar los puertos, si el panel sigue en el mismo origen (solo cambió el HTTP,
-  o se entró por otra dirección que la de Caddy), Ajustes sigue `GET /proxy` con
-  `proxyQuery` y `proxyNotice` del barrel de `ingress` hasta que deja de decir `recreating`;
-  si cambió el HTTPS y se entró por la dirección de Caddy, no: esa dirección deja de
-  responder, y el aviso lleva a la nueva.
+  Ajustes pide `GET /proxy` al abrirse (`proxyFollowQuery`, `proxyNotice` y el tipo
+  `PortsRollback` del barrel de `ingress`) y, después de cambiar los puertos, lo sigue hasta
+  que dice cómo terminó, aunque falle (2 min como mucho). Antes, `resetQueries` saca lo que
+  había en el cache: el `PATCH` limpió `ports_rollback`.
+    - Si el panel sigue en el mismo origen (solo cambió el HTTP, o se entró por otra
+      dirección que la de Caddy), dice "Recreando muelle-caddy…" y después si quedó
+      escuchando o el error.
+    - Si cambió el HTTPS y se entró por la dirección de Caddy, esa dirección deja de
+      responder: el aviso lleva a la nueva, no salen más escrituras (`holdWrites`) y se
+      sigue preguntando solo por si muelle vuelve atrás (la dirección vuelve a responder).
+    - Con `ports_rollback` (muelle-caddy no arrancó con los puertos nuevos y muelle volvió a
+      los anteriores, contrato §3.5) la tarjeta lo dice con el motivo, saca el aviso de la
+      dirección que falló (también uno guardado, al recargar), deja salir las escrituras,
+      pone los puertos de antes en los campos y, si el panel no está en la dirección
+      anterior (`https://<panel_domain>[:<puerto anterior>]`), ofrece volver. El panel no
+      puede saber si la dirección nueva responde (la CSP no deja pedir a otro origen): lo
+      sabe por `ports_rollback`, en una dirección que sí responde.
 - En MSW: `db/ingress.ts` lee el token, las IP, el dominio del panel y los puertos de
-  `db/admin.ts` (un `PATCH` de los puertos llama a `ingressDb.recreateProxy`), y el
+  `db/admin.ts` (un `PATCH` de los puertos llama a `ingressDb.recreateProxy`, e
+  `ingressDb.settle` termina la recreación: con el 9443, muelle vuelve a los puertos
+  anteriores y escribe `ports_rollback`; el 8081 lo rechaza el `PATCH` con `422`), y el
   `DELETE` de una app (`handlers/catalog.ts`) mira los dominios de `db/ingress.ts` con
   `ingressDb.list` (una app con dominios es `409 not_empty`). `list` siembra los tres
   dominios del diseño la primera vez que se piden los de una app, así que una app del mock

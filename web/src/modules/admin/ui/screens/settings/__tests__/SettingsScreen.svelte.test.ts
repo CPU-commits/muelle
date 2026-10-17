@@ -33,6 +33,11 @@ vi.mock('@/modules/admin/container', () => ({
 	},
 }))
 
+// "Proxy y DNS" pide `GET /proxy` (ingress) al abrirse, por si muelle volvió a los puertos
+// anteriores.
+const ingress = vi.hoisted(() => ({ getProxyStatus: vi.fn() }))
+vi.mock('@/modules/ingress/container', () => ({ ingressUseCases: ingress }))
+
 // Usuarios es de identity y la auditoría lee los nombres de sus tokens.
 vi.mock('@/modules/identity/container', () => ({
 	identityUseCases: {
@@ -78,6 +83,13 @@ describe('SettingsScreen', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		localStorage.clear()
+		ingress.getProxyStatus.mockResolvedValue({
+			status: 'synced',
+			error: null,
+			syncedAt: new Date('2026-10-16T12:00:00Z'),
+			caddy: { image: null, running: true, httpPort: 80, httpsPort: 443 },
+			portsRollback: null,
+		})
 		mocks.listAudit.mockResolvedValue({ items: [], nextCursor: null })
 		mocks.listUsers.mockResolvedValue([
 			{ username: 'felipe', totpEnabled: true, createdAt: new Date('2026-10-09T12:00:00Z') },
@@ -146,6 +158,42 @@ describe('SettingsScreen', () => {
 			.toBeVisible()
 		expect(document.body.textContent).not.toContain('MUELLE_PANEL_ORIGIN')
 		expect(document.body.textContent).not.toContain('docker service update')
+	})
+
+	it('si muelle volvió a los puertos anteriores, lo dice en Puertos y ofrece la dirección anterior', async () => {
+		mocks.getSettings.mockResolvedValue(PHASE_3)
+		mocks.listRegistries.mockResolvedValue([])
+		ingress.getProxyStatus.mockResolvedValue({
+			status: 'synced',
+			error: null,
+			syncedAt: new Date('2026-10-16T12:00:00Z'),
+			caddy: { image: null, running: true, httpPort: 80, httpsPort: 443 },
+			portsRollback: {
+				attempted: { httpPort: 80, httpsPort: 9443 },
+				restored: { httpPort: 80, httpsPort: 443 },
+				error: 'los puertos 80 o 9443 del host ya están en uso, y muelle-caddy no pudo arrancar con ellos',
+				at: new Date('2026-10-16T20:41:07.120Z'),
+			},
+		})
+
+		const screen = await render(SettingsView, { client: client() })
+
+		const ports = screen.getByRole('region', { name: 'Puertos del proxy' })
+		await expect
+			.element(
+				ports.getByText('muelle volvió a los puertos anteriores (HTTP 80, HTTPS 443).'),
+			)
+			.toBeVisible()
+		await expect
+			.element(
+				ports.getByText(
+					/La dirección del panel sigue siendo https:\/\/panel\.tudominio\.cl\./,
+				),
+			)
+			.toBeVisible()
+		await expect
+			.element(ports.getByRole('link', { name: 'Volver a la dirección anterior' }))
+			.toHaveAttribute('href', 'https://panel.tudominio.cl/ajustes')
 	})
 
 	it('cuándo se actualizó un registry es un <time> con la fecha, y la fecha exacta se lee', async () => {

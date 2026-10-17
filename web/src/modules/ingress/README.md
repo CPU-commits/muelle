@@ -185,10 +185,11 @@ Dominios, arriba del formulario.
   reintentar) lo vuelve a pedir: una ruta nueva puede dejarlo desincronizado.
 - Sin la Fase 3 (`no_route`), con Docker caído (`503 docker_unavailable`) o mientras carga,
   no se muestra nada: ni `<ComingSoon>` ni un error (los dominios tienen sus propios avisos).
-- Ajustes no es de este módulo, pero usa `proxyQuery` y `proxyNotice` del barrel: después
-  de cambiar los puertos sin mudarse de origen (solo el HTTP, o se entró por otra dirección)
-  sigue `GET /proxy` mientras dice `recreating`, y muestra si muelle-caddy quedó escuchando o
-  el `error` si no arrancó (contrato §3.5).
+- Ajustes no es de este módulo, pero usa `proxyFollowQuery` y `proxyNotice` del barrel: lo
+  pide al abrirse (muestra `ports_rollback`) y, después de cambiar los puertos, sigue
+  `GET /proxy` mientras dice `recreating` (aunque falle), y muestra si muelle-caddy quedó
+  escuchando, el `error` si no arrancó o, si muelle volvió a los puertos anteriores, por qué
+  y la dirección anterior del panel (contrato §3.5).
 
 ## Refresco y avisos
 

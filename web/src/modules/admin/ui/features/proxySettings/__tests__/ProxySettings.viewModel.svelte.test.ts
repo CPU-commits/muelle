@@ -14,7 +14,8 @@ import {
 	type ProxySettings,
 	type Settings,
 } from '../../../../domain'
-import { ingressKeys, type ProxyStatus } from '@/modules/ingress'
+import { ingressKeys, type PortsRollback, type ProxyStatus } from '@/modules/ingress'
+import { adminKeys } from '../../../../data'
 import ProxySettingsHarness from './ProxySettingsHarness.svelte'
 import { cacheHolds } from '../../../__tests__/cacheHolds'
 
@@ -538,8 +539,10 @@ describe('ProxySettingsViewModel', () => {
 	it('si el panel sigue en este origen, sigue a muelle-caddy (GET /proxy) mientras se recrea', async () => {
 		ingress.getProxyStatus.mockResolvedValue(proxyStatus({ status: 'recreating' }))
 		const vm = await mountViewModel()
+		// Al abrir Ajustes ya se pregunta una vez (por si muelle volvió a los puertos
+		// anteriores), pero sin un cambio de puertos acá no hay nada que seguir.
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
 		expect(vm.recreation).toBeNull()
-		expect(ingress.getProxyStatus).not.toHaveBeenCalled()
 
 		vm.setField('httpPort', '8080')
 		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
@@ -682,5 +685,126 @@ describe('ProxySettingsViewModel', () => {
 		local.askSavePorts()
 		await local.savePorts()
 		expect(local.movedTo).toBeNull()
+	})
+
+	describe('si muelle-caddy no arranca con los puertos nuevos y muelle vuelve a los anteriores', () => {
+		const ROLLBACK: PortsRollback = {
+			attempted: { httpPort: 80, httpsPort: 8443 },
+			restored: { httpPort: 80, httpsPort: 443 },
+			error: 'los puertos 80 o 8443 del host ya están en uso, y muelle-caddy no pudo arrancar con ellos',
+			at: new Date('2026-10-16T20:41:07.120Z'),
+		}
+
+		async function saveHttps(vm: ProxySettingsViewModel): Promise<void> {
+			vm.setField('httpsPort', '8443')
+			mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpsPort: 8443 }))
+			vm.askSavePorts()
+			await vm.savePorts()
+		}
+
+		it('al abrir Ajustes dice que volvió, por qué, y ofrece la dirección anterior', async () => {
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			const vm = await mountViewModel()
+
+			await vi.waitFor(() =>
+				expect(vm.rollback).toEqual({
+					attempted: { httpPort: 80, httpsPort: 8443 },
+					restored: { httpPort: 80, httpsPort: 443 },
+					error: ROLLBACK.error,
+					origin: 'https://panel.tudominio.cl',
+				}),
+			)
+			expect(vm.rollbackBody).toBe(
+				`${m.admin_ports_rollback_reason({ http: 80, https: 8443, error: ROLLBACK.error })} ${m.admin_ports_rollback_origin({ origin: 'https://panel.tudominio.cl' })}`,
+			)
+			// Este panel no está en esa dirección (vitest): ofrece ir.
+			expect(vm.rollbackHref).toBe('https://panel.tudominio.cl/ajustes')
+		})
+
+		it('después de cambiar el HTTPS: el aviso de la dirección nueva se va y los campos vuelven', async () => {
+			const vm = await mountViewModel()
+			await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+			const invalidate = vi.spyOn(client, 'invalidateQueries')
+			await saveHttps(vm)
+			expect(vm.movedTo).toBe('https://panel.tudominio.cl:8443')
+
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			await client.refetchQueries({ queryKey: ingressKeys.proxy })
+
+			await vi.waitFor(() => expect(vm.rollback?.origin).toBe('https://panel.tudominio.cl'))
+			expect(vm.movedTo).toBeNull()
+			expect(localStorage.getItem('muelle:admin:panel-moved')).toBeNull()
+			expect(vm.recreation).toBeNull()
+			expect([vm.httpPort, vm.httpsPort]).toEqual(['80', '443'])
+			// Los ajustes de verdad son los de antes: se vuelven a pedir.
+			expect(invalidate).toHaveBeenCalledWith({ queryKey: adminKeys.settings() })
+		})
+
+		it('entrando por la dirección de Caddy: cuando vuelve a responder, acepta escrituras otra vez', async () => {
+			page.origin = 'https://panel.tudominio.cl'
+			const vm = await mountViewModel()
+			await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+			await saveHttps(vm)
+			await expect(http.post('/projects')).rejects.toBeInstanceOf(PanelMovedError)
+
+			// Mientras muelle-caddy se recrea, esta dirección no responde: nada que mostrar,
+			// el aviso dice a dónde ir.
+			ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
+			await client.refetchQueries({ queryKey: ingressKeys.proxy })
+			expect(vm.recreation).toBeNull()
+			expect(vm.rollback).toBeNull()
+
+			// Volvió a los puertos anteriores: esta dirección responde de nuevo.
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			await client.refetchQueries({ queryKey: ingressKeys.proxy })
+			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
+			expect(vm.movedTo).toBeNull()
+			// Ya está acá: no hay a dónde volver.
+			expect(vm.rollbackHref).toBeNull()
+			const sent = vi
+				.spyOn(globalThis, 'fetch')
+				.mockResolvedValue(new Response(null, { status: 204 }))
+			await expect(http.post('/projects')).resolves.toBeNull()
+			expect(sent).toHaveBeenCalledOnce()
+		})
+
+		it('un ports_rollback de antes del cambio (en el cache) no cuenta: el PATCH lo limpia', async () => {
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			const vm = await mountViewModel()
+			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
+
+			ingress.getProxyStatus.mockReturnValue(new Promise<ProxyStatus>(() => {}))
+			vm.setField('httpPort', '8080')
+			mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+			vm.askSavePorts()
+			await vm.savePorts()
+
+			expect(vm.rollback).toBeNull()
+			expect(vm.recreation).toEqual({ kind: 'recreating' })
+		})
+
+		it('con el aviso guardado de un puerto que falló (al recargar), el aviso se va', async () => {
+			localStorage.setItem('muelle:admin:panel-moved', 'https://panel.tudominio.cl:8443')
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			const vm = await mountViewModel()
+
+			await vi.waitFor(() => expect(vm.movedTo).toBeNull())
+			expect(localStorage.getItem('muelle:admin:panel-moved')).toBeNull()
+		})
+
+		it('si solo cambió el HTTP, no hay otra dirección que ofrecer', async () => {
+			ingress.getProxyStatus.mockResolvedValue(
+				proxyStatus({
+					portsRollback: {
+						...ROLLBACK,
+						attempted: { httpPort: 9443, httpsPort: 443 },
+					},
+				}),
+			)
+			const vm = await mountViewModel()
+			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
+			expect(vm.rollback?.origin).toBeNull()
+			expect(vm.rollbackHref).toBeNull()
+		})
 	})
 })
