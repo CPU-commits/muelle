@@ -184,6 +184,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
   "status": "succeeded",
   "trigger": "api",
   "images": { "api": "ghcr.io/aumi-app/backend-app:sha-3f9c2e1@sha256:9b2de1f4…" },
+  "requested_images": { "api": "ghcr.io/aumi-app/backend-app:sha-3f9c2e1" },
   "actor_type": "token",
   "actor_id": 4,
   "actor_name": "github-actions",
@@ -201,6 +202,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
 | `status` | `queued` · `running` · `succeeded` · `failed` · `superseded` | Los finales son `succeeded`, `failed` y `superseded` |
 | `trigger` | `panel` · `api` · `rollback` | `panel` si lo pidió una sesión, `api` si un token, `rollback` por `POST …/rollback` |
 | `images` | objeto `servicio → ref` | **Mientras está `queued`:** los overrides del cuerpo (`{}` si no hubo); en un rollback, las imágenes del deploy al que vuelve (§2.7). **Desde que se resolvieron (§7 paso 2):** todos los servicios, con `ref@sha256:…`. Si falló antes de resolver, quedan los overrides |
+| `requested_images` | objeto `servicio → ref` | La ref **pedida** de cada servicio, la que se resolvió (`deploys.requested_images`, §2.2 "Qué imagen se despliega"). Tiene digest solo si alguien lo fijó: un override con digest, una ref de la configuración con digest o un rollback (§2.7), y un deploy sin cuerpo repite esa ref mientras no cambie la de la configuración. Así se sabe qué servicios deja fijos en un digest el deploy actual, también después de que el rollback que los fijó salió del historial (§2.3). `{}` hasta que se resolvieron las imágenes (§7 paso 2): mientras está `queued`, en un `superseded` y en uno que falló antes. Nunca null |
 | `actor_type` | `user` · `token` | |
 | `actor_id` | int o null | El id del usuario o del token |
 | `actor_name` | string | El username o el nombre del token **al crear el deploy**: sigue aunque se borren. Nunca es null |
@@ -248,7 +250,7 @@ No se llama a Docker al encolar: con Docker caído igual se responde `202`, y el
 #### Qué imagen se despliega
 
 Cada deploy guarda dos cosas por servicio, además de `images` (la ref resuelta):
-- `deploys.requested_images`: la ref **pedida**, la que se resolvió. Tiene digest solo si alguien lo fijó a propósito: un override con digest, una ref de la configuración con digest, o un rollback (que pide las refs resueltas del deploy al que vuelve);
+- `deploys.requested_images`: la ref **pedida**, la que se resolvió. Tiene digest solo si alguien lo fijó a propósito: un override con digest, una ref de la configuración con digest, o un rollback (que pide las refs resueltas del deploy al que vuelve). Sale en el deploy como `requested_images` (§2.1);
 - `deploys.config_images`: la ref de la configuración (`spec.image`, o el `image:` del compose ya interpolado) que leyó el deploy.
 
 Para cada servicio, en este orden:
@@ -1143,6 +1145,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Estado y logs | Fase 2 | Fase 2 (§17 del diseño decía 3) | Mismo cliente de Docker que el deploy |
 | `actor_name` | Null si el actor ya no existe | Siempre string: se copia al crear el deploy | No se pierde al borrar el usuario o el token |
 | Deploy | — | Campos nuevos `actor_id` y `superseded_by` | La Action informa el deploy que lo reemplazó (§14) |
+| Qué servicios fija un rollback | El panel lo adivina comparando la ref y el digest de los deploys | El deploy suma `requested_images` (servicio → ref pedida, §2.1): un servicio cuya ref pedida trae `@sha256:` está fijo en ese digest | Sin adivinar: comparar daba un falso positivo cuando la configuración o un override volvía al mismo digest, y perdía el digest fijo cuando el rollback salía del historial de 22 |
 | `images` en cola | Todos los servicios, sin digest | Solo los overrides del cuerpo; todos con digest desde el paso 2 | La configuración se lee al correr, no al encolar |
 | `POST …/deploys` | — | La respuesta suma `status: "queued"` y el header `Location` | Compatible |
 | `chunk` del log | Puede cortar una línea | Siempre líneas completas | Más simple; el manejo del panel sigue sirviendo |

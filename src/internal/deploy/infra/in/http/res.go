@@ -31,29 +31,35 @@ func newRegistriesRes(list []entity.Registry) []RegistryRes {
 func millis(t time.Time) time.Time { return t.UTC().Truncate(time.Millisecond) }
 
 // DeployRes es un deploy (contrato §2.1): todos los campos, con null cuando
-// corresponde e images nunca null.
+// corresponde, e images y requested_images nunca null.
 type DeployRes struct {
-	ID           int64             `json:"id"`
-	Status       string            `json:"status"`
-	Trigger      string            `json:"trigger"`
-	Images       map[string]string `json:"images"`
-	ActorType    string            `json:"actor_type"`
-	ActorID      *int64            `json:"actor_id"`
-	ActorName    string            `json:"actor_name"`
-	Error        *string           `json:"error"`
-	SupersededBy *int64            `json:"superseded_by"`
-	CreatedAt    time.Time         `json:"created_at"`
-	StartedAt    *time.Time        `json:"started_at"`
-	FinishedAt   *time.Time        `json:"finished_at"`
+	ID              int64             `json:"id"`
+	Status          string            `json:"status"`
+	Trigger         string            `json:"trigger"`
+	Images          map[string]string `json:"images"`
+	RequestedImages map[string]string `json:"requested_images"`
+	ActorType       string            `json:"actor_type"`
+	ActorID         *int64            `json:"actor_id"`
+	ActorName       string            `json:"actor_name"`
+	Error           *string           `json:"error"`
+	SupersededBy    *int64            `json:"superseded_by"`
+	CreatedAt       time.Time         `json:"created_at"`
+	StartedAt       *time.Time        `json:"started_at"`
+	FinishedAt      *time.Time        `json:"finished_at"`
+}
+
+// orEmpty es m, o {} si es nil: un mapa del deploy nunca sale null.
+func orEmpty(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }
 
 func newDeployRes(d entity.Deploy) DeployRes {
-	images := d.Images
-	if images == nil {
-		images = map[string]string{}
-	}
 	return DeployRes{
-		ID: d.ID, Status: string(d.Status), Trigger: string(d.Trigger), Images: images,
+		ID: d.ID, Status: string(d.Status), Trigger: string(d.Trigger),
+		Images: orEmpty(d.Images), RequestedImages: orEmpty(d.RequestedImages),
 		ActorType: d.ActorType, ActorID: d.ActorID, ActorName: d.ActorName,
 		Error: d.Error, SupersededBy: d.SupersededBy,
 		CreatedAt: millis(d.CreatedAt), StartedAt: millisPtr(d.StartedAt), FinishedAt: millisPtr(d.FinishedAt),
