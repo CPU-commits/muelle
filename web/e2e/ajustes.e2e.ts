@@ -143,6 +143,91 @@ test('cambiar los puertos espera a que se apliquen, diciendo que está aplicando
 	await expect(page.getByText('Puertos guardados')).toBeVisible()
 	await expect(ports.getByLabel('HTTP', { exact: true })).toHaveValue('8080')
 
+	// Solo cambió el HTTP: el panel sigue acá y sigue a muelle-caddy (GET /proxy) mientras
+	// se recrea. El mock tarda unos segundos; el panel pregunta cada 10.
+	await expect(ports.getByText('Recreando muelle-caddy con los puertos nuevos…')).toBeVisible()
+	await expect(ports.getByText('muelle-caddy ya escucha en los puertos nuevos.')).toBeVisible({
+		timeout: 20_000,
+	})
+	await expect(ports.getByText(/La dirección del panel ahora es/)).toHaveCount(0)
+
+	expect(errors).toEqual([])
+})
+
+test('cambiar el HTTPS avisa a dónde se muda el panel, y el aviso sobrevive a recargar hasta cerrarlo', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await login(page)
+	await page.goto('/ajustes')
+
+	const ports = page.getByRole('region', { name: 'Puertos del proxy' })
+	await ports.getByLabel('HTTPS', { exact: true }).fill('8443')
+	await ports.getByRole('button', { name: 'Guardar' }).click()
+
+	// Antes de confirmar: a dónde va el panel y que ese puerto tiene que estar abierto.
+	const dialog = page.getByRole('dialog', { name: '¿Cambiar los puertos?' })
+	await expect(dialog.getByText('El panel pasa a https://panel.tudominio.cl:8443')).toBeVisible()
+	await expect(dialog.getByText(/Abre el puerto 8443 en el firewall/)).toBeVisible()
+	await dialog.getByRole('button', { name: 'Cambiar puertos' }).click()
+	await expect(dialog).toHaveCount(0)
+
+	const notice = 'La dirección del panel ahora es https://panel.tudominio.cl:8443'
+	const command =
+		'docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl:8443 muelle_muelle'
+	await expect(ports.getByText(notice)).toBeVisible()
+	await expect(ports.getByText(command)).toBeVisible()
+	await expect(ports.getByRole('link', { name: 'Ir al panel' })).toHaveAttribute(
+		'href',
+		'https://panel.tudominio.cl:8443/ajustes?panel_moved=1',
+	)
+
+	await page.reload()
+	const reloaded = page.getByRole('region', { name: 'Puertos del proxy' })
+	await expect(reloaded.getByText(notice)).toBeVisible()
+
+	await reloaded.getByRole('button', { name: 'Entendido' }).click()
+	await expect(reloaded.getByText(notice)).toHaveCount(0)
+	await page.reload()
+	await expect(page.getByRole('region', { name: 'Puertos del proxy' })).toBeVisible()
+	await expect(page.getByText(notice)).toHaveCount(0)
+
+	expect(errors).toEqual([])
+})
+
+test('Cloudflare caído (502) es un aviso en el modal para reintentar; un token mal formado se queda en el campo', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await login(page)
+	await page.goto('/ajustes')
+
+	const cloudflare = page.getByRole('region', { name: 'Cloudflare' })
+	await cloudflare.getByRole('button', { name: 'Reemplazar token' }).click()
+	const dialog = page.getByRole('dialog', { name: 'Token de Cloudflare' })
+	const token = dialog.getByLabel('Token de API')
+
+	// La forma la mira el panel antes de mandarlo: no sale, y el campo no se borra.
+	await token.fill('corto')
+	await dialog.getByRole('button', { name: 'Guardar' }).click()
+	await expect(
+		dialog.getByText('Un token de Cloudflare tiene entre 20 y 512 caracteres.'),
+	).toBeVisible()
+	await expect(token).toHaveValue('corto')
+
+	// Con "caido", el mock responde como Cloudflare caído: 502 cloudflare_unavailable.
+	await token.fill('cf-token-de-prueba-caido-0123456789')
+	await dialog.getByRole('button', { name: 'Guardar' }).click()
+	await expect(dialog.getByText('Cloudflare no respondió')).toBeVisible()
+	await expect(dialog.getByText(/El token no se guardó\. Pégalo otra vez/)).toBeVisible()
+	// Ya salió: no se queda en el campo.
+	await expect(token).toHaveValue('')
+
+	await token.fill('cf-token-de-prueba-nuevo-0123456789')
+	await dialog.getByRole('button', { name: 'Guardar' }).click()
+	await expect(dialog).toHaveCount(0)
+	await expect(page.getByText('Token de Cloudflare guardado')).toBeVisible()
+
 	expect(errors).toEqual([])
 })
 
