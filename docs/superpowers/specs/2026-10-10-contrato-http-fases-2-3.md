@@ -30,7 +30,7 @@ Las peticiones con cookie que modifican algo exigen un `Origin` permitido, que s
 - el origen en que muelle-caddy sirve el panel según los ajustes **de ese momento**: `https://<panel_domain>`, con `:<proxy_https_port>` si no es 443 (`ProxySettings.PanelOrigin`, que da `admin.Module.PanelOrigin`). `""` sin `panel_domain` (en desarrollo), y entonces no pasa ninguno por acá. Va en memoria: `PATCH /settings` lo invalida cuando cambia algún ajuste del proxy, así después de cambiar `proxy_https_port` (§4.1) el origen nuevo pasa desde que responde el `PATCH`, y el viejo ya no. Un cambio hecho fuera de muelle (el `UPDATE` a mano de §4.1) se ve en 30 s como mucho (`usecases.PanelOriginTTL`);
 - `MUELLE_PANEL_ORIGIN`, si está: una variable opcional para un origen más, puesto a mano (detrás de otro proxy, o en desarrollo, con una IP o `localhost`). install no la escribe: escribe `MUELLE_PANEL_DOMAIN` (§5.2). Con ella, los ajustes solo se consultan cuando el `Origin` no es ese.
 
-Los links de setup (`<origen>/setup?token=…`) y de las invitaciones (`POST /invites`, `url`) se arman con `MUELLE_PANEL_ORIGIN` si está y, si no, con el origen de los ajustes, en cada uno: siguen al puerto HTTPS igual.
+Los links de setup (`<origen>/setup?token=…`) y de las invitaciones (`POST /invites`, `url`) se arman con `MUELLE_PANEL_ORIGIN` si está y, si no, con el origen de los ajustes, en cada uno: siguen al puerto HTTPS igual. Un link relativo no abre nada, así que nunca sale uno: si no hay origen (sin `MUELLE_PANEL_ORIGIN`, los ajustes no se pudieron leer), `POST /invites` responde `500 internal` sin crear la invitación.
 
 ### 0.2 Códigos de error comunes
 

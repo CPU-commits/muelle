@@ -30,8 +30,9 @@ type Deps struct {
 	// PanelOrigin da el origen del panel, con el que se arman los links de
 	// las invitaciones (<origen>/invite/<token>). Se llama en cada invitación:
 	// el contenedor pasa MUELLE_PANEL_ORIGIN si está o, si no, el origen de
-	// los ajustes, que sigue al puerto HTTPS del proxy. Obligatorio para
-	// RegisterRoutes.
+	// los ajustes, que sigue al puerto HTTPS del proxy. "" (los ajustes no se
+	// pudieron leer) hace que POST /invites responda 500 sin crear la
+	// invitación. Obligatorio para RegisterRoutes.
 	PanelOrigin func(ctx context.Context) string
 }
 

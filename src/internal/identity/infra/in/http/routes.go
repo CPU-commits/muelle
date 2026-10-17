@@ -37,7 +37,7 @@ type handler struct {
 
 // RegisterRoutes registra los errores y las rutas de identity en el Kit.
 // panelOrigin da el origen del panel, para los links de las invitaciones; se
-// llama en cada una. Hace panic si es nil.
+// llama en cada una, y con "" la invitación es un 500. Hace panic si es nil.
 func RegisterRoutes(k *utils.Kit, uc Usecases, panelOrigin func(ctx context.Context) string) {
 	if panelOrigin == nil {
 		panic("identity: RegisterRoutes sin el origen del panel (Deps.PanelOrigin)")
