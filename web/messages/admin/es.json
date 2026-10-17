@@ -74,7 +74,7 @@
 	"admin_ports_recreate_failed_title": "muelle-caddy no arrancó con los puertos nuevos.",
 	"admin_ports_recreate_failed_body": "{error}. muelle reintenta solo con estos puertos: si uno está ocupado, elige otro.",
 	"admin_ports_recreate_failed_generic": "muelle reintenta solo con estos puertos: si uno está ocupado, elige otro.",
-	"admin_ports_rollback_title": "muelle volvió a los puertos anteriores (HTTP {http}, HTTPS {https}).",
+	"admin_ports_rollback_title": "muelle volvió a los puertos anteriores (HTTP {http}, HTTPS {https}) {when}.",
 	"admin_ports_rollback_reason": "muelle-caddy no arrancó con HTTP {http} y HTTPS {https}: {error}.",
 	"admin_ports_rollback_origin": "La dirección del panel sigue siendo {origin}.",
 	"admin_ports_rollback_action": "Volver a la dirección anterior",

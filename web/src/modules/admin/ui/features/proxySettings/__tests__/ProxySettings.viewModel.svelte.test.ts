@@ -776,6 +776,7 @@ describe('ProxySettingsViewModel', () => {
 					attempted: { httpPort: 80, httpsPort: 8443 },
 					restored: { httpPort: 80, httpsPort: 443 },
 					error: ROLLBACK.error,
+					at: ROLLBACK.at,
 					origin: 'https://panel.tudominio.cl',
 				}),
 			)
@@ -784,6 +785,19 @@ describe('ProxySettingsViewModel', () => {
 			)
 			// Este panel no está en esa dirección (vitest): ofrece ir.
 			expect(vm.rollbackHref).toBe('https://panel.tudominio.cl/ajustes')
+		})
+
+		it('dice cuándo volvió: GET /proxy lo trae hasta el próximo cambio de puertos, quizás días', async () => {
+			const at = new Date(Date.now() - 5 * 60_000)
+			ingress.getProxyStatus.mockResolvedValue(
+				proxyStatus({ portsRollback: { ...ROLLBACK, at } }),
+			)
+			const vm = await mountViewModel()
+
+			await vi.waitFor(() => expect(vm.rollback?.at).toEqual(at))
+			expect(vm.rollbackTitle).toBe(
+				'muelle volvió a los puertos anteriores (HTTP 80, HTTPS 443) hace 5 minutos.',
+			)
 		})
 
 		it('después de cambiar el HTTPS: el aviso de la dirección nueva se va y los campos vuelven', async () => {

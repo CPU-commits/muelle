@@ -195,10 +195,7 @@
 			     (contrato §3.5). Si el panel no está en esa dirección, la ofrece. -->
 			<Banner
 				tone="warn"
-				title={m.admin_ports_rollback_title({
-					http: vm.rollback.restored.httpPort,
-					https: vm.rollback.restored.httpsPort,
-				})}
+				title={vm.rollbackTitle}
 				body={vm.rollbackBody}
 				{...vm.rollbackHref ? { action: goBack } : {}}
 			/>

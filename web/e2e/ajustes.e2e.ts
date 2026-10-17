@@ -243,10 +243,11 @@ test('si muelle-caddy no arranca con el HTTPS nuevo, muelle vuelve al anterior y
 	const notice = 'La dirección del panel ahora es https://panel.tudominio.cl:9443'
 	await expect(ports.getByText(notice)).toBeVisible()
 
-	// El panel sigue GET /proxy (cada 10 s): muelle volvió a 80/443 (ports_rollback).
-	await expect(
-		ports.getByText('muelle volvió a los puertos anteriores (HTTP 80, HTTPS 443).'),
-	).toBeVisible({ timeout: 25_000 })
+	// El panel sigue GET /proxy (cada 10 s): muelle volvió a 80/443 (ports_rollback), y
+	// dice cuándo (el aviso puede verse días después).
+	const rolledBack =
+		/^muelle volvió a los puertos anteriores \(HTTP 80, HTTPS 443\) (este minuto|hace 1 minuto)\.$/
+	await expect(ports.getByText(rolledBack)).toBeVisible({ timeout: 25_000 })
 	await expect(
 		ports.getByText(/HTTPS 9443: los puertos 80 o 9443 del host ya están en uso/),
 	).toBeVisible()
@@ -274,9 +275,7 @@ test('si muelle-caddy no arranca con el HTTPS nuevo, muelle vuelve al anterior y
 	// sin el aviso de la dirección que falló.
 	await page.reload()
 	const reloaded = page.getByRole('region', { name: 'Puertos del proxy' })
-	await expect(
-		reloaded.getByText('muelle volvió a los puertos anteriores (HTTP 80, HTTPS 443).'),
-	).toBeVisible()
+	await expect(reloaded.getByText(rolledBack)).toBeVisible()
 	await expect(reloaded.getByText(notice)).toHaveCount(0)
 	await expect(reloaded.getByLabel('HTTPS', { exact: true })).toHaveValue('443')
 

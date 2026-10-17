@@ -3,7 +3,7 @@ import { untrack } from 'svelte'
 import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query'
 import { heldWritesOrigin, holdWrites, releaseWrites } from '@/shared/data/http/client'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { withQuery } from '@/shared/ui'
+import { formatRelative, withQuery } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
 import {
 	ingressKeys,
@@ -85,6 +85,8 @@ export interface PortsRollbackView {
 	readonly restored: CaddyPorts
 	/** Por qué no arrancó, como lo dice muelle (en español). */
 	readonly error: string
+	/** Cuándo volvió: el aviso puede verse días después (hasta el próximo cambio de puertos). */
+	readonly at: Date
 	/**
 	 * La dirección del panel con los puertos de antes, si la vuelta cambió el HTTPS y Caddy
 	 * sirve el panel; si no, null.
@@ -302,6 +304,7 @@ export class ProxySettingsViewModel {
 			attempted: rollback.attempted,
 			restored: rollback.restored,
 			error: rollback.error,
+			at: rollback.at,
 			origin: httpsChanged
 				? panelOrigin({
 						panelDomain: this.proxy.panelDomain,
@@ -309,6 +312,17 @@ export class ProxySettingsViewModel {
 					})
 				: null,
 		}
+	}
+
+	/** A qué puertos volvió y cuándo ("hace 3 días"). */
+	get rollbackTitle(): string {
+		const rollback = this.rollback
+		if (!rollback) return ''
+		return m.admin_ports_rollback_title({
+			http: rollback.restored.httpPort,
+			https: rollback.restored.httpsPort,
+			when: formatRelative(rollback.at),
+		})
 	}
 
 	/** Con qué puertos no arrancó, por qué y, si cambió el HTTPS, dónde sigue el panel. */

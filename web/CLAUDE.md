@@ -638,7 +638,8 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
       responder: el aviso lleva a la nueva, no salen más escrituras (`holdWrites`) y se
       sigue preguntando solo por si muelle vuelve atrás (la dirección vuelve a responder).
     - Con `ports_rollback` (muelle-caddy no arrancó con los puertos nuevos y muelle volvió a
-      los anteriores, contrato §3.5) la tarjeta lo dice con el motivo, saca el aviso de la
+      los anteriores, contrato §3.5) la tarjeta lo dice con el motivo y cuándo (`GET /proxy`
+      lo trae hasta el próximo cambio de puertos o un reinicio de muelle), saca el aviso de la
       dirección que falló (también uno guardado, al recargar), deja salir las escrituras
       frenadas por la mudanza a esa dirección (también si se salió de Ajustes y se volvió),
       pone los puertos de antes en los campos (si el cambio fue desde acá, o si los ajustes

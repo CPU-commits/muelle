@@ -177,16 +177,19 @@ describe('SettingsScreen', () => {
 				attempted: { httpPort: 80, httpsPort: 9443 },
 				restored: { httpPort: 80, httpsPort: 443 },
 				error: 'los puertos 80 o 9443 del host ya están en uso, y muelle-caddy no pudo arrancar con ellos',
-				at: new Date('2026-10-16T20:41:07.120Z'),
+				at: new Date(Date.now() - 2 * 60 * 60_000),
 			},
 		})
 
 		const screen = await render(SettingsView, { client: client() })
 
+		// Dice cuándo: GET /proxy lo trae hasta el próximo cambio de puertos.
 		const ports = screen.getByRole('region', { name: 'Puertos del proxy' })
 		await expect
 			.element(
-				ports.getByText('muelle volvió a los puertos anteriores (HTTP 80, HTTPS 443).'),
+				ports.getByText(
+					'muelle volvió a los puertos anteriores (HTTP 80, HTTPS 443) hace 2 horas.',
+				),
 			)
 			.toBeVisible()
 		await expect
