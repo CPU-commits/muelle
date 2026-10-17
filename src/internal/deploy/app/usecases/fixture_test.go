@@ -136,6 +136,7 @@ func validationMessage(t *testing.T, err error) string {
 type auditEvent struct {
 	ActorType string
 	ActorID   *int64
+	ActorName string
 	Action    string
 	Target    string
 	Details   string
@@ -144,7 +145,7 @@ type auditEvent struct {
 func auditEvents(t *testing.T, db *sqlite.DB) []auditEvent {
 	t.Helper()
 	ctx := context.Background()
-	rows, err := db.Conn(ctx).QueryContext(ctx, `SELECT actor_type, actor_id, action, target, details FROM audit_events ORDER BY id`)
+	rows, err := db.Conn(ctx).QueryContext(ctx, `SELECT actor_type, actor_id, actor_name, action, target, details FROM audit_events ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +153,7 @@ func auditEvents(t *testing.T, db *sqlite.DB) []auditEvent {
 	var out []auditEvent
 	for rows.Next() {
 		var e auditEvent
-		if err := rows.Scan(&e.ActorType, &e.ActorID, &e.Action, &e.Target, &e.Details); err != nil {
+		if err := rows.Scan(&e.ActorType, &e.ActorID, &e.ActorName, &e.Action, &e.Target, &e.Details); err != nil {
 			t.Fatal(err)
 		}
 		out = append(out, e)

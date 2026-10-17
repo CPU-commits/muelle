@@ -60,7 +60,7 @@ func TestSeedInitRegistryFirstBoot(t *testing.T) {
 		t.Fatalf("eventos: %+v", events)
 	}
 	e := events[0]
-	if e.ActorType != "system" || e.ActorID != nil || e.Action != "registry.create" || e.Target != "registry:ghcr.io" ||
+	if e.ActorType != "system" || e.ActorID != nil || e.ActorName != "system" || e.Action != "registry.create" || e.Target != "registry:ghcr.io" ||
 		e.Details != `{"source":"install","username":"bot"}` {
 		t.Fatalf("evento: %+v", e)
 	}

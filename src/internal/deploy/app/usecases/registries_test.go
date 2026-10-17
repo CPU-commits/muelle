@@ -127,16 +127,17 @@ func TestRegistryAuditNoPassword(t *testing.T) {
 	}
 	events := auditEvents(t, f.db)
 	want := []auditEvent{
-		{ActorType: "user", ActorID: ptr(int64(1)), Action: "registry.create", Target: "registry:ghcr.io", Details: `{"username":"bot"}`},
-		{ActorType: "user", ActorID: ptr(int64(1)), Action: "registry.update", Target: "registry:ghcr.io", Details: `{"username":"bot2"}`},
-		{ActorType: "user", ActorID: ptr(int64(1)), Action: "registry.delete", Target: "registry:ghcr.io", Details: `{}`},
+		{ActorType: "user", ActorID: ptr(int64(1)), ActorName: "felipe", Action: "registry.create", Target: "registry:ghcr.io", Details: `{"username":"bot"}`},
+		{ActorType: "user", ActorID: ptr(int64(1)), ActorName: "felipe", Action: "registry.update", Target: "registry:ghcr.io", Details: `{"username":"bot2"}`},
+		{ActorType: "user", ActorID: ptr(int64(1)), ActorName: "felipe", Action: "registry.delete", Target: "registry:ghcr.io", Details: `{}`},
 	}
 	if len(events) != len(want) {
 		t.Fatalf("eventos: %+v", events)
 	}
 	for i, e := range events {
 		w := want[i]
-		if e.ActorType != w.ActorType || e.ActorID == nil || *e.ActorID != *w.ActorID || e.Action != w.Action || e.Target != w.Target || e.Details != w.Details {
+		if e.ActorType != w.ActorType || e.ActorID == nil || *e.ActorID != *w.ActorID || e.ActorName != w.ActorName ||
+			e.Action != w.Action || e.Target != w.Target || e.Details != w.Details {
 			t.Errorf("evento %d: %+v, esperaba %+v", i, e, w)
 		}
 		if strings.Contains(e.Details, "s3cr3t") {

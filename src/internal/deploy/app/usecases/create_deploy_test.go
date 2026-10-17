@@ -205,11 +205,12 @@ func TestCreateDeployAudit(t *testing.T) {
 		t.Fatalf("eventos: %+v", events)
 	}
 	e := events[0]
-	if e.ActorType != "token" || e.ActorID == nil || *e.ActorID != 4 || e.Action != "deploy.create" || e.Target != "app:auditfy/staging/infra" ||
+	if e.ActorType != "token" || e.ActorID == nil || *e.ActorID != 4 || e.ActorName != "github-actions" ||
+		e.Action != "deploy.create" || e.Target != "app:auditfy/staging/infra" ||
 		e.Details != fmt.Sprintf(`{"deploy":%d,"images":{"web":"ghcr.io/x/web:2"},"trigger":"api"}`, q.ID) {
 		t.Fatalf("evento: %+v", e)
 	}
-	if e := events[1]; e.Details != fmt.Sprintf(`{"deploy":%d,"images":{},"trigger":"panel"}`, q2.ID) {
+	if e := events[1]; e.ActorName != "felipe" || e.Details != fmt.Sprintf(`{"deploy":%d,"images":{},"trigger":"panel"}`, q2.ID) {
 		t.Fatalf("evento sin overrides: %+v", e)
 	}
 }
@@ -303,7 +304,7 @@ func TestRollback(t *testing.T) {
 	}
 	events := auditEvents(t, f.db)
 	last := events[len(events)-1]
-	if last.Action != "deploy.create" || last.Target != "app:auditfy/staging/api" ||
+	if last.Action != "deploy.create" || last.ActorName != "felipe" || last.Target != "app:auditfy/staging/api" ||
 		last.Details != fmt.Sprintf(`{"deploy":%d,"images":{"api":"ghcr.io/x/api:staging%s"},"trigger":"rollback"}`, q.ID, digest("a")) {
 		t.Fatalf("auditoría: %+v", last)
 	}
