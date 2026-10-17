@@ -65,6 +65,27 @@ func TestContractStageNetworkAndAppStack(t *testing.T) {
 	}
 }
 
+// Una red de Docker con el nombre de la del stage que no es overlay
+// attachable no es de muelle: crear el stage responde 409 network_conflict
+// (contrato §0.2 y §3.4), no lo guarda, y la red queda como estaba.
+func TestContractStageNetworkConflict(t *testing.T) {
+	e := api{t: t, c: newTestContainer(t)}
+	f := fakeDocker(t, e.c)
+	ctx := context.Background()
+	s := e.setup()
+	const P = "/api/v1/projects/p"
+	e.create(s, "/api/v1/projects", map[string]string{"slug": "p", "name": "P"})
+	name := naming.Network("p", "tmp")
+	if _, err := f.CreateNetwork(ctx, docker.NetworkSpec{Name: name, Driver: "bridge"}); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, "crear el stage", e.do("POST", P+"/stages", map[string]string{"slug": "tmp"}, s), http.StatusConflict, "network_conflict")
+	expect(t, "el stage no se guardó", e.do("GET", P+"/stages/tmp", nil, s), http.StatusNotFound, "not_found")
+	if n, err := f.InspectNetwork(ctx, name); err != nil || n.Driver != "bridge" || n.Attachable {
+		t.Fatalf("la red ajena cambió: %+v %v", n, err)
+	}
+}
+
 // §13: con Docker caído, lo que lo necesita responde 503 docker_unavailable y
 // no deja nada a medias.
 func TestContractDockerDown(t *testing.T) {
