@@ -595,7 +595,13 @@ desconocidos): mientras no existan, no se mandan.
   de IPs permitidas, invalida `ingressKeys.all`: los `records` de cada dominio se calculan
   con los ajustes de ahora, y todos regeneran (o recrean) la configuración de Caddy, así
   que el estado del proxy puede cambiar (contrato §3.5). Guardar solo el 2FA no la toca.
-- En MSW: `db/ingress.ts` lee el token, las IP y el dominio del panel de `db/admin.ts`, y el
+  Después de cambiar los puertos, si el panel sigue en el mismo origen (solo cambió el HTTP,
+  o se entró por otra dirección que la de Caddy), Ajustes sigue `GET /proxy` con
+  `proxyQuery` y `proxyNotice` del barrel de `ingress` hasta que deja de decir `recreating`;
+  si cambió el HTTPS y se entró por la dirección de Caddy, no: esa dirección deja de
+  responder, y el aviso lleva a la nueva.
+- En MSW: `db/ingress.ts` lee el token, las IP, el dominio del panel y los puertos de
+  `db/admin.ts` (un `PATCH` de los puertos llama a `ingressDb.recreateProxy`), y el
   `DELETE` de una app (`handlers/catalog.ts`) mira los dominios de `db/ingress.ts` con
   `ingressDb.list` (una app con dominios es `409 not_empty`). `list` siembra los tres
   dominios del diseño la primera vez que se piden los de una app, así que una app del mock

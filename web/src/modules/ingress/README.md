@@ -179,8 +179,10 @@ Dominios, arriba del formulario.
   reintentar) lo vuelve a pedir: una ruta nueva puede dejarlo desincronizado.
 - Sin la Fase 3 (`no_route`), con Docker caído (`503 docker_unavailable`) o mientras carga,
   no se muestra nada: ni `<ComingSoon>` ni un error (los dominios tienen sus propios avisos).
-- Ajustes no es de este módulo: si quiere el mismo aviso, puede usar `proxyQuery` del
-  barrel.
+- Ajustes no es de este módulo, pero usa `proxyQuery` y `proxyNotice` del barrel: después
+  de cambiar los puertos sin mudarse de origen (solo el HTTP, o se entró por otra dirección)
+  sigue `GET /proxy` mientras dice `recreating`, y muestra si muelle-caddy quedó escuchando o
+  el `error` si no arrancó (contrato §3.5).
 
 ## Refresco y avisos
 
@@ -228,6 +230,10 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
   (`db/admin.ts`): sin token todo queda fuera de Cloudflare; `records` sigue a las IP de
   ahora (sin IPv6 no hay `AAAA`, sin IP pública `[]`); adoptar sin token o sin IP queda en
   `error` + `cloudflare`; sin dominio del panel, `GET /proxy` dice `disabled`.
+- Cambiar los puertos en Ajustes recrea muelle-caddy: `GET /proxy` dice `recreating` unos 4 s
+  (sin contenedor: `image: null`, `running: false`) y después `synced`. El puerto `8081`
+  está ocupado en el host del mock: con él, `out_of_sync` con el puerto en el `error`, hasta
+  que se cambia (no vuelve solo a los viejos, §3.4).
 - Un `PATCH` de Proxied que sale bien saca un `error` + `cloudflare` (vuelve a `pending`).
   Sin token (se quitó en Ajustes), se guarda y el dominio queda en `error` + `cloudflare`
   con "agrega el token de Cloudflare en Ajustes", como en el backend.

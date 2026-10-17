@@ -199,6 +199,23 @@
 				/>
 			</div>
 		{/if}
+		{#if vm.recreation?.kind === 'recreating'}
+			<Banner
+				tone="info"
+				title={m.admin_ports_recreating_title()}
+				body={m.admin_ports_recreating_body()}
+			/>
+		{:else if vm.recreation?.kind === 'done'}
+			<Banner tone="info" dot="ok" title={m.admin_ports_recreated()} />
+		{:else if vm.recreation?.kind === 'failed'}
+			<Banner
+				tone="warn"
+				title={m.admin_ports_recreate_failed_title()}
+				body={vm.recreation.error
+					? m.admin_ports_recreate_failed_body({ error: vm.recreation.error })
+					: m.admin_ports_recreate_failed_generic()}
+			/>
+		{/if}
 		<form
 			id={portsForm}
 			class={portFields}

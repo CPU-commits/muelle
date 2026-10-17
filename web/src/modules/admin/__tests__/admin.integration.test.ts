@@ -4,8 +4,10 @@ import { api, apiError, invalid, noRoute } from '@/mocks/api'
 import { adminDb, MOCK_AUDIT_SEED_COUNT } from '@/mocks/db/admin'
 import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { identityDb } from '@/mocks/db/identity'
+import { ingressDb } from '@/mocks/db/ingress'
 import { server } from '@/mocks/server'
 import { pendingPhase, UnavailableError, ValidationError } from '@/shared/domain'
+import { ingressUseCases } from '@/modules/ingress'
 import { adminUseCases } from '../container'
 import {
 	AUDIT_PAGE_SIZE,
@@ -25,6 +27,7 @@ beforeEach(() => {
 	authDb.reset()
 	identityDb.reset()
 	adminDb.reset()
+	ingressDb.reset()
 	authDb.state.session = { username: MOCK_USERNAME, mfaPending: false, badCodes: 0 }
 	authDb.commit()
 })
@@ -170,6 +173,31 @@ describe('settings', () => {
 			acmeEmail: 'certs@tudominio.cl',
 			httpPort: 8080,
 			httpsPort: 8443,
+		})
+	})
+
+	it('cambiar los puertos recrea muelle-caddy: GET /proxy dice recreating, y después synced', async () => {
+		await adminUseCases.updateProxyPorts({ http: '8080', https: '443' })
+		await expect(ingressUseCases.getProxyStatus()).resolves.toMatchObject({
+			status: 'recreating',
+		})
+
+		ingressDb.reset({ recreateMs: 0 })
+		await adminUseCases.updateProxyPorts({ http: '8088', https: '443' })
+		await expect(ingressUseCases.getProxyStatus()).resolves.toMatchObject({
+			status: 'synced',
+			caddy: { running: true, httpPort: 8088, httpsPort: 443 },
+		})
+	})
+
+	it('con un puerto ocupado (8081 en el mock), muelle-caddy no arranca y GET /proxy dice por qué', async () => {
+		ingressDb.reset({ recreateMs: 0 })
+		await adminUseCases.updateProxyPorts({ http: '8081', https: '443' })
+
+		await expect(ingressUseCases.getProxyStatus()).resolves.toMatchObject({
+			status: 'out_of_sync',
+			error: expect.stringContaining('8081'),
+			caddy: { running: false },
 		})
 	})
 

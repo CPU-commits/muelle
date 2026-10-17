@@ -17,6 +17,10 @@ import { loadPersisted, savePersisted } from './persist'
 //     responde 200 con el dominio en `error` + `cloudflare` (Reintentar lo arregla);
 // - un hostname con `caddy-rechaza` en la primera etiqueta hace que Caddy no acepte la
 //   configuración: `GET /proxy` dice `out_of_sync` (el aviso "proxy desincronizado");
+// - cambiar los puertos en Ajustes recrea muelle-caddy: `GET /proxy` dice `recreating` unos
+//   segundos (`recreateMs`) y después `synced`. El puerto 8081 está "ocupado" en el host:
+//   con él, muelle-caddy no arranca y `GET /proxy` dice `out_of_sync` con el puerto en el
+//   `error`, hasta que se cambia (no vuelve solo a los viejos, contrato §3.4);
 // - cualquier otro hostname está fuera de Cloudflare (`tls_mode: http`): queda `pending`
 //   ("Esperando DNS") hasta que se toca Verificar (retry), que lo pasa a `active`;
 // - lo de Cloudflare y las IP públicas salen de los ajustes del mock (`db/admin.ts`), como
@@ -30,6 +34,11 @@ const STORAGE_KEY = 'ingress'
 const DAY = 24 * 60 * 60 * 1000
 /** Lo que tarda en emitirse un certificado en el mock. */
 const PROVISION_MS = 3000
+/** Lo que tarda en recrearse muelle-caddy después de cambiar los puertos. */
+const RECREATE_MS = 4000
+/** Un puerto que algo ya usa en el host simulado: muelle-caddy no arranca con él. */
+export const MOCK_BUSY_PORT = 8081
+const CADDY_IMAGE = 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0'
 
 export interface MockDomain {
 	app: string
@@ -58,10 +67,20 @@ interface IngressState {
 	/** Apps ya sembradas (`proyecto/stage/app`). */
 	seeded: string[]
 	provisionMs: number
+	recreateMs?: number
+	/** Hasta cuándo `GET /proxy` dice `recreating` (un cambio de puertos). */
+	recreatingUntil?: number | null
 }
 
 function seed(overrides: Partial<IngressState> = {}): IngressState {
-	return { domains: [], seeded: [], provisionMs: PROVISION_MS, ...overrides }
+	return {
+		domains: [],
+		seeded: [],
+		provisionMs: PROVISION_MS,
+		recreateMs: RECREATE_MS,
+		recreatingUntil: null,
+		...overrides,
+	}
 }
 
 let state: IngressState = loadPersisted<IngressState>(STORAGE_KEY) ?? seed()
@@ -346,6 +365,12 @@ export const ingressDb = {
 	 * `GET /proxy`: sincronizado, salvo que algún dominio tenga `caddy-rechaza`. Sin dominio
 	 * del panel, `disabled`: no hay contenedor (`image: null`) y no se consulta Docker.
 	 */
+	/** Un `PATCH /settings` cambió los puertos: muelle-caddy se recrea (contrato §3.5). */
+	recreateProxy(now = Date.now()): void {
+		state.recreatingUntil = now + (state.recreateMs ?? RECREATE_MS)
+		commit()
+	},
+
 	proxy(now = Date.now()) {
 		const settings = adminDb.state
 		if (settings.panelDomain === '') {
@@ -361,8 +386,29 @@ export const ingressDb = {
 				},
 			}
 		}
+		// Sin contenedor (se está recreando, o no arrancó): nada corre (contrato §3.3).
+		const noContainer = { image: null, running: false, http_port: null, https_port: null }
+		if (state.recreatingUntil != null && now < state.recreatingUntil) {
+			return {
+				status: 'recreating' as const,
+				error: null,
+				synced_at: new Date(now - 60_000).toISOString(),
+				caddy: noContainer,
+			}
+		}
+		const busy = [settings.proxyHttpPort, settings.proxyHttpsPort].find(
+			(port) => port === MOCK_BUSY_PORT,
+		)
+		if (busy !== undefined) {
+			return {
+				status: 'out_of_sync' as const,
+				error: `no se pudo crear muelle-caddy: el puerto ${String(busy)} ya está en uso en el host`,
+				synced_at: new Date(now - 60_000).toISOString(),
+				caddy: noContainer,
+			}
+		}
 		const caddy = {
-			image: 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0',
+			image: CADDY_IMAGE,
 			running: true,
 			http_port: settings.proxyHttpPort,
 			https_port: settings.proxyHttpsPort,

@@ -1,9 +1,9 @@
 import { resolve } from '$app/paths'
-import { createMutation, useQueryClient } from '@tanstack/svelte-query'
+import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { withQuery } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
-import { ingressKeys } from '@/modules/ingress'
+import { ingressKeys, proxyNotice, proxyQuery } from '@/modules/ingress'
 import {
 	removeCloudflareTokenMutation,
 	replaceCloudflareTokenMutation,
@@ -14,6 +14,7 @@ import {
 import {
 	CloudflareUnavailable,
 	movedPanelOrigin,
+	panelOrigin,
 	parseCloudflareToken,
 	parseProxyPorts,
 	type ProxyPorts,
@@ -54,6 +55,16 @@ export interface PortsMove {
 	/** El puerto HTTPS nuevo: el que tiene que estar abierto en el firewall. */
 	readonly port: number
 }
+
+/**
+ * Cómo va muelle-caddy después de cambiar los puertos sin mudarse de origen (contrato §3.5):
+ * se recrea con los puertos nuevos, quedó escuchando, o no pudo (un puerto ocupado: el
+ * `error` de `GET /proxy`, y muelle reintenta con los mismos puertos).
+ */
+export type PortsRecreation =
+	| { readonly kind: 'recreating' }
+	| { readonly kind: 'done' }
+	| { readonly kind: 'failed'; readonly error: string | null }
 
 /** Un aviso adentro del modal del token: título y, si hace falta, qué hacer. */
 export interface CloudflareNotice {
@@ -98,6 +109,10 @@ export class ProxySettingsViewModel {
 	readonly #ports = createMutation(() => updateProxyPortsMutation(this.#client))
 	readonly #cloudflare = createMutation(() => replaceCloudflareTokenMutation(this.#client))
 	readonly #removeCloudflare = createMutation(() => removeCloudflareTokenMutation(this.#client))
+	/** Se prende al cambiar los puertos si el panel sigue en este origen. */
+	#watchingProxy = $state(false)
+	// `GET /proxy` (ingress): mientras dice `recreating` lo vuelve a pedir solo.
+	readonly #proxyStatus = createQuery(() => ({ ...proxyQuery(), enabled: this.#watchingProxy }))
 
 	constructor(proxy: () => ProxySettings) {
 		this.#proxy = proxy
@@ -159,6 +174,24 @@ export class ProxySettingsViewModel {
 		const next = { ...this.proxy, httpPort: ports.http, httpsPort: ports.https }
 		const origin = movedPanelOrigin(this.proxy, next)
 		return origin === null ? null : { origin, port: ports.https }
+	}
+
+	/**
+	 * muelle-caddy después de cambiar los puertos, si el panel sigue en este origen (contrato
+	 * §3.5: solo el HTTP, o se entró por otra dirección). null si no se cambiaron, si se mudó
+	 * (este origen deja de responder), sin el proxy de muelle (`disabled`) o si `GET /proxy`
+	 * no contesta: los puertos ya se guardaron, esto es solo el seguimiento.
+	 */
+	get recreation(): PortsRecreation | null {
+		if (!this.#watchingProxy) return null
+		const query = this.#proxyStatus
+		if (query.isError) return null
+		if (query.isPending) return { kind: 'recreating' }
+		const notice = proxyNotice(query.data)
+		if (notice === null) return { kind: 'done' }
+		if (notice === 'recreating') return { kind: 'recreating' }
+		if (notice === 'disabled') return null
+		return { kind: 'failed', error: query.data.error }
 	}
 
 	/** Si el aviso apunta a otro origen: "Ir al panel" lleva allá. */
@@ -245,6 +278,7 @@ export class ProxySettingsViewModel {
 		if (this.#ports.isPending) return
 		this.portsError = null
 		const before = this.proxy
+		this.#watchingProxy = false
 		try {
 			const settings = await this.#ports.mutateAsync({
 				http: this.httpPort,
@@ -257,6 +291,9 @@ export class ProxySettingsViewModel {
 					this.movedTo = moved
 					savePanelMove(moved)
 				}
+				// Si se entró por el origen que sirve Caddy y cambió el HTTPS, este origen deja
+				// de responder: no hay nada que seguir desde acá. Si no, se sigue la recreación.
+				this.#watchingProxy = moved === null || currentOrigin() !== panelOrigin(before)
 			}
 			this.#refreshIngress()
 			toast.success(m.admin_ports_saved())

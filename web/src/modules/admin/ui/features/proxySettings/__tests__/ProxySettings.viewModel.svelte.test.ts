@@ -12,7 +12,7 @@ import {
 	type ProxySettings,
 	type Settings,
 } from '../../../../domain'
-import { ingressKeys } from '@/modules/ingress'
+import { ingressKeys, type ProxyStatus } from '@/modules/ingress'
 import ProxySettingsHarness from './ProxySettingsHarness.svelte'
 import { cacheHolds } from '../../../__tests__/cacheHolds'
 
@@ -23,6 +23,25 @@ const mocks = vi.hoisted(() => ({
 	replaceCloudflareToken: vi.fn(),
 	removeCloudflareToken: vi.fn(),
 }))
+
+// `GET /proxy` (de ingress, por su barrel): Ajustes lo sigue mientras se recrea muelle-caddy.
+const ingress = vi.hoisted(() => ({ getProxyStatus: vi.fn() }))
+vi.mock('@/modules/ingress/container', () => ({ ingressUseCases: ingress }))
+
+function proxyStatus(overrides: Partial<ProxyStatus> = {}): ProxyStatus {
+	return {
+		status: 'synced',
+		error: null,
+		syncedAt: new Date('2026-10-16T12:00:00Z'),
+		caddy: {
+			image: 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0',
+			running: true,
+			httpPort: 8080,
+			httpsPort: 443,
+		},
+		...overrides,
+	}
+}
 
 vi.mock('@/modules/admin/container', () => ({
 	adminUseCases: {
@@ -74,6 +93,7 @@ describe('ProxySettingsViewModel', () => {
 		vi.clearAllMocks()
 		vi.restoreAllMocks()
 		localStorage.clear()
+		ingress.getProxyStatus.mockResolvedValue(proxyStatus())
 		mocks.updatePublicIp.mockResolvedValue(saved({ publicIpv4: '203.0.113.30' }))
 		mocks.updateAcmeEmail.mockResolvedValue(saved({}))
 		mocks.updateProxyPorts.mockResolvedValue(saved({ httpPort: 8080, httpsPort: 8443 }))
@@ -457,6 +477,66 @@ describe('ProxySettingsViewModel', () => {
 		expect((await mountViewModel()).movedTo).toBeNull()
 		localStorage.setItem('muelle:admin:panel-moved', 'https://panel.tudominio.cl/x')
 		expect((await mountViewModel()).movedTo).toBeNull()
+	})
+
+	it('si el panel sigue en este origen, sigue a muelle-caddy (GET /proxy) mientras se recrea', async () => {
+		ingress.getProxyStatus.mockResolvedValue(proxyStatus({ status: 'recreating' }))
+		const vm = await mountViewModel()
+		expect(vm.recreation).toBeNull()
+		expect(ingress.getProxyStatus).not.toHaveBeenCalled()
+
+		vm.setField('httpPort', '8080')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		expect(vm.recreation).toEqual({ kind: 'recreating' })
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+		expect(vm.recreation).toEqual({ kind: 'recreating' })
+
+		// Ya escucha en los puertos nuevos.
+		ingress.getProxyStatus.mockResolvedValue(proxyStatus())
+		await client.refetchQueries({ queryKey: ingressKeys.proxy })
+		await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'done' }))
+	})
+
+	it('si muelle-caddy no arranca con los puertos nuevos, dice por qué (el error de GET /proxy)', async () => {
+		ingress.getProxyStatus.mockResolvedValue(
+			proxyStatus({
+				status: 'out_of_sync',
+				error: 'el puerto 8080 ya está en uso',
+				caddy: { image: null, running: false, httpPort: null, httpsPort: null },
+			}),
+		)
+		const vm = await mountViewModel()
+		vm.setField('httpPort', '8080')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		await vi.waitFor(() =>
+			expect(vm.recreation).toEqual({
+				kind: 'failed',
+				error: 'el puerto 8080 ya está en uso',
+			}),
+		)
+	})
+
+	it('sin el proxy de muelle (sin dominio del panel) no hay nada que seguir', async () => {
+		ingress.getProxyStatus.mockResolvedValue(
+			proxyStatus({
+				status: 'disabled',
+				caddy: { image: null, running: false, httpPort: null, httpsPort: null },
+			}),
+		)
+		const vm = await mountViewModel({ ...PROXY, panelDomain: '' })
+		vm.setField('httpPort', '8080')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ panelDomain: '', httpPort: 8080 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+		await vi.waitFor(() => expect(vm.recreation).toBeNull())
 	})
 
 	it('si solo cambió el HTTP, o no hay dominio del panel, no hay mudanza', async () => {

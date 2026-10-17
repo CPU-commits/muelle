@@ -2,6 +2,7 @@ import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent, notFound } from '../api'
 import { adminDb, type MockRegistry } from '../db/admin'
 import { authDb } from '../db/auth'
+import { ingressDb } from '../db/ingress'
 import { requireSession, sessionUser } from '../session'
 
 // `/settings` y `/audit` (admin/infra/in/http), y lo que agregan las Fases 2 y 3 según el
@@ -300,7 +301,12 @@ export const adminHandlers: RequestHandler[] = [
 			body.proxy_http_port !== undefined || body.proxy_https_port !== undefined
 		// El hook del proxy corre antes de responder (contrato §3.5): en el navegador se nota.
 		if (portsChange && typeof window !== 'undefined') await delay(PORT_CHANGE_DELAY_MS)
+		const before = [adminDb.state.proxyHttpPort, adminDb.state.proxyHttpsPort].join()
 		adminDb.record('settings.update', 'settings', applySettings(body))
+		// El hook agenda la recreación de muelle-caddy si cambiaron los puertos (§3.5).
+		if (before !== [adminDb.state.proxyHttpPort, adminDb.state.proxyHttpsPort].join()) {
+			ingressDb.recreateProxy()
+		}
 		return HttpResponse.json(settingsRes())
 	}),
 
