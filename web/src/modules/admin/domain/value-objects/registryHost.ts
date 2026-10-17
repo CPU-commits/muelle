@@ -3,6 +3,9 @@ import { InvalidRegistryHost } from '../errors/adminErrors'
 
 export type RegistryHost = Brand<string, 'RegistryHost'>
 
+/** El largo máximo que acepta el backend (`validate.RegistryHost`, contrato §2.10). */
+export const REGISTRY_HOST_MAX_LENGTH = 255
+
 /** El host de Docker Hub, como lo da `reference.Domain` para cualquier imagen de ahí. */
 export const DOCKER_HUB_HOST = 'docker.io'
 
@@ -27,6 +30,8 @@ const HOST = new RegExp(`^${LABEL}(\\.${LABEL})*(:(?<port>\\d{1,5}))?$`)
 export function parseRegistryHost(raw: string): RegistryHost {
 	const host = raw.trim().toLowerCase()
 	if (host === '') throw new InvalidRegistryHost('empty')
+	// Solo ASCII llega a ser válido: el largo en unidades UTF-16 es el de bytes del backend.
+	if (host.length > REGISTRY_HOST_MAX_LENGTH) throw new InvalidRegistryHost('too_long')
 	if (/^[a-z][a-z0-9+.-]*:\/\//.test(host)) throw new InvalidRegistryHost('scheme')
 	if (host.includes('/')) throw new InvalidRegistryHost('path')
 	const match = HOST.exec(host)

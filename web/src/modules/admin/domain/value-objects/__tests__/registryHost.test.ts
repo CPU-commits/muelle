@@ -40,6 +40,23 @@ describe('registryHost', () => {
 		expect(problemOf('ghcr.io/')).toBe('path')
 	})
 
+	it('hasta 255 caracteres, como el backend (validate.RegistryHost)', () => {
+		const label = (c: string, n: number) => c.repeat(n)
+		// 63 + 1 + 63 + 1 + 63 + 1 + 63 = 255.
+		const longest = [label('a', 63), label('b', 63), label('c', 63), label('d', 63)].join('.')
+		expect(longest).toHaveLength(255)
+		expect(parseRegistryHost(longest)).toBe(longest)
+		expect(problemOf(`${'a.'.repeat(127)}io`)).toBe('too_long')
+	})
+
+	it('el puerto va de 1 a 65535', () => {
+		expect(parseRegistryHost('r.io:1')).toBe('r.io:1')
+		expect(parseRegistryHost('r.io:65535')).toBe('r.io:65535')
+		for (const bad of ['r.io:0', 'r.io:65536', 'r.io:123456', 'r.io:5a']) {
+			expect(problemOf(bad)).toBe('format')
+		}
+	})
+
 	it('rechaza lo que no es un host', () => {
 		expect(problemOf('')).toBe('empty')
 		for (const bad of [

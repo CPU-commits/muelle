@@ -344,6 +344,32 @@ describe('registries (Fase 2)', () => {
 		})
 	})
 
+	it('el usuario se cuenta en caracteres, como el backend: 255 emoji pasan', async () => {
+		const username = '😀'.repeat(255)
+
+		await adminUseCases.updateRegistry({ host: 'ghcr.io', username, password: 'y' })
+
+		expect(adminDb.state.registries.find((r) => r.host === 'ghcr.io')?.username).toBe(username)
+	})
+
+	it('el mock valida el host como validate.RegistryHost: hasta 255 y puerto de 1 a 65535', async () => {
+		const post = (host: string) =>
+			fetch(api('/registries'), {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ host, username: 'a', password: 'b' }),
+			})
+
+		for (const host of [`${'a.'.repeat(127)}io`, 'r.io:0', 'r.io:70000']) {
+			const response = await post(host)
+			expect(response.status).toBe(422)
+			expect(await response.json()).toMatchObject({
+				error: { message: expect.stringMatching(/^host: /) },
+			})
+		}
+		expect((await post('r.io:65535')).status).toBe(201)
+	})
+
 	it('cambiar las credenciales manda usuario y contraseña, los dos', async () => {
 		let sent: unknown
 		server.use(

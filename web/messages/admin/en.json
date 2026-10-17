@@ -119,6 +119,7 @@
 	"admin_error_registry_host_scheme": "No scheme: just the host, like ghcr.io.",
 	"admin_error_registry_host_path": "Just the host, with no path or trailing /: ghcr.io, not ghcr.io/your-org.",
 	"admin_error_registry_host_format": "A host like ghcr.io, registry.example.com:5000 or localhost:5000.",
+	"admin_error_registry_host_long": "Up to {max} characters.",
 	"admin_error_registry_username_long": "Up to {max} characters.",
 	"admin_error_registry_username_control": "No tabs or other control characters.",
 	"admin_error_registry_password_long": "Up to {max} bytes.",

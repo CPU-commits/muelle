@@ -46,6 +46,33 @@ describe('registryCredentials', () => {
 		expect(problemOf('bot', 'ghp:x')).toBe('ok')
 	})
 
+	it('el largo del usuario se cuenta en caracteres (runas), no en unidades UTF-16', () => {
+		// Un emoji es una runa para el backend (utf8.RuneCountInString) y dos para .length.
+		expect(problemOf('😀'.repeat(255), 'x')).toBe('ok')
+		expect(problemOf('ñ'.repeat(255), 'x')).toBe('ok')
+		expect(problemOf('😀'.repeat(256), 'x')).toBe('username:too_long')
+	})
+
+	it('caracteres de control son los de unicode.IsControl: C0, DEL y C1; U+2028 no lo es', () => {
+		// Adentro: en los bordes, el usuario se recorta como cualquier campo de texto.
+		for (const control of ['\u0000', '\n', '\u007f', '\u0085', '\u009f']) {
+			expect(problemOf(`bo${control}t`, 'x')).toBe('username:control')
+		}
+		// Separadores de línea y de párrafo Unicode: el backend los acepta en el usuario.
+		expect(problemOf('bot\u2028ci', 'x')).toBe('ok')
+		expect(problemOf('bot\u2029ci', 'x')).toBe('ok')
+	})
+
+	it('en la contraseña solo \\n y \\r son saltos de línea: un tab o U+2028 pasan', () => {
+		expect(problemOf('bot', 'con\ttab')).toBe('ok')
+		expect(problemOf('bot', 'ghp\u2028x')).toBe('ok')
+		expect(problemOf('bot', 'ghp\u0085x')).toBe('ok')
+		// 1024 emoji son 4096 bytes en UTF-8; uno más se pasa.
+		expect(problemOf('bot', '😀'.repeat(1024))).toBe('ok')
+		expect(problemOf('bot', '😀'.repeat(1025))).toBe('password:too_long')
+		expect(problemOf('bot', 'ghp_x\r\n')).toBe('password:newline')
+	})
+
 	it('la contraseña tiene hasta 4096 bytes (no caracteres) y ningún salto de línea', () => {
 		expect(REGISTRY_PASSWORD_MAX_BYTES).toBe(4096)
 		expect(problemOf('bot', 'x'.repeat(4096))).toBe('ok')

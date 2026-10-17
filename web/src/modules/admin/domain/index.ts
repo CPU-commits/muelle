@@ -94,7 +94,11 @@ export {
 	REGISTRY_USERNAME_MAX_LENGTH,
 } from './value-objects/registryCredentials'
 export type { RegistryHost } from './value-objects/registryHost'
-export { DOCKER_HUB_HOST, parseRegistryHost } from './value-objects/registryHost'
+export {
+	DOCKER_HUB_HOST,
+	parseRegistryHost,
+	REGISTRY_HOST_MAX_LENGTH,
+} from './value-objects/registryHost'
 export {
 	CLOUDFLARE_TOKEN_MAX_LENGTH,
 	CLOUDFLARE_TOKEN_MIN_LENGTH,

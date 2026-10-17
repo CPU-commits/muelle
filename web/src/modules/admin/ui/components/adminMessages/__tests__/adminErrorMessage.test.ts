@@ -44,6 +44,11 @@ describe('adminFieldError', () => {
 			field: 'host',
 			message: m.admin_error_registry_host_format(),
 		})
+		expect(messageOf('too_long')).toEqual({
+			field: 'host',
+			message: m.admin_error_registry_host_long({ max: 255 }),
+		})
+		expect(m.admin_error_registry_host_long({ max: 255 })).toBe('Hasta 255 caracteres.')
 	})
 
 	it('{ y } en el email o el token: Caddy los lee como placeholder', () => {

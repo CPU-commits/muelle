@@ -201,35 +201,56 @@ interface RegistryBody {
 	password?: unknown
 }
 
-// El host en su forma canónica, sin normalizar (contrato §2.10).
+// Lo que hace `shared/domain/validate` (registry_deploy.go) con un registry, en el mismo
+// orden y con los mismos mensajes (contrato §2.10): el host en su forma canónica y sin
+// normalizar, el usuario contado en runas y la contraseña en bytes.
 const REGISTRY_LABEL = '[a-z0-9]([a-z0-9-]*[a-z0-9])?'
-const REGISTRY_HOST = new RegExp(`^${REGISTRY_LABEL}(\\.${REGISTRY_LABEL})*(:\\d{1,5})?$`)
+const REGISTRY_HOST = new RegExp(`^${REGISTRY_LABEL}(\\.${REGISTRY_LABEL})*(:[0-9]{1,5})?$`)
 const DOCKER_HUB_ALIASES = new Set([
 	'index.docker.io',
 	'registry-1.docker.io',
 	'registry.hub.docker.com',
 ])
-const CONTROL = /[\p{Cc}]/u
+/** `unicode.IsControl`: C0, DEL y C1 (lo mismo que `\p{Cc}`). */
+const CONTROL = /\p{Cc}/u
 
-function validateCredentials(body: RegistryBody) {
-	if (typeof body.username !== 'string' || body.username === '' || body.username.length > 255) {
-		return invalid('username', 'debe tener entre 1 y 255 caracteres')
+function validateHost(host: string) {
+	// `len(s)`: bytes, no caracteres.
+	if (host === '' || new TextEncoder().encode(host).length > 255) {
+		return invalid('host', 'es obligatorio y de hasta 255 caracteres')
 	}
-	if (CONTROL.test(body.username)) {
-		return invalid('username', 'no puede tener caracteres de control')
-	}
-	if (body.username.includes(':')) {
+	if (!REGISTRY_HOST.test(host)) {
 		return invalid(
-			'username',
-			'no puede tener ":" (la autenticación HTTP Basic lo usa de separador)',
+			'host',
+			'no es un host de registry válido: en minúsculas, sin esquema ni ruta (ej. ghcr.io o registry.example.com:5000)',
 		)
 	}
-	if (typeof body.password !== 'string' || body.password === '') {
-		return invalid('password', 'es obligatoria')
+	const [, port] = host.split(':')
+	if (port !== undefined && (Number(port) < 1 || Number(port) > 65535)) {
+		return invalid('host', 'el puerto debe estar entre 1 y 65535')
 	}
-	if (new TextEncoder().encode(body.password).length > 4096 || /[\r\n]/.test(body.password)) {
-		return invalid('password', 'hasta 4096 bytes, sin saltos de línea')
+	if (DOCKER_HUB_ALIASES.has(host)) return invalid('host', 'para Docker Hub usa docker.io')
+	return undefined
+}
+
+function validateCredentials(body: RegistryBody) {
+	const { username, password } = body
+	// `utf8.RuneCountInString`: un emoji es una runa, no dos unidades UTF-16.
+	if (typeof username !== 'string' || username === '' || [...username].length > 255) {
+		return invalid('username', 'es obligatorio y de hasta 255 caracteres')
 	}
+	if (CONTROL.test(username)) {
+		return invalid('username', 'no puede contener caracteres de control')
+	}
+	if (username.includes(':')) return invalid('username', "no puede contener ':'")
+	if (
+		typeof password !== 'string' ||
+		password === '' ||
+		new TextEncoder().encode(password).length > 4096
+	) {
+		return invalid('password', 'es obligatoria y de hasta 4096 bytes')
+	}
+	if (/[\r\n]/.test(password)) return invalid('password', 'no puede contener saltos de línea')
 	return undefined
 }
 
@@ -319,9 +340,7 @@ export const adminHandlers: RequestHandler[] = [
 		const body = await readJson<RegistryBody>(request)
 		if (!body) return apiError(400, 'invalid_json', 'el cuerpo no es JSON válido')
 		const host = typeof body.host === 'string' ? body.host : ''
-		if (DOCKER_HUB_ALIASES.has(host)) return invalid('host', 'para Docker Hub usa docker.io')
-		if (!REGISTRY_HOST.test(host)) return invalid('host', 'no es un host en su forma canónica')
-		const problem = validateCredentials(body)
+		const problem = validateHost(host) ?? validateCredentials(body)
 		if (problem) return problem
 		if (adminDb.state.registries.some((registry) => registry.host === host)) {
 			return apiError(409, 'conflict', 'ya existe')

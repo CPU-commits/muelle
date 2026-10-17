@@ -122,7 +122,7 @@ export class InvalidAcmeEmail extends ValidationError {
  * Por qué un host no es canónico: el backend no lo normaliza (contrato §2.10), así que el
  * panel explica qué sobra.
  */
-export type RegistryHostProblem = 'empty' | 'scheme' | 'path' | 'format'
+export type RegistryHostProblem = 'empty' | 'too_long' | 'scheme' | 'path' | 'format'
 
 export class InvalidRegistryHost extends ValidationError {
 	readonly problem: RegistryHostProblem

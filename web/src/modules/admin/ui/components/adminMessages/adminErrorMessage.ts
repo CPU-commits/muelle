@@ -12,6 +12,7 @@ import {
 	InvalidPort,
 	InvalidRegistryCredential,
 	InvalidRegistryHost,
+	REGISTRY_HOST_MAX_LENGTH,
 	REGISTRY_PASSWORD_MAX_BYTES,
 	REGISTRY_USERNAME_MAX_LENGTH,
 	type RegistryHostProblem,
@@ -36,6 +37,7 @@ export function adminErrorMessage(error: unknown): string {
 
 const REGISTRY_HOST_MESSAGES: Record<RegistryHostProblem, () => string> = {
 	empty: () => m.common_required(),
+	too_long: () => m.admin_error_registry_host_long({ max: REGISTRY_HOST_MAX_LENGTH }),
 	scheme: () => m.admin_error_registry_host_scheme(),
 	path: () => m.admin_error_registry_host_path(),
 	format: () => m.admin_error_registry_host_format(),
