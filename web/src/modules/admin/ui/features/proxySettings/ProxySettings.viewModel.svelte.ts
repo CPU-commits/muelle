@@ -12,6 +12,7 @@ import {
 import {
 	CloudflareUnavailable,
 	movedPanelOrigin,
+	parseCloudflareToken,
 	parseProxyPorts,
 	type ProxySettings,
 	type Settings,
@@ -232,10 +233,18 @@ export class ProxySettingsViewModel {
 
 	saveCloudflare = async (): Promise<void> => {
 		if (this.#cloudflare.isPending) return
-		const token = this.cloudflareToken
-		// El token no se queda en ningún lado: ni en el campo ni en el cache de mutaciones.
-		this.cloudflareToken = ''
 		this.cloudflareError = null
+		let token: string
+		try {
+			token = parseCloudflareToken(this.cloudflareToken)
+		} catch (error) {
+			// Todavía no salió: queda en el campo para corregirlo, como en un formulario.
+			this.#fail(error)
+			return
+		}
+		// Ya sale: el token no se queda en ningún lado, ni en el campo ni en el cache de
+		// mutaciones. Si el backend lo rechaza, se pega de nuevo.
+		this.cloudflareToken = ''
 		try {
 			await this.#cloudflare.mutateAsync(token)
 			this.#refreshIngress()

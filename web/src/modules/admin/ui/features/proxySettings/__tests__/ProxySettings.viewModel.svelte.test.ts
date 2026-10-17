@@ -208,13 +208,13 @@ describe('ProxySettingsViewModel', () => {
 		const vm = await mountViewModel()
 
 		vm.openCloudflare()
-		vm.setField('cloudflareToken', 'cf-secreto')
+		vm.setField('cloudflareToken', 'cf-secreto-de-veinte-caracteres')
 		await vm.saveCloudflare()
 
-		expect(mocks.replaceCloudflareToken).toHaveBeenCalledWith('cf-secreto')
+		expect(mocks.replaceCloudflareToken).toHaveBeenCalledWith('cf-secreto-de-veinte-caracteres')
 		expect(vm.cloudflareOpen).toBe(false)
 		expect(vm.cloudflareToken).toBe('')
-		expect(await cacheHolds(client, 'cf-secreto')).toBe(false)
+		expect(await cacheHolds(client, 'cf-secreto-de-veinte-caracteres')).toBe(false)
 	})
 
 	it('sin red, guardar el token falla enseguida en vez de quedar pausado con el token', async () => {
@@ -223,15 +223,38 @@ describe('ProxySettingsViewModel', () => {
 		onlineManager.setOnline(false)
 		try {
 			vm.openCloudflare()
-			vm.setField('cloudflareToken', 'cf-sin-red')
+			vm.setField('cloudflareToken', 'cf-sin-red-de-veinte-caracteres')
 			// Pausada, esta promesa no terminaría hasta que vuelva la red.
 			await vm.saveCloudflare()
 
-			expect(mocks.replaceCloudflareToken).toHaveBeenCalledWith('cf-sin-red')
-			expect(await cacheHolds(client, 'cf-sin-red')).toBe(false)
+			expect(mocks.replaceCloudflareToken).toHaveBeenCalledWith(
+				'cf-sin-red-de-veinte-caracteres',
+			)
+			expect(await cacheHolds(client, 'cf-sin-red-de-veinte-caracteres')).toBe(false)
 		} finally {
 			onlineManager.setOnline(true)
 		}
+	})
+
+	it('un token sin la forma de uno de Cloudflare no sale y se queda en el campo para corregirlo', async () => {
+		const vm = await mountViewModel()
+
+		vm.openCloudflare()
+		vm.setField('cloudflareToken', 'cf-corto')
+		await vm.saveCloudflare()
+
+		expect(mocks.replaceCloudflareToken).not.toHaveBeenCalled()
+		expect(vm.errors).toEqual({
+			cloudflareToken: m.admin_error_cf_token_length({ min: 20, max: 512 }),
+		})
+		expect(vm.cloudflareToken).toBe('cf-corto')
+		expect(vm.cloudflareOpen).toBe(true)
+
+		vm.setField('cloudflareToken', '  ')
+		await vm.saveCloudflare()
+		expect(vm.errors).toEqual({ cloudflareToken: m.common_required() })
+		expect(vm.cloudflareToken).toBe('  ')
+		expect(mocks.replaceCloudflareToken).not.toHaveBeenCalled()
 	})
 
 	it('si guardar el token falla, tampoco queda en el cache ni en el campo', async () => {
@@ -241,13 +264,13 @@ describe('ProxySettingsViewModel', () => {
 		const vm = await mountViewModel()
 
 		vm.openCloudflare()
-		vm.setField('cloudflareToken', 'cf-malo')
+		vm.setField('cloudflareToken', 'cf-malo-de-veinte-caracteres')
 		await vm.saveCloudflare()
 
 		expect(vm.errors).toEqual({ cloudflareToken: 'el token no ve ninguna zona' })
 		expect(vm.cloudflareOpen).toBe(true)
 		expect(vm.cloudflareToken).toBe('')
-		expect(await cacheHolds(client, 'cf-malo')).toBe(false)
+		expect(await cacheHolds(client, 'cf-malo-de-veinte-caracteres')).toBe(false)
 	})
 
 	it('vaciar la IPv4 o el email ACME los borra: se manda ""', async () => {
@@ -299,7 +322,7 @@ describe('ProxySettingsViewModel', () => {
 		const vm = await mountViewModel()
 
 		vm.openCloudflare()
-		vm.setField('cloudflareToken', 'cf-cloudflare-caido')
+		vm.setField('cloudflareToken', 'cf-cloudflare-caido-de-veinte')
 		await vm.saveCloudflare()
 
 		expect(vm.errors).toEqual({})
@@ -311,10 +334,10 @@ describe('ProxySettingsViewModel', () => {
 		expect(failure).not.toHaveBeenCalled()
 		// El token tampoco se queda: se pega otra vez para reintentar.
 		expect(vm.cloudflareToken).toBe('')
-		expect(await cacheHolds(client, 'cf-cloudflare-caido')).toBe(false)
+		expect(await cacheHolds(client, 'cf-cloudflare-caido-de-veinte')).toBe(false)
 
 		// Reintentar limpia el aviso; cerrar y volver a abrir, también.
-		vm.setField('cloudflareToken', 'cf-otra-vez')
+		vm.setField('cloudflareToken', 'cf-otra-vez-de-veinte-caracteres')
 		await vm.saveCloudflare()
 		expect(vm.cloudflareError).toBeNull()
 		expect(vm.cloudflareOpen).toBe(false)
@@ -325,7 +348,7 @@ describe('ProxySettingsViewModel', () => {
 		const vm = await mountViewModel()
 
 		vm.openCloudflare()
-		vm.setField('cloudflareToken', 'cf-x')
+		vm.setField('cloudflareToken', 'cf-x-de-veinte-caracteres')
 		await vm.saveCloudflare()
 
 		expect(vm.cloudflareError).toEqual({ title: m.common_unavailable(), body: null })
