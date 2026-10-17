@@ -36,7 +36,6 @@ export function proxyQuery() {
 }
 
 export interface ProxyFollowOptions {
-	readonly enabled: boolean
 	/** Si todavía falta una respuesta que diga cómo terminó (se lee en cada vuelta). */
 	readonly waiting: () => boolean
 }
@@ -47,10 +46,9 @@ export interface ProxyFollowOptions {
  * mientras `waiting()` diga que sí, aunque la última respuesta haya fallado o sea de antes
  * del cambio. El panel puede pasar por el mismo muelle-caddy que se recrea.
  */
-export function proxyFollowQuery({ enabled, waiting }: ProxyFollowOptions) {
+export function proxyFollowQuery({ waiting }: ProxyFollowOptions) {
 	return queryOptions({
 		...proxyQuery(),
-		enabled,
 		refetchInterval: (query) =>
 			waiting() || proxySettling(query.state.data) ? PROXY_SETTLING_REFRESH_MS : false,
 	})

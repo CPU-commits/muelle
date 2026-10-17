@@ -167,10 +167,7 @@ export class ProxySettingsViewModel {
 	// efecto que suscribe la query: leído con `untrack`, o cada respuesta haría que se vuelva
 	// a suscribir, y eso cancela el pedido en curso (y descarta su respuesta).
 	readonly #proxyStatus = createQuery(() =>
-		proxyFollowQuery({
-			enabled: true,
-			waiting: () => untrack(() => this.#awaitingProxy),
-		}),
+		proxyFollowQuery({ waiting: () => untrack(() => this.#awaitingProxy) }),
 	)
 
 	constructor(proxy: () => ProxySettings) {
