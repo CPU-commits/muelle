@@ -15,7 +15,6 @@ export {
 	parsePanelOrigin,
 	PROXY_SETTINGS_PHASE,
 	RESET_PANEL_IPS_COMMAND,
-	updatePanelOriginCommand,
 } from './entities/settings'
 export type {
 	CloudflareTokenProblem,

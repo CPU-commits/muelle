@@ -173,10 +173,10 @@ test('cambiar el HTTPS avisa a dónde se muda el panel, y el aviso sobrevive a r
 	await expect(dialog).toHaveCount(0)
 
 	const notice = 'La dirección del panel ahora es https://panel.tudominio.cl:8443'
-	const command =
-		'docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl:8443 muelle_muelle'
 	await expect(ports.getByText(notice)).toBeVisible()
-	await expect(ports.getByText(command)).toBeVisible()
+	// El origen permitido sigue al puerto HTTPS (contrato §0.1): no hay nada que tocar en el
+	// servidor.
+	await expect(ports.getByText(/MUELLE_PANEL_ORIGIN/)).toHaveCount(0)
 	await expect(ports.getByRole('link', { name: 'Ir al panel' })).toHaveAttribute(
 		'href',
 		'https://panel.tudominio.cl:8443/ajustes?panel_moved=1',

@@ -456,16 +456,13 @@ describe('ProxySettingsViewModel', () => {
 		expect((await mountViewModel()).movedTo).toBeNull()
 	})
 
-	it('el aviso dice cómo actualizar MUELLE_PANEL_ORIGIN y lleva al panel nuevo con el aviso', async () => {
+	it('el aviso lleva al panel nuevo con el aviso', async () => {
 		const vm = await mountViewModel()
 		vm.setField('httpsPort', '8443')
 		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpsPort: 8443 }))
 		vm.askSavePorts()
 		await vm.savePorts()
 
-		expect(vm.movedOriginCommand).toBe(
-			'docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl:8443 muelle_muelle',
-		)
 		// El link lleva a Ajustes del origen nuevo, que muestra el mismo aviso (la otra
 		// pestaña no ve este localStorage: es de otro origen).
 		expect(vm.canGoToMovedPanel).toBe(true)

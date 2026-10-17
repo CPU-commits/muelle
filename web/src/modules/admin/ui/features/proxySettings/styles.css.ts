@@ -40,14 +40,6 @@ export const fields = style({
 	maxWidth: '560px',
 })
 
-// El aviso de la dirección nueva del panel, con el comando de MUELLE_PANEL_ORIGIN abajo.
-export const moved = style({
-	display: 'flex',
-	flexDirection: 'column',
-	gap: theme.space[12],
-	maxWidth: '720px',
-})
-
 export const portFields = style({
 	display: 'grid',
 	gridTemplateColumns: 'repeat(auto-fit, minmax(min(140px, 100%), 1fr))',

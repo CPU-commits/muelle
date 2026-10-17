@@ -106,14 +106,6 @@ export function movedPanelOrigin(before: ProxySettings, after: ProxySettings): s
 }
 
 /**
- * Lo que actualiza `MUELLE_PANEL_ORIGIN` en el servidor (contrato §5.2): install lo fijó con
- * el puerto HTTPS de entonces. Reinicia muelle unos segundos.
- */
-export function updatePanelOriginCommand(origin: string): string {
-	return `docker service update --env-add MUELLE_PANEL_ORIGIN=${origin} muelle_muelle`
-}
-
-/**
  * Volver a entrar después de una lista de IPs que deja fuera (contrato §5.4): corre adentro
  * del contenedor de muelle, vacía `panel_allowed_cidrs` y reinicia el servicio, que al
  * arrancar le reenvía la configuración a Caddy.

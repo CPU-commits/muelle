@@ -13,11 +13,9 @@
 		StatusDot,
 	} from '@/shared/ui'
 	import type { ProxySettings } from '../../../domain'
-	import { ServerCommand } from '../../components/serverCommand'
 	import { ProxySettingsViewModel } from './ProxySettings.viewModel.svelte.ts'
 	import {
 		fields,
-		moved,
 		portFields,
 		readonlyField,
 		readonlyLabel,
@@ -173,31 +171,24 @@
 
 	<Card title={m.admin_ports_title()} description={m.admin_ports_description()}>
 		{#if vm.movedTo}
-			<!-- Queda hasta que se cierra, también al recargar. El comando no da por hecho
-			     cómo arma muelle sus links: solo actualiza la variable si sigue vieja. -->
-			<div class={moved}>
-				<Banner
-					tone="info"
-					title={m.admin_ports_moved_title({ origin: vm.movedTo })}
-					body={m.admin_ports_moved_body()}
-				>
-					{#snippet action()}
-						{#if vm.canGoToMovedPanel}
-							<LinkButton href={vm.movedPanelHref} variant="secondary" size="sm">
-								{m.admin_ports_moved_action()}
-							</LinkButton>
-						{/if}
-						<Button variant="ghost" size="sm" onclick={vm.dismissMove}>
-							{m.admin_ports_moved_dismiss()}
-						</Button>
-					{/snippet}
-				</Banner>
-				<ServerCommand
-					label={m.admin_ports_moved_origin_label()}
-					command={vm.movedOriginCommand}
-					copyLabel={m.admin_ports_moved_copy()}
-				/>
-			</div>
+			<!-- Queda hasta que se cierra, también al recargar. No pide tocar la configuración
+			     de muelle: el origen permitido sigue al puerto HTTPS (contrato §0.1). -->
+			<Banner
+				tone="info"
+				title={m.admin_ports_moved_title({ origin: vm.movedTo })}
+				body={m.admin_ports_moved_body()}
+			>
+				{#snippet action()}
+					{#if vm.canGoToMovedPanel}
+						<LinkButton href={vm.movedPanelHref} variant="secondary" size="sm">
+							{m.admin_ports_moved_action()}
+						</LinkButton>
+					{/if}
+					<Button variant="ghost" size="sm" onclick={vm.dismissMove}>
+						{m.admin_ports_moved_dismiss()}
+					</Button>
+				{/snippet}
+			</Banner>
 		{/if}
 		{#if vm.recreation?.kind === 'recreating'}
 			<Banner

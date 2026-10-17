@@ -76,8 +76,6 @@
 	"admin_ports_moved_title": "The panel's address is now {origin}",
 	"admin_ports_moved_body": "If you came in through the previous address, it stops responding in a few seconds; your session stays open at the new one.",
 	"admin_ports_moved_action": "Go to the panel",
-	"admin_ports_moved_copy": "Copy the command",
-	"admin_ports_moved_origin_label": "If MUELLE_PANEL_ORIGIN still has the previous address, update it on the server (restarts muelle for a few seconds):",
 	"admin_ports_moved_dismiss": "Got it",
 	"admin_error_port": "A number between 1 and 65535.",
 	"admin_error_port_same": "It must differ from the HTTP one.",

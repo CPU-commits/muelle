@@ -21,7 +21,6 @@ import {
 	type ProxyPorts,
 	type ProxySettings,
 	type Settings,
-	updatePanelOriginCommand,
 } from '../../../domain'
 import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
 import { clearPanelMove, loadPanelMove, PANEL_MOVED_PARAM, savePanelMove } from './panelMoveNotice'
@@ -243,11 +242,6 @@ export class ProxySettingsViewModel {
 		return withQuery(`${this.movedTo ?? ''}${resolve('/(app)/ajustes')}`, {
 			[PANEL_MOVED_PARAM]: 1,
 		})
-	}
-
-	/** Lo que actualiza `MUELLE_PANEL_ORIGIN` en el servidor con el origen nuevo. */
-	get movedOriginCommand(): string {
-		return this.movedTo === null ? '' : updatePanelOriginCommand(this.movedTo)
 	}
 
 	dismissMove = (): void => {

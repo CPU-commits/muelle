@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-	movedPanelOrigin,
-	panelOrigin,
-	parsePanelOrigin,
-	type ProxySettings,
-	updatePanelOriginCommand,
-} from '../..'
+import { movedPanelOrigin, panelOrigin, parsePanelOrigin, type ProxySettings } from '../..'
 
 const PROXY: ProxySettings = {
 	cloudflare: { tokenSet: false, zones: null },
@@ -39,12 +33,6 @@ describe('settings', () => {
 		expect(
 			movedPanelOrigin({ ...PROXY, panelDomain: '' }, { ...https, panelDomain: '' }),
 		).toBeNull()
-	})
-
-	it('el comando que actualiza MUELLE_PANEL_ORIGIN en el servidor (contrato §5.2)', () => {
-		expect(updatePanelOriginCommand('https://panel.tudominio.cl:8443')).toBe(
-			'docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl:8443 muelle_muelle',
-		)
 	})
 
 	it('un origen del panel guardado es https, con un dominio o una IP y el puerto, y nada más', () => {

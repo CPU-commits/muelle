@@ -77,6 +77,7 @@ function client(): QueryClient {
 describe('SettingsScreen', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		localStorage.clear()
 		mocks.listAudit.mockResolvedValue({ items: [], nextCursor: null })
 		mocks.listUsers.mockResolvedValue([
 			{ username: 'felipe', totpEnabled: true, createdAt: new Date('2026-10-09T12:00:00Z') },
@@ -124,6 +125,27 @@ describe('SettingsScreen', () => {
 		await expect.element(screen.getByLabelText('IPs permitidas para el panel')).toBeVisible()
 		await expect.element(screen.getByText('ghcr.io')).toBeVisible()
 		await expect.element(screen.getByText(/llega con la Fase/)).not.toBeInTheDocument()
+	})
+
+	it('el aviso de la dirección nueva del panel no pide tocar la configuración de muelle', async () => {
+		// El origen permitido sigue al puerto HTTPS de Ajustes (contrato §0.1 y §4.1): no hay
+		// que actualizar MUELLE_PANEL_ORIGIN en el servidor.
+		localStorage.setItem('muelle:admin:panel-moved', 'https://panel.tudominio.cl:8443')
+		mocks.getSettings.mockResolvedValue({
+			...PHASE_3,
+			proxy: PHASE_3.proxy && { ...PHASE_3.proxy, httpsPort: 8443 },
+		})
+		mocks.listRegistries.mockResolvedValue([])
+
+		const screen = await render(SettingsView, { client: client() })
+
+		await expect
+			.element(
+				screen.getByText('La dirección del panel ahora es https://panel.tudominio.cl:8443'),
+			)
+			.toBeVisible()
+		expect(document.body.textContent).not.toContain('MUELLE_PANEL_ORIGIN')
+		expect(document.body.textContent).not.toContain('docker service update')
 	})
 
 	it('cuándo se actualizó un registry es un <time> con la fecha, y la fecha exacta se lee', async () => {
