@@ -21,7 +21,7 @@ export interface MockToken {
 export interface IdentityState {
 	tokens: MockToken[]
 	nextTokenId: number
-	/** El id de cada usuario (la auditoría guarda `actor_id`, no el nombre). */
+	/** El id de cada usuario: el `actor_id` de la auditoría (el nombre va copiado aparte). */
 	userIds: Record<string, number>
 	nextUserId: number
 }

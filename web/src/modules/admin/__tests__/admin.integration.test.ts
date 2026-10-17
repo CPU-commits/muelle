@@ -409,8 +409,24 @@ describe('auditoría', () => {
 		expect(page.items[0]).toMatchObject({
 			action: 'settings.update',
 			target: 'settings',
-			actor: { kind: 'user', id: 1 },
+			actor: { kind: 'user', id: 1, name: 'felipe' },
 		})
+	})
+
+	it('cada evento trae el nombre de quién lo hizo, copiado al escribirlo (contrato §4.2)', async () => {
+		const events = []
+		let page = await adminUseCases.listAudit()
+		events.push(...page.items)
+		while (page.nextCursor) {
+			page = await adminUseCases.listAudit({ before: page.nextCursor })
+			events.push(...page.items)
+		}
+		const actors = new Set(events.map((event) => JSON.stringify(event.actor)))
+		expect(actors).toContain(JSON.stringify({ kind: 'user', id: 1, name: 'felipe' }))
+		expect(actors).toContain(JSON.stringify({ kind: 'token', id: 1, name: 'github-actions' }))
+		expect(actors).toContain(JSON.stringify({ kind: 'system' }))
+		// Uno de antes de la migración 0004, de un token que ya no existía: sin nombre.
+		expect(actors).toContain(JSON.stringify({ kind: 'token', id: 9, name: '' }))
 	})
 })
 

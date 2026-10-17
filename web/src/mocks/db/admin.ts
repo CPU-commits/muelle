@@ -19,6 +19,11 @@ export interface MockAuditEvent {
 	id: number
 	actor_type: 'user' | 'token' | 'system'
 	actor_id: number | null
+	/**
+	 * El username, el nombre del token o "system", copiado al escribir el evento (contrato
+	 * §4.2). `''` solo en un evento de antes de la migración 0004 cuyo autor ya no estaba.
+	 */
+	actor_name: string
 	action: string
 	target: string
 	details: Record<string, unknown>
@@ -45,14 +50,34 @@ export interface AdminState {
 }
 
 // Con versión: una pestaña con el estado de antes (registries sin fechas, la auditoría sin
-// el primer arranque) empieza de cero.
-const STORAGE_KEY = 'admin-v3'
+// el primer arranque o sin `actor_name`) empieza de cero.
+const STORAGE_KEY = 'admin-v4'
 const MINUTE_MS = 60_000
 
 /** Cuántos eventos trae la auditoría al empezar: más de una página, para ver "Cargar más". */
 export const MOCK_AUDIT_SEED_COUNT = 40
 
 type SeedAction = Pick<MockAuditEvent, 'actor_type' | 'action' | 'target'>
+
+/** Los nombres de los actores del seed: el usuario felipe (id 1) y el token github-actions (id 1). */
+const SEED_NAMES: Record<SeedAction['actor_type'], string> = {
+	user: 'felipe',
+	token: 'github-actions',
+	system: 'system',
+}
+
+/**
+ * Un evento de antes de la migración 0004 (contrato §6) cuyo autor, un token, ya se había
+ * borrado: queda sin nombre, y el panel muestra el tipo y el id.
+ */
+const ORPHAN: Omit<MockAuditEvent, 'id' | 'at'> = {
+	actor_type: 'token',
+	actor_id: 9,
+	actor_name: '',
+	action: 'deploy.create',
+	target: 'app:auditfy/staging/api',
+	details: {},
+}
 
 const LOGIN: SeedAction = { actor_type: 'user', action: 'auth.login', target: 'user:felipe' }
 
@@ -93,22 +118,20 @@ function seedAudit(): MockAuditEvent[] {
 	return Array.from({ length: MOCK_AUDIT_SEED_COUNT }, (_, index) => {
 		const install = INSTALL_ACTIONS[index]
 		const minutesAgo = (MOCK_AUDIT_SEED_COUNT - index) * 37
+		const at = new Date(now - minutesAgo * MINUTE_MS).toISOString()
 		if (install) {
-			return {
-				id: index + 1,
-				...install,
-				actor_id: null,
-				at: new Date(now - minutesAgo * MINUTE_MS).toISOString(),
-			}
+			return { id: index + 1, ...install, actor_id: null, actor_name: 'system', at }
 		}
+		if (index === INSTALL_ACTIONS.length) return { id: index + 1, ...ORPHAN, at }
 		const base = SEED_ACTIONS[index % SEED_ACTIONS.length] ?? LOGIN
 		return {
 			id: index + 1,
 			...base,
 			// El usuario felipe (id 1) o el token github-actions (id 1).
 			actor_id: 1,
+			actor_name: SEED_NAMES[base.actor_type],
 			details: base === LOGIN ? { ip: '198.51.100.17', mfa: false } : {},
-			at: new Date(now - minutesAgo * MINUTE_MS).toISOString(),
+			at,
 		}
 	})
 }
@@ -173,6 +196,7 @@ export const adminDb = {
 				id: state.nextAuditId,
 				actor_type: user ? 'user' : 'system',
 				actor_id: user ? identityDb.userId(user.username) : null,
+				actor_name: user ? user.username : 'system',
 				action,
 				target,
 				details,
