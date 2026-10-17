@@ -583,6 +583,11 @@ desconocidos): mientras no existan, no se mandan.
   healthcheck del spec, y vuelve a pedir la app una vez cuando el deploy actual es más nuevo
   que su `last_deployed_at` (un deploy exitoso lo adelanta en la misma transacción). Un
   test de viewModel de esas pantallas mockea también `@/modules/catalog/container`.
+- Variables (`secrets`), después de guardar un cambio de verdad, marca viejo todo
+  `catalogKeys.all` con `refetchType: 'none'`: el backend dejó con cambios pendientes a la
+  app o a todas las apps del stage (§5.2 regla 4 del diseño), y Proyectos, el Resumen y
+  Configuración lo vuelven a pedir al mostrarse (no antes: el árbol del breadcrumb, que está
+  a la vista, no muestra la marca). Un guardado que no cambió nada no lo toca.
 - Ajustes, después de guardar la IP pública, el email ACME, el token, los puertos o la lista
   de IPs permitidas, invalida `ingressKeys.all`: los `records` de cada dominio se calculan
   con los ajustes de ahora, y todos regeneran (o recrean) la configuración de Caddy, así

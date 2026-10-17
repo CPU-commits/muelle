@@ -32,7 +32,8 @@ const FORGET_VALUES = { gcTime: 0 } as const
 
 /**
  * Agregar, editar, borrar o importar. El backend marca con cambios pendientes a la app (o
- * a todas las apps del stage): las queries de catalog que lo muestran se invalidan en F2.
+ * a todas las apps del stage): las queries de catalog que lo muestran las marca viejas el
+ * `EnvEditorViewModel` (data no importa otro módulo; la UI sí, por el barrel).
  */
 export function patchEnvMutation(client: QueryClient) {
 	return {

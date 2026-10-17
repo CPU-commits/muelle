@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { setQueryClientContext } from '@tanstack/svelte-query'
+	import { type QueryClient, setQueryClientContext } from '@tanstack/svelte-query'
 	import { createQueryClient } from '@/shared/data/query'
 	import { untrack } from 'svelte'
 	import type { EnvOwner } from '../../../../domain'
@@ -11,13 +11,15 @@
 	const props: {
 		owner: EnvOwner
 		overridden?: ReadonlySet<string>
+		/** El cache, si el test lo quiere mirar; si no, uno nuevo. */
+		client?: QueryClient
 		onReady: (vm: EnvEditorViewModel) => void
 	} = $props()
 
 	// `untrack`: las props se leen UNA vez, al montar, y es a propósito.
 	untrack(() => {
 		// Las mismas opciones que la app, sin reintentos.
-		setQueryClientContext(createQueryClient({ retry: false }))
+		setQueryClientContext(props.client ?? createQueryClient({ retry: false }))
 		const overridden = props.overridden
 		props.onReady(
 			new EnvEditorViewModel(() => props.owner, overridden ? () => overridden : undefined),

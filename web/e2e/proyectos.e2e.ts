@@ -92,3 +92,40 @@ test('Proyectos pide el estado una vez por app, y la de abajo recién cuando se 
 	await page.waitForTimeout(300)
 	for (const [path, count] of counts) expect(count, path).toBe(1)
 })
+
+test('una variable nueva deja la app con cambios sin desplegar, en el Resumen y en Proyectos', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await login(page)
+	const tabs = page.getByRole('navigation', { name: 'Secciones de la app' })
+
+	// nats de staging está al día: sin marca en Proyectos ni en su Resumen.
+	const nats = row(page, 'auditfy', 'staging', 'nats')
+	await expect(nats).toContainText('Corriendo')
+	await expect(nats).not.toContainText('Cambios pendientes')
+	await nats.click()
+	await expect(page.getByRole('heading', { name: 'nats', level: 1 })).toBeVisible()
+	await expect(page.getByRole('link', { name: 'Cambios sin desplegar' })).toHaveCount(0)
+
+	// Una variable nueva (el backend actualiza config_changed_at: §5.2 regla 4 del diseño).
+	await tabs.getByRole('link', { name: 'Variables' }).click()
+	await page.getByRole('textbox', { name: 'Clave' }).fill('NATS_DEBUG')
+	await page.getByRole('textbox', { name: 'Valor' }).fill('true')
+	await page.getByRole('button', { name: 'Agregar', exact: true }).click()
+	await expect(page.getByText('Hay cambios sin desplegar.')).toBeVisible()
+
+	// El Resumen ya lo sabe (el catálogo quedó viejo y se vuelve a pedir), con link a
+	// Configuración.
+	await tabs.getByRole('link', { name: 'Resumen' }).click()
+	const pending = page.getByRole('link', { name: 'Cambios sin desplegar' })
+	await expect(pending).toBeVisible()
+	await pending.click()
+	await expect(page).toHaveURL(/\/apps\/nats\/configuracion$/)
+
+	// Y Proyectos también.
+	await page.getByRole('link', { name: 'muelle, inicio' }).click()
+	await expect(nats).toContainText('Cambios pendientes')
+
+	expect(errors).toEqual([])
+})

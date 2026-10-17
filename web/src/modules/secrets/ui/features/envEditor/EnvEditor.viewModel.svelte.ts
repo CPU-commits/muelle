@@ -9,6 +9,7 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 import type { MenuEntry } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
 import { ValidationError } from '@/shared/domain'
+import { catalogKeys } from '@/modules/catalog'
 import { envQuery, patchEnvMutation } from '../../../data'
 import {
 	type EnvOwner,
@@ -517,6 +518,14 @@ export class EnvEditorViewModel {
 		]
 	}
 
+	// El backend deja con cambios pendientes a la app, o a todas las apps del stage (§5.2
+	// regla 4 del diseño): lo que el catálogo tiene en el cache (la marca de Proyectos, del
+	// Resumen y de Configuración) queda viejo. Se marca para que se pida al volver a
+	// mostrarse, no ahora: el árbol del breadcrumb, que está a la vista, no lo muestra.
+	#markCatalogStale(): void {
+		void this.#client.invalidateQueries({ queryKey: catalogKeys.all, refetchType: 'none' })
+	}
+
 	// Un PATCH a la vez. Con `current`, el caso de uso revisa los límites del dueño antes
 	// de mandar. Un error va al formulario o al diálogo si la acción lo sabe mostrar
 	// (`onError`); si no, a un toast. La mutación espera el refetch: comparar la
@@ -533,7 +542,10 @@ export class EnvEditorViewModel {
 		try {
 			await this.#patch.mutateAsync({ owner: this.owner, current: before, ...request })
 			const changed = this.#env.isError || !sameEnv(before, this.vars)
-			if (changed) this.savedChanges += 1
+			if (changed) {
+				this.savedChanges += 1
+				this.#markCatalogStale()
+			}
 			return changed ? 'changed' : 'unchanged'
 		} catch (error) {
 			const message = secretsErrorMessage(error, this.kind)

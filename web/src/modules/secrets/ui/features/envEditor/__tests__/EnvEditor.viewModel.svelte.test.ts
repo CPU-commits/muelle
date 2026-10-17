@@ -1,8 +1,11 @@
+import type { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
+import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toasts } from '@/shared/ui/stores'
 import { UnavailableError } from '@/shared/domain'
+import { appRefFrom, catalogKeys } from '@/modules/catalog'
 import type { EnvEditorViewModel } from '..'
 import {
 	appOwner,
@@ -56,11 +59,13 @@ function seedFake(): InMemoryEnvRepository {
 async function mount(
 	owner: EnvOwner = api,
 	overridden?: ReadonlySet<string>,
+	client?: QueryClient,
 ): Promise<EnvEditorViewModel> {
 	let vm: EnvEditorViewModel | undefined
 	await render(EditorHarness, {
 		owner,
 		...(overridden ? { overridden } : {}),
+		...(client ? { client } : {}),
 		onReady: (instance) => {
 			vm = instance
 		},
@@ -226,6 +231,62 @@ describe('EnvEditorViewModel', () => {
 				tone: 'error',
 				title: m.common_unavailable(),
 			})
+		})
+	})
+
+	// El backend deja con cambios pendientes a la app, o a todas las apps del stage (§5.2
+	// regla 4 del diseño): lo que el catálogo tiene en el cache (Proyectos, el Resumen,
+	// Configuración) queda viejo y se vuelve a pedir al abrirlo, no ahora.
+	describe('los cambios pendientes del catálogo', () => {
+		function seededClient(): QueryClient {
+			const client = createQueryClient({ retry: false })
+			client.setQueryData(catalogKeys.tree(), [])
+			client.setQueryData(catalogKeys.app(appRefFrom('auditfy', 'staging', 'api')), {})
+			return client
+		}
+
+		const invalidated = (client: QueryClient) =>
+			client
+				.getQueryCache()
+				.findAll({ queryKey: catalogKeys.all })
+				.map((query) => query.state.isInvalidated)
+
+		it('un cambio guardado deja viejo lo del catálogo, sin pedirlo otra vez', async () => {
+			const client = seededClient()
+			const vm = await mount(api, undefined, client)
+			vm.setNewKey('API_KEY')
+			vm.setNewValue('k-1')
+
+			await expect(vm.submitAdd()).resolves.toBe(true)
+
+			expect(invalidated(client)).toEqual([true, true])
+			// Nadie las mira: no se piden ahora (catalog no está mockeado y fallaría).
+			for (const query of client.getQueryCache().findAll({ queryKey: catalogKeys.all })) {
+				expect(query.state.fetchStatus).toBe('idle')
+			}
+		})
+
+		it('también desde el stage', async () => {
+			const client = seededClient()
+			const vm = await mount(stageOwner('auditfy', 'staging'), undefined, client)
+			vm.setNewKey('FEATURE_X')
+			vm.setNewValue('on')
+
+			await vm.submitAdd()
+
+			expect(invalidated(client)).toEqual([true, true])
+		})
+
+		it('un guardado que no cambió nada no toca el catálogo', async () => {
+			const client = seededClient()
+			const vm = await mount(api, undefined, client)
+			vm.openEdit(byKey(vm, 'JWT_SECRET'))
+			vm.setEditValue('jwt-viejo')
+
+			await vm.submitEdit()
+
+			expect(vm.savedChanges).toBe(0)
+			expect(invalidated(client)).toEqual([false, false])
 		})
 	})
 
