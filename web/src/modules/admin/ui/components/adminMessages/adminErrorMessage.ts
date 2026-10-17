@@ -31,7 +31,8 @@ export function adminErrorMessage(error: unknown): string {
 	if (error instanceof CloudflareUnavailable) return m.admin_cf_unavailable_title()
 	if (error instanceof RegistryExists) return m.admin_error_registry_exists()
 	if (error instanceof RegistryNotFound) return m.admin_error_registry_not_found()
-	// Lo común (sin red, fase pendiente, MUELLE_PANEL_ORIGIN mal, demasiados intentos…).
+	// Lo común (sin red, fase pendiente, una dirección que no es la del panel, demasiados
+	// intentos…).
 	return describeError(error)
 }
 

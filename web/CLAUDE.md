@@ -245,8 +245,10 @@ pnpm build        # el ./build que embebe el binario (sin MSW ni mockServiceWork
 
 Con el backend real: `MUELLE_PANEL_ORIGIN=http://localhost:5173 MUELLE_SECURE_COOKIES=false
 MUELLE_LISTEN=127.0.0.1:18080 … go run . serve` en la raíz y `pnpm dev` acá. El backend
-compara el `Origin` de cada escritura con `MUELLE_PANEL_ORIGIN`; el proxy de Vite lo deja
-pasar tal cual. `MUELLE_BACKEND_URL` cambia el destino del proxy.
+compara el `Origin` de cada escritura con los permitidos (contrato §0.1): sin
+`MUELLE_PANEL_DOMAIN` y con `localhost` (que no es un dominio) no hay dominio del panel, y el
+único que pasa es el de `MUELLE_PANEL_ORIGIN`. El proxy de Vite lo deja pasar tal cual.
+`MUELLE_BACKEND_URL` cambia el destino del proxy.
 
 Datos de `pnpm dev:mock` (`src/mocks/db/auth.ts`):
 
@@ -462,8 +464,8 @@ un `href` lo esperan **ya resuelto** con `resolve()`.
 Clases y helpers: `srOnly`, `textLink` (link dentro de un texto), `truncate`, `firstError`,
 `formatDate`, `formatDateTime`, `formatNumber`, `formatRelative`, `withQuery(href, query)` (ver
 [Convenciones](#convenciones)) y `describeError(error)`
-(el texto para el usuario de cualquier error de `@/shared/domain`: "revisa
-MUELLE_PANEL_ORIGIN", "Llega con la Fase 2", "No se pudo contactar a muelle", …; los errores
+(el texto para el usuario de cualquier error de `@/shared/domain`: "muelle no acepta cambios
+desde esta dirección", "Llega con la Fase 2", "No se pudo contactar a muelle", …; los errores
 propios de un módulo los traduce el módulo y caen acá para el resto).
 
 ### Paginación
@@ -498,9 +500,13 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
       El 422 `invalid` trae `"<campo>: <motivo>"`; sale como `ValidationError` con `field` y
       `message` = el motivo. El viewModel lo pone en el campo del formulario.
     - `phase`: ver abajo.
-    - Siempre, en cualquier endpoint: 403 `bad_origin` → `BadOriginError` (el panel no está
-      en `MUELLE_PANEL_ORIGIN`) y 400 `ambiguous_session` → `AmbiguousSessionError` (dos
-      cookies de sesión). `describeError` les da el texto que dice qué hacer.
+    - Siempre, en cualquier endpoint: 403 `bad_origin` → `BadOriginError` y 400
+      `ambiguous_session` → `AmbiguousSessionError` (dos cookies de sesión). `describeError`
+      les da el texto que dice qué hacer. `bad_origin` es una escritura desde una dirección
+      que no es la del panel (contrato §0.1): la de Ajustes, `https://<panel_domain>` con el
+      puerto HTTPS si no es 443, o `MUELLE_PANEL_ORIGIN` si alguien la puso a mano (detrás de
+      otro proxy, o en desarrollo). install ya no escribe `MUELLE_PANEL_ORIGIN`
+      (`MUELLE_PANEL_DOMAIN`, §5.2): el texto la nombra solo para el caso del otro proxy.
     - Sin mapa: 401 `UnauthorizedError`, 403 `ForbiddenError`, 404 `NotFoundError`,
       409 `ConflictError`, 423/429 `RateLimitedError`, 5xx, red y timeout `UnavailableError`,
       el resto `UnexpectedError`. Una respuesta con otra forma es `ContractError`

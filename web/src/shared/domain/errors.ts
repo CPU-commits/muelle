@@ -60,12 +60,14 @@ export class ConflictError extends DomainError {
 }
 
 /**
- * `bad_origin`: el backend rechazó una escritura porque el `Origin` no es el de
- * `MUELLE_PANEL_ORIGIN`. Es de configuración, no del usuario.
+ * `bad_origin`: el backend rechazó una escritura porque el `Origin` no es uno de los
+ * permitidos (contrato §0.1): el del panel según Ajustes (`https://<panel_domain>`, con el
+ * puerto HTTPS si no es 443) o `MUELLE_PANEL_ORIGIN`, si alguien la puso a mano (detrás de
+ * otro proxy, o en desarrollo). Es de dónde se entró, no del usuario.
  */
 export class BadOriginError extends ForbiddenError {
 	constructor(options?: ErrorOptions) {
-		super('El panel no está en el origen configurado (MUELLE_PANEL_ORIGIN)', options)
+		super('muelle no acepta escrituras desde este origen', options)
 		this.name = 'BadOriginError'
 	}
 }

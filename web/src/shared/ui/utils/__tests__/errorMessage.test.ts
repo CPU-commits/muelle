@@ -12,8 +12,20 @@ import { describeError } from '../errorMessage'
 describe('describeError', () => {
 	it('explica qué hacer con un origen o una sesión mal configurados', () => {
 		expect(describeError(new BadOriginError())).toBe(m.common_bad_origin())
-		expect(m.common_bad_origin()).toContain('MUELLE_PANEL_ORIGIN')
 		expect(describeError(new AmbiguousSessionError())).toBe(m.common_ambiguous_session())
+	})
+
+	it('con bad_origin dice por qué dirección entrar; MUELLE_PANEL_ORIGIN, solo detrás de otro proxy', () => {
+		// El origen permitido sale de Ajustes (contrato §0.1): install ya no escribe
+		// MUELLE_PANEL_ORIGIN, y pedir que se revise nombraría una variable que no está.
+		for (const locale of ['es', 'en'] as const) {
+			const text = m.common_bad_origin({}, { locale })
+			expect(text).not.toMatch(/(revisa|check) MUELLE_PANEL_ORIGIN/)
+			expect(text).toContain('https://')
+			expect(text).toMatch(
+				/otro proxy, esta dirección va en MUELLE_PANEL_ORIGIN|another proxy, this address goes in MUELLE_PANEL_ORIGIN/,
+			)
+		}
 	})
 
 	it('distingue una fase pendiente de un backend caído', () => {
