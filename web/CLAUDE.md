@@ -575,6 +575,12 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   `appStatusQuery` (5 s) y `deploysQuery` (10 s), el mismo del Resumen y Deploys, sin
   refrescos ni reintentos. Si la Fase 2 no está o falla, la fila dice "—" y la imagen es la
   del spec (o los servicios del compose).
+- **Pendiente:** el "Variables · N" de cada stage en Proyectos (el slot `stageVariablesCount`
+  de `ProjectsScreen` y la clave `catalog_stage_variables_count`) no está conectado. No hay
+  un endpoint que cuente las variables de un stage, y pedir `GET …/stages/{s}/env` por cada
+  stage traería al cache los valores de las que no son secretas solo para contarlas. Queda un
+  `TODO(stageVariablesCount)` en `(app)/+page.svelte`: se conecta cuando el backend dé el
+  número.
 - Dominios pide los destinos al catálogo: `appTargetsQuery(ref)` de `catalog` (un
   `servicio:puerto` por cada puerto que declara cada servicio, comparte el cache de
   `appQuery`).
