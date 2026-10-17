@@ -3,12 +3,18 @@ package usecases
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/CPU-commits/muelle/src/internal/ingress/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
+	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
+	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy"
+	"github.com/CPU-commits/muelle/src/internal/ingress/ingresstest"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
+	"github.com/CPU-commits/muelle/src/shared/domain/naming"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
 )
 
@@ -169,6 +175,38 @@ func TestRecreateRollbackAlsoFails(t *testing.T) {
 	}
 	if rb := f.state.LastPortsRollback(); rb == nil || rb.Restored != servingPorts {
 		t.Fatalf("ports_rollback: %+v", rb)
+	}
+}
+
+// Un stage cuya red se asegura mientras la vuelta atrás crea el muelle-caddy
+// con los puertos anteriores (el paso 4 de un deploy): el segundo Ensure usa
+// los stages de la primera lectura, así que, como Execute, Recreate vuelve a
+// leerlos después y lo conecta a la red que falta.
+func TestRecreateRollbackConnectsStageAddedWhileRecreating(t *testing.T) {
+	f, _ := servingFixture(t)
+	f.changePorts(t, 9080)
+	f.docker.BusyHostPort(9080)
+	ctx := context.Background()
+	eng := &hookEngine{Fake: f.docker}
+	f.ensure = f.newEnsure(caddy.NewRuntime(eng, testCaddyNames, f.slog))
+	networks := NewEnsureStageNetwork(outservice.NewDockerNetworks(f.docker), testCaddyNames.Container, f.slog)
+	web := naming.Network("web", "dev")
+	eng.beforeCreate = func() {
+		ingresstest.Stage(t, f.db, "web", "dev")
+		if err := networks.Execute(ctx, dto.StageRef{Project: "web", Stage: "dev"}); err != nil {
+			t.Errorf("EnsureStageNetwork: %v", err)
+		}
+	}
+
+	recreated, err := f.ensure.Recreate(ctx)
+	if !errors.Is(err, service.ErrPortInUse) || !recreated {
+		t.Fatalf("Recreate: %v %v", recreated, err)
+	}
+	if eng.beforeCreate != nil || f.state.LastPortsRollback() == nil {
+		t.Fatal("no volvió atrás creando muelle-caddy de nuevo")
+	}
+	if c := f.container(t); c.Ports[0].HostPort != 8080 || !slices.Contains(c.Networks, web) {
+		t.Fatalf("muelle-caddy con 8080 y conectado a %s: %+v", web, c)
 	}
 }
 

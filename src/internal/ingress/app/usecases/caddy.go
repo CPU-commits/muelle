@@ -90,7 +90,8 @@ func (u *EnsureCaddy) Execute(ctx context.Context) (recreated bool, err error) {
 //
 // Con Docker caído no vuelve atrás: no es culpa de los puertos, y el job lo
 // reintenta. Después de volver atrás devuelve recreated del segundo Ensure y
-// un error que envuelve el primero.
+// un error que envuelve el primero. Como Execute, si lo creó lo conecta a
+// las redes de los stages nuevos.
 func (u *EnsureCaddy) Recreate(ctx context.Context) (recreated bool, err error) {
 	return u.execute(ctx, true)
 }
@@ -158,7 +159,9 @@ func (u *EnsureCaddy) execute(ctx context.Context, rollback bool) (recreated boo
 }
 
 // rollback vuelve a los puertos con que servía muelle-caddy (prev) después
-// de que el Ensure con los de p falló con cause (Recreate).
+// de que el Ensure con los de p falló con cause (Recreate). Si el segundo
+// Ensure lo creó, lo conecta a las redes de los stages nuevos, como execute
+// (connectNewStages): la ventana es la misma.
 func (u *EnsureCaddy) rollback(ctx context.Context, p shared.ProxySettings, prev service.CaddyServing, want service.CaddyWant,
 	cause, failure error, host, password string) (bool, error) {
 	attempted := service.ProxyPorts{HTTPPort: p.HTTPPort, HTTPSPort: p.HTTPSPort}
@@ -200,6 +203,9 @@ func (u *EnsureCaddy) rollback(ctx context.Context, p shared.ProxySettings, prev
 	}
 	u.state.ContainerOK()
 	u.log.Info("ingress: muelle-caddy volvió a los puertos anteriores", "http", restored.HTTPPort, "https", restored.HTTPSPort)
+	if recreated {
+		u.connectNewStages(ctx, want.Networks)
+	}
 	return recreated, fmt.Errorf("ingress: muelle-caddy no arrancó con los puertos %d y %d, y volvió a %d y %d: %w",
 		attempted.HTTPPort, attempted.HTTPSPort, restored.HTTPPort, restored.HTTPSPort, failure)
 }
