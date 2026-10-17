@@ -199,6 +199,45 @@ test('Dominios: el aviso "proxy desincronizado" cuando Caddy no acepta la config
 	expect(problems).toEqual([])
 })
 
+test('Deploys: si Caddy no tomó las rutas, el deploy lo avisa con el motivo de GET /proxy', async ({
+	page,
+}) => {
+	test.setTimeout(60_000)
+	const problems = await watch(page)
+	await login(page)
+
+	// El mock: un hostname con `caddy-rechaza` deja a Caddy sin aceptar la configuración.
+	await page.goto(`${APP}/dominios`)
+	await page.getByRole('textbox', { name: 'Hostname' }).fill('caddy-rechaza.tudominio.cl')
+	await page.getByRole('button', { name: 'Agregar' }).click()
+	await expect(page.getByText('El proxy está desincronizado.')).toBeVisible()
+
+	// nats tiene un solo deploy, sin otro en curso: el nuevo corre enseguida (~10 s).
+	await page.goto('/projects/auditfy/stages/staging/apps/nats/deploys')
+	await page.getByRole('button', { name: 'Desplegar' }).click()
+	const dialog = page.getByRole('dialog', { name: 'Desplegar nats' })
+	await dialog.getByRole('button', { name: 'Desplegar' }).click()
+	await expect(dialog).toHaveCount(0)
+
+	// El paso 7 escribe la advertencia y el deploy trae `routes_warning`: el aviso sale de
+	// ahí, arriba del log, con el motivo (que el log no trae) y el link a Dominios.
+	const deploy = page.getByRole('region', { name: '#13', exact: true })
+	const log = deploy.getByRole('region', { name: 'Log del deploy #13' })
+	await expect(log.getByText(/advertencia: no se pudo actualizar Caddy/)).toBeVisible({
+		timeout: 30_000,
+	})
+	await expect(deploy.getByText('Caddy no tomó las rutas de este deploy.')).toBeVisible({
+		timeout: 15_000,
+	})
+	await expect(
+		deploy.getByText(/la ruta de caddy-rechaza\.tudominio\.cl no es válida/),
+	).toBeVisible()
+	await deploy.getByRole('link', { name: 'Ver dominios' }).click()
+	await expect(page).toHaveURL(/\/apps\/nats\/dominios$/)
+
+	expect(problems).toEqual([])
+})
+
 test('Dominios de una compose ofrece los servicios del catálogo con sus puertos', async ({
 	page,
 }) => {
