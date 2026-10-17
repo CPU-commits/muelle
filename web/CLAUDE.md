@@ -575,6 +575,9 @@ opcionales y que falten quiere decir "fase pendiente". Así están los campos de
 de `GET /settings` (en el contrato, §4, vienen siempre; opcionales solo por un backend de
 `main`, que tiene nada más que `require_2fa`) y los `services` de una app de catalog
 (§2.12, Fase 2: sin ellos, Dominios sugiere solo los destinos que ya usan sus dominios).
+Lo mismo con `requested_images` y `routes_warning` de un deploy (§2.1, revisión del
+2026-10-17): sin `requested_images` (`requestedImages: null`), lo fijado en un digest se
+deduce del historial como antes (`pinnedImages`); sin `routes_warning`, es `false`.
 También el `actor_name` de cada evento de `GET /audit` (§4.2): la Auditoría muestra el
 nombre que trae el evento (el username, el del token; `system` es "sistema"), copiado al
 escribirlo, así sigue aunque se borre el usuario o el token. Sin nombre (`""`: un evento de
@@ -614,9 +617,10 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   cambios pendientes al volver, sin esperar a que venza el cache. Un test de viewModel de
   esas pantallas mockea también `@/modules/catalog/container`.
 - Deploys pide el estado del proxy a `ingress` (`proxyQuery` y `proxyNotice` del barrel)
-  solo cuando el log del deploy elegido tiene la advertencia del paso 7 ("no se pudo
-  actualizar Caddy"): la línea no trae el error (contrato §2.11) y el motivo sale de
-  `GET /proxy`. Su test de viewModel mockea también `@/modules/ingress/container`.
+  solo cuando el deploy elegido trae `routes_warning` (el paso 7 no pudo actualizar Caddy,
+  contrato §2.1): la línea del log no trae el error (§2.11) y el motivo sale de
+  `GET /proxy`. Decide por el campo, nunca por el texto del log (que no es un contrato). Su
+  test de viewModel mockea también `@/modules/ingress/container`.
 - Variables (`secrets`), después de guardar un cambio de verdad, marca viejo todo
   `catalogKeys.all` con `refetchType: 'none'`: el backend dejó con cambios pendientes a la
   app o a todas las apps del stage (§5.2 regla 4 del diseño), y Proyectos, el Resumen y

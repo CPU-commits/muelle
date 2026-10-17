@@ -119,8 +119,10 @@ si no es de esa app.
 	"actor_type": "token",
 	"actor_id": 4,
 	"actor_name": "github-actions",
+	"requested_images": { "api": "ghcr.io/aumi-app/backend-app:sha-3f9c2e1" },
 	"error": null,
 	"superseded_by": null,
+	"routes_warning": false,
 	"created_at": "2026-10-10T14:19:49.12Z",
 	"started_at": "2026-10-10T14:19:49.3Z",
 	"finished_at": "2026-10-10T14:20:41.002Z"
@@ -131,10 +133,12 @@ si no es de esa app.
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `status`                      | `queued` · `running` · `succeeded` · `failed` · `superseded` (los tres últimos, finales)                                                                    |
 | `images`                      | **En cola:** los overrides del cuerpo (`{}` si no hubo); en un rollback, las del deploy al que vuelve. **Desde que se resolvieron:** todos, con `@sha256:…` |
+| `requested_images`            | La ref **pedida** de cada servicio: con digest solo si se fijó (ver "Qué imagen sale sin override"). `{}` hasta resolver                                    |
 | `actor_name`                  | Una copia del username o del nombre del token al crear el deploy: **nunca null** (puede ser `""`)                                                           |
 | `actor_id?`                   | El id del usuario o del token. El panel no lo usa                                                                                                           |
 | `error?`                      | Por qué falló, en una línea ya enmascarada (el panel la muestra arriba del log)                                                                             |
 | `superseded_by?`              | El deploy que lo dejó `superseded`: el historial dice "Reemplazado por #145"                                                                                |
+| `routes_warning`              | El paso 7 no pudo actualizar las rutas de Caddy (ver `GET …/log`). `false` antes del paso 7                                                                 |
 | `started_at?`, `finished_at?` | La duración que muestra el panel es `finished_at − started_at`. Un `superseded` tiene `finished_at` y no `started_at`                                       |
 
 El deploy "actual" es el `succeeded` más reciente; el rollback va al `succeeded` anterior.
@@ -180,13 +184,16 @@ Al encolar, los deploys `queued` de la misma app pasan a `superseded` con `super
 **Qué imagen sale sin override** (contrato §2.2): la ref **pedida** del deploy actual, tal
 cual. Un tag se vuelve a resolver y un digest queda fijo, así que **un rollback no se
 deshace con el próximo deploy sin cuerpo**: repite sus refs con digest, y el que sigue
-también. Por eso el diálogo de "Desplegar" avisa qué sigue fijado por el último rollback
-(`rollbackPin` de `domain/entities/deploy.ts`) y que para volver a seguir un tag hay que
-escribir la imagen (o cambiarla en la configuración). El backend no expone la ref pedida
-(`requested_images`), así que el panel la deduce: un servicio sigue fijado si en el deploy
-actual tiene la misma imagen (ref y digest) que en el último rollback `succeeded`. Se
-equivoca solo si un override pide el mismo tag y resuelve al mismo digest (avisa de más), o
-si el rollback ya salió del historial (no avisa).
+también. Por eso el diálogo de "Desplegar" avisa qué deja fijo en un digest el deploy actual
+(`pinnedImages` de `domain/entities/deploy.ts`) y que para volver a seguir un tag hay que
+escribir la imagen (o cambiarla en la configuración). Sale de `requested_images` del deploy
+actual: un servicio está fijo si su ref pedida trae `@sha256:`. Nombra el rollback ("fijada
+por el rollback #144") solo si sigue en el historial y su imagen es la fijada; si salió del
+historial, o lo fijó un override o la configuración, dice que está fijada en un digest. Con
+un backend sin `requested_images` (uno de antes del cambio) lo deduce como antes: un
+servicio sigue fijado si en el deploy actual tiene la misma imagen (ref y digest) que en el
+último rollback `succeeded`, lo que avisa de más si un override vuelve al mismo digest y no
+avisa si el rollback ya salió del historial.
 
 `409 conflict`: la app se está borrando (el `DELETE` de la app frena sus deploys hasta 2
 min). El diálogo lo dice en su banner. El orden de los errores es `404` (la app), `400` (el
@@ -231,10 +238,13 @@ El polling: lo usa el panel para un deploy terminado y como respaldo cuando el S
   advertencia
   `advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)`:
   sin el error, porque el log lo lee un token del proyecto y el mensaje de Caddy puede
-  nombrar hosts de otros proyectos (contrato §2.11). Cuando Deploys ve esa línea
-  (`hasProxySyncWarning`, que la pinta en ámbar), pide `GET /proxy` (`proxyQuery` del barrel
-  de `ingress`, solo con sesión) y muestra arriba del log el `error` y un link a Dominios, o
-  que el proxy ya se sincronizó.
+  nombrar hosts de otros proyectos (contrato §2.11). El deploy lo trae como dato,
+  `routes_warning: true` (se marca antes de escribir la línea). Deploys decide por ese campo,
+  no por el texto (que no es un contrato, y una tarea de la app puede escribir lo mismo): con
+  él pide `GET /proxy` (`proxyQuery` del barrel de `ingress`, solo con sesión) y muestra
+  arriba del log el `error` y un link a Dominios, o que el proxy ya se sincronizó. Uno que se
+  sigue en vivo lo muestra al terminar, cuando se refresca el historial. La línea se pinta
+  en ámbar como cualquier `advertencia`. Sin el campo (un backend de antes), no avisa.
 
 ## `GET {app}/deploys/{id}/log/stream` → `text/event-stream`
 
@@ -361,8 +371,12 @@ que pasa `queued → running → succeeded` en ~10 s.
   healthcheck; con `missing`, por imagen inexistente.
 - Desplegar dos veces seguidas deja el primero `superseded` (con `superseded_by`).
 - Si Caddy no acepta la configuración cuando se crea el deploy (`GET /proxy` en
-  `out_of_sync`: un dominio con `caddy-rechaza`), el paso 7 es la advertencia, y el deploy
-  termina bien igual.
+  `out_of_sync`: un dominio con `caddy-rechaza`), el paso 7 es la advertencia, el deploy
+  queda con `routes_warning: true` desde ese paso y termina bien igual.
+- `requested_images` sigue al contrato: `{}` hasta resolver; un rollback pide las refs del
+  anterior con digest, un deploy sin cuerpo repite la ref pedida del actual (con su digest),
+  y un override con digest queda fijo en ese digest. El rollback #139 del historial sembrado
+  está fijado; los demás siguen un tag.
 - El tipo y los servicios salen del catálogo (`db/catalog.ts`, `catalogDb.configured`),
   como en el backend: `image` solo en una app de formulario (en una compose,
   `422 image: una app compose recibe images, por servicio`) e `images.<servicio>` solo con
@@ -384,7 +398,8 @@ que pasa `queued → running → succeeded` en ~10 s.
 
 ## Diferencias con el contrato
 
-Ninguna: lo de arriba es lo que dice el contrato (`since` ya está en §2.9). Lo único que el
-panel deduce es `rollbackPin`, porque el deploy de §2.1 no trae la ref pedida
-(`requested_images`, ver "Qué imagen sale sin override"). Se propuso sumarla a §2.1 (o un
-`pinned` por servicio); hasta que esté en el contrato, el panel no la lee.
+Ninguna: lo de arriba es lo que dice el contrato (`since` ya está en §2.9;
+`requested_images` y `routes_warning` en §2.1, desde la revisión del 2026-10-17, §7). Los
+dos son opcionales en el DTO solo por un backend de antes del cambio: sin
+`requested_images`, `pinnedImages` deduce lo fijado del historial; sin `routes_warning`,
+Deploys no avisa de la advertencia del paso 7.
