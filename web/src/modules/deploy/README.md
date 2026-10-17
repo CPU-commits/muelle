@@ -227,10 +227,11 @@ El polling: lo usa el panel para un deploy terminado y como respaldo cuando el S
   debería pasar; si pasa, vuelve a leer el log desde 0 (una vez) y descarta lo que tenía.
 - El panel pide de nuevo enseguida si vino un chunk, y cada 1 s si no. Termina cuando
   `status` es final y `chunk` viene vacío.
-- El paso 7 es `rutas de Caddy actualizadas` o, si Caddy no tomó la configuración,
-  `advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET
-/api/v1/proxy)`: sin el error, porque el log lo lee un token del proyecto y el mensaje de
-  Caddy puede nombrar hosts de otros proyectos (contrato §2.11). Cuando Deploys ve esa línea
+- El paso 7 es `rutas de Caddy actualizadas` o, si Caddy no tomó la configuración, la
+  advertencia
+  `advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)`:
+  sin el error, porque el log lo lee un token del proyecto y el mensaje de Caddy puede
+  nombrar hosts de otros proyectos (contrato §2.11). Cuando Deploys ve esa línea
   (`hasProxySyncWarning`, que la pinta en ámbar), pide `GET /proxy` (`proxyQuery` del barrel
   de `ingress`, solo con sesión) y muestra arriba del log el `error` y un link a Dominios, o
   que el proxy ya se sincronizó.
@@ -352,10 +353,9 @@ logfmt o `level`/`severity` de un JSON).
 Siguen el contrato (offsets en bytes, chunks de hasta 64 KiB, `status` al conectar solo si
 no terminó, `: ping`, `end`, los `422` de la query de los logs en el orden del backend —
 `service`, `tail`, `since`, `follow`— antes del `404` del servicio, la retención de 22). Los
-deploys se calculan
-con la hora, así el polling y el SSE ven lo mismo y un F5 no los pierde. La primera vez que
-se abre una app se siembra el historial del diseño (#139–#143) y un #144 que pasa
-`queued → running → succeeded` en ~10 s.
+deploys se calculan con la hora, así el polling y el SSE ven lo mismo y un F5 no los pierde.
+La primera vez que se abre una app se siembra el historial del diseño (#139–#143) y un #144
+que pasa `queued → running → succeeded` en ~10 s.
 
 - "Desplegar" con una imagen que contenga `fail` o `broken` termina `failed` por
   healthcheck; con `missing`, por imagen inexistente.
@@ -366,8 +366,9 @@ se abre una app se siembra el historial del diseño (#139–#143) y un #144 que 
 - El tipo y los servicios salen del catálogo (`db/catalog.ts`, `catalogDb.configured`),
   como en el backend: `image` solo en una app de formulario (en una compose,
   `422 image: una app compose recibe images, por servicio`) e `images.<servicio>` solo con
-  un servicio de la configuración de ahora (`422 images.<s>: el servicio no existe en la
-app`), aunque la app no se haya desplegado nunca.
+  un servicio de la configuración de ahora
+  (`422 images.<s>: el servicio no existe en la app`), aunque la app no se haya desplegado
+  nunca.
 - Sin override, cada servicio de la configuración repite la ref del deploy actual, salvo
   que la de la configuración cambió desde ese deploy, y uno que el deploy actual no tiene
   (primer deploy, servicio nuevo del compose) usa la de la configuración (§2.2).
