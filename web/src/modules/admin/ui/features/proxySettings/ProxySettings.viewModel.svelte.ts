@@ -406,14 +406,17 @@ export class ProxySettingsViewModel {
 		if (this.#ports.isPending) return
 		this.portsError = null
 		const before = this.proxy
-		this.#watchingProxy = false
-		this.#watchExpired = false
-		this.#leaving = false
 		try {
 			const settings = await this.#ports.mutateAsync({
 				http: this.httpPort,
 				https: this.httpsPort,
 			})
+			// Lo que se seguía es del cambio anterior. Solo se deja ahora: un `PATCH` que falla
+			// no guardó nada (o no salió, si esta dirección ya no acepta escrituras) y el cambio
+			// anterior sigue en curso, con su vuelta atrás si muelle-caddy no arranca.
+			this.#watchingProxy = false
+			this.#watchExpired = false
+			this.#leaving = false
 			if (settings.proxy) {
 				this.#loadPorts(settings.proxy)
 				const moved = this.#movedTo(settings.proxy, before)

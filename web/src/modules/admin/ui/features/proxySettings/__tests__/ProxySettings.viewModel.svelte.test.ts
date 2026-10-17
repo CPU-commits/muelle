@@ -573,6 +573,27 @@ describe('ProxySettingsViewModel', () => {
 		await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'done' }))
 	})
 
+	it('si otro cambio de puertos falla, no guardó nada: se sigue el anterior', async () => {
+		ingress.getProxyStatus.mockResolvedValue(proxyStatus({ status: 'recreating' }))
+		const vm = await mountViewModel()
+		vm.setField('httpPort', '8080')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+		expect(vm.recreation).toEqual({ kind: 'recreating' })
+
+		vm.setField('httpPort', '8088')
+		mocks.updateProxyPorts.mockRejectedValueOnce(new UnavailableError('caído'))
+		vm.askSavePorts()
+		await vm.savePorts()
+		expect(vm.portsError).toBe(m.common_unavailable())
+		expect(vm.recreation).toEqual({ kind: 'recreating' })
+
+		ingress.getProxyStatus.mockResolvedValue(proxyStatus())
+		await client.refetchQueries({ queryKey: ingressKeys.proxy })
+		await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'done' }))
+	})
+
 	it('si GET /proxy falla mientras muelle-caddy se recrea, sigue diciendo que se recrea', async () => {
 		ingress.getProxyStatus.mockResolvedValue(proxyStatus({ status: 'recreating' }))
 		const vm = await mountViewModel()
@@ -775,6 +796,34 @@ describe('ProxySettingsViewModel', () => {
 			expect(vm.movedTo).toBeNull()
 			// Ya está acá: no hay a dónde volver.
 			expect(vm.rollbackHref).toBeNull()
+			const sent = vi
+				.spyOn(globalThis, 'fetch')
+				.mockResolvedValue(new Response(null, { status: 204 }))
+			await expect(http.post('/projects')).resolves.toBeNull()
+			expect(sent).toHaveBeenCalledOnce()
+		})
+
+		it('entrando por la dirección de Caddy, otro cambio de puertos no sale y no corta el seguimiento', async () => {
+			page.origin = 'https://panel.tudominio.cl'
+			const vm = await mountViewModel()
+			await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+			ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
+			await saveHttps(vm)
+
+			// Se intenta cambiar los puertos otra vez desde acá: el cliente no lo manda.
+			vm.setField('httpsPort', '9000')
+			const moved = new PanelMovedError('https://panel.tudominio.cl:8443')
+			mocks.updateProxyPorts.mockRejectedValueOnce(moved)
+			vm.askSavePorts()
+			await vm.savePorts()
+			expect(vm.portsError).toBe(m.common_panel_moved({ origin: moved.origin }))
+
+			// muelle volvió a los puertos anteriores: el seguimiento lo ve, y queda todo como antes.
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			await client.refetchQueries({ queryKey: ingressKeys.proxy })
+			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
+			expect(vm.movedTo).toBeNull()
+			expect([vm.httpPort, vm.httpsPort]).toEqual(['80', '443'])
 			const sent = vi
 				.spyOn(globalThis, 'fetch')
 				.mockResolvedValue(new Response(null, { status: 204 }))
