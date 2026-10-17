@@ -23,6 +23,11 @@ const (
 	listeningLine = `{"time":"2026-10-15T12:00:01Z","level":"INFO","msg":"muelle escuchando","event":"listening","addr":"[::]:8080"}`
 )
 
+// listeningPanelLine es listeningLine con el origen del panel.
+func listeningPanelLine(panel string) string {
+	return `{"time":"2026-10-15T12:00:01Z","level":"INFO","msg":"muelle escuchando","event":"listening","addr":"[::]:8080","panel":"` + panel + `"}`
+}
+
 func setupLine(url string) string {
 	return `{"time":"2026-10-15T12:00:00Z","level":"INFO","msg":"todavía no hay usuarios","event":"setup_url","url":"` + url + `"}`
 }
@@ -62,8 +67,8 @@ func later(t *testing.T, d time.Duration, fn func()) {
 func wait(t *testing.T, e docker.Services, timeout time.Duration) (string, bool, string, error) {
 	t.Helper()
 	var stderr bytes.Buffer
-	url, users, err := waitSetup(context.Background(), e, svcName, timeout, testPoll, &stderr)
-	return url, users, stderr.String(), err
+	res, err := waitSetup(context.Background(), e, svcName, timeout, testPoll, &stderr)
+	return res.URL, res.HasUsers, stderr.String(), err
 }
 
 func TestWaitSetupURL(t *testing.T) {
@@ -122,6 +127,17 @@ func TestWaitSetupURLHasUsers(t *testing.T) {
 	url, users, _, err := wait(t, f, 2*time.Second)
 	if err != nil || !users || url != "" {
 		t.Fatalf("url=%q users=%v err=%v", url, users, err)
+	}
+}
+
+// listening trae el origen del panel (panel) de la tarea actual: install lo
+// usa para decir dónde entrar si ya hay usuarios.
+func TestWaitSetupPanelOrigin(t *testing.T) {
+	f := newSetupFake(running("t1", 0))
+	f.AppendTaskLogs("t1", lines(listeningPanelLine("https://panel.example.com:9443"))...)
+	res, err := waitSetup(context.Background(), f, svcName, 2*time.Second, testPoll, io.Discard)
+	if err != nil || !res.HasUsers || res.Panel != "https://panel.example.com:9443" {
+		t.Fatalf("res=%+v err=%v", res, err)
 	}
 }
 
@@ -294,7 +310,7 @@ func TestWaitSetupURLCanceled(t *testing.T) {
 	f := newSetupFake(running("t1", 0))
 	ctx, cancel := context.WithCancel(context.Background())
 	later(t, 50*time.Millisecond, cancel)
-	_, _, err := waitSetup(ctx, f, svcName, 2*time.Second, testPoll, io.Discard)
+	_, err := waitSetup(ctx, f, svcName, 2*time.Second, testPoll, io.Discard)
 	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrSetupTimeout) {
 		t.Fatalf("err=%v", err)
 	}

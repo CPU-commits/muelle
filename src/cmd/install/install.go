@@ -731,14 +731,16 @@ func (in *installer) finish(ctx context.Context, key string) error {
 		fmt.Fprintf(out, "Clave maestra de muelle. Guárdala en un lugar seguro: no se vuelve a mostrar, y sin ella no se pueden descifrar los secretos ni los backups:\n\n    %s\n\n", key)
 	}
 	in.logf("esperando a que muelle arranque (hasta %s)…", in.c.SetupTimeout)
-	url, hasUsers, err := waitSetup(ctx, in.d, in.names.Service, in.c.SetupTimeout, in.c.Poll, in.c.Stderr)
+	res, err := waitSetup(ctx, in.d, in.names.Service, in.c.SetupTimeout, in.c.Poll, in.c.Stderr)
 	if err != nil {
 		return err
 	}
-	if hasUsers {
-		fmt.Fprintf(out, "muelle ya tiene usuarios: entra al panel en %s\n", panelOrigin(in.o))
+	if res.HasUsers {
+		// El origen que dice muelle sale de sus ajustes: con una base que ya
+		// tenía usuarios (--reinstall), --https-port no se aplicó.
+		fmt.Fprintf(out, "muelle ya tiene usuarios: entra al panel en %s\n", cmp.Or(res.Panel, panelOrigin(in.o)))
 		return nil
 	}
-	fmt.Fprintf(out, "Abre este link para crear el primer usuario (es de un solo uso y vence en 24 h):\n\n    %s\n", url)
+	fmt.Fprintf(out, "Abre este link para crear el primer usuario (es de un solo uso y vence en 24 h):\n\n    %s\n", res.URL)
 	return nil
 }

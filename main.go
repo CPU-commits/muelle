@@ -243,8 +243,9 @@ func serve(log *slog.Logger) error {
 	}()
 
 	errc := make(chan error, 1)
+	panel := c.PanelOrigin(ctx)
 	go func() {
-		logListening(log, ln.Addr().String())
+		logListening(log, ln.Addr().String(), panel)
 		errc <- srv.Serve(ln)
 	}()
 	select {
@@ -288,9 +289,15 @@ func logSetupURL(log *slog.Logger, origin, token string) error {
 
 // logListening deja en el log que serve empezó a atender, con
 // event=listening: install la espera después del setup_url (contrato
-// §5.4). El mensaje se puede cambiar; event no.
-func logListening(log *slog.Logger, addr string) {
-	log.Info("muelle escuchando", "event", "listening", "addr", addr)
+// §5.4). Lleva el origen del panel (panel, si hay uno): con usuarios, install
+// dice que se entre ahí, que sale de los ajustes y no de sus flags. El
+// mensaje se puede cambiar; event y panel no.
+func logListening(log *slog.Logger, addr, panel string) {
+	attrs := []any{"event", "listening", "addr", addr}
+	if panel != "" {
+		attrs = append(attrs, "panel", panel)
+	}
+	log.Info("muelle escuchando", attrs...)
 }
 
 // newHTTPServer arma el servidor HTTP con los plazos de muelle. En producción

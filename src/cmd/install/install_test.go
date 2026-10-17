@@ -795,6 +795,21 @@ func TestRunHasUsers(t *testing.T) {
 	}
 }
 
+// Con usuarios (por ejemplo, con --reinstall), el origen del panel es el
+// que dice muelle en listening, que sale de sus ajustes: --https-port solo
+// vale en el primer arranque de la base.
+func TestRunHasUsersPanelFromMuelle(t *testing.T) {
+	h := newInstall(t)
+	h.o.HTTPSPort = 8443
+	muelleStarts(h.f, muelleNames, listeningPanelLine("https://panel.example.com"))
+	if err := h.run(); err != nil {
+		t.Fatal(err)
+	}
+	if out := h.stdout.String(); !strings.Contains(out, "entra al panel en https://panel.example.com\n") {
+		t.Fatalf("stdout=%s", out)
+	}
+}
+
 func TestRunNamePrefix(t *testing.T) {
 	h := newInstall(t)
 	h.o.NamePrefix = "it5abc"

@@ -304,12 +304,19 @@ func TestRunInstallUsage(t *testing.T) {
 }
 
 // La línea de "muelle escuchando" lleva event=listening: install la espera
-// después del setup_url (contrato §5.4).
+// después del setup_url (contrato §5.4). Lleva también el origen del panel
+// (panel), con el que install dice dónde entrar si ya hay usuarios; sin
+// origen, no va.
 func TestLogListening(t *testing.T) {
 	var out bytes.Buffer
-	logListening(slog.New(slog.NewJSONHandler(&out, nil)), "[::]:8080")
+	logListening(slog.New(slog.NewJSONHandler(&out, nil)), "[::]:8080", "https://panel.example.com:9443")
 	m := lastLogLine(t, out.String())
-	if m["level"] != "INFO" || m["event"] != "listening" || m["addr"] != "[::]:8080" {
+	if m["level"] != "INFO" || m["event"] != "listening" || m["addr"] != "[::]:8080" || m["panel"] != "https://panel.example.com:9443" {
 		t.Fatalf("log=%v", m)
+	}
+	out.Reset()
+	logListening(slog.New(slog.NewJSONHandler(&out, nil)), "[::]:8080", "")
+	if m := lastLogLine(t, out.String()); m["event"] != "listening" || m["panel"] != nil {
+		t.Fatalf("sin origen: log=%v", m)
 	}
 }

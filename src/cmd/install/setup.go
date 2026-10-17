@@ -17,7 +17,8 @@ import (
 var ErrSetupTimeout = errors.New("muelle no mostró el link de setup a tiempo")
 
 // Los eventos del log de muelle que lee install (main.go: logSetupURL y
-// logListening). El mensaje de esas líneas puede cambiar; event y url no.
+// logListening). El mensaje de esas líneas puede cambiar; event, url y panel
+// no.
 const (
 	eventSetupURL  = "setup_url"
 	eventListening = "listening"
@@ -43,16 +44,25 @@ type setupWait struct {
 	errLines map[string]bool // las líneas ERROR escritas, por tarea y texto
 }
 
+// setupResult es lo que install lee del arranque de muelle: el último
+// setup_url de la tarea actual (URL), o HasUsers si no hubo ninguno, y el
+// origen del panel que dice listening (Panel; "" con un muelle que no lo
+// escribe).
+type setupResult struct {
+	URL, Panel string
+	HasUsers   bool
+}
+
 // waitSetup sigue el log de la tarea actual del servicio (la running más
 // nueva) hasta "event":"listening". Devuelve el último setup_url de esa
-// tarea, o hasUsers si no hubo ninguno. Si la tarea actual cambia, cierra el
+// tarea, o HasUsers si no hubo ninguno, y el origen del panel. Si la tarea actual cambia, cierra el
 // stream y lee la nueva desde el principio; si el stream se corta antes de
 // listening, vuelve a leer la misma desde el principio. Mientras no hay una tarea
 // corriendo, muestra en stderr por qué: el estado y el Err de la tarea más
 // nueva, y las líneas ERROR de su log si ya terminó. Las líneas de nivel
 // ERROR de cualquier tarea van a stderr, una vez cada una (contrato §5.4,
 // "El link de setup").
-func waitSetup(ctx context.Context, e docker.Services, service string, timeout, poll time.Duration, stderr io.Writer) (setupURL string, hasUsers bool, err error) {
+func waitSetup(ctx context.Context, e docker.Services, service string, timeout, poll time.Duration, stderr io.Writer) (setupResult, error) {
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -64,8 +74,8 @@ func waitSetup(ctx context.Context, e docker.Services, service string, timeout, 
 		// no muestra, Docker que no responde un momento) se reintenta.
 		if tasks, err := e.ListTasks(ctx, docker.TaskFilter{Service: service}); err == nil {
 			if cur, ok := currentTask(tasks); ok {
-				if url, users, done := w.follow(ctx, cur.ID); done {
-					return url, users, nil
+				if res, done := w.follow(ctx, cur.ID); done {
+					return res, nil
 				}
 			} else if len(tasks) > 0 {
 				w.explain(ctx, tasks[0])
@@ -80,9 +90,9 @@ func waitSetup(ctx context.Context, e docker.Services, service string, timeout, 
 		}
 	}
 	if err := parent.Err(); err != nil {
-		return "", false, err // Ctrl-C: no es el plazo
+		return setupResult{}, err // Ctrl-C: no es el plazo
 	}
-	return "", false, fmt.Errorf("%w: revisa docker service logs %s y docker service ps --no-trunc %s (muestra el error entero de cada tarea)",
+	return setupResult{}, fmt.Errorf("%w: revisa docker service logs %s y docker service ps --no-trunc %s (muestra el error entero de cada tarea)",
 		ErrSetupTimeout, service, service)
 }
 
@@ -101,12 +111,12 @@ func currentTask(tasks []docker.Task) (docker.Task, bool) {
 // listening (done). Una goroutine cierra el stream si la tarea actual
 // cambia; si el stream termina antes de listening, done es false y el bucle
 // de waitSetup decide qué leer.
-func (w *setupWait) follow(ctx context.Context, taskID string) (setupURL string, hasUsers bool, done bool) {
+func (w *setupWait) follow(ctx context.Context, taskID string) (res setupResult, done bool) {
 	ctx, cancel := context.WithCancel(ctx)
 	stream, err := w.e.TaskLogs(ctx, taskID, docker.LogOptions{Tail: -1, Follow: true})
 	if err != nil {
 		cancel()
-		return "", false, false
+		return setupResult{}, false
 	}
 	watched := make(chan struct{})
 	go func() {
@@ -121,7 +131,7 @@ func (w *setupWait) follow(ctx context.Context, taskID string) (setupURL string,
 	for {
 		line, err := stream.Next()
 		if err != nil {
-			return "", false, false
+			return setupResult{}, false
 		}
 		ev, ok := decodeLogLine(line.Text)
 		if !ok {
@@ -133,10 +143,11 @@ func (w *setupWait) follow(ctx context.Context, taskID string) (setupURL string,
 		switch ev.event {
 		case eventSetupURL:
 			if ev.url != "" {
-				setupURL = ev.url
+				res.URL = ev.url
 			}
 		case eventListening:
-			return setupURL, setupURL == "", true
+			res.Panel, res.HasUsers = ev.panel, res.URL == ""
+			return res, true
 		}
 	}
 }
@@ -217,7 +228,7 @@ func (w *setupWait) showError(taskID, raw string, ev logEvent) {
 
 // logEvent son los campos que install lee de una línea JSON del log de muelle.
 type logEvent struct {
-	level, msg, err, event, url string
+	level, msg, err, event, url, panel string
 }
 
 func decodeLogLine(text string) (logEvent, bool) {
@@ -233,5 +244,6 @@ func decodeLogLine(text string) (logEvent, bool) {
 		s, _ := m[k].(string)
 		return s
 	}
-	return logEvent{level: str("level"), msg: str("msg"), err: str("err"), event: str("event"), url: str("url")}, true
+	return logEvent{level: str("level"), msg: str("msg"), err: str("err"), event: str("event"), url: str("url"),
+		panel: str("panel")}, true
 }
