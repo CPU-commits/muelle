@@ -581,8 +581,11 @@ desconocidos): mientras no existan, no se mandan.
   (contra esos valida el backend). Si el catálogo no carga, salen de Swarm, como antes.
   Resumen también saca de ahí "Cambios sin desplegar" (con link a Configuración) y el
   healthcheck del spec, y vuelve a pedir la app una vez cuando el deploy actual es más nuevo
-  que su `last_deployed_at` (un deploy exitoso lo adelanta en la misma transacción). Un
-  test de viewModel de esas pantallas mockea también `@/modules/catalog/container`.
+  que su `last_deployed_at` (un deploy exitoso lo adelanta en la misma transacción). Deploys,
+  cuando un deploy que sigue en vivo termina `succeeded`, marca viejos el árbol y la app en
+  el cache del catálogo (`refetchType: 'none'`): Proyectos y el Resumen dejan de mostrar los
+  cambios pendientes al volver, sin esperar a que venza el cache. Un test de viewModel de
+  esas pantallas mockea también `@/modules/catalog/container`.
 - Variables (`secrets`), después de guardar un cambio de verdad, marca viejo todo
   `catalogKeys.all` con `refetchType: 'none'`: el backend dejó con cambios pendientes a la
   app o a todas las apps del stage (§5.2 regla 4 del diseño), y Proyectos, el Resumen y

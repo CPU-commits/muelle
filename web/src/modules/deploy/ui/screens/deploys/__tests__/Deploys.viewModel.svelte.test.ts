@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { UnavailableError } from '@/shared/domain'
+import { appRefFrom, catalogKeys } from '@/modules/catalog'
 import {
 	asDeployId,
 	asLogOffset,
@@ -9,7 +10,7 @@ import {
 	type FollowDeployLogInput,
 } from '../../../../domain'
 import { makeDeploy, makeStatus } from '../../../../domain/repositories/__fakes__/deployFixtures'
-import { mountViewModel } from '../../../__tests__/mountViewModel'
+import { mountViewModel, testClient } from '../../../__tests__/mountViewModel'
 import { DeploysViewModel } from '../Deploys.viewModel.svelte.ts'
 
 const mocks = vi.hoisted(() => ({
@@ -274,6 +275,48 @@ describe('DeploysViewModel', () => {
 		await vi.waitFor(() =>
 			expect(vm.announcement).toBe(m.deploy_announce_succeeded({ id: 144 })),
 		)
+	})
+
+	// Un deploy exitoso adelanta `last_deployed_at` (diseño §7 paso 8): lo que el catálogo
+	// tiene en el cache (la marca "Cambios pendientes" de Proyectos, la del Resumen) queda
+	// viejo y se vuelve a pedir al mostrarse.
+	it('un deploy seguido en vivo que termina bien deja viejo lo del catálogo de esa app', async () => {
+		mocks.followDeployLog.mockImplementation(
+			scripted([
+				{ kind: 'status', status: 'running' },
+				{ kind: 'status', status: 'succeeded' },
+			]),
+		)
+		const client = testClient()
+		const other = catalogKeys.app(appRefFrom('auditfy', 'staging', 'nats'))
+		client.setQueryData(catalogKeys.tree(), [])
+		client.setQueryData(other, {})
+		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS), client)
+
+		await vi.waitFor(() => expect(vm.liveStatus).toBe('succeeded'))
+		await vi.waitFor(() =>
+			expect(client.getQueryState(catalogKeys.tree())?.isInvalidated).toBe(true),
+		)
+		expect(
+			client.getQueryState(catalogKeys.app(appRefFrom('auditfy', 'staging', 'api')))
+				?.isInvalidated,
+		).toBe(true)
+		expect(client.getQueryState(other)?.isInvalidated).toBe(false)
+	})
+
+	it('uno que falla no toca el catálogo', async () => {
+		mocks.followDeployLog.mockImplementation(
+			scripted([
+				{ kind: 'status', status: 'running' },
+				{ kind: 'status', status: 'failed' },
+			]),
+		)
+		const client = testClient()
+		client.setQueryData(catalogKeys.tree(), [])
+		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS), client)
+
+		await vi.waitFor(() => expect(vm.liveStatus).toBe('failed'))
+		expect(client.getQueryState(catalogKeys.tree())?.isInvalidated).toBe(false)
 	})
 
 	it('los chunks que llegan juntos se pintan en un solo frame', async () => {

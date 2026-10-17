@@ -129,3 +129,34 @@ test('una variable nueva deja la app con cambios sin desplegar, en el Resumen y 
 
 	expect(errors).toEqual([])
 })
+
+test('un deploy que termina bien quita la marca de cambios pendientes en Proyectos', async ({
+	page,
+}) => {
+	test.slow()
+	const errors = watchErrors(page)
+	await login(page)
+
+	// api de staging tiene un cambio de después de su último deploy.
+	const api = row(page, 'auditfy', 'staging', 'api')
+	await expect(api).toContainText('Cambios pendientes')
+	await api.click()
+	await expect(page.getByRole('link', { name: 'Cambios sin desplegar' })).toBeVisible()
+
+	// Desplegar sin imagen: Deploys sigue el nuevo hasta que termina.
+	await page.getByRole('button', { name: 'Desplegar' }).first().click()
+	const dialog = page.getByRole('dialog', { name: 'Desplegar api' })
+	await dialog.getByRole('button', { name: 'Desplegar' }).click()
+	await expect(page).toHaveURL(/\/apps\/api\/deploys$/)
+	// El aviso para lectores de pantalla: "El deploy #N terminó bien."
+	await expect(page.getByRole('status').filter({ hasText: 'terminó bien' })).toHaveCount(1, {
+		timeout: 30_000,
+	})
+
+	// Proyectos ya no la marca, sin esperar a que su cache venza.
+	await page.getByRole('link', { name: 'muelle, inicio' }).click()
+	await expect(api).toContainText('Corriendo')
+	await expect(api).not.toContainText('Cambios pendientes')
+
+	expect(errors).toEqual([])
+})

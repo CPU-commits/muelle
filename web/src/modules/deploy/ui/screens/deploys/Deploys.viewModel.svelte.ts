@@ -3,7 +3,7 @@ import { untrack } from 'svelte'
 import type { Attachment } from 'svelte/attachments'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { pendingPhase, type RoadmapPhase } from '@/shared/domain'
-import { type App as CatalogApp, appQuery, appRefFrom } from '@/modules/catalog'
+import { type App as CatalogApp, appQuery, appRefFrom, catalogKeys } from '@/modules/catalog'
 import {
 	appStatusQuery,
 	deployQuery,
@@ -356,6 +356,7 @@ export class DeploysViewModel {
 					this.liveStatus = event.status
 					// El historial (y el Resumen) ya no dicen lo mismo que el stream.
 					if (changed) void refreshDeploys(this.#client, this.ref)
+					if (changed && event.status === 'succeeded') this.#markCatalogStale()
 					// Uno que se estaba siguiendo en vivo terminó: se anuncia.
 					if (live && isTerminalStatus(event.status)) this.#announce(deploy, event.status)
 				}
@@ -369,6 +370,19 @@ export class DeploysViewModel {
 			this.#dropPendingInto()
 			this.logError = error
 			this.logLoading = false
+		}
+	}
+
+	// Un deploy exitoso adelanta el `last_deployed_at` de la app (diseño §7 paso 8): sus
+	// cambios pendientes en el cache del catálogo (Proyectos, el Resumen) quedan viejos. Se
+	// marcan para que se pidan al mostrarse, no ahora.
+	#markCatalogStale(): void {
+		const { project, stage, app } = this.ref
+		for (const queryKey of [
+			catalogKeys.tree(),
+			catalogKeys.app(appRefFrom(project, stage, app)),
+		]) {
+			void this.#client.invalidateQueries({ queryKey, exact: true, refetchType: 'none' })
 		}
 	}
 
