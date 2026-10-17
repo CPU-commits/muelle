@@ -3,6 +3,8 @@
 // de la sesión ni un secreto (el origen del panel), y si el navegador no deja guardar, el
 // aviso dura lo que dure la página.
 
+import { parsePanelOrigin } from '../../../domain'
+
 const STORAGE_KEY = 'muelle:admin:panel-moved'
 
 /**
@@ -19,13 +21,14 @@ function storage(): Storage | null {
 	}
 }
 
-/** El origen guardado, si es un origen `https://` (nada de rutas ni otros esquemas). */
+/**
+ * El origen guardado, si es un origen `https://` con un dominio o una IP (nada de rutas, otros
+ * esquemas ni caracteres raros en el host): va en el título del aviso y en el link.
+ */
 export function loadPanelMove(): string | null {
 	try {
 		const saved = storage()?.getItem(STORAGE_KEY)
-		if (!saved) return null
-		const url = new URL(saved)
-		return url.protocol === 'https:' && url.origin === saved ? saved : null
+		return saved ? parsePanelOrigin(saved) : null
 	} catch {
 		return null
 	}

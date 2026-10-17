@@ -74,6 +74,28 @@ export function panelOrigin(
 	return `https://${proxy.panelDomain}${port}`
 }
 
+// Un host que se puede mostrar, poner en un link o en un comando sin sorpresas: etiquetas
+// de `[a-z0-9-]` separadas por puntos (un dominio o una IPv4), o una IPv6 entre corchetes.
+// El URL de WHATWG acepta más (`a$(id).com`, `a;id.com`): esos no pasan.
+const HOST_LABEL = '[a-z0-9]([a-z0-9-]*[a-z0-9])?'
+const PANEL_HOST = new RegExp(`^(${HOST_LABEL}(\\.${HOST_LABEL})*|\\[[0-9a-f:.]+\\])$`)
+
+/**
+ * `text` si es un origen `https://` del panel (un dominio o una IP, con puerto opcional, y
+ * nada más: ni ruta, ni usuario, ni mayúsculas), o null. Para lo que se lee de afuera, como
+ * el aviso guardado en el localStorage.
+ */
+export function parsePanelOrigin(text: string): string | null {
+	let url: URL
+	try {
+		url = new URL(text)
+	} catch {
+		return null
+	}
+	if (url.protocol !== 'https:' || url.origin !== text) return null
+	return PANEL_HOST.test(url.hostname) ? text : null
+}
+
 /**
  * El origen nuevo del panel después de cambiar los puertos, o null si sigue donde estaba:
  * solo lo mueve el puerto HTTPS, y solo si Caddy sirve el panel (contrato §3.5).

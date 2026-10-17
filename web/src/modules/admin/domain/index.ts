@@ -12,6 +12,7 @@ export type {
 export {
 	movedPanelOrigin,
 	panelOrigin,
+	parsePanelOrigin,
 	PROXY_SETTINGS_PHASE,
 	RESET_PANEL_IPS_COMMAND,
 	updatePanelOriginCommand,

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { movedPanelOrigin, panelOrigin, type ProxySettings, updatePanelOriginCommand } from '../..'
+import {
+	movedPanelOrigin,
+	panelOrigin,
+	parsePanelOrigin,
+	type ProxySettings,
+	updatePanelOriginCommand,
+} from '../..'
 
 const PROXY: ProxySettings = {
 	cloudflare: { tokenSet: false, zones: null },
@@ -39,5 +45,45 @@ describe('settings', () => {
 		expect(updatePanelOriginCommand('https://panel.tudominio.cl:8443')).toBe(
 			'docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl:8443 muelle_muelle',
 		)
+	})
+
+	it('un origen del panel guardado es https, con un dominio o una IP y el puerto, y nada más', () => {
+		for (const origin of [
+			'https://panel.tudominio.cl',
+			'https://panel.tudominio.cl:8443',
+			'https://203.0.113.24:8443',
+			'https://[2001:db8::24]:8443',
+		]) {
+			expect(parsePanelOrigin(origin)).toBe(origin)
+		}
+	})
+
+	it('un host con lo que una consola interpreta no es un origen del panel (el URL de WHATWG lo acepta)', () => {
+		for (const origin of [
+			'https://a$(id).com',
+			'https://a;id.com',
+			'https://a`id`.com',
+			"https://a'b.com",
+			'https://a&b.com',
+			'https://a..b.com',
+			'https://-a.com',
+		]) {
+			expect(new URL(origin).origin).toBe(origin)
+			expect(parsePanelOrigin(origin)).toBeNull()
+		}
+	})
+
+	it('otro esquema, una ruta, un usuario o algo que no es una URL tampoco', () => {
+		for (const text of [
+			'javascript:alert(1)',
+			'http://panel.tudominio.cl',
+			'https://panel.tudominio.cl/x',
+			'https://felipe@panel.tudominio.cl',
+			'https://PANEL.tudominio.cl',
+			'panel.tudominio.cl',
+			'',
+		]) {
+			expect(parsePanelOrigin(text)).toBeNull()
+		}
 	})
 })

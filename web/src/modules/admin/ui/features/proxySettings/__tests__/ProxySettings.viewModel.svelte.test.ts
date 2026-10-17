@@ -477,6 +477,9 @@ describe('ProxySettingsViewModel', () => {
 		expect((await mountViewModel()).movedTo).toBeNull()
 		localStorage.setItem('muelle:admin:panel-moved', 'https://panel.tudominio.cl/x')
 		expect((await mountViewModel()).movedTo).toBeNull()
+		// El URL del navegador lo acepta como origen, pero el host no es un dominio ni una IP.
+		localStorage.setItem('muelle:admin:panel-moved', 'https://a$(id).com')
+		expect((await mountViewModel()).movedTo).toBeNull()
 	})
 
 	it('si el panel sigue en este origen, sigue a muelle-caddy (GET /proxy) mientras se recrea', async () => {
