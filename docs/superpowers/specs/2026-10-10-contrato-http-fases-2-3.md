@@ -1,6 +1,6 @@
 # muelle — Contrato de las Fases 2, 3 y 5
 
-> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos) · Estado: aprobado para la etapa de contratos (rama `fase-23-base`).
+> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos) y 2026-10-17 (lo que pidió el panel, §7) · Estado: aprobado para la etapa de contratos (rama `fase-23-base`).
 > Complementa el diseño ([`2026-10-09-muelle-design.md`](2026-10-09-muelle-design.md)); las referencias `§N` apuntan a sus secciones. Donde este documento y el diseño difieren, manda este documento, y el diseño ya se actualizó.
 
 Las Fases 2 (deploy), 3 (ingress) y 5 (distribución) se implementan **en paralelo**, cada una en su rama y sin hablar con las otras. Este documento fija lo que comparten:
@@ -1168,6 +1168,8 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Servicios de una app | El formulario de un dominio pide el destino a mano | `GET` de una app (catalog) suma `services: [{name, ports}]` (§2.12) | Ofrecer los destinos sin esperar al primer deploy |
 | Guardar un compose | Validación al guardar | `422 compose_yaml` con las reglas de §6.3 del diseño, y con un servicio que choca con otro del stage. Una app de formulario nueva con el slug de un servicio compose del stage: `422 slug` | Los servicios de un stage comparten la red (§5.2 regla 2) |
 | Deploy o rollback de una app que se está borrando | — | `409 conflict` (a lo más 2 min) | No desplegar un stack que el `DELETE` acaba de borrar |
+| `409 conflict` con varios sentidos | Pidió códigos propios (`app_removing`, `deploy_stopping`) | No en la v1: sigue `409 conflict`, y el panel lo distingue por el endpoint: en `POST …/deploys` y `…/rollback`, la app se está borrando (§2.2); en el `DELETE` de una app, un deploy que no se detiene (§1.1); en un `POST` que crea algo, ya existe | Los tres casos ya se distinguen por la ruta |
+| Los motivos de un `422` y el `error` de `GET /proxy` | Pidió un motivo legible por máquina (la regla), para traducirlo | No en la v1: el `message` y el `error` siguen siendo oraciones en español (§0), que el panel muestra tal cual; el campo del `422` sí es un dato (§0.2) | Las reglas de §6.3 del diseño y los errores de Caddy y Docker no tienen una lista cerrada |
 | Crear un stage con una red ajena del mismo nombre | El panel lo mapea a `StageNetworkConflict` desde el código | `409 network_conflict` (§0.2, §3.4), sin guardar el stage | El código ya existía en ingress; faltaba en el contrato |
 | Deploy sin cuerpo después de un rollback | — | Repite las imágenes del rollback (con digest); para volver a seguir un tag, override o cambiar la configuración | El rollback no se deshace solo (§2.2) |
 | SSE, los dos | — | La credencial se revisa cada 60 s; a lo más 8 por principal (`429`) y 1 h por stream | El panel ya trata un stream que se corta |
