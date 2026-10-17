@@ -218,7 +218,9 @@ func serve(log *slog.Logger) error {
 	if token, created, err := c.Identity.EnsureSetupInvite(ctx); err != nil {
 		return err
 	} else if created {
-		logSetupURL(log, c.PanelOrigin(ctx), token)
+		if err := logSetupURL(log, c.PanelOrigin(ctx), token); err != nil {
+			return err
+		}
 	}
 
 	// Las tareas periódicas y los workers de los módulos (deploy, ingress)
@@ -270,9 +272,18 @@ func serve(log *slog.Logger) error {
 // event=setup_url: muelle install (Fase 5) sigue los logs del servicio hasta
 // encontrarla y le imprime la url al usuario (§3.3 paso 8). El mensaje se
 // puede cambiar; event y url no.
-func logSetupURL(log *slog.Logger, origin, token string) {
+//
+// Sin origin (sin MUELLE_PANEL_ORIGIN, y los ajustes no se pudieron leer)
+// devuelve un error, sin el token, en vez de un link relativo que no abre
+// nada: serve termina con él, y el próximo arranque (Swarm lo reinicia) arma
+// un link nuevo. install muestra la línea ERROR y sigue esperando.
+func logSetupURL(log *slog.Logger, origin, token string) error {
+	if origin == "" {
+		return errors.New("no se pudo armar el link de setup: falta el origen del panel (sin MUELLE_PANEL_ORIGIN, y el de los ajustes no se pudo leer); el próximo arranque arma uno nuevo")
+	}
 	log.Info("todavía no hay usuarios: abre este link para crear el primero (vence en 24 h)",
 		"event", "setup_url", "url", origin+"/setup?token="+token)
+	return nil
 }
 
 // logListening deja en el log que serve empezó a atender, con

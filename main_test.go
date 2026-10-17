@@ -230,10 +230,26 @@ func TestRunServeMemoryLimit(t *testing.T) {
 // (Fase 5) la busca en los logs del servicio para imprimirla (§3.3 paso 8).
 func TestLogSetupURL(t *testing.T) {
 	var out bytes.Buffer
-	logSetupURL(slog.New(slog.NewJSONHandler(&out, nil)), "https://panel.example.com", "abc123")
+	if err := logSetupURL(slog.New(slog.NewJSONHandler(&out, nil)), "https://panel.example.com", "abc123"); err != nil {
+		t.Fatal(err)
+	}
 	m := lastLogLine(t, out.String())
 	if m["level"] != "INFO" || m["event"] != "setup_url" || m["url"] != "https://panel.example.com/setup?token=abc123" {
 		t.Fatalf("log=%v", m)
+	}
+}
+
+// Sin origen del panel (los ajustes no se pudieron leer) no sale un link
+// relativo, que no abre nada: logSetupURL devuelve un error sin el token, y
+// serve termina con él (el próximo arranque arma un link nuevo).
+func TestLogSetupURLWithoutOrigin(t *testing.T) {
+	var out bytes.Buffer
+	err := logSetupURL(slog.New(slog.NewJSONHandler(&out, nil)), "", "abc123")
+	if err == nil || !strings.Contains(err.Error(), "origen del panel") || strings.Contains(err.Error(), "abc123") {
+		t.Fatalf("err=%v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("no deja ningún link en el log: %s", out.String())
 	}
 }
 
