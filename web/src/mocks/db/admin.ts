@@ -156,9 +156,17 @@ export const adminDb = {
 		savePersisted(STORAGE_KEY, state)
 	},
 
-	/** Lo que hace `audit.Recorder.Record`: el actor sale de la sesión. Nunca con secretos. */
-	record(action: string, target: string, details: Record<string, unknown> = {}): void {
-		const user = authDb.currentUser()
+	/**
+	 * Lo que hace `audit.Recorder.Record`: el actor sale de la sesión, o es `system` (lo que
+	 * hace muelle solo, como volver a los puertos anteriores). Nunca con secretos.
+	 */
+	record(
+		action: string,
+		target: string,
+		details: Record<string, unknown> = {},
+		actor: 'session' | 'system' = 'session',
+	): void {
+		const user = actor === 'session' ? authDb.currentUser() : null
 		state.audit = [
 			...state.audit,
 			{

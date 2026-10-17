@@ -19,7 +19,10 @@ import { loadPersisted, savePersisted } from './persist'
 //   configuración: `GET /proxy` dice `out_of_sync` (el aviso "proxy desincronizado");
 // - cambiar los puertos en Ajustes recrea muelle-caddy: `GET /proxy` dice `recreating` unos
 //   segundos (`recreateMs`) y después `synced`. El puerto 8081 está "ocupado" en el host:
-//   el `PATCH` lo prueba antes de guardar y responde `422` en ese campo (contrato §3.5);
+//   el `PATCH` lo prueba antes de guardar y responde `422` en ese campo (contrato §3.5). El
+//   9443 pasa la prueba, pero otro lo toma antes de recrear: muelle-caddy no arranca con él,
+//   y muelle vuelve a los puertos anteriores (`ports_rollback` en `GET /proxy`, los ajustes
+//   de antes y `settings.ports_rollback` en la auditoría);
 // - cualquier otro hostname está fuera de Cloudflare (`tls_mode: http`): queda `pending`
 //   ("Esperando DNS") hasta que se toca Verificar (retry), que lo pasa a `active`;
 // - lo de Cloudflare y las IP públicas salen de los ajustes del mock (`db/admin.ts`), como
@@ -37,6 +40,11 @@ const PROVISION_MS = 3000
 const RECREATE_MS = 4000
 /** Un puerto que algo ya usa en el host simulado: el `PATCH` de los puertos lo rechaza. */
 export const MOCK_BUSY_PORT = 8081
+/**
+ * Un puerto que está libre cuando el `PATCH` lo prueba y que otro toma antes de recrear:
+ * muelle-caddy no arranca con él y muelle vuelve a los anteriores (contrato §3.5).
+ */
+export const MOCK_RACED_PORT = 9443
 const CADDY_IMAGE = 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0'
 
 export interface MockDomain {
@@ -69,6 +77,22 @@ interface IngressState {
 	recreateMs?: number
 	/** Hasta cuándo `GET /proxy` dice `recreating` (un cambio de puertos). */
 	recreatingUntil?: number | null
+	/** Los puertos con que servía muelle-caddy antes de la recreación en curso. */
+	recreatingFrom?: MockProxyPorts | null
+	/** La última vuelta a los puertos anteriores (`ports_rollback`, contrato §3.3). */
+	portsRollback?: MockPortsRollback | null
+}
+
+export interface MockProxyPorts {
+	http_port: number
+	https_port: number
+}
+
+export interface MockPortsRollback {
+	attempted: MockProxyPorts
+	restored: MockProxyPorts
+	error: string
+	at: string
 }
 
 function seed(overrides: Partial<IngressState> = {}): IngressState {
@@ -78,6 +102,8 @@ function seed(overrides: Partial<IngressState> = {}): IngressState {
 		provisionMs: PROVISION_MS,
 		recreateMs: RECREATE_MS,
 		recreatingUntil: null,
+		recreatingFrom: null,
+		portsRollback: null,
 		...overrides,
 	}
 }
@@ -411,9 +437,61 @@ export const ingressDb = {
 		)
 	},
 
-	/** Un `PATCH /settings` cambió los puertos: muelle-caddy se recrea (contrato §3.5). */
-	recreateProxy(now = Date.now()): void {
+	/**
+	 * Un `PATCH /settings` cambió los puertos: muelle-caddy se recrea (contrato §3.5).
+	 * `previous` son los puertos de antes del `PATCH`; si ya se estaba recreando, los dos
+	 * cambios se juntan y vale el de antes del primero (con esos servía). Es un intento
+	 * nuevo: limpia `ports_rollback`.
+	 */
+	recreateProxy(previous: MockProxyPorts, now = Date.now()): void {
+		this.settle(now)
+		const recreating = state.recreatingUntil != null && now < state.recreatingUntil
+		state.recreatingFrom = recreating ? (state.recreatingFrom ?? previous) : previous
 		state.recreatingUntil = now + (state.recreateMs ?? RECREATE_MS)
+		state.portsRollback = null
+		commit()
+	},
+
+	/**
+	 * Termina la recreación si ya pasó su tiempo. Con `MOCK_RACED_PORT`, muelle-caddy no
+	 * arranca: muelle vuelve a los puertos con que servía, si los guardados siguen siendo los
+	 * que fallaron, y lo deja en `ports_rollback` y en la auditoría (actor `system`).
+	 */
+	settle(now = Date.now()): void {
+		if (state.recreatingUntil == null || now < state.recreatingUntil) return
+		const from = state.recreatingFrom ?? null
+		state.recreatingUntil = null
+		state.recreatingFrom = null
+		const settings = adminDb.state
+		const attempted = { http_port: settings.proxyHttpPort, https_port: settings.proxyHttpsPort }
+		const raced =
+			attempted.http_port === MOCK_RACED_PORT || attempted.https_port === MOCK_RACED_PORT
+		if (from && raced && settings.panelDomain !== '') {
+			settings.proxyHttpPort = from.http_port
+			settings.proxyHttpsPort = from.https_port
+			adminDb.commit()
+			const error = `los puertos ${String(attempted.http_port)} o ${String(attempted.https_port)} del host ya están en uso, y muelle-caddy no pudo arrancar con ellos`
+			adminDb.record(
+				'settings.ports_rollback',
+				'settings',
+				{
+					proxy_http_port: from.http_port,
+					proxy_https_port: from.https_port,
+					attempted: {
+						proxy_http_port: attempted.http_port,
+						proxy_https_port: attempted.https_port,
+					},
+					error,
+				},
+				'system',
+			)
+			state.portsRollback = {
+				attempted,
+				restored: from,
+				error,
+				at: new Date(now).toISOString(),
+			}
+		}
 		commit()
 	},
 
@@ -423,7 +501,8 @@ export const ingressDb = {
 	 * `ports_rollback` viene siempre (contrato §3.3).
 	 */
 	proxy(now = Date.now()) {
-		return { ...proxyState(now), ports_rollback: null }
+		this.settle(now)
+		return { ...proxyState(now), ports_rollback: state.portsRollback ?? null }
 	},
 
 	/** Cloudflare falla al escribir (`cf-intermitente`): el dominio queda en error. */

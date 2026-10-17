@@ -288,11 +288,18 @@ async function readJson<T>(request: Request): Promise<T | null> {
 }
 
 export const adminHandlers: RequestHandler[] = [
-	http.get(api('/settings'), () => requireSession() ?? HttpResponse.json(settingsRes())),
+	http.get(api('/settings'), () => {
+		const denied = requireSession()
+		if (denied) return denied
+		// Una recreación de muelle-caddy que terminó puede haber vuelto a los puertos de antes.
+		ingressDb.settle()
+		return HttpResponse.json(settingsRes())
+	}),
 
 	http.patch(api('/settings'), async ({ request }) => {
 		const denied = requireSession()
 		if (denied) return denied
+		ingressDb.settle()
 		const body = await readJson<SettingsBody>(request)
 		if (!body || typeof body !== 'object') {
 			return apiError(400, 'invalid_json', 'el cuerpo no es JSON válido')
@@ -327,11 +334,17 @@ export const adminHandlers: RequestHandler[] = [
 			body.proxy_http_port !== undefined || body.proxy_https_port !== undefined
 		// El hook del proxy corre antes de responder (contrato §3.5): en el navegador se nota.
 		if (portsChange && typeof window !== 'undefined') await delay(PORT_CHANGE_DELAY_MS)
-		const before = [adminDb.state.proxyHttpPort, adminDb.state.proxyHttpsPort].join()
+		const before = {
+			http_port: adminDb.state.proxyHttpPort,
+			https_port: adminDb.state.proxyHttpsPort,
+		}
 		adminDb.record('settings.update', 'settings', applySettings(body))
 		// El hook agenda la recreación de muelle-caddy si cambiaron los puertos (§3.5).
-		if (before !== [adminDb.state.proxyHttpPort, adminDb.state.proxyHttpsPort].join()) {
-			ingressDb.recreateProxy()
+		if (
+			before.http_port !== adminDb.state.proxyHttpPort ||
+			before.https_port !== adminDb.state.proxyHttpsPort
+		) {
+			ingressDb.recreateProxy(before)
 		}
 		return HttpResponse.json(settingsRes())
 	}),

@@ -154,7 +154,8 @@ Dominios, arriba del formulario.
 		"running": true,
 		"http_port": 80,
 		"https_port": 443
-	}
+	},
+	"ports_rollback": null
 }
 ```
 
@@ -174,6 +175,11 @@ Dominios, arriba del formulario.
   configuración a Caddy".
 - `synced_at` es null hasta el primer envío; sin contenedor, `caddy.image` es null y
   `running` false. Con `disabled` no se consulta Docker (también responde sin Docker).
+- `ports_rollback` (`portsRollback`): la última vez que muelle volvió a los puertos
+  anteriores porque muelle-caddy no arrancó con los nuevos (§3.5), o null:
+  `{attempted: {http_port, https_port}, restored: {…}, error, at}`. Vive en la memoria de
+  muelle (se pierde al reiniciarlo) y el próximo cambio de puertos la limpia. Opcional en el
+  DTO solo por un backend de antes de esa vuelta. Dominios no la usa; Ajustes sí.
 - Mientras dice `out_of_sync` o `recreating` se pregunta de nuevo cada 10 s (con la
   pestaña visible). Cada cambio de un dominio (crear, editar, borrar, adoptar,
   reintentar) lo vuelve a pedir: una ruta nueva puede dejarlo desincronizado.
@@ -233,7 +239,10 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
 - Cambiar los puertos en Ajustes recrea muelle-caddy: `GET /proxy` dice `recreating` unos 4 s
   (sin contenedor: `image: null`, `running: false`) y después `synced`. El puerto `8081`
   está ocupado en el host del mock: el `PATCH` lo prueba antes de guardar y responde `422`
-  en ese campo, sin guardar nada (§3.5).
+  en ese campo, sin guardar nada (§3.5). El `9443` pasa la prueba pero otro lo toma antes de
+  recrear: al terminar la recreación (`ingressDb.settle`, que corren `GET /proxy` y
+  `GET`/`PATCH /settings`) muelle vuelve a los puertos anteriores, con `ports_rollback` y
+  `settings.ports_rollback` (actor `system`) en la auditoría.
 - Un `PATCH` de Proxied que sale bien saca un `error` + `cloudflare` (vuelve a `pending`).
   Sin token (se quitó en Ajustes), se guarda y el dominio queda en `error` + `cloudflare`
   con "agrega el token de Cloudflare en Ajustes", como en el backend.

@@ -217,6 +217,45 @@ describe('settings', () => {
 		await expect(ingressUseCases.getProxyStatus()).resolves.toMatchObject({ status: 'synced' })
 	})
 
+	it('si el puerto se ocupa después de la prueba (9443 en el mock), muelle vuelve a los anteriores (contrato §3.5)', async () => {
+		ingressDb.reset({ recreateMs: 0 })
+		// El PATCH lo prueba y está libre: se guarda.
+		const saved = await adminUseCases.updateProxyPorts({ http: '80', https: '9443' })
+		expect(saved.proxy).toMatchObject({ httpPort: 80, httpsPort: 9443 })
+
+		// Al recrear, otro ya lo tomó: muelle-caddy no arranca y muelle vuelve a 80/443.
+		const proxy = await ingressUseCases.getProxyStatus()
+		expect(proxy).toMatchObject({
+			status: 'synced',
+			caddy: { running: true, httpPort: 80, httpsPort: 443 },
+			portsRollback: {
+				attempted: { httpPort: 80, httpsPort: 9443 },
+				restored: { httpPort: 80, httpsPort: 443 },
+				error: expect.stringContaining('9443'),
+			},
+		})
+		expect(proxy.portsRollback?.at).toBeInstanceOf(Date)
+		const settings = await adminUseCases.getSettings()
+		expect(settings.proxy).toMatchObject({ httpPort: 80, httpsPort: 443 })
+		// Queda en la auditoría, del actor system.
+		const [last] = (await adminUseCases.listAudit()).items
+		expect(last).toMatchObject({ action: 'settings.ports_rollback', actor: { kind: 'system' } })
+
+		// El próximo cambio de puertos es un intento nuevo: limpia ports_rollback.
+		await adminUseCases.updateProxyPorts({ http: '8080', https: '443' })
+		await expect(ingressUseCases.getProxyStatus()).resolves.toMatchObject({
+			portsRollback: null,
+			caddy: { httpPort: 8080, httpsPort: 443 },
+		})
+	})
+
+	it('los ajustes ya dicen los puertos anteriores aunque nadie haya preguntado GET /proxy', async () => {
+		ingressDb.reset({ recreateMs: 0 })
+		await adminUseCases.updateProxyPorts({ http: '9443', https: '443' })
+		const settings = await adminUseCases.getSettings()
+		expect(settings.proxy).toMatchObject({ httpPort: 80, httpsPort: 443 })
+	})
+
 	it('Docker caído al probar los puertos nuevos (503 docker_unavailable) es PortsDockerUnavailable', async () => {
 		server.use(
 			http.patch(api('/settings'), () =>
