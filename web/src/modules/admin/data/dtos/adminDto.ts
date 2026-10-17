@@ -1,15 +1,17 @@
 import { z } from 'zod'
 
 // Las formas de admin: settings y auditoría de la Fase 1 (src/internal/admin/app/dto), y
-// lo que agregan las Fases 2 y 3 según el spec (§5.1, §8, §9, §10). Ver web/CLAUDE.md,
-// "Endpoints de las fases 2 y 3".
+// lo que agregan las Fases 2 y 3 según el contrato (§2.10 los registries, §4 los ajustes del
+// proxy). Ver web/CLAUDE.md, "Endpoints de las fases 2 y 3".
 
 // UTC con milisegundos (`2026-10-10T19:36:53.770Z`) o RFC 3339 completo con offset.
 const timestamp = z.iso.datetime({ offset: true })
 
 /**
- * `GET /settings` y la respuesta de `PATCH /settings`. En la Fase 1 solo existe
- * `require_2fa`; el resto llega con la Fase 3 y mientras tanto falta.
+ * `GET /settings` y la respuesta de `PATCH /settings` (contrato §4): con la Fase 3 trae
+ * siempre todas las claves. Son opcionales solo por un backend de la Fase 1 (`pnpm dev`
+ * contra `main`), que tiene nada más que `require_2fa`. `caddy_image` no es un ajuste: solo
+ * lo fija install, y si viniera, Zod lo descarta.
  */
 export const settingsDtoSchema = z.object({
 	require_2fa: z.boolean(),

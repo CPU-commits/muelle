@@ -1,7 +1,7 @@
 import type { RoadmapPhase } from '@/shared/domain'
 
 // Los ajustes de `GET /settings`. En la Fase 1 el backend solo tiene `require_2fa`; el
-// resto (proxy, DNS, certificados e IPs permitidas, spec §5.1 y §8–9) llega con la Fase 3
+// resto (proxy, DNS, certificados e IPs permitidas, contrato §4) llega con la Fase 3
 // como campos nuevos del mismo endpoint. Mientras falten, la sección es `null` y la
 // pantalla muestra "Llega con la Fase 3".
 

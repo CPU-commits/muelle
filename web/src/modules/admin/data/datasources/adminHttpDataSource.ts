@@ -49,8 +49,8 @@ export const adminHttpDataSource = {
 		return parseOrThrow(auditSchema, payload, 'admin.audit')
 	},
 
-	// Fase 2: `/registries` (contrato §2.10), con el host url-encoded en la ruta. Hasta
-	// entonces responde 404 `no_route`.
+	// Fase 2: `/registries` (contrato §2.10), con el host url-encoded en la ruta. Un backend
+	// sin la Fase 2 (`pnpm dev` contra `main`) responde 404 `no_route`.
 
 	async listRegistries(signal?: AbortSignal): Promise<RegistryDto[]> {
 		const payload = await http.get<unknown>('/registries', withSignal(signal))

@@ -558,10 +558,12 @@ Un `UnavailableError` sin `phase` es un backend caído o sin red: eso sí es un 
 
 Si lo nuevo son **campos** de un endpoint que ya existe, no hay 404: el DTO los declara
 opcionales y que falten quiere decir "fase pendiente". Así están los campos de proxy y DNS
-de `GET /settings` (la Fase 1 solo tiene `require_2fa`) y los `services` de una app de
-catalog (§2.12, Fase 2: sin ellos, Dominios sugiere solo los destinos que ya usan sus
-dominios). Mandarlos en un `PATCH` responde 400 `invalid_json` (el backend rechaza campos
-desconocidos): mientras no existan, no se mandan.
+de `GET /settings` (en el contrato, §4, vienen siempre; opcionales solo por un backend de
+`main`, que tiene nada más que `require_2fa`) y los `services` de una app de catalog
+(§2.12, Fase 2: sin ellos, Dominios sugiere solo los destinos que ya usan sus dominios).
+Mandarlos en un `PATCH` a ese backend responde 400 `invalid_json` (rechaza campos
+desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es un ajuste
+(§4.1: solo lo fija install): Ajustes no lo muestra ni lo manda, y el mock lo rechaza.
 
 **Lo que un módulo usa de otro** (siempre por el barrel):
 

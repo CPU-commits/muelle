@@ -201,6 +201,38 @@ describe('settings', () => {
 		})
 	})
 
+	it('caddy_image no es un ajuste (§4.1): el mock lo rechaza en el PATCH y el panel no lo lee', async () => {
+		const response = await fetch(api('/settings'), {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ caddy_image: 'caddy:2' }),
+		})
+		expect(response.status).toBe(400)
+		expect(await response.json()).toMatchObject({ error: { code: 'invalid_json' } })
+
+		// Un backend que lo mandara igual no lo pone en los ajustes del panel.
+		server.use(
+			http.get(api('/settings'), () =>
+				HttpResponse.json({
+					require_2fa: false,
+					cloudflare_token_set: false,
+					cloudflare_zones: null,
+					public_ip: '',
+					public_ipv6: '',
+					acme_email: '',
+					panel_domain: 'panel.tudominio.cl',
+					panel_allowed_cidrs: [],
+					proxy_http_port: 80,
+					proxy_https_port: 443,
+					client_ip: '198.51.100.17',
+					caddy_image: 'caddy:2',
+				}),
+			),
+		)
+		const settings = await adminUseCases.getSettings()
+		expect(JSON.stringify(settings)).not.toContain('caddy')
+	})
+
 	it('"" borra la IP pública, la IPv6 y el email ACME', async () => {
 		await adminUseCases.updatePublicIp({ ipv4: '', ipv6: '' })
 		const settings = await adminUseCases.updateAcmeEmail('')
