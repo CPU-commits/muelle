@@ -879,16 +879,20 @@ Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `public_ip
 - Un error de DNS al cambiar la IP pública nunca hace fallar el `PATCH` (§9).
 - **Auditoría:** `settings.update` con las claves y sus valores. El token solo aparece como `"set"` o `"removed"`. Si después muelle vuelve a los puertos anteriores (§3.5), va otro evento, `settings.ports_rollback`, del actor `system`.
 
-**Recuperar el acceso** después de guardar una lista que te deja fuera, desde el servidor. La imagen de muelle no trae `sqlite3`, así que se usa un contenedor aparte sobre el mismo volumen (SQLite en modo WAL admite la escritura con muelle corriendo):
+**Recuperar el acceso** después de guardar una lista que te deja fuera, desde el servidor: `muelle settings reset-panel-ips` (§5.4), con `docker exec` en el contenedor de muelle, deja la lista en `[]` y reinicia muelle, que al arrancar le manda a Caddy la configuración sin la lista:
+
+```bash
+docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle | head -n1)" muelle settings reset-panel-ips
+```
+
+**Si muelle-caddy quedó sin arrancar por los puertos** y muelle no volvió solo a los anteriores (§3.5: no había un muelle-caddy sirviendo, o los anteriores también estaban tomados), sin Caddy no se llega al panel. Se ponen otros que estén libres directo en la base. La imagen de muelle no trae `sqlite3`, así que se usa un contenedor aparte sobre el mismo volumen (SQLite en modo WAL admite la escritura con muelle corriendo):
 
 ```bash
 docker run --rm -v muelle_data:/data alpine sh -c \
-  "apk add -q sqlite && sqlite3 /data/muelle.db \"UPDATE settings SET value='[]' WHERE key='panel_allowed_cidrs'\""
+  "apk add -q sqlite && sqlite3 /data/muelle.db \"UPDATE settings SET value='8080' WHERE key='proxy_http_port'; UPDATE settings SET value='8443' WHERE key='proxy_https_port'\""
 ```
 
-Después se reinicia muelle (`docker service update --force muelle_muelle`), o se espera al job `"proxy"`, que reenvía la configuración cada 5 min. La Fase 5 agrega el subcomando `muelle settings reset-panel-ips`, que hace lo mismo con `docker exec` en el contenedor de muelle.
-
-Lo mismo sirve si muelle-caddy quedó sin arrancar por los puertos y muelle no volvió solo a los anteriores (§3.5: no había un muelle-caddy sirviendo, o los anteriores también estaban tomados), y sin Caddy no se llega al panel. Se ponen otros que estén libres (`UPDATE settings SET value='8443' WHERE key='proxy_https_port'`, y lo mismo con `proxy_http_port`), y el job `"proxy"` recrea el contenedor.
+Después se reinicia muelle (`docker service update --force muelle_muelle`), o se espera al job `"proxy"` (a lo más 5 min), que recrea el contenedor con esos puertos.
 
 ### 4.2 `GET /audit?limit=N&before=<id>` → 200 · sesión
 
