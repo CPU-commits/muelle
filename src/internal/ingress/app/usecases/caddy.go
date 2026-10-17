@@ -42,7 +42,8 @@ type EnsureCaddy struct {
 // PortsRollbackDeps es lo que usa Recreate para volver a los puertos
 // anteriores (contrato §3.5). Audit y Clock son obligatorios. Done puede ser
 // nil: se llama después de volver los ajustes (el contenedor invalida ahí el
-// origen del panel en caché de admin, así el del puerto anterior pasa enseguida).
+// origen del panel en caché de admin, así el del puerto anterior pasa
+// enseguida).
 type PortsRollbackDeps struct {
 	Audit audit.Recorder
 	Clock clock.Clock

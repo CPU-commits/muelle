@@ -78,7 +78,8 @@ func TestAuditActorNameMigration(t *testing.T) {
 		{9, "token", 5, "env.replace", "stage:auditfy/staging", "ci"},
 		// El token 6 ya no está: su nombre no quedó en ninguna parte.
 		{10, "token", 6, "env.replace", "stage:auditfy/staging", ""},
-		// Un evento del sistema con un username en el target sigue siendo del sistema.
+		// Un evento del sistema con un username en el target sigue siendo del
+		// sistema.
 		{11, "system", nil, "auth.login_failed", "user:felipe", "system"},
 	}
 	for _, e := range events {

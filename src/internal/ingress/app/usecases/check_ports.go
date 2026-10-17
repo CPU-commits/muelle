@@ -13,7 +13,8 @@ import (
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
 
-// checkPortsTimeout es el plazo de CheckProxyPorts, sobre el ctx de la petición.
+// checkPortsTimeout es el plazo de CheckProxyPorts, sobre el ctx de la
+// petición.
 const checkPortsTimeout = 30 * time.Second
 
 // CheckProxyPorts prueba, antes de que admin guarde otros puertos del proxy
@@ -43,7 +44,8 @@ func NewCheckProxyPorts(runtime service.CaddyRuntime, defImage string, log *slog
 //
 // Un puerto ocupado es un *validate.Error en su campo (422), y Docker caído,
 // su error (503). Si la prueba no se puede hacer por otra cosa, lo registra y
-// devuelve nil: la protección de fondo es la vuelta atrás (EnsureCaddy.Recreate).
+// devuelve nil: la protección de fondo es la vuelta atrás
+// (EnsureCaddy.Recreate).
 func (u *CheckProxyPorts) Execute(ctx context.Context, old, next shared.ProxySettings) error {
 	if !next.Enabled(u.defImage) || (old.HTTPPort == next.HTTPPort && old.HTTPSPort == next.HTTPSPort) {
 		return nil

@@ -154,7 +154,8 @@ func (s *ProxyState) PortsRolledBack(r PortsRollback) {
 	s.rollback = &r
 }
 
-// ClearPortsRollback la olvida: un PATCH /settings volvió a cambiar los puertos.
+// ClearPortsRollback la olvida: un PATCH /settings volvió a cambiar los
+// puertos.
 func (s *ProxyState) ClearPortsRollback() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

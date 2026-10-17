@@ -10,10 +10,10 @@
 // se borra en t.Cleanup, también si el test falla. Nunca usan los nombres
 // fijos de producción (muelle_panel, muelle-caddy, muelle_caddy_*,
 // muelle_muelle…) ni los puertos 80, 443 o 2019: solo los del host entre
-// 21000 y 21999 (it6: entre 23000 y 23999), por ranuras. Usan imágenes que ya estén en el nodo
-// (caddy:2-alpine y alpine/socat:latest); si faltan, el test se salta en vez
-// de bajarlas. Ninguno llega a la API real de Cloudflare: opts.CloudflareURL
-// es siempre un cftest. No usan t.Parallel.
+// 21000 y 21999 (it6: entre 23000 y 23999), por ranuras. Usan imágenes que
+// ya estén en el nodo (caddy:2-alpine y alpine/socat:latest); si faltan, el
+// test se salta en vez de bajarlas. Ninguno llega a la API real de
+// Cloudflare: opts.CloudflareURL es siempre un cftest. No usan t.Parallel.
 package ingress
 
 import (

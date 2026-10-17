@@ -198,7 +198,8 @@ func (f *ucFixture) audits(t *testing.T) []string {
 	return auditRows(t, f.db)
 }
 
-// auditRows son las filas de audit_events como "acción target details", en orden.
+// auditRows son las filas de audit_events como "acción target details", en
+// orden.
 func auditRows(t *testing.T, db *sqlite.DB) []string {
 	t.Helper()
 	ctx := context.Background()

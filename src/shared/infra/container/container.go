@@ -10,8 +10,10 @@
 //	catalog → deploy   docker stack rm al borrar una app (AppRuntime)
 //	deploy  → secrets  las variables de la app y sus secretos (EnvResolver)
 //	deploy  → ingress  la red antes del deploy y las rutas después (Ingress)
-//	admin   → ingress  verificar el token de Cloudflare y aplicar los ajustes (ProxyHook)
-//	ingress → admin    el origen del panel, al volver a los puertos anteriores (PortsRolledBack)
+//	admin   → ingress  verificar el token de Cloudflare, probar los puertos
+//	                   del proxy y aplicar los ajustes (ProxyHook)
+//	ingress → admin    descartar el origen del panel en caché al volver a los
+//	                   puertos anteriores (PortsRolledBack)
 //
 // Lo que un módulo lee de las tablas de otro va por sus adaptadores SQL:
 // deploy lee apps (y escribe solo storage_node_id y last_deployed_at) y

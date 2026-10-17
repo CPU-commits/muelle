@@ -107,7 +107,8 @@ func TestContractPanelOriginFromPanelDomain(t *testing.T) {
 	if url := e.inviteURL(after); !strings.HasPrefix(url, after+"/invite/") {
 		t.Fatalf("link de invitación después del cambio: %s", url)
 	}
-	// El login, que no tiene sesión, pasa desde el origen nuevo y no desde el viejo.
+	// El login, que no tiene sesión, pasa desde el origen nuevo y no desde el
+	// viejo.
 	login := map[string]string{"username": "admin", "password": testPassword}
 	httptestutil.Expect(t, e.do("POST", "/api/v1/auth/login", login, httptestutil.WithOrigin(after)), http.StatusOK)
 	expect(t, "login desde el origen viejo", e.do("POST", "/api/v1/auth/login", login, httptestutil.WithOrigin(before)), http.StatusForbidden, "bad_origin")

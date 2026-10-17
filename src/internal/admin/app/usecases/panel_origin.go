@@ -69,7 +69,8 @@ func (u *GetPanelOrigin) Execute(ctx context.Context) (string, error) {
 	return o, nil
 }
 
-// Invalidate descarta el origen en caché: la próxima petición lo lee de la base.
+// Invalidate descarta el origen en caché: la próxima petición lo lee de la
+// base.
 func (u *GetPanelOrigin) Invalidate() {
 	u.mu.Lock()
 	u.gen++
