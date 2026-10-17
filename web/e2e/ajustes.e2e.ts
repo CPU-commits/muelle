@@ -259,6 +259,17 @@ test('si muelle-caddy no arranca con el HTTPS nuevo, muelle vuelve al anterior y
 	await expect(ports.getByText(notice)).toHaveCount(0)
 	await expect(ports.getByLabel('HTTPS', { exact: true })).toHaveValue('443')
 
+	// La auditoría lo dice, del actor system; el cambio, con el nombre de quién lo hizo
+	// (actor_name, contrato §4.2).
+	const audit = page.getByRole('region', { name: 'Auditoría' })
+	await audit.getByRole('button', { name: 'Actualizar' }).click()
+	await expect(audit.locator('tr', { hasText: 'settings.ports_rollback' })).toContainText(
+		'sistema',
+	)
+	await expect(audit.locator('tr', { hasText: 'settings.update' }).first()).toContainText(
+		'felipe',
+	)
+
 	// Lo sigue diciendo al recargar (GET /proxy lo trae hasta el próximo cambio de puertos),
 	// sin el aviso de la dirección que falló.
 	await page.reload()
