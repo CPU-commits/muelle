@@ -338,7 +338,9 @@ cambiar `shared/`, `package.json` o una ruta ajena, se detiene y lo reporta.
   cambios pendientes) y un componente chico con esos datos, para que las páginas los usen
   sin entrar a las tripas de `catalog`. En el layout cambia los items del breadcrumb por
   selectores (`{ kind: 'menu', … }`, ver `Breadcrumb`).
-- La página de variables del stage pone su breadcrumb con `<ShellHeader>` igual.
+- La página de variables del stage pone su breadcrumb con `<ShellHeader>` igual:
+  `<StageBreadcrumb>` del barrel de `catalog`, con los selectores de proyecto y stage (cambiar
+  de uno lleva a las variables del otro stage).
 - **Los snippets de `<ShellHeader>` pueden ver `params` vacíos.** Se pintan en el header
   del AppShell, fuera de su ruta. Al navegar afuera, SvelteKit cambia los `params` y
   desmonta la ruta en el mismo cambio, y el snippet llega a evaluarse una vez con los params

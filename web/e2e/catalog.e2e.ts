@@ -131,6 +131,36 @@ test('los selectores del breadcrumb cambian de app en el mismo tab', async ({ pa
 	expect(found.errors).toEqual([])
 })
 
+test('las variables de un stage tienen los mismos selectores: llevan a las del otro', async ({
+	page,
+}) => {
+	const found = await watch(page)
+	await login(page)
+
+	await page.goto('/projects/auditfy/stages/staging/variables')
+	await expect(page.getByRole('heading', { name: 'Variables del stage' })).toBeVisible()
+	const location = page.getByRole('navigation', { name: 'Ubicación' })
+
+	await location.getByRole('button', { name: 'Stage staging, cambiar' }).click()
+	await page.getByRole('menuitem', { name: 'production' }).click()
+	await expect(page).toHaveURL(/\/auditfy\/stages\/production\/variables$/)
+	await expect(
+		location.getByRole('button', { name: 'Stage production, cambiar' }),
+	).toHaveAttribute('aria-current', 'page')
+
+	await location.getByRole('button', { name: 'Proyecto auditfy, cambiar' }).click()
+	await page.getByRole('menuitem', { name: 'extractor' }).click()
+	await expect(page).toHaveURL(/\/extractor\/stages\/production\/variables$/)
+	await expect(page.getByRole('heading', { name: 'Variables del stage' })).toBeVisible()
+
+	// "Proyectos", arriba del menú del proyecto, vuelve a la lista.
+	await location.getByRole('button', { name: 'Proyecto extractor, cambiar' }).click()
+	await page.getByRole('menuitem', { name: 'Proyectos' }).click()
+	await expect(page.getByRole('heading', { name: 'Proyectos', level: 1 })).toBeVisible()
+
+	expect(found.errors).toEqual([])
+})
+
 test('el compose se edita en CodeMirror, sin violar la CSP', async ({ page }) => {
 	const found = await watch(page)
 	await login(page)
