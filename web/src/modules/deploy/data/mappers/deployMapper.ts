@@ -8,6 +8,7 @@ import {
 	type DeployRequest,
 	type LogPage,
 	parseAppLogText,
+	type ServiceImage,
 	type ServiceStatus,
 	type ServiceTask,
 	splitImageRef,
@@ -58,13 +59,19 @@ export function appStatusFromDto(dto: AppStatusDto): AppStatus {
 	return { services: dto.services.map(serviceStatusFromDto) }
 }
 
+/** `servicio → ref` a una lista por servicio, con el digest aparte. */
+function serviceImages(images: Record<string, string>): ServiceImage[] {
+	return Object.entries(images)
+		.map(([service, raw]) => ({ service, ...splitImageRef(raw) }))
+		.sort((a, b) => a.service.localeCompare(b.service))
+}
+
 export function deployFromDto(dto: DeployDto): Deploy {
 	return {
 		id: asDeployId(dto.id),
 		status: dto.status,
-		images: Object.entries(dto.images)
-			.map(([service, raw]) => ({ service, ...splitImageRef(raw) }))
-			.sort((a, b) => a.service.localeCompare(b.service)),
+		images: serviceImages(dto.images),
+		requestedImages: dto.requested_images ? serviceImages(dto.requested_images) : null,
 		trigger: dto.trigger,
 		actor: { type: dto.actor_type, name: dto.actor_name || null },
 		error: dto.error || null,
@@ -72,6 +79,7 @@ export function deployFromDto(dto: DeployDto): Deploy {
 		startedAt: dateOrNull(dto.started_at),
 		finishedAt: dateOrNull(dto.finished_at),
 		supersededBy: dto.superseded_by ? asDeployId(dto.superseded_by) : null,
+		routesWarning: dto.routes_warning ?? false,
 	}
 }
 

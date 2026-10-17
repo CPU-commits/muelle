@@ -8,17 +8,24 @@ import { asDeployId } from '../../value-objects/deployId'
 
 export const APP: AppRef = { project: 'auditfy', stage: 'staging', app: 'api' }
 
+/**
+ * Un deploy terminado. Por defecto sigue un tag: la ref pedida de cada servicio es la de
+ * `images` sin el digest (pasá `requestedImages` para uno fijado, o null para un backend
+ * que no la manda).
+ */
 export function makeDeploy(id: number, overrides: Partial<Omit<Deploy, 'id'>> = {}): Deploy {
+	const images = overrides.images ?? [
+		{
+			service: 'api',
+			ref: 'ghcr.io/auditfy/api:sha-3f9c2e1',
+			digest: `sha256:${'9b2de1f4'.repeat(8)}`,
+		},
+	]
 	return {
 		id: asDeployId(id),
 		status: 'succeeded',
-		images: [
-			{
-				service: 'api',
-				ref: 'ghcr.io/auditfy/api:sha-3f9c2e1',
-				digest: `sha256:${'9b2de1f4'.repeat(8)}`,
-			},
-		],
+		images,
+		requestedImages: images.map((image) => ({ ...image, digest: null })),
 		trigger: 'api',
 		actor: { type: 'token', name: 'github-actions' },
 		error: null,
@@ -26,6 +33,7 @@ export function makeDeploy(id: number, overrides: Partial<Omit<Deploy, 'id'>> = 
 		startedAt: new Date('2026-10-10T14:00:01Z'),
 		finishedAt: new Date('2026-10-10T14:00:53Z'),
 		supersededBy: null,
+		routesWarning: false,
 		...overrides,
 	}
 }

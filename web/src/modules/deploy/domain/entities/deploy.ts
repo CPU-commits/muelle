@@ -23,6 +23,13 @@ export interface Deploy {
 	readonly id: DeployId
 	readonly status: DeployStatus
 	readonly images: readonly ServiceImage[]
+	/**
+	 * La ref pedida de cada servicio, la que se resolvió (contrato §2.1, `requested_images`).
+	 * Tiene digest solo si alguien lo fijó: un rollback, un override con digest o una ref de
+	 * la configuración con digest. Vacía hasta que se resolvieron las imágenes. null si el
+	 * backend no la manda (uno de antes del cambio).
+	 */
+	readonly requestedImages: readonly ServiceImage[] | null
 	readonly trigger: DeployTrigger
 	readonly actor: DeployActor
 	/** Por qué falló (`failed`), en una línea. */
@@ -32,6 +39,11 @@ export interface Deploy {
 	readonly finishedAt: Date | null
 	/** Si quedó `superseded`: el deploy más nuevo que lo reemplazó. */
 	readonly supersededBy: DeployId | null
+	/**
+	 * El paso 7 no pudo actualizar las rutas de Caddy (contrato §2.1, `routes_warning`): la
+	 * app corre, pero Caddy puede no tener sus rutas nuevas. El motivo está en `GET /proxy`.
+	 */
+	readonly routesWarning: boolean
 }
 
 /** Lo que responde `POST …/deploys` y `POST …/rollback` (202). */

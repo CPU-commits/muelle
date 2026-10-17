@@ -30,12 +30,22 @@ describe('deployFromDto', () => {
 			started_at: '2026-10-10T14:19:49.500Z',
 			finished_at: '2026-10-10T14:20:41Z',
 			superseded_by: 144,
+			// La ref pedida: `api` quedó fija en un digest (un rollback), `worker` sigue el tag.
+			requested_images: {
+				worker: 'ghcr.io/x/worker:v1',
+				api: `ghcr.io/x/api:sha-3f9c2e1@${DIGEST}`,
+			},
+			routes_warning: true,
 		})
 
 		expect(deployFromDto(dto)).toEqual({
 			id: 143,
 			status: 'succeeded',
 			images: [
+				{ service: 'api', ref: 'ghcr.io/x/api:sha-3f9c2e1', digest: DIGEST },
+				{ service: 'worker', ref: 'ghcr.io/x/worker:v1', digest: null },
+			],
+			requestedImages: [
 				{ service: 'api', ref: 'ghcr.io/x/api:sha-3f9c2e1', digest: DIGEST },
 				{ service: 'worker', ref: 'ghcr.io/x/worker:v1', digest: null },
 			],
@@ -46,7 +56,37 @@ describe('deployFromDto', () => {
 			startedAt: new Date('2026-10-10T14:19:49.500Z'),
 			finishedAt: new Date('2026-10-10T14:20:41Z'),
 			supersededBy: 144,
+			routesWarning: true,
 		})
+	})
+
+	it('requested_images es {} hasta que se resolvieron las imágenes (contrato §2.1)', () => {
+		const dto = deployDtoSchema.parse({
+			id: 145,
+			status: 'queued',
+			images: {},
+			requested_images: {},
+			routes_warning: false,
+			trigger: 'panel',
+			actor_type: 'user',
+			actor_name: 'felipe',
+			created_at: '2026-10-10T14:32:07Z',
+		})
+		expect(deployFromDto(dto)).toMatchObject({ requestedImages: [], routesWarning: false })
+	})
+
+	it('un backend sin requested_images ni routes_warning (de antes del cambio): null y false', () => {
+		const dto = deployDtoSchema.parse({
+			id: 143,
+			status: 'succeeded',
+			images: { api: `ghcr.io/x/api:sha-3f9c2e1@${DIGEST}` },
+			trigger: 'api',
+			actor_type: 'token',
+			actor_name: 'github-actions',
+			created_at: '2026-10-10T14:19:49Z',
+		})
+		// null: el panel no sabe la ref pedida y deduce lo fijado del historial (`pinnedImages`).
+		expect(deployFromDto(dto)).toMatchObject({ requestedImages: null, routesWarning: false })
 	})
 
 	it('los campos opcionales que faltan son null, y un actor_name vacío también', () => {
