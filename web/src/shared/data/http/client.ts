@@ -1,3 +1,4 @@
+import { PanelMovedError } from '@/shared/domain'
 import { config } from '@/shared/data/config'
 import { type ApiError, apiErrorFromResponse, NetworkError, RequestTimeoutError } from './errors'
 
@@ -44,6 +45,22 @@ export function configureHttp(overrides: Partial<HttpHooks>): void {
 	if (overrides.onTotpSetupRequired) hooks.onTotpSetupRequired = overrides.onTotpSetupRequired
 }
 
+// A dónde se mudó el panel, si esta página ya no puede escribir. Después de cambiar el puerto
+// HTTPS desde la dirección en que lo servía muelle-caddy, el backend rechaza las escrituras
+// con este `Origin` (`403 bad_origin`, contrato §0.1 y §3.5): el panel no las manda. Las
+// lecturas no llevan `Origin` y siguen saliendo. Vive lo que vive la página.
+let movedTo: string | null = null
+
+/** Desde ahora ninguna escritura (POST, PUT, PATCH, DELETE) sale de esta página. */
+export function holdWrites(origin: string): void {
+	movedTo = origin
+}
+
+/** Las escrituras vuelven a salir: muelle volvió a los puertos anteriores (§3.5). */
+export function releaseWrites(): void {
+	movedTo = null
+}
+
 export function apiUrl(path: string, query?: QueryParams): string {
 	const url = `${config.apiUrl}${API_PREFIX}${path}`
 	if (!query) return url
@@ -66,6 +83,8 @@ function parseJson(raw: string): unknown {
 }
 
 async function request<T>(method: HttpMethod, path: string, options: HttpOptions = {}): Promise<T> {
+	if (method !== 'GET' && movedTo !== null) throw new PanelMovedError(movedTo)
+
 	const headers: Record<string, string> = { Accept: 'application/json' }
 
 	// La sesión es la cookie `muelle_session` (HttpOnly): el navegador la manda sola en

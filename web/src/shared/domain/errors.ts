@@ -73,6 +73,23 @@ export class BadOriginError extends ForbiddenError {
 }
 
 /**
+ * El panel se mudó: después de cambiar el puerto HTTPS desde la dirección en que lo servía
+ * muelle-caddy, esa dirección ya no pasa el chequeo de `Origin` (contrato §0.1 y §3.5), y el
+ * panel no manda escrituras desde ahí (`holdWrites` del cliente HTTP). Es un `bad_origin`
+ * que no llegó a salir. `origin` es la dirección nueva.
+ */
+export class PanelMovedError extends BadOriginError {
+	readonly origin: string
+
+	constructor(origin: string, options?: ErrorOptions) {
+		super(options)
+		this.message = `El panel se mudó a ${origin}`
+		this.name = 'PanelMovedError'
+		this.origin = origin
+	}
+}
+
+/**
  * `ambiguous_session`: el navegador mandó más de una cookie de sesión (otra app de un
  * subdominio plantó la suya). Se arregla borrando las cookies del panel.
  */

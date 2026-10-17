@@ -1,7 +1,8 @@
 import { delay, http as mock, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { apiUrl, configureHttp, http } from '../client'
+import { PanelMovedError } from '@/shared/domain'
+import { apiUrl, configureHttp, holdWrites, http, releaseWrites } from '../client'
 import { ApiError, NetworkError, RequestTimeoutError } from '../errors'
 
 const url = (path: string) => apiUrl(path)
@@ -44,6 +45,7 @@ beforeAll(() => {
 afterEach(() => {
 	server.resetHandlers()
 	vi.clearAllMocks()
+	releaseWrites()
 })
 afterAll(() => server.close())
 
@@ -110,5 +112,34 @@ describe('cliente HTTP', () => {
 
 		const error = await pending.catch((caught: unknown) => caught)
 		expect((error as DOMException).name).toBe('AbortError')
+	})
+
+	it('después de mudarse el panel, ninguna escritura sale de esta página; las lecturas sí', async () => {
+		// Este origen ya no pasa el chequeo de Origin (contrato §0.1 y §3.5).
+		holdWrites('https://panel.tudominio.cl:8443')
+		const sent = vi.fn()
+		server.events.on('request:start', sent)
+		try {
+			for (const write of [
+				() => http.post('/echo', { body: { a: 1 } }),
+				() => http.put('/echo'),
+				() => http.patch('/echo'),
+				() => http.delete('/vacio'),
+			]) {
+				const error = await write().catch((caught: unknown) => caught)
+				expect(error).toBeInstanceOf(PanelMovedError)
+				expect((error as PanelMovedError).origin).toBe('https://panel.tudominio.cl:8443')
+			}
+			expect(sent).not.toHaveBeenCalled()
+			await expect(http.get('/ok')).resolves.toEqual({ hola: 'mundo' })
+
+			// muelle volvió a los puertos anteriores: este origen pasa otra vez.
+			releaseWrites()
+			await expect(http.post('/echo', { body: { a: 1 } })).resolves.toMatchObject({
+				body: { a: 1 },
+			})
+		} finally {
+			server.events.removeListener('request:start', sent)
+		}
 	})
 })

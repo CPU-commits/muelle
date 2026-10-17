@@ -27,6 +27,7 @@
 	"common_forbidden": "No tienes permiso para hacer esto.",
 	"common_rate_limited": "Demasiados intentos. Espera unos minutos y vuelve a intentar.",
 	"common_bad_origin": "muelle no acepta cambios desde esta dirección. Entra por la del panel: https://<dominio del panel>, con el puerto HTTPS de Ajustes si no es 443. Si muelle está detrás de otro proxy, esta dirección va en MUELLE_PANEL_ORIGIN.",
+	"common_panel_moved": "El panel se mudó a {origin}: esta dirección ya no acepta cambios. Sigue allá.",
 	"common_ambiguous_session": "Hay más de una cookie de sesión: borra las cookies del panel y vuelve a entrar.",
 	"common_coming_title": "Llega con la Fase {phase}",
 	"common_coming_feature_title": "{feature} llega con la Fase {phase}",

@@ -2,6 +2,7 @@ import {
 	AmbiguousSessionError,
 	BadOriginError,
 	ForbiddenError,
+	PanelMovedError,
 	pendingPhase,
 	RateLimitedError,
 	UnavailableError,
@@ -11,6 +12,7 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 // El texto para un error que la pantalla no conoce por su clase: las de shared que pueden
 // llegar de cualquier endpoint. Cada módulo mira primero sus errores propios y cae acá.
 export function describeError(error: unknown): string {
+	if (error instanceof PanelMovedError) return m.common_panel_moved({ origin: error.origin })
 	if (error instanceof BadOriginError) return m.common_bad_origin()
 	if (error instanceof AmbiguousSessionError) return m.common_ambiguous_session()
 	const phase = pendingPhase(error)

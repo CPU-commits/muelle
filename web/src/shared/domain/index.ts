@@ -13,6 +13,7 @@ export {
 	hasCode,
 	isDomainError,
 	NotFoundError,
+	PanelMovedError,
 	pendingPhase,
 	RateLimitedError,
 	UnauthorizedError,

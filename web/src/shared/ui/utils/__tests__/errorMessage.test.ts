@@ -3,6 +3,7 @@ import {
 	AmbiguousSessionError,
 	BadOriginError,
 	ForbiddenError,
+	PanelMovedError,
 	RateLimitedError,
 	UnavailableError,
 } from '@/shared/domain'
@@ -26,6 +27,15 @@ describe('describeError', () => {
 				/otro proxy, esta dirección va en MUELLE_PANEL_ORIGIN|another proxy, this address goes in MUELLE_PANEL_ORIGIN/,
 			)
 		}
+	})
+
+	it('si el panel se mudó, dice a dónde seguir', () => {
+		const error = new PanelMovedError('https://panel.tudominio.cl:8443')
+		expect(error).toBeInstanceOf(BadOriginError)
+		expect(describeError(error)).toBe(
+			m.common_panel_moved({ origin: 'https://panel.tudominio.cl:8443' }),
+		)
+		expect(describeError(error)).toContain('https://panel.tudominio.cl:8443')
 	})
 
 	it('distingue una fase pendiente de un backend caído', () => {
