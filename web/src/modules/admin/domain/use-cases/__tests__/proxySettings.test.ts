@@ -55,7 +55,7 @@ describe('ajustes de proxy y DNS', () => {
 
 		const error = await update('ops{x}@tudominio.cl').catch((caught: unknown) => caught)
 
-		// El backend lo aceptaría, y muelle dejaría de mandarle la configuración a Caddy.
+		// No sale: el backend también lo rechaza (422, §4.1), pero acá con el texto del panel.
 		expect(error).toMatchObject({ name: 'InvalidAcmeEmail', problem: 'placeholder' })
 		expect(settings.patches).toEqual([])
 	})

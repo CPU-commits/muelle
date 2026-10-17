@@ -114,9 +114,9 @@ export class InvalidPort extends ValidationError {
 
 /**
  * `placeholder`: lleva `{` o `}`. Caddy expande placeholders en el email del emisor ACME y
- * en el token de Cloudflare: con uno, el backend lo guarda pero deja de mandarle la
- * configuración a Caddy (`GET /proxy` dice `out_of_sync`, contrato §3.4). El panel no lo
- * deja guardar.
+ * en el token de Cloudflare, y con uno muelle dejaría de mandarle la configuración
+ * (`out_of_sync`, contrato §3.4). El backend lo rechaza con un `422` en el campo (§4.1); el
+ * panel lo frena antes, con su texto, y si igual vuelve el `422` muestra su motivo.
  */
 export type PlaceholderProblem = 'placeholder'
 

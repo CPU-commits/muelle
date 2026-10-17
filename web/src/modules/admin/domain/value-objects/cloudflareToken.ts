@@ -16,8 +16,8 @@ export function parseCloudflareToken(raw: string): string {
 	if (token.length < CLOUDFLARE_TOKEN_MIN_LENGTH || token.length > CLOUDFLARE_TOKEN_MAX_LENGTH) {
 		throw new InvalidCloudflareToken('length')
 	}
-	// Caddy lo leería como un placeholder (contrato §3.4): el backend lo guardaría y Caddy
-	// dejaría de recibir la configuración.
+	// Caddy lo leería como un placeholder (contrato §3.4): el backend lo rechaza con un 422
+	// (§4.1), y el panel lo frena antes.
 	if (/[{}]/.test(token)) throw new InvalidCloudflareToken('placeholder')
 	return token
 }

@@ -75,6 +75,18 @@ describe('adminFieldError', () => {
 		})
 	})
 
+	it('el 422 de { y } del backend se muestra con su motivo, en su campo (contrato §4.1)', () => {
+		const reason = 'no puede tener { ni }: Caddy los toma como placeholders'
+		expect(adminFieldError(new ValidationError(reason, 'acmeEmail'))).toEqual({
+			field: 'acmeEmail',
+			message: reason,
+		})
+		expect(adminFieldError(new ValidationError(reason, 'cloudflareToken'))).toEqual({
+			field: 'cloudflareToken',
+			message: reason,
+		})
+	})
+
 	it('los límites de usuario y contraseña de un registry', () => {
 		expect(adminFieldError(new InvalidRegistryCredential('username', 'too_long'))).toEqual({
 			field: 'username',

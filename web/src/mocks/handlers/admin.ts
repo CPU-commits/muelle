@@ -21,6 +21,11 @@ const IPV6 = /^[0-9a-f:.]*:[0-9a-f:.]*$/
 const CIDR = /^[0-9a-f:.]+(\/\d{1,3})?$/i
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 const CLOUDFLARE_TOKEN = /^[\x21-\x7e]{20,512}$/
+/**
+ * El 422 de un `acme_email` o un `cloudflare_token` con `{` o `}`: Caddy los toma como
+ * placeholders y muelle dejaría de mandarle la configuración (contrato §3.4 y §4.1).
+ */
+const PLACEHOLDER = 'no puede tener { ni }: Caddy los toma como placeholders'
 /** Cuántas zonas "ve" un token que se guarda en el mock. */
 const MOCK_CLOUDFLARE_ZONES = 3
 /** Lo que el mock tarda en "aplicar" un cambio de puertos (en el navegador). */
@@ -71,6 +76,10 @@ function isPort(value: unknown): value is number {
 	return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
 }
 
+function hasPlaceholder(value: unknown): boolean {
+	return typeof value === 'string' && /[{}]/.test(value)
+}
+
 /** `''` borra el valor (contrato §4.1); si no, tiene que cumplir `rule`. */
 function clearsOrMatches(value: unknown, rule: RegExp): boolean {
 	return value === '' || (typeof value === 'string' && rule.test(value))
@@ -109,6 +118,7 @@ function validateSettings(body: SettingsBody) {
 	if (body.acme_email !== undefined && !clearsOrMatches(body.acme_email, EMAIL)) {
 		return invalid('acme_email', 'no es un email válido')
 	}
+	if (hasPlaceholder(body.acme_email)) return invalid('acme_email', PLACEHOLDER)
 	if (body.proxy_http_port !== undefined && !isPort(body.proxy_http_port)) {
 		return invalid('proxy_http_port', 'debe estar entre 1 y 65535')
 	}
@@ -135,6 +145,8 @@ function validateSettings(body: SettingsBody) {
 			'debe tener entre 20 y 512 caracteres visibles, sin espacios',
 		)
 	}
+	// Después de la forma, como el backend; el mensaje nunca trae el token.
+	if (hasPlaceholder(body.cloudflare_token)) return invalid('cloudflare_token', PLACEHOLDER)
 	return undefined
 }
 

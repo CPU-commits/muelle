@@ -251,12 +251,16 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
 ## Diferencias con el contrato
 
 Ninguna en estos endpoints: lo de arriba es lo que dice el contrato. Dos cosas de ingress
-que el panel sigue del código porque el contrato no las dice (propuestas como cambios):
+que el panel seguía del código, propuestas como cambios y ya en el contrato (revisión del
+2026-10-17, §7):
 
 - `409 network_conflict` al crear un stage (ya hay una red de Docker con su nombre que no
   creó muelle; `ErrNotStageNetwork` en `ingress/infra/in/http/errors.go`): catalog lo
   muestra como `StageNetworkConflict`. Falta en la tabla de §0.2.
-- Un email ACME o un token de Cloudflare con `{` o `}`: §3.4 dice que muelle lo guarda y
-  deja de mandarle la configuración a Caddy (`out_of_sync`). Ajustes los frena antes de
-  mandarlos (`InvalidAcmeEmail('placeholder')`, `InvalidCloudflareToken('placeholder')`);
-  lo propuesto es que `PATCH /settings` responda `422` con su campo.
+- Un email ACME o un token de Cloudflare con `{` o `}` (Caddy los toma como placeholders,
+  §3.4): `PATCH /settings` responde `422` en `acme_email` o `cloudflare_token` y no guarda
+  nada (§4.1; el del token, después del de su forma, y sin el token en el mensaje). Ajustes
+  los frena antes de mandarlos, con su texto (`InvalidAcmeEmail('placeholder')`,
+  `InvalidCloudflareToken('placeholder')`); si igual vuelve el `422`, su motivo va al campo,
+  como cualquier `422` de Ajustes. El mock responde lo mismo. Si llegan a los ajustes por otro
+  lado (install, un `UPDATE` a mano), `GET /proxy` dice `out_of_sync` con el motivo.

@@ -163,6 +163,68 @@ describe('settings', () => {
 		expect((error as ValidationError).message).toBe('no es pública')
 	})
 
+	it('el backend rechaza { y } en el email ACME y en el token (422 en ese campo) y no guarda nada', async () => {
+		// Directo contra el endpoint, sin el chequeo del panel: el 422 lo tiene que dar el mock.
+		const patch = (body: Record<string, unknown>) =>
+			fetch(api('/settings'), {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(body),
+			})
+		const before = {
+			email: adminDb.state.acmeEmail,
+			token: adminDb.state.cloudflareToken,
+			audit: adminDb.state.audit.length,
+		}
+
+		const email = await patch({ acme_email: 'a{x}@tudominio.cl' })
+		expect(email.status).toBe(422)
+		expect(await email.json()).toMatchObject({
+			error: {
+				code: 'invalid',
+				message: 'acme_email: no puede tener { ni }: Caddy los toma como placeholders',
+			},
+		})
+
+		// Con la forma de un token, el de los placeholders; sin ella, el de la forma (va antes).
+		const token = 'cf_token_con_un_{placeholder}_adentro'
+		const shaped = await patch({ cloudflare_token: token })
+		expect(shaped.status).toBe(422)
+		const body = await shaped.text()
+		expect(JSON.parse(body)).toMatchObject({
+			error: {
+				message:
+					'cloudflare_token: no puede tener { ni }: Caddy los toma como placeholders',
+			},
+		})
+		expect(body).not.toContain(token)
+		const short = await patch({ cloudflare_token: 'a{b}' })
+		expect(await short.json()).toMatchObject({
+			error: { message: expect.stringMatching(/^cloudflare_token: debe tener entre 20/) },
+		})
+
+		expect(adminDb.state.acmeEmail).toBe(before.email)
+		expect(adminDb.state.cloudflareToken).toBe(before.token)
+		expect(adminDb.state.audit).toHaveLength(before.audit)
+	})
+
+	it('el 422 de { y } que vuelve del backend llega al campo con su motivo', async () => {
+		const reason = 'no puede tener { ni }: Caddy los toma como placeholders'
+		server.use(http.patch(api('/settings'), () => invalid('acme_email', reason)))
+		const email = await adminUseCases
+			.updateAcmeEmail('certs@tudominio.cl')
+			.catch((caught: unknown) => caught)
+		expect(email).toBeInstanceOf(ValidationError)
+		expect(email).toMatchObject({ field: 'acmeEmail', message: reason })
+
+		server.use(http.patch(api('/settings'), () => invalid('cloudflare_token', reason)))
+		const token = await adminUseCases
+			.replaceCloudflareToken('cf_token_de_mas_de_veinte_caracteres')
+			.catch((caught: unknown) => caught)
+		expect(token).toBeInstanceOf(ValidationError)
+		expect(token).toMatchObject({ field: 'cloudflareToken', message: reason })
+	})
+
 	it('IP pública, email ACME y puertos', async () => {
 		await adminUseCases.updatePublicIp({ ipv4: '203.0.113.30', ipv6: '' })
 		await adminUseCases.updateAcmeEmail('certs@tudominio.cl')
