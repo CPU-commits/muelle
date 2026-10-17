@@ -1,5 +1,7 @@
+import { resolve } from '$app/paths'
 import { createMutation, useQueryClient } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
+import { withQuery } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
 import { ingressKeys } from '@/modules/ingress'
 import {
@@ -17,8 +19,10 @@ import {
 	type ProxyPorts,
 	type ProxySettings,
 	type Settings,
+	updatePanelOriginCommand,
 } from '../../../domain'
 import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
+import { clearPanelMove, loadPanelMove, PANEL_MOVED_PARAM, savePanelMove } from './panelMoveNotice'
 
 /** Los campos de las cuatro tarjetas, con el nombre que usan los errores del dominio. */
 export type ProxyField =
@@ -78,10 +82,11 @@ export class ProxySettingsViewModel {
 	removeCloudflareError = $state<string | null>(null)
 	confirmingPorts = $state(false)
 	/**
-	 * A dónde se mudó el panel después de cambiar el puerto HTTPS: el origen actual deja de
-	 * responder cuando se recrea muelle-caddy. null si sigue donde está.
+	 * A dónde se mudó el panel después de cambiar el puerto HTTPS (si se entró por el origen
+	 * anterior, deja de responder cuando se recrea muelle-caddy). Queda guardado hasta que
+	 * se cierra el aviso: sobrevive a recargar. null si no hay aviso.
 	 */
-	movedTo = $state<string | null>(null)
+	movedTo = $state<string | null>(loadPanelMove())
 	/** Por qué no se pudieron cambiar los puertos; se muestra adentro de la confirmación. */
 	portsError = $state<string | null>(null)
 	errors = $state<FieldErrors>({})
@@ -156,6 +161,28 @@ export class ProxySettingsViewModel {
 		return origin === null ? null : { origin, port: ports.https }
 	}
 
+	/** Si el aviso apunta a otro origen: "Ir al panel" lleva allá. */
+	get canGoToMovedPanel(): boolean {
+		return this.movedTo !== null && this.movedTo !== currentOrigin()
+	}
+
+	/** Ajustes del origen nuevo, con el aviso (allá el localStorage es otro). */
+	get movedPanelHref(): string {
+		return withQuery(`${this.movedTo ?? ''}${resolve('/(app)/ajustes')}`, {
+			[PANEL_MOVED_PARAM]: 1,
+		})
+	}
+
+	/** Lo que actualiza `MUELLE_PANEL_ORIGIN` en el servidor con el origen nuevo. */
+	get movedOriginCommand(): string {
+		return this.movedTo === null ? '' : updatePanelOriginCommand(this.movedTo)
+	}
+
+	dismissMove = (): void => {
+		this.movedTo = null
+		clearPanelMove()
+	}
+
 	get isSavingPorts(): boolean {
 		return this.#ports.isPending
 	}
@@ -225,7 +252,11 @@ export class ProxySettingsViewModel {
 			})
 			if (settings.proxy) {
 				this.#loadPorts(settings.proxy)
-				this.movedTo = this.#movedTo(settings.proxy, before)
+				const moved = this.#movedTo(settings.proxy, before)
+				if (moved !== null) {
+					this.movedTo = moved
+					savePanelMove(moved)
+				}
 			}
 			this.#refreshIngress()
 			toast.success(m.admin_ports_saved())

@@ -7,12 +7,14 @@
 	import { Registries } from '../../features/registries'
 	import { SecuritySettings } from '../../features/securitySettings'
 	import { SETTINGS_SECTIONS } from '../../features/settingsLayout'
-	import { SettingsViewModel } from './Settings.viewModel.svelte.ts'
+	import { type SettingsProps, SettingsViewModel } from './Settings.viewModel.svelte.ts'
 	import { screen } from './styles.css'
 
 	// Las secciones de Ajustes, en el orden del diseño. El marco (h1 y nav) es
 	// <SettingsLayout>, que pone la ruta.
-	const vm = new SettingsViewModel()
+	let props: SettingsProps = $props()
+
+	const vm = new SettingsViewModel(() => props)
 </script>
 
 <div class={screen}>

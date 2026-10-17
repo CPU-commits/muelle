@@ -615,7 +615,10 @@ desconocidos): mientras no existan, no se mandan.
 ### Sesión y `auth`
 
 - La sesión es la cookie `muelle_session` (HttpOnly): el panel nunca la lee ni guarda nada
-  en localStorage.
+  de la sesión en localStorage. Ahí solo van comodidades de la vista: el idioma (Paraglide) y
+  el aviso de Ajustes "La dirección del panel ahora es …" después de cambiar el puerto HTTPS
+  (`proxySettings/panelMoveNotice.ts`, hasta que se cierra; "Ir al panel" lo lleva al origen
+  nuevo con `?panel_moved=1`, porque allá el localStorage es otro).
 - Para saber quién es el usuario: `createQuery(() => meQuery())` con `meQuery` del barrel
   de `auth`. Devuelve `Me`: `username`, `totpEnabled` y `needsTotpSetup`. El guard ya lo dejó
   en el cache.

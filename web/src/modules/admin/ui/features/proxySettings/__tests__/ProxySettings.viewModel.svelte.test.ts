@@ -73,6 +73,7 @@ describe('ProxySettingsViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.restoreAllMocks()
+		localStorage.clear()
 		mocks.updatePublicIp.mockResolvedValue(saved({ publicIpv4: '203.0.113.30' }))
 		mocks.updateAcmeEmail.mockResolvedValue(saved({}))
 		mocks.updateProxyPorts.mockResolvedValue(saved({ httpPort: 8080, httpsPort: 8443 }))
@@ -417,6 +418,45 @@ describe('ProxySettingsViewModel', () => {
 		back.askSavePorts()
 		await back.savePorts()
 		expect(back.movedTo).toBe('https://panel.tudominio.cl')
+	})
+
+	it('el aviso de la dirección nueva sobrevive a recargar hasta que se cierra', async () => {
+		const vm = await mountViewModel()
+		vm.setField('httpsPort', '8443')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpsPort: 8443 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		// Recargar es montar otro viewModel: el aviso sigue.
+		const reloaded = await mountViewModel({ ...PROXY, httpsPort: 8443 })
+		expect(reloaded.movedTo).toBe('https://panel.tudominio.cl:8443')
+
+		reloaded.dismissMove()
+		expect(reloaded.movedTo).toBeNull()
+		expect((await mountViewModel()).movedTo).toBeNull()
+	})
+
+	it('el aviso dice cómo actualizar MUELLE_PANEL_ORIGIN y lleva al panel nuevo con el aviso', async () => {
+		const vm = await mountViewModel()
+		vm.setField('httpsPort', '8443')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpsPort: 8443 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		expect(vm.movedOriginCommand).toBe(
+			'docker service update --env-add MUELLE_PANEL_ORIGIN=https://panel.tudominio.cl:8443 muelle_muelle',
+		)
+		// El link lleva a Ajustes del origen nuevo, que muestra el mismo aviso (la otra
+		// pestaña no ve este localStorage: es de otro origen).
+		expect(vm.canGoToMovedPanel).toBe(true)
+		expect(vm.movedPanelHref).toBe('https://panel.tudominio.cl:8443/ajustes?panel_moved=1')
+	})
+
+	it('un aviso guardado que no es un origen https se ignora', async () => {
+		localStorage.setItem('muelle:admin:panel-moved', 'javascript:alert(1)')
+		expect((await mountViewModel()).movedTo).toBeNull()
+		localStorage.setItem('muelle:admin:panel-moved', 'https://panel.tudominio.cl/x')
+		expect((await mountViewModel()).movedTo).toBeNull()
 	})
 
 	it('si solo cambió el HTTP, o no hay dominio del panel, no hay mudanza', async () => {
