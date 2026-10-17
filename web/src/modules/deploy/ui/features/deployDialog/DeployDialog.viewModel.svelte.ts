@@ -9,7 +9,7 @@ import {
 	ImageRejected,
 	isValidImageOverride,
 	overridableServices,
-	type RollbackPin,
+	type PinnedImages,
 } from '../../../domain'
 import { deployErrorMessage } from '../../components/labels/deployErrorMessage'
 
@@ -22,10 +22,11 @@ export interface DeployDialogProps {
 	/** La imagen actual de cada servicio, para el placeholder. */
 	readonly currentImages: Readonly<Record<string, string>>
 	/**
-	 * Lo que sigue fijado por un rollback (`rollbackPin`): un deploy sin imagen repite esas
-	 * refs con digest, así que no vuelve a seguir el tag (contrato §2.2). El diálogo lo avisa.
+	 * Lo que el deploy actual deja fijo en un digest (`pinnedImages`): un deploy sin imagen
+	 * repite esas refs con digest, así que no vuelve a seguir el tag (contrato §2.2). El
+	 * diálogo lo avisa.
 	 */
-	readonly rollbackPin?: RollbackPin | null
+	readonly pinned?: PinnedImages | null
 	readonly onDeployed: (id: DeployId) => void
 	readonly onClose: () => void
 }
@@ -69,13 +70,22 @@ export class DeployDialogViewModel {
 		return this.#deploy.isPending
 	}
 
-	/** El título del aviso de un rollback que sigue fijando imágenes; null si no hay. */
-	get rollbackPinTitle(): string | null {
-		const pin = this.#props().rollbackPin
+	/**
+	 * El título del aviso de lo que sigue fijo en un digest, nombrando el rollback si se sabe
+	 * que fue él; null si no hay nada fijo.
+	 */
+	get pinnedTitle(): string | null {
+		const pin = this.#props().pinned
 		if (!pin) return null
 		const id = pin.rollback
-		return this.fields.length > 1
-			? m.deploy_dialog_rollback_pin_services_title({ id, services: pin.services.join(', ') })
+		const services = pin.services.join(', ')
+		if (this.fields.length > 1) {
+			return id === null
+				? m.deploy_dialog_digest_pin_services_title({ services })
+				: m.deploy_dialog_rollback_pin_services_title({ id, services })
+		}
+		return id === null
+			? m.deploy_dialog_digest_pin_title()
 			: m.deploy_dialog_rollback_pin_title({ id })
 	}
 

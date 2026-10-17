@@ -336,7 +336,7 @@
 	kind={vm.kind}
 	services={vm.deployServices}
 	currentImages={vm.currentImages}
-	rollbackPin={vm.rollbackPin}
+	pinned={vm.pinned}
 	onDeployed={() => void vm.onQueued()}
 	onClose={vm.closeDeploy}
 />

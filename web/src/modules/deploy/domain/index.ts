@@ -51,7 +51,7 @@ export type {
 	Deploy,
 	DeployAccepted,
 	DeployActor,
-	RollbackPin,
+	PinnedImages,
 	ServiceImage,
 } from './entities/deploy'
 export {
@@ -60,7 +60,7 @@ export {
 	hasActiveDeploy,
 	imageOf,
 	latestDeploy,
-	rollbackPin,
+	pinnedImages,
 	rollbackTarget,
 } from './entities/deploy'
 export type {

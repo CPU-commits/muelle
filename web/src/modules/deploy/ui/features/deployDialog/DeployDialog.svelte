@@ -33,12 +33,8 @@
 		{#if vm.formError}
 			<Banner tone="error" title={vm.formError} />
 		{/if}
-		{#if vm.rollbackPinTitle}
-			<Banner
-				tone="info"
-				title={vm.rollbackPinTitle}
-				body={m.deploy_dialog_rollback_pin_body()}
-			/>
+		{#if vm.pinnedTitle}
+			<Banner tone="info" title={vm.pinnedTitle} body={m.deploy_dialog_rollback_pin_body()} />
 		{/if}
 		{#each vm.fields as service (service)}
 			<Field

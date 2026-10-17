@@ -275,19 +275,21 @@ describe('DeploysViewModel', () => {
 	it('sabe qué sigue fijado por un rollback, aunque el deploy actual ya no sea el rollback', async () => {
 		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
 		await vi.waitFor(() => expect(vm.selected?.id).toBe(144))
-		expect(vm.rollbackPin).toBeNull()
+		expect(vm.pinned).toBeNull()
 
-		// #146 es un deploy sin cuerpo después del rollback #144: repite sus refs con digest.
+		// #146 es un deploy sin cuerpo después del rollback #144: repite sus refs pedidas, con
+		// digest (`requested_images`).
+		const pinned = makeDeploy(144).images
 		mocks.listDeploys.mockResolvedValue([
 			makeDeploy(147, { status: 'failed' }),
-			makeDeploy(146),
-			makeDeploy(145, { trigger: 'rollback', status: 'failed' }),
-			makeDeploy(144, { trigger: 'rollback' }),
+			makeDeploy(146, { requestedImages: pinned }),
+			makeDeploy(145, { trigger: 'rollback', status: 'failed', requestedImages: pinned }),
+			makeDeploy(144, { trigger: 'rollback', requestedImages: pinned }),
 			makeDeploy(143),
 		])
 		const rolledBack = await mountViewModel(() => new DeploysViewModel(() => PROPS))
 		await vi.waitFor(() => expect(rolledBack.vm.selected?.id).toBe(147))
-		expect(rolledBack.vm.rollbackPin).toEqual({ rollback: 144, services: ['api'] })
+		expect(rolledBack.vm.pinned).toEqual({ rollback: 144, services: ['api'] })
 	})
 
 	it('al encolar uno nuevo desde el diálogo, lo abre', async () => {

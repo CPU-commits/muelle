@@ -177,5 +177,7 @@
 	"deploy_error_app_removing": "The app is being deleted: it doesn't accept deploys meanwhile (2 minutes at most).",
 	"deploy_dialog_rollback_pin_title": "The image is still pinned by rollback #{id}.",
 	"deploy_dialog_rollback_pin_services_title": "Services pinned by rollback #{id}: {services}.",
+	"deploy_dialog_digest_pin_title": "The image is pinned to a digest.",
+	"deploy_dialog_digest_pin_services_title": "Services pinned to a digest: {services}.",
 	"deploy_dialog_rollback_pin_body": "Without a new image, that version is repeated with its digest. To follow a tag again (like :staging), type it here or change it in the configuration."
 }

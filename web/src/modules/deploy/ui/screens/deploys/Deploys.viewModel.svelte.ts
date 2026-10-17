@@ -33,8 +33,8 @@ import {
 	type LogBuffer,
 	logText,
 	parseDeployId,
-	type RollbackPin,
-	rollbackPin,
+	type PinnedImages,
+	pinnedImages,
 } from '../../../domain'
 
 export interface DeploysProps {
@@ -272,11 +272,12 @@ export class DeploysViewModel {
 	}
 
 	/**
-	 * Lo que sigue fijado por el último rollback: desplegar sin imagen repite esas refs con
-	 * digest (no vuelve a seguir el tag; contrato §2.2), y el diálogo de deploy lo avisa.
+	 * Lo que el deploy actual deja fijo en un digest (`requested_images`): desplegar sin
+	 * imagen repite esas refs (no vuelve a seguir el tag; contrato §2.2), y el diálogo de
+	 * deploy lo avisa.
 	 */
-	get rollbackPin(): RollbackPin | null {
-		return rollbackPin(this.history)
+	get pinned(): PinnedImages | null {
+		return pinnedImages(this.history)
 	}
 
 	get currentImages(): Record<string, string> {

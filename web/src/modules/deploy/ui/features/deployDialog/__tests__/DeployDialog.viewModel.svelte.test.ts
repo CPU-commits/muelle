@@ -146,13 +146,13 @@ describe('DeployDialogViewModel', () => {
 
 	it('si algo sigue fijado por un rollback, avisa que sin imagen se repite esa versión', async () => {
 		const normal = await mountViewModel(() => new DeployDialogViewModel(() => props()))
-		expect(normal.vm.rollbackPinTitle).toBeNull()
+		expect(normal.vm.pinnedTitle).toBeNull()
 
 		const pin = { rollback: asDeployId(144), services: ['api'] }
 		const single = await mountViewModel(
-			() => new DeployDialogViewModel(() => props({ rollbackPin: pin })),
+			() => new DeployDialogViewModel(() => props({ pinned: pin })),
 		)
-		expect(single.vm.rollbackPinTitle).toBe(m.deploy_dialog_rollback_pin_title({ id: 144 }))
+		expect(single.vm.pinnedTitle).toBe(m.deploy_dialog_rollback_pin_title({ id: 144 }))
 
 		// En una compose dice cuáles: un override de un servicio suelta solo ese.
 		const compose = await mountViewModel(
@@ -161,12 +161,36 @@ describe('DeployDialogViewModel', () => {
 					props({
 						kind: 'compose',
 						services: ['api', 'web', 'worker'],
-						rollbackPin: { rollback: asDeployId(144), services: ['web', 'worker'] },
+						pinned: { rollback: asDeployId(144), services: ['web', 'worker'] },
 					}),
 				),
 		)
-		expect(compose.vm.rollbackPinTitle).toBe(
+		expect(compose.vm.pinnedTitle).toBe(
 			m.deploy_dialog_rollback_pin_services_title({ id: 144, services: 'web, worker' }),
+		)
+	})
+
+	it('fijado en un digest sin un rollback a la vista (salió del historial, o un override): lo dice igual', async () => {
+		const single = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({ pinned: { rollback: null, services: ['api'] } }),
+				),
+		)
+		expect(single.vm.pinnedTitle).toBe(m.deploy_dialog_digest_pin_title())
+
+		const compose = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({
+						kind: 'compose',
+						services: ['api', 'web', 'worker'],
+						pinned: { rollback: null, services: ['web'] },
+					}),
+				),
+		)
+		expect(compose.vm.pinnedTitle).toBe(
+			m.deploy_dialog_digest_pin_services_title({ services: 'web' }),
 		)
 	})
 
