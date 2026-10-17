@@ -254,5 +254,5 @@
 	"catalog_error_slug_is_service": "{slug} is already a service of the compose app {app} in this stage: services in a stage share the network. Pick another slug.",
 	"catalog_error_app_has_domains": "The app still has domains: delete them first in Domains.",
 	"catalog_error_app_deploy_stopping": "A deploy of the app hasn't stopped yet, so it wasn't deleted. Try again in a few seconds.",
-	"catalog_error_stage_network_conflict": "There's already a Docker network with this stage's name that muelle didn't create (it isn't an attachable overlay). Delete or rename it on the server and try again."
+	"catalog_error_stage_network_conflict": "There's already a Docker network named {network} on the server that isn't an attachable overlay: muelle can't use it for this stage, and the stage wasn't created. Delete or rename it on the server and try again."
 }

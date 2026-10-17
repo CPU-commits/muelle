@@ -233,7 +233,9 @@ export function catalogErrorMessage(error: unknown): string {
 	if (error instanceof SlugTaken) return slugTakenMessage(error)
 	if (error instanceof AppHasDomains) return m.catalog_error_app_has_domains()
 	if (error instanceof AppDeployStopping) return m.catalog_error_app_deploy_stopping()
-	if (error instanceof StageNetworkConflict) return m.catalog_error_stage_network_conflict()
+	if (error instanceof StageNetworkConflict) {
+		return m.catalog_error_stage_network_conflict({ network: error.network })
+	}
 	if (error instanceof InvalidProjectName) return projectNameMessage(error)
 	if (error instanceof InvalidSlug) return slugMessage(error, error.slug)
 	if (error instanceof InvalidCompose) {

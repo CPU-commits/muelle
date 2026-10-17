@@ -7,6 +7,7 @@ import {
 	ProjectNotFound,
 	SlugTaken,
 	STAGE_SLUG_MAX,
+	StageNetworkConflict,
 } from '../../../../domain'
 import { fakeStage } from '../../../../domain/repositories/__fakes__/inMemoryCatalogRepository'
 import { mountViewModel } from '../../../__tests__/mountViewModel'
@@ -84,6 +85,20 @@ describe('NewStageViewModel', () => {
 		mocks.createStage.mockRejectedValueOnce(new ProjectNotFound())
 		await vm.form.handleSubmit()
 		expect(vm.errors).toEqual({ fields: {}, form: m.catalog_error_project_not_found() })
+		expect(mocks.onDone).not.toHaveBeenCalled()
+	})
+
+	it('una red de Docker con el nombre del stage va arriba, nombrando la red', async () => {
+		const vm = await mount()
+		vm.form.setFieldValue('slug', 'qa')
+
+		mocks.createStage.mockRejectedValueOnce(new StageNetworkConflict('auditfy_qa'))
+		await vm.form.handleSubmit()
+
+		expect(vm.errors).toEqual({
+			fields: {},
+			form: m.catalog_error_stage_network_conflict({ network: 'auditfy_qa' }),
+		})
 		expect(mocks.onDone).not.toHaveBeenCalled()
 	})
 })

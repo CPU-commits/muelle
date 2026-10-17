@@ -254,5 +254,5 @@
 	"catalog_error_slug_is_service": "{slug} ya es un servicio de la app compose {app} de este stage: los servicios de un stage comparten la red. Elige otro slug.",
 	"catalog_error_app_has_domains": "La app todavía tiene dominios: bórralos primero en Dominios.",
 	"catalog_error_app_deploy_stopping": "Un deploy de la app todavía no se detiene, así que no se borró. Vuelve a intentarlo en unos segundos.",
-	"catalog_error_stage_network_conflict": "Ya hay una red de Docker con el nombre de este stage que no creó muelle (no es overlay attachable). Bórrala o renómbrala en el servidor y vuelve a intentarlo."
+	"catalog_error_stage_network_conflict": "Ya hay en el servidor una red de Docker llamada {network} que no es overlay attachable: muelle no puede usarla para este stage, y el stage no se creó. Bórrala o renómbrala en el servidor y vuelve a intentarlo."
 }

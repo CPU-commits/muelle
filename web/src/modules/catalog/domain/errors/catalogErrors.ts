@@ -64,13 +64,20 @@ export class AppDeployStopping extends ConflictError {
 }
 
 /**
- * `network_conflict` al crear un stage: ya hay una red de Docker con su nombre que no es
- * overlay attachable (no la creó muelle). Hay que borrarla o renombrarla en el servidor.
+ * `network_conflict` al crear un stage (contrato §0.2 y §3.4): ya hay una red de Docker con
+ * el nombre de la del stage (`<proyecto>_<stage>`) que no es overlay attachable, así que
+ * muelle no la usa ni la borra, y el stage no se guardó. Hay que borrarla o renombrarla en
+ * el servidor. (Una overlay attachable con ese nombre sí se usa, aunque no la haya creado
+ * muelle.)
  */
 export class StageNetworkConflict extends ConflictError {
-	constructor(options?: ErrorOptions) {
-		super('Ya existe una red de Docker con el nombre del stage', options)
+	/** La red que choca: la que hay que borrar o renombrar. */
+	readonly network: string
+
+	constructor(network: string, options?: ErrorOptions) {
+		super(`Ya existe una red de Docker ${network} que no es overlay attachable`, options)
 		this.name = 'StageNetworkConflict'
+		this.network = network
 	}
 }
 

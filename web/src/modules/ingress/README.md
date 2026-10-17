@@ -254,9 +254,12 @@ Ninguna en estos endpoints: lo de arriba es lo que dice el contrato. Dos cosas d
 que el panel seguía del código, propuestas como cambios y ya en el contrato (revisión del
 2026-10-17, §7):
 
-- `409 network_conflict` al crear un stage (ya hay una red de Docker con su nombre que no
-  creó muelle; `ErrNotStageNetwork` en `ingress/infra/in/http/errors.go`): catalog lo
-  muestra como `StageNetworkConflict`. Falta en la tabla de §0.2.
+- `409 network_conflict` al crear un stage (§0.2, §1.1 y §3.4; `ErrNotStageNetwork`): ya
+  hay una red de Docker con el nombre de la del stage (`<proyecto>_<stage>`) que no es
+  overlay attachable. muelle no la usa ni la borra, y el stage no se guarda. Una overlay
+  attachable con ese nombre sí se usa, aunque no la haya creado muelle. catalog lo muestra
+  como `StageNetworkConflict`, nombrando la red que hay que borrar o renombrar en el
+  servidor. En el mock, un stage con `ajena` en el slug.
 - Un email ACME o un token de Cloudflare con `{` o `}` (Caddy los toma como placeholders,
   §3.4): `PATCH /settings` responde `422` en `acme_email` o `cloudflare_token` y no guarda
   nada (§4.1; el del token, después del de su forma, y sin el token en el mensaje). Ajustes

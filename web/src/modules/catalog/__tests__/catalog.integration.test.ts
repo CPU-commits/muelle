@@ -269,19 +269,28 @@ describe('catálogo contra el backend simulado', () => {
 		)
 	})
 
-	it('una red de Docker ajena con el nombre del stage: 409 network_conflict', async () => {
+	it('una red de Docker ajena con el nombre del stage: 409 network_conflict, con la red', async () => {
 		server.use(
 			http.post(api('/projects/:p/stages'), () =>
 				apiError(
 					409,
 					'network_conflict',
-					'ya existe una red de Docker con el nombre del stage',
+					'ya existe una red de Docker con el nombre del stage que no es overlay attachable; bórrala o renómbrala',
 				),
 			),
 		)
+		const error = await catalogUseCases
+			.createStage({ project: auditfy, slug: 'qa' })
+			.catch((caught: unknown) => caught)
+		expect(error).toBeInstanceOf(StageNetworkConflict)
+		expect((error as StageNetworkConflict).network).toBe('auditfy_qa')
+	})
+
+	it('el mock: un stage con "ajena" choca con una red del servidor y no se guarda (§3.4)', async () => {
 		await expect(
-			catalogUseCases.createStage({ project: auditfy, slug: 'qa' }),
+			catalogUseCases.createStage({ project: auditfy, slug: 'red-ajena' }),
 		).rejects.toBeInstanceOf(StageNetworkConflict)
+		expect(catalogDb.findStage('auditfy', 'red-ajena')).toBeUndefined()
 	})
 
 	it('el mock no borra una app que tiene dominios, como el backend, aunque nadie los haya listado', async () => {

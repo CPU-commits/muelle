@@ -438,6 +438,16 @@ export const catalogHandlers: RequestHandler[] = [
 			if (!SLUG_12.test(slug)) throw new Invalid('slug', slugMessage(slug, 12))
 			if (!catalogDb.findProject(params.p)) return notFound()
 			if (catalogDb.findStage(params.p, slug)) return apiError(409, 'conflict', 'ya existe')
+			// Después de lo que se responde sin Docker, ingress asegura la red del stage
+			// (contrato §1.1 y §3.4): con "ajena" en el slug, ya hay en el servidor una red con
+			// su nombre que no es overlay attachable, y el stage no se guarda.
+			if (slug.includes('ajena')) {
+				return apiError(
+					409,
+					'network_conflict',
+					'ya existe una red de Docker con el nombre del stage que no es overlay attachable; bórrala o renómbrala',
+				)
+			}
 			const created = { project: params.p, slug, created_at: new Date().toISOString() }
 			catalogDb.state.stages.push(created)
 			catalogDb.save()

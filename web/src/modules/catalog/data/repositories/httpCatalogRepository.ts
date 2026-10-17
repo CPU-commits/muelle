@@ -1,6 +1,6 @@
 import type { ApiError } from '@/shared/data/http/errors'
 import { type DomainErrorMap, withDomainErrors } from '@/shared/data/http/domainErrors'
-import type { CatalogRepository } from '../../domain'
+import type { CatalogRepository, ProjectSlug, StageSlug } from '../../domain'
 import {
 	AppDeployStopping,
 	AppHasDomains,
@@ -10,6 +10,7 @@ import {
 	ProjectNotFound,
 	SlugTaken,
 	StageNetworkConflict,
+	stageNetwork,
 	StageNotEmpty,
 	StageNotFound,
 } from '../../domain'
@@ -46,15 +47,19 @@ const PROJECT: DomainErrorMap = {
 }
 
 // Un 404 al crear un stage es su proyecto; al borrarlo, el stage (o su proyecto).
-// `network_conflict`: ya hay una red de Docker con el nombre del stage que no creó muelle
-// (la crea ingress al crear el stage).
-const NEW_STAGE: DomainErrorMap = {
-	notFound: (error) => new ProjectNotFound(cause(error)),
-	fields: FIELDS,
-	codes: {
-		conflict: (error) => new SlugTaken('stage', cause(error)),
-		network_conflict: (error) => new StageNetworkConflict(cause(error)),
-	},
+// `network_conflict`: ya hay una red de Docker con el nombre de la del stage que no es
+// overlay attachable (ingress la crea al crear el stage, contrato §3.4). El error nombra esa
+// red, que es la que hay que borrar o renombrar en el servidor.
+function newStageErrors(project: ProjectSlug, slug: StageSlug): DomainErrorMap {
+	const network = stageNetwork({ project, slug })
+	return {
+		notFound: (error) => new ProjectNotFound(cause(error)),
+		fields: FIELDS,
+		codes: {
+			conflict: (error) => new SlugTaken('stage', cause(error)),
+			network_conflict: (error) => new StageNetworkConflict(network, cause(error)),
+		},
+	}
 }
 
 const STAGE: DomainErrorMap = {
@@ -109,7 +114,7 @@ export const httpCatalogRepository: CatalogRepository = {
 	createStage: (project, slug) =>
 		withDomainErrors(
 			async () => stageFromDto(await ds.createStage(project, { slug })),
-			NEW_STAGE,
+			newStageErrors(project, slug),
 		),
 
 	deleteStage: (project, stage) => withDomainErrors(() => ds.deleteStage(project, stage), STAGE),

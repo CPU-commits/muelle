@@ -92,10 +92,21 @@ describe('catalogErrorMessage', () => {
 		)
 	})
 
-	it('crear un stage: una red de Docker ajena con su nombre', () => {
-		expect(catalogErrorMessage(new StageNetworkConflict())).toBe(
-			m.catalog_error_stage_network_conflict(),
+	it('crear un stage: una red de Docker con su nombre que no es overlay attachable', () => {
+		const error = new StageNetworkConflict('auditfy_qa')
+		expect(catalogErrorMessage(error)).toBe(
+			m.catalog_error_stage_network_conflict({ network: 'auditfy_qa' }),
 		)
-		expect(new StageNetworkConflict()).toBeInstanceOf(ConflictError)
+		expect(error).toBeInstanceOf(ConflictError)
+		// Nombra la red (la que hay que borrar o renombrar en el servidor) y por qué no sirve:
+		// que la creara muelle o no da igual, una overlay attachable se usa (contrato §3.4).
+		for (const locale of ['es', 'en'] as const) {
+			const text = m.catalog_error_stage_network_conflict(
+				{ network: 'auditfy_qa' },
+				{ locale },
+			)
+			expect(text).toContain('auditfy_qa')
+			expect(text).toMatch(/overlay attachable|attachable overlay/)
+		}
 	})
 })
