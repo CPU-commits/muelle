@@ -3,6 +3,7 @@ import { type DomainErrorMap, withDomainErrors } from '@/shared/data/http/domain
 import type { AuditRepository, RegistryRepository, SettingsRepository } from '../../domain'
 import {
 	CloudflareUnavailable,
+	PortsDockerUnavailable,
 	REGISTRIES_PHASE,
 	RegistryExists,
 	RegistryNotFound,
@@ -21,13 +22,15 @@ import {
 
 const cause = (error: ApiError) => ({ cause: error })
 
-// `totp_required_first` (mapper_errors.go), `would_lock_out` y `cloudflare_unavailable`
-// (contrato §4.1), y los 422 de los campos de la Fase 3.
+// `totp_required_first` (mapper_errors.go), `would_lock_out`, `cloudflare_unavailable` y
+// `docker_unavailable` (contrato §4.1: el único `PATCH` que toca Docker es el de los puertos,
+// que los prueba antes de guardar), y los 422 de los campos de la Fase 3.
 const SETTINGS_ERRORS: DomainErrorMap = {
 	codes: {
 		totp_required_first: (error) => new TotpRequiredFirst(cause(error)),
 		would_lock_out: (error) => new WouldLockOut(cause(error)),
 		cloudflare_unavailable: (error) => new CloudflareUnavailable(cause(error)),
+		docker_unavailable: (error) => new PortsDockerUnavailable(cause(error)),
 	},
 	fields: {
 		public_ip: 'ipv4',

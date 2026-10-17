@@ -12,6 +12,7 @@ import {
 	InvalidPort,
 	InvalidRegistryCredential,
 	InvalidRegistryHost,
+	PortsDockerUnavailable,
 	REGISTRY_HOST_MAX_LENGTH,
 	REGISTRY_PASSWORD_MAX_BYTES,
 	REGISTRY_USERNAME_MAX_LENGTH,
@@ -29,6 +30,7 @@ export function adminErrorMessage(error: unknown): string {
 	if (error instanceof WouldLockOut) return m.admin_security_lockout_title()
 	// Antes que lo común: un `UnavailableError` cualquiera diría "muelle respondió con un error".
 	if (error instanceof CloudflareUnavailable) return m.admin_cf_unavailable_title()
+	if (error instanceof PortsDockerUnavailable) return m.admin_ports_docker_unavailable()
 	if (error instanceof RegistryExists) return m.admin_error_registry_exists()
 	if (error instanceof RegistryNotFound) return m.admin_error_registry_not_found()
 	// Lo común (sin red, fase pendiente, una dirección que no es la del panel, demasiados

@@ -31,6 +31,7 @@ export {
 	InvalidPort,
 	InvalidRegistryCredential,
 	InvalidRegistryHost,
+	PortsDockerUnavailable,
 	RegistryExists,
 	RegistryNotFound,
 	RequiredField,

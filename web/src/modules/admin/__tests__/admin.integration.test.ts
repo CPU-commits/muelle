@@ -13,6 +13,7 @@ import {
 	AUDIT_PAGE_SIZE,
 	CloudflareUnavailable,
 	InvalidCidr,
+	PortsDockerUnavailable,
 	RegistryExists,
 	RegistryNotFound,
 	TotpRequiredFirst,
@@ -199,6 +200,17 @@ describe('settings', () => {
 			error: expect.stringContaining('8081'),
 			caddy: { running: false },
 		})
+	})
+
+	it('Docker caído al probar los puertos nuevos (503 docker_unavailable) es PortsDockerUnavailable', async () => {
+		server.use(
+			http.patch(api('/settings'), () =>
+				apiError(503, 'docker_unavailable', 'Docker no responde'),
+			),
+		)
+		await expect(
+			adminUseCases.updateProxyPorts({ http: '8080', https: '443' }),
+		).rejects.toBeInstanceOf(PortsDockerUnavailable)
 	})
 
 	it('caddy_image no es un ajuste (§4.1): el mock lo rechaza en el PATCH y el panel no lo lee', async () => {

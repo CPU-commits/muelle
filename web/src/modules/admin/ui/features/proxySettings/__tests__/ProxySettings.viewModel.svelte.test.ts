@@ -10,6 +10,7 @@ import { toast } from '@/shared/ui/stores'
 import {
 	CloudflareUnavailable,
 	InvalidIpAddress,
+	PortsDockerUnavailable,
 	type ProxySettings,
 	type Settings,
 } from '../../../../domain'
@@ -234,6 +235,20 @@ describe('ProxySettingsViewModel', () => {
 		await vm.savePorts()
 		expect(vm.confirmingPorts).toBe(false)
 		expect(vm.errors).toEqual({ httpPort: 'el puerto está ocupado' })
+	})
+
+	it('Docker caído al probar los puertos (503): la confirmación queda abierta y dice que no se guardó', async () => {
+		const vm = await mountViewModel()
+		vm.setField('httpsPort', '8443')
+		vm.askSavePorts()
+
+		mocks.updateProxyPorts.mockRejectedValueOnce(new PortsDockerUnavailable())
+		await vm.savePorts()
+		expect(vm.confirmingPorts).toBe(true)
+		expect(vm.portsError).toBe(m.admin_ports_docker_unavailable())
+		// No se guardó: ni aviso de mudanza ni seguimiento de muelle-caddy.
+		expect(vm.movedTo).toBeNull()
+		expect(vm.recreation).toBeNull()
 	})
 
 	it('el token de Cloudflare se escribe en un modal y no queda en memoria', async () => {

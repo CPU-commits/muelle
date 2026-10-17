@@ -67,6 +67,7 @@
 	"admin_ports_applying": "Aplicando los puertos…",
 	"admin_ports_applying_body": "Puede tardar hasta 2 minutos mientras muelle prepara muelle-caddy.",
 	"admin_ports_saved": "Puertos guardados",
+	"admin_ports_docker_unavailable": "Docker no respondió en el servidor de muelle mientras se probaban los puertos nuevos. No se guardó nada: vuelve a intentarlo en un momento.",
 	"admin_ports_recreating_title": "Recreando muelle-caddy con los puertos nuevos…",
 	"admin_ports_recreating_body": "Los sitios vuelven en unos segundos.",
 	"admin_ports_recreated": "muelle-caddy ya escucha en los puertos nuevos.",

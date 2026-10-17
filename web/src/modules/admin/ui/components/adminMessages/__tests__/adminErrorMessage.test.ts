@@ -7,6 +7,7 @@ import {
 	InvalidCloudflareToken,
 	InvalidRegistryCredential,
 	InvalidRegistryHost,
+	PortsDockerUnavailable,
 	WouldLockOut,
 } from '../../../../domain'
 import { adminErrorMessage, adminFieldError } from '../adminErrorMessage'
@@ -19,6 +20,14 @@ describe('adminErrorMessage', () => {
 		expect(adminErrorMessage(new UnavailableError('x', { reason: 'server' }))).not.toBe(
 			m.admin_cf_unavailable_title(),
 		)
+	})
+
+	it('Docker caído al probar los puertos dice que no se guardó nada, no "muelle respondió con un error"', () => {
+		expect(adminErrorMessage(new PortsDockerUnavailable())).toBe(
+			m.admin_ports_docker_unavailable(),
+		)
+		expect(m.admin_ports_docker_unavailable()).toMatch(/Docker/)
+		expect(m.admin_ports_docker_unavailable({}, { locale: 'en' })).toMatch(/Docker/)
 	})
 
 	it('would_lock_out tiene su texto', () => {

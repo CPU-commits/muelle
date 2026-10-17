@@ -37,6 +37,18 @@ export class CloudflareUnavailable extends UnavailableError {
 	}
 }
 
+/**
+ * `docker_unavailable` (503) en un `PATCH /settings` que cambia los puertos: muelle prueba
+ * los nuevos en el host antes de guardar (contrato §3.5, `CheckProxyPorts`), y Docker no
+ * respondió. No se guardó nada; se puede reintentar.
+ */
+export class PortsDockerUnavailable extends UnavailableError {
+	constructor(options?: ErrorOptions) {
+		super('Docker no respondió al probar los puertos', { ...options, reason: 'server' })
+		this.name = 'PortsDockerUnavailable'
+	}
+}
+
 /** `conflict` al agregar un registry: ya hay uno con ese host. */
 export class RegistryExists extends ConflictError {
 	constructor(options?: ErrorOptions) {

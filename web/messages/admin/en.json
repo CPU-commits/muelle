@@ -67,6 +67,7 @@
 	"admin_ports_applying": "Applying the ports…",
 	"admin_ports_applying_body": "It can take up to 2 minutes while muelle prepares muelle-caddy.",
 	"admin_ports_saved": "Ports saved",
+	"admin_ports_docker_unavailable": "Docker didn't respond on the muelle server while the new ports were being checked. Nothing was saved: try again in a moment.",
 	"admin_ports_recreating_title": "Recreating muelle-caddy with the new ports…",
 	"admin_ports_recreating_body": "Sites are back in a few seconds.",
 	"admin_ports_recreated": "muelle-caddy is listening on the new ports.",
