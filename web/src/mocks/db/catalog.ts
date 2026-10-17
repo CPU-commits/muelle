@@ -410,6 +410,20 @@ export const catalogDb = {
 		return state.apps.filter((app) => app.project === project && app.stage === stage)
 	},
 
+	/**
+	 * Cambiaron las variables de la app, o las del stage (todas sus apps): su
+	 * `config_changed_at` pasa a ahora y quedan con cambios pendientes (§5.2 regla 4 del
+	 * diseño), como hace `secrets` en el backend.
+	 */
+	touchConfig(project: string, stage: string, slug?: string): void {
+		const now = new Date().toISOString()
+		for (const app of state.apps) {
+			if (app.project !== project || app.stage !== stage) continue
+			if (slug === undefined || app.slug === slug) app.config_changed_at = now
+		}
+		this.save()
+	},
+
 	removeApp(project: string, stage: string, slug: string): void {
 		state.apps = state.apps.filter((app) => !sameApp(app, project, stage, slug))
 	},

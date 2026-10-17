@@ -598,7 +598,10 @@ desconocidos): mientras no existan, no se mandan.
   y saca de ahí la ref de un servicio que el deploy actual no tiene (§2.2), e ingress exige
   el slug como destino solo en una app de formulario. Lo que corre en Swarm (estado, logs)
   son los servicios del deploy actual. Al revés, el `last_deployed_at` del catálogo sigue
-  al deploy actual del mock de deploy (`deployDb.lastDeployedAt`). Un test de integración
+  al deploy actual del mock de deploy (`deployDb.lastDeployedAt`). `handlers/secrets.ts`
+  pregunta al catálogo si el stage o la app existen (si no, `404`) y, al cambiar sus
+  variables, adelanta su `config_changed_at` (`catalogDb.touchConfig`: la app, o todas las
+  del stage), así quedan con cambios pendientes como en el backend. Un test de integración
   que toque uno de esos resetea también el otro.
 
 ### Sesión y `auth`

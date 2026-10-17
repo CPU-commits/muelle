@@ -1,5 +1,6 @@
 import { http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent, notFound } from '../api'
+import { catalogDb } from '../db/catalog'
 import { type MockEnvTarget, type MockEnvVar, secretsDb } from '../db/secrets'
 import { requireSession } from '../session'
 
@@ -7,6 +8,17 @@ import { requireSession } from '../session'
 // con las reglas de `entity`, `validate.EnvKey` y los casos de uso: los secretos vuelven
 // enmascarados, un PATCH no reescribe lo que no cambia, y los límites (500 variables,
 // 64 KiB por valor, 1 MiB por dueño y por cuerpo) responden lo mismo que el backend.
+
+// Los dueños viven en el mock de catalog: un stage o una app que no está ahí es 404, y
+// cambiar sus variables deja con cambios pendientes a la app o a todas las apps del stage
+// (§5.2 regla 4 del diseño). Un test puede cambiar cualquiera de los dos (`null` vuelve a
+// "todo existe" y "nadie se entera").
+secretsDb.setOwnerResolver(({ project, stage, app }) =>
+	app === undefined
+		? catalogDb.findStage(project, stage) !== undefined
+		: catalogDb.findApp(project, stage, app) !== undefined,
+)
+secretsDb.setChangeListener(({ project, stage, app }) => catalogDb.touchConfig(project, stage, app))
 
 const MAX_VARS = 500
 const MAX_VALUE_BYTES = 64 * 1024
