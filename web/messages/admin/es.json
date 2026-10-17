@@ -97,6 +97,7 @@
 	"admin_registries_edit": "Cambiar credenciales",
 	"admin_registries_delete": "Eliminar",
 	"admin_registries_updated": "Actualizado {when}",
+	"admin_registries_updated_exact": "el {date}",
 	"admin_registries_empty_title": "Sin registries",
 	"admin_registries_empty_body": "Solo hacen falta para bajar imágenes privadas.",
 	"admin_registries_feature": "La sección de registries",

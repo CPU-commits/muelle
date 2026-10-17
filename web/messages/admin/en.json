@@ -97,6 +97,7 @@
 	"admin_registries_edit": "Change credentials",
 	"admin_registries_delete": "Delete",
 	"admin_registries_updated": "Updated {when}",
+	"admin_registries_updated_exact": "on {date}",
 	"admin_registries_empty_title": "No registries",
 	"admin_registries_empty_body": "They're only needed to pull private images.",
 	"admin_registries_feature": "The registries section",

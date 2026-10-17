@@ -93,6 +93,13 @@ export class RegistriesViewModel {
 	/** La fecha y hora exactas, para el `title`. */
 	updatedTitle = (registry: Registry): string => formatDateTime(registry.updatedAt)
 
+	/**
+	 * La fecha y hora exactas para un lector de pantalla ("el 9 oct 2026, 12:30"): un `title`
+	 * no lo leen todos, y con un dedo no se ve.
+	 */
+	updatedExact = (registry: Registry): string =>
+		m.admin_registries_updated_exact({ date: formatDateTime(registry.updatedAt) })
+
 	menuFor = (registry: Registry): MenuEntry[] => [
 		{
 			kind: 'action',

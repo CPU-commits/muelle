@@ -15,6 +15,7 @@
 		Menu,
 		Modal,
 		Mono,
+		srOnly,
 	} from '@/shared/ui'
 	import { SectionHeading } from '../../components/sectionHeading'
 	import { RegistriesViewModel } from './Registries.viewModel.svelte.ts'
@@ -60,13 +61,17 @@
 				<ListRow>
 					<span class={hostCell}><Mono>{registry.host}</Mono></span>
 					<span class={userCell}>{registry.username}</span>
-					<time
-						class={dateCell}
-						datetime={registry.updatedAt.toISOString()}
-						title={vm.updatedTitle(registry)}
-					>
-						{vm.updatedLabel(registry)}
-					</time>
+					<!-- "Actualizado hace 3 días" a la vista; la fecha exacta en el `title` para el
+					     puntero y en el texto para un lector de pantalla. -->
+					<span class={dateCell}>
+						<time
+							datetime={registry.updatedAt.toISOString()}
+							title={vm.updatedTitle(registry)}
+						>
+							{vm.updatedLabel(registry)}
+						</time>
+						<span class={srOnly}>{vm.updatedExact(registry)}</span>
+					</span>
 					<Menu
 						label={m.admin_registries_options({ host: registry.host })}
 						items={vm.menuFor(registry)}

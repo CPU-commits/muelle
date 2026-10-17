@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/svelte-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-svelte'
 import { createQueryClient } from '@/shared/data/query'
+import { formatDateTime } from '@/shared/ui'
 import { authKeys } from '@/modules/auth'
 import { UnavailableError } from '@/shared/domain'
 import type { Settings } from '../../../../domain'
@@ -123,5 +124,24 @@ describe('SettingsScreen', () => {
 		await expect.element(screen.getByLabelText('IPs permitidas para el panel')).toBeVisible()
 		await expect.element(screen.getByText('ghcr.io')).toBeVisible()
 		await expect.element(screen.getByText(/llega con la Fase/)).not.toBeInTheDocument()
+	})
+
+	it('cuándo se actualizó un registry es un <time> con la fecha, y la fecha exacta se lee', async () => {
+		mocks.getSettings.mockResolvedValue(PHASE_3)
+		const at = new Date('2026-10-09T15:30:00.000Z')
+		mocks.listRegistries.mockResolvedValue([
+			{ host: 'ghcr.io', username: 'cpu-commits', createdAt: at, updatedAt: at },
+		])
+
+		const screen = await render(SettingsView, { client: client() })
+
+		const updated = screen.getByText(/^Actualizado /)
+		await expect.element(updated).toBeVisible()
+		const time = updated.element().closest('time')
+		expect(time?.getAttribute('datetime')).toBe('2026-10-09T15:30:00.000Z')
+		// La fecha exacta no queda solo en un `title` (ni un lector de pantalla ni un dedo la
+		// ven): va en el texto de la fila, para el lector.
+		const row = time?.parentElement
+		expect(row?.textContent).toContain(formatDateTime(at))
 	})
 })
