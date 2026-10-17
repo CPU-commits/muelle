@@ -174,6 +174,10 @@ test('cambiar el HTTPS avisa a dónde se muda el panel, y el aviso sobrevive a r
 
 	const notice = 'La dirección del panel ahora es https://panel.tudominio.cl:8443'
 	await expect(ports.getByText(notice)).toBeVisible()
+	// Nombra la anterior: a dónde volver si la nueva no responde (contrato §3.5).
+	await expect(
+		ports.getByText(/vuelve a la anterior, https:\/\/panel\.tudominio\.cl: si muelle-caddy/),
+	).toBeVisible()
 	// El origen permitido sigue al puerto HTTPS (contrato §0.1): no hay nada que tocar en el
 	// servidor.
 	await expect(ports.getByText(/MUELLE_PANEL_ORIGIN/)).toHaveCount(0)
