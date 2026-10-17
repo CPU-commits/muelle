@@ -61,6 +61,15 @@ export function releaseWrites(): void {
 	movedTo = null
 }
 
+/**
+ * A dónde se mudó el panel si esta página frena las escrituras (`holdWrites`); null si no.
+ * El freno es de la página, no de quien lo puso: quien ve que muelle volvió a los puertos
+ * anteriores lo suelta si es el de la dirección que falló.
+ */
+export function heldWritesOrigin(): string | null {
+	return movedTo
+}
+
 export function apiUrl(path: string, query?: QueryParams): string {
 	const url = `${config.apiUrl}${API_PREFIX}${path}`
 	if (!query) return url

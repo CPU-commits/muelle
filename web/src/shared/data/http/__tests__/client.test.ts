@@ -2,7 +2,7 @@ import { delay, http as mock, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PanelMovedError } from '@/shared/domain'
-import { apiUrl, configureHttp, holdWrites, http, releaseWrites } from '../client'
+import { apiUrl, configureHttp, heldWritesOrigin, holdWrites, http, releaseWrites } from '../client'
 import { ApiError, NetworkError, RequestTimeoutError } from '../errors'
 
 const url = (path: string) => apiUrl(path)
@@ -141,5 +141,15 @@ describe('cliente HTTP', () => {
 		} finally {
 			server.events.removeListener('request:start', sent)
 		}
+	})
+
+	it('dice a dónde se mudó el panel mientras frena las escrituras, o null', () => {
+		// Quien ve que muelle volvió a los puertos anteriores suelta solo lo que frenó la
+		// mudanza a la dirección que falló (la página entera comparte este freno).
+		expect(heldWritesOrigin()).toBeNull()
+		holdWrites('https://panel.tudominio.cl:8443')
+		expect(heldWritesOrigin()).toBe('https://panel.tudominio.cl:8443')
+		releaseWrites()
+		expect(heldWritesOrigin()).toBeNull()
 	})
 })

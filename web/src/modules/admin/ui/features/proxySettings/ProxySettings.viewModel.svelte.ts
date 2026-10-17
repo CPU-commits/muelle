@@ -1,7 +1,7 @@
 import { resolve } from '$app/paths'
 import { untrack } from 'svelte'
 import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query'
-import { holdWrites, releaseWrites } from '@/shared/data/http/client'
+import { heldWritesOrigin, holdWrites, releaseWrites } from '@/shared/data/http/client'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { withQuery } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
@@ -568,10 +568,11 @@ export class ProxySettingsViewModel {
 			httpsPort: rollback.attempted.httpsPort,
 		})
 		if (this.movedTo !== null && this.movedTo === failed) this.dismissMove()
-		if (this.#leaving) {
-			this.#leaving = false
-			releaseWrites()
-		}
+		this.#leaving = false
+		// El freno de las escrituras es de la página: lo puso este viewModel o el de otra
+		// visita a Ajustes (se salió y se volvió sin recargar). Se suelta si es el de la
+		// mudanza a la dirección que falló.
+		if (failed !== null && heldWritesOrigin() === failed) releaseWrites()
 		if (this.#watchingProxy) {
 			this.httpPort = String(rollback.restored.httpPort)
 			this.httpsPort = String(rollback.restored.httpsPort)

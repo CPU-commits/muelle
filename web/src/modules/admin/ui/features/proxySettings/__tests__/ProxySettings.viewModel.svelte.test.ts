@@ -86,16 +86,30 @@ function saved(proxy: Partial<ProxySettings>): Settings {
 
 let client: QueryClient
 
-async function mountViewModel(proxy: ProxySettings = PROXY): Promise<ProxySettingsViewModel> {
-	client = createQueryClient({ retry: false })
+interface Mounted {
+	readonly vm: ProxySettingsViewModel
+	/** Salir de Ajustes (navegar a otra pantalla): el viewModel se va, la página sigue. */
+	readonly unmount: () => void
+}
+
+/** Monta Ajustes; con `queryClient`, el de la app que ya estaba (volver a Ajustes). */
+async function mount(
+	proxy: ProxySettings = PROXY,
+	queryClient: QueryClient = createQueryClient({ retry: false }),
+): Promise<Mounted> {
+	client = queryClient
 	let vm: ProxySettingsViewModel | undefined
-	await render(ProxySettingsHarness, {
+	const screen = await render(ProxySettingsHarness, {
 		client,
 		proxy: () => proxy,
 		onReady: (instance) => (vm = instance),
 	})
 	if (!vm) throw new Error('el harness no expuso el viewModel')
-	return vm
+	return { vm, unmount: () => screen.unmount() }
+}
+
+async function mountViewModel(proxy: ProxySettings = PROXY): Promise<ProxySettingsViewModel> {
+	return (await mount(proxy)).vm
 }
 
 describe('ProxySettingsViewModel', () => {
@@ -766,6 +780,49 @@ describe('ProxySettingsViewModel', () => {
 				.mockResolvedValue(new Response(null, { status: 204 }))
 			await expect(http.post('/projects')).resolves.toBeNull()
 			expect(sent).toHaveBeenCalledOnce()
+		})
+
+		it('entrando por la dirección de Caddy y volviendo a Ajustes desde otra pantalla, también acepta escrituras', async () => {
+			page.origin = 'https://panel.tudominio.cl'
+			const first = await mount()
+			await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+			// Mientras muelle-caddy se recrea, esta dirección no responde.
+			ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
+			await saveHttps(first.vm)
+			await vi.waitFor(() =>
+				expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('error'),
+			)
+			first.unmount()
+
+			// Volvió a los puertos anteriores, y se vuelve a Ajustes (sin recargar: el freno de
+			// las escrituras es de la página, no del viewModel que lo puso).
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			const { vm } = await mount({ ...PROXY, httpsPort: 8443 }, client)
+			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
+			expect(vm.movedTo).toBeNull()
+			const sent = vi
+				.spyOn(globalThis, 'fetch')
+				.mockResolvedValue(new Response(null, { status: 204 }))
+			await expect(http.post('/projects')).resolves.toBeNull()
+			expect(sent).toHaveBeenCalledOnce()
+		})
+
+		it('una vuelta atrás de otra dirección no suelta el freno de esta mudanza', async () => {
+			// Se cambió el HTTPS a 8443 desde la dirección de Caddy; GET /proxy trae una vuelta
+			// atrás que no es de ese puerto (otro intento): las escrituras siguen frenadas.
+			page.origin = 'https://panel.tudominio.cl'
+			const vm = await mountViewModel()
+			await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+			await saveHttps(vm)
+
+			ingress.getProxyStatus.mockResolvedValue(
+				proxyStatus({
+					portsRollback: { ...ROLLBACK, attempted: { httpPort: 80, httpsPort: 9443 } },
+				}),
+			)
+			const { vm: again } = await mount({ ...PROXY, httpsPort: 8443 })
+			await vi.waitFor(() => expect(again.rollback).not.toBeNull())
+			await expect(http.post('/projects')).rejects.toBeInstanceOf(PanelMovedError)
 		})
 
 		it('un ports_rollback de antes del cambio (en el cache) no cuenta: el PATCH lo limpia', async () => {

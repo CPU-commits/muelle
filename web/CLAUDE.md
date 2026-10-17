@@ -512,7 +512,9 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
       `holdWrites(<origen nuevo>)` del cliente: desde esa página ningún `POST`, `PUT`,
       `PATCH` ni `DELETE` sale, y tira `PanelMovedError` (un `BadOriginError` con `origin`;
       `describeError` dice a dónde seguir). Las lecturas siguen. `releaseWrites()` las deja
-      salir otra vez (muelle volvió a los puertos anteriores).
+      salir otra vez (muelle volvió a los puertos anteriores). El freno es de la página, no
+      del viewModel que lo puso: `heldWritesOrigin()` dice a dónde se mudó, y Ajustes lo
+      suelta al ver la vuelta atrás de esa dirección aunque sea otra visita a la pantalla.
     - Sin mapa: 401 `UnauthorizedError`, 403 `ForbiddenError`, 404 `NotFoundError`,
       409 `ConflictError`, 423/429 `RateLimitedError`, 5xx, red y timeout `UnavailableError`,
       el resto `UnexpectedError`. Una respuesta con otra forma es `ContractError`
@@ -636,7 +638,8 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
       sigue preguntando solo por si muelle vuelve atrás (la dirección vuelve a responder).
     - Con `ports_rollback` (muelle-caddy no arrancó con los puertos nuevos y muelle volvió a
       los anteriores, contrato §3.5) la tarjeta lo dice con el motivo, saca el aviso de la
-      dirección que falló (también uno guardado, al recargar), deja salir las escrituras,
+      dirección que falló (también uno guardado, al recargar), deja salir las escrituras
+      frenadas por la mudanza a esa dirección (también si se salió de Ajustes y se volvió),
       pone los puertos de antes en los campos y, si el panel no está en la dirección
       anterior (`https://<panel_domain>[:<puerto anterior>]`), ofrece volver. El panel no
       puede saber si la dirección nueva responde (la CSP no deja pedir a otro origen): lo
