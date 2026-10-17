@@ -77,7 +77,6 @@ export {
 	asLogOffset,
 	EMPTY_LOG,
 	flushLog,
-	hasProxySyncWarning,
 	LOG_LINE_CAP,
 	LOG_START,
 	logLineTone,
@@ -85,7 +84,6 @@ export {
 	MASK,
 	maskedSegments,
 	parseLogLine,
-	PROXY_SYNC_WARNING,
 } from './entities/deployLog'
 export type { AppKind, DeployOverridesInput, DeployRequest } from './entities/deployRequest'
 export {

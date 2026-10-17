@@ -74,6 +74,11 @@ const HISTORY = [
 	makeDeploy(142, { status: 'failed', error: 'la versión nueva no pasó el healthcheck' }),
 ]
 
+/** El historial con #143 marcado: su paso 7 no pudo actualizar Caddy (`routes_warning`). */
+const WARNED = HISTORY.map((deploy) =>
+	deploy.id === 143 ? { ...deploy, routesWarning: true } : deploy,
+)
+
 /** Un log guionado: los eventos y, si se pide, quedarse abierto hasta abortar. */
 function scripted(events: DeployLogEvent[], { hold = false } = {}) {
 	return async function* (
@@ -104,13 +109,14 @@ describe('DeploysViewModel', () => {
 		ingress.getProxyStatus.mockResolvedValue(proxyStatus())
 	})
 
-	it('la advertencia del paso 7 no trae el error de Caddy: lo busca en GET /proxy', async () => {
+	it('la advertencia del paso 7 sale del deploy (routes_warning); su motivo, de GET /proxy', async () => {
 		ingress.getProxyStatus.mockResolvedValue(
 			proxyStatus({
 				status: 'out_of_sync',
 				error: 'Caddy rechazó la configuración: la ruta de x.tudominio.cl no es válida',
 			}),
 		)
+		mocks.listDeploys.mockResolvedValue(WARNED)
 		mocks.followDeployLog.mockImplementation(
 			scripted([chunk(CADDY_WARNING, 120), { kind: 'status', status: 'succeeded' }]),
 		)
@@ -124,13 +130,12 @@ describe('DeploysViewModel', () => {
 				error: 'Caddy rechazó la configuración: la ruta de x.tudominio.cl no es válida',
 			}),
 		)
-		expect(vm.log.lines[0]?.tone).toBe('warn')
+		// La línea se pinta en ámbar como cualquier advertencia.
+		await vi.waitFor(() => expect(vm.log.lines[0]?.tone).toBe('warn'))
 	})
 
 	it('si el proxy ya se sincronizó, lo dice; si GET /proxy no contesta, avisa sin el motivo', async () => {
-		mocks.followDeployLog.mockImplementation(
-			scripted([chunk(CADDY_WARNING, 120), { kind: 'status', status: 'succeeded' }]),
-		)
+		mocks.listDeploys.mockResolvedValue(WARNED)
 		const { vm } = await mountViewModel(
 			() => new DeploysViewModel(() => ({ ...PROPS, deployParam: '143' })),
 		)
@@ -140,16 +145,15 @@ describe('DeploysViewModel', () => {
 		const other = await mountViewModel(
 			() => new DeploysViewModel(() => ({ ...PROPS, deployParam: '143' })),
 		)
-		await vi.waitFor(() => expect(other.vm.log.lines).toHaveLength(1))
+		await vi.waitFor(() => expect(other.vm.selected?.id).toBe(143))
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalledTimes(2))
 		expect(other.vm.proxyWarning).toEqual({ kind: 'failing', error: null })
 	})
 
-	it('sin la advertencia no pide el estado del proxy', async () => {
+	it('sin la marca no avisa ni pide el estado del proxy, aunque el log diga lo mismo', async () => {
+		// El texto del log no es un contrato (§2.11): una tarea de la app puede escribirlo.
 		mocks.followDeployLog.mockImplementation(
-			scripted([
-				chunk('2026-10-16T12:00:08Z rutas de Caddy actualizadas\n', 60),
-				{ kind: 'status', status: 'succeeded' },
-			]),
+			scripted([chunk(CADDY_WARNING, 120), { kind: 'status', status: 'succeeded' }]),
 		)
 		const { vm } = await mountViewModel(
 			() => new DeploysViewModel(() => ({ ...PROPS, deployParam: '143' })),
@@ -158,6 +162,24 @@ describe('DeploysViewModel', () => {
 		await vi.waitFor(() => expect(vm.log.lines).toHaveLength(1))
 		expect(vm.proxyWarning).toBeNull()
 		expect(ingress.getProxyStatus).not.toHaveBeenCalled()
+	})
+
+	it('uno que se sigue en vivo y termina con la marca: avisa al refrescar el historial', async () => {
+		mocks.listDeploys
+			.mockResolvedValueOnce(HISTORY)
+			.mockResolvedValue([makeDeploy(144, { routesWarning: true }), ...HISTORY.slice(1)])
+		mocks.followDeployLog.mockImplementation(
+			// Sin la línea en el log: lo que cuenta es la marca del deploy.
+			scripted([
+				{ kind: 'status', status: 'running' },
+				chunk('2026-10-16T12:00:09Z deploy exitoso en 9 s\n', 50),
+				{ kind: 'status', status: 'succeeded' },
+			]),
+		)
+		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
+
+		await vi.waitFor(() => expect(vm.proxyWarning).toEqual({ kind: 'synced' }))
+		expect(vm.selected?.id).toBe(144)
 	})
 
 	it('abre el deploy de ?deploy= y lee su log entero si ya terminó', async () => {

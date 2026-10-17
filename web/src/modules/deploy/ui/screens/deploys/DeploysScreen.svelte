@@ -164,8 +164,9 @@
 						</div>
 					{/if}
 					{#if vm.proxyWarning?.kind === 'failing'}
-						<!-- El paso 7 no trae el motivo (lo lee un token del proyecto): sale de
-						     GET /proxy, que solo ve la sesión (contrato §2.11). -->
+						<!-- Sale de `routes_warning` del deploy (contrato §2.1), no del log. El
+						     motivo no va en el log (lo lee un token del proyecto): sale de
+						     GET /proxy, que solo ve la sesión (§2.11). -->
 						<Banner
 							tone="warn"
 							title={m.deploy_proxy_warning_title()}

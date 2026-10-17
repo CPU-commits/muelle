@@ -27,7 +27,6 @@ import {
 	type DeployStatus,
 	EMPTY_LOG,
 	flushLog,
-	hasProxySyncWarning,
 	isActiveStatus,
 	isTerminalStatus,
 	type LogBuffer,
@@ -48,9 +47,10 @@ export interface DeploysProps {
 }
 
 /**
- * Lo que dice el panel de la advertencia del paso 7 ("no se pudo actualizar Caddy"): la
- * línea no trae el motivo, que sale de `GET /proxy` (contrato §2.11). `failing`: el proxy
- * sigue sin la configuración (con el `error`, si lo dice); `synced`: ya se arregló.
+ * Lo que dice el panel de la advertencia del paso 7 (Caddy no tomó las rutas: el deploy
+ * trae `routes_warning`, contrato §2.1). El log no trae el motivo, que sale de `GET /proxy`
+ * (§2.11). `failing`: el proxy sigue sin la configuración (con el `error`, si lo dice);
+ * `synced`: ya se arregló.
  */
 export type ProxyWarning =
 	| { readonly kind: 'failing'; readonly error: string | null }
@@ -105,7 +105,11 @@ export class DeploysViewModel {
 	readonly #catalogApp: CreateQueryResult<CatalogApp, Error>
 	/** El `?deploy=` que no está en el historial (más viejo que la retención, o borrado). */
 	readonly linked: CreateQueryResult<Deploy, Error>
-	/** Si el log del elegido tiene la advertencia del paso 7 (Caddy no tomó las rutas). */
+	/**
+	 * Si el paso 7 del elegido no pudo actualizar las rutas de Caddy (`routes_warning`). Sale
+	 * del deploy, no del texto del log: uno en curso la muestra cuando se refresca el
+	 * historial, al terminar.
+	 */
 	readonly hasProxyWarning: boolean
 	/** `GET /proxy`, solo si hace falta el motivo de esa advertencia. */
 	readonly #proxy: CreateQueryResult<ProxyStatus, Error>
@@ -157,7 +161,7 @@ export class DeploysViewModel {
 			return list[0] ?? null
 		})
 		this.#selectedKey = $derived(this.selected?.id ?? null)
-		this.hasProxyWarning = $derived(hasProxySyncWarning(this.log))
+		this.hasProxyWarning = $derived(this.selected?.routesWarning === true)
 		this.#proxy = createQuery(() => ({ ...proxyQuery(), enabled: this.hasProxyWarning }))
 
 		$effect(() => {
@@ -237,8 +241,8 @@ export class DeploysViewModel {
 	}
 
 	/**
-	 * La advertencia del paso 7 con su motivo, o null si el log no la tiene. Si `GET /proxy`
-	 * todavía no contestó, o no contesta, se avisa igual, sin el motivo.
+	 * La advertencia del paso 7 con su motivo, o null si el deploy no la tiene. Si
+	 * `GET /proxy` todavía no contestó, o no contesta, se avisa igual, sin el motivo.
 	 */
 	get proxyWarning(): ProxyWarning | null {
 		if (!this.hasProxyWarning) return null
