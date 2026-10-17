@@ -224,7 +224,7 @@ describe('SummaryViewModel', () => {
 		await vi.waitFor(() => expect(vm.health).toBe('degraded'))
 	})
 
-	it('los datos del catálogo llegan por props (F2)', async () => {
+	it('los datos del catálogo llegan por props', async () => {
 		const { vm } = await mountViewModel(
 			() =>
 				new SummaryViewModel(() => ({

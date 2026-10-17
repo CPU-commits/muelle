@@ -48,7 +48,7 @@ function toggles({ refreshEvery, enabled, noRetry }: QueryToggles) {
 	}
 }
 
-/** El estado de la app en Swarm. Lo usa el Resumen, Logs (servicios) y Proyectos (F2). */
+/** El estado de la app en Swarm. Lo usan el Resumen, Logs (servicios) y Proyectos. */
 export function appStatusQuery(app: AppRef, options: QueryToggles = {}) {
 	return queryOptions({
 		queryKey: deployKeys.status(app),

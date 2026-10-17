@@ -109,8 +109,8 @@ export function appContents(app: App): AppContents {
 }
 
 /**
- * Lo que identifica a una app en el encabezado de sus pantallas (Configuración, y en F2
- * Resumen): nombre, tipo, qué corre, si tiene cambios sin desplegar y dónde vive en Swarm.
+ * Lo que identifica a una app en el encabezado de sus pantallas (Configuración y Resumen):
+ * nombre, tipo, qué corre, si tiene cambios sin desplegar y dónde vive en Swarm.
  */
 export interface AppSummary {
 	readonly ref: AppRef

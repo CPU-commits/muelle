@@ -24,7 +24,7 @@ vi.mock('@/modules/deploy/container', () => ({
 	},
 }))
 
-describe('AppDeployState (las columnas de Proyectos para F2)', () => {
+describe('AppDeployState (las columnas de Proyectos)', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mocks.getAppStatus.mockResolvedValue(makeStatus())

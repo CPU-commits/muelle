@@ -30,7 +30,7 @@ export function catalogTreeQuery() {
 	})
 }
 
-/** Una app: el header, Configuración y (en F2) Resumen la leen del mismo cache. */
+/** Una app: el header, Configuración, Resumen y Deploys la leen del mismo cache. */
 export function appQuery(ref: AppRef) {
 	return queryOptions({
 		queryKey: catalogKeys.app(ref),

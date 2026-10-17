@@ -99,13 +99,14 @@ export const secretsDb = {
 
 	/**
 	 * Por defecto todo dueño existe: los proyectos, stages y apps viven en el mock de
-	 * catalog. F2 (o un test) conecta acá la búsqueda de verdad; `null` vuelve al defecto.
+	 * catalog. `handlers/secrets.ts` (o un test) conecta acá la búsqueda de verdad; `null`
+	 * vuelve al defecto.
 	 */
 	setOwnerResolver(resolver: EnvOwnerResolver | null): void {
 		resolveOwner = resolver
 	},
 
-	/** Para marcar las apps con cambios pendientes en el mock de catalog (F2). */
+	/** Para marcar las apps con cambios pendientes en el mock de catalog (`touchConfig`). */
 	setChangeListener(listener: EnvChangeListener | null): void {
 		onChange = listener
 	},
