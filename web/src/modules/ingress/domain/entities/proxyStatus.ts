@@ -19,6 +19,26 @@ export interface CaddyState {
 	readonly httpsPort: number | null
 }
 
+export interface ProxyPorts {
+	readonly httpPort: number
+	readonly httpsPort: number
+}
+
+/**
+ * La última vez que muelle volvió a los puertos anteriores porque muelle-caddy no arrancó con
+ * los nuevos (contrato §3.5). Vive en la memoria de muelle: se pierde al reiniciarlo, y el
+ * próximo cambio de puertos la limpia.
+ */
+export interface PortsRollback {
+	/** Los que no arrancaron. */
+	readonly attempted: ProxyPorts
+	/** A los que volvió: los de Ajustes desde entonces. */
+	readonly restored: ProxyPorts
+	/** Por qué, en español y sin secretos. */
+	readonly error: string
+	readonly at: Date
+}
+
 export interface ProxyStatus {
 	readonly status: ProxySyncStatus
 	/** El motivo de `out_of_sync`, o del último fallo del contenedor. */
@@ -26,6 +46,7 @@ export interface ProxyStatus {
 	/** La última configuración que se aplicó. */
 	readonly syncedAt: Date | null
 	readonly caddy: CaddyState
+	readonly portsRollback: PortsRollback | null
 }
 
 /**

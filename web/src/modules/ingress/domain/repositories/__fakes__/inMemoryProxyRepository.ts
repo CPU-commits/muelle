@@ -13,6 +13,7 @@ export function makeProxyStatus(overrides: Partial<ProxyStatus> = {}): ProxyStat
 			httpPort: 80,
 			httpsPort: 443,
 		},
+		portsRollback: null,
 		...overrides,
 	}
 }

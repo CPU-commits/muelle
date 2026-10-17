@@ -127,7 +127,38 @@ describe('proxyFromDto', () => {
 				httpPort: 80,
 				httpsPort: 443,
 			},
+			portsRollback: null,
 		})
+	})
+
+	it('trae la última vuelta a los puertos anteriores (ports_rollback, contrato §3.3)', () => {
+		const dto = proxyDtoSchema.parse({
+			status: 'synced',
+			error: null,
+			synced_at: '2026-10-16T20:41:20Z',
+			caddy: {
+				image: 'ghcr.io/cpu-commits/muelle-caddy:v0.1.0',
+				running: true,
+				http_port: 80,
+				https_port: 443,
+			},
+			ports_rollback: {
+				attempted: { http_port: 8080, https_port: 8443 },
+				restored: { http_port: 80, https_port: 443 },
+				error: 'los puertos 8080 o 8443 del host ya están en uso, y muelle-caddy no pudo arrancar con ellos',
+				at: '2026-10-16T20:41:07.12Z',
+			},
+		})
+		expect(proxyFromDto(dto).portsRollback).toEqual({
+			attempted: { httpPort: 8080, httpsPort: 8443 },
+			restored: { httpPort: 80, httpsPort: 443 },
+			error: 'los puertos 8080 o 8443 del host ya están en uso, y muelle-caddy no pudo arrancar con ellos',
+			at: new Date('2026-10-16T20:41:07.12Z'),
+		})
+		// Un backend sin el campo (antes de la vuelta a los puertos) no volvió nunca.
+		const older = proxyDtoSchema.parse({ ...dto, ports_rollback: undefined })
+		expect('ports_rollback' in older && older.ports_rollback !== undefined).toBe(false)
+		expect(proxyFromDto(older).portsRollback).toBeNull()
 	})
 
 	it('el schema rechaza un estado que no es del contrato', () => {

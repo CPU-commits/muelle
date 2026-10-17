@@ -30,7 +30,14 @@ export {
 	HostnameTaken,
 	NothingToAdopt,
 } from './errors/ingressErrors'
-export type { CaddyState, ProxyNotice, ProxyStatus, ProxySyncStatus } from './entities/proxyStatus'
+export type {
+	CaddyState,
+	PortsRollback,
+	ProxyNotice,
+	ProxyPorts,
+	ProxyStatus,
+	ProxySyncStatus,
+} from './entities/proxyStatus'
 export { PROXY_SYNC_STATUSES, proxyNotice, proxySettling } from './entities/proxyStatus'
 export type { DomainRepository, IngressDeps } from './repositories/domainRepository'
 export type { ProxyDeps, ProxyRepository } from './repositories/proxyRepository'

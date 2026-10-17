@@ -438,6 +438,8 @@ describe('GET /proxy', () => {
 		expect(proxy.status).toBe('synced')
 		expect(proxy.caddy).toMatchObject({ running: true, httpPort: 80, httpsPort: 443 })
 		expect(proxy.syncedAt).toBeInstanceOf(Date)
+		// Nunca volvió a los puertos anteriores (contrato §3.3: la clave viene siempre).
+		expect(proxy.portsRollback).toBeNull()
 	})
 
 	it('un dominio que Caddy rechaza lo deja desincronizado, con el motivo', async () => {

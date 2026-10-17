@@ -48,7 +48,14 @@ const CADDY = {
 }
 
 function proxyStatus(overrides: Partial<ProxyStatus> = {}): ProxyStatus {
-	return { status: 'synced', error: null, syncedAt: new Date(), caddy: CADDY, ...overrides }
+	return {
+		status: 'synced',
+		error: null,
+		syncedAt: new Date(),
+		caddy: CADDY,
+		portsRollback: null,
+		...overrides,
+	}
 }
 
 const CADDY_WARNING =

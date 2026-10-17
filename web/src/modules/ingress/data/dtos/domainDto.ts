@@ -43,6 +43,11 @@ export const domainDtoSchema = z.object({
 /** `GET …/apps/{a}/domains`. */
 export const domainListDtoSchema = z.array(domainDtoSchema)
 
+const proxyPortsDtoSchema = z.object({
+	http_port: z.number().int(),
+	https_port: z.number().int(),
+})
+
 /** `GET /proxy` (contrato §3.3): el estado de muelle-caddy. */
 export const proxyDtoSchema = z.object({
 	status: z.enum(PROXY_SYNC_STATUSES),
@@ -54,6 +59,16 @@ export const proxyDtoSchema = z.object({
 		http_port: z.number().int().nullish(),
 		https_port: z.number().int().nullish(),
 	}),
+	// La última vez que muelle volvió a los puertos anteriores (§3.5). Opcional solo por un
+	// backend de antes de esa vuelta: que falte es que no hubo.
+	ports_rollback: z
+		.object({
+			attempted: proxyPortsDtoSchema,
+			restored: proxyPortsDtoSchema,
+			error: z.string(),
+			at: timestamp,
+		})
+		.nullish(),
 })
 
 export type DnsRecordDto = z.infer<typeof dnsRecordDtoSchema>

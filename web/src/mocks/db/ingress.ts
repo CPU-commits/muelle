@@ -239,6 +239,68 @@ export interface NewMockDomain {
 	proxied: boolean
 }
 
+/** Lo que dice `GET /proxy` ahora, sin `ports_rollback`. */
+function proxyState(now: number) {
+	const settings = adminDb.state
+	if (settings.panelDomain === '') {
+		return {
+			status: 'disabled' as const,
+			error: null,
+			synced_at: null,
+			caddy: {
+				image: null,
+				running: false,
+				http_port: settings.proxyHttpPort,
+				https_port: settings.proxyHttpsPort,
+			},
+		}
+	}
+	// Sin contenedor (se está recreando, o no arrancó): nada corre (contrato §3.3).
+	const noContainer = { image: null, running: false, http_port: null, https_port: null }
+	if (state.recreatingUntil != null && now < state.recreatingUntil) {
+		return {
+			status: 'recreating' as const,
+			error: null,
+			synced_at: new Date(now - 60_000).toISOString(),
+			caddy: noContainer,
+		}
+	}
+	const busy = [settings.proxyHttpPort, settings.proxyHttpsPort].find(
+		(port) => port === MOCK_BUSY_PORT,
+	)
+	if (busy !== undefined) {
+		return {
+			status: 'out_of_sync' as const,
+			error: `no se pudo crear muelle-caddy: el puerto ${String(busy)} ya está en uso en el host`,
+			synced_at: new Date(now - 60_000).toISOString(),
+			caddy: noContainer,
+		}
+	}
+	const caddy = {
+		image: CADDY_IMAGE,
+		running: true,
+		http_port: settings.proxyHttpPort,
+		https_port: settings.proxyHttpsPort,
+	}
+	const rejected = state.domains.find((domain) =>
+		firstLabel(domain.hostname).includes('caddy-rechaza'),
+	)
+	if (rejected) {
+		return {
+			status: 'out_of_sync' as const,
+			error: `Caddy rechazó la configuración: la ruta de ${rejected.hostname} no es válida`,
+			synced_at: new Date(now - 5 * 60_000).toISOString(),
+			caddy,
+		}
+	}
+	return {
+		status: 'synced' as const,
+		error: null,
+		synced_at: new Date(now - 60_000).toISOString(),
+		caddy,
+	}
+}
+
 export const ingressDb = {
 	get state(): IngressState {
 		return state
@@ -361,75 +423,19 @@ export const ingressDb = {
 		)
 	},
 
-	/**
-	 * `GET /proxy`: sincronizado, salvo que algún dominio tenga `caddy-rechaza`. Sin dominio
-	 * del panel, `disabled`: no hay contenedor (`image: null`) y no se consulta Docker.
-	 */
 	/** Un `PATCH /settings` cambió los puertos: muelle-caddy se recrea (contrato §3.5). */
 	recreateProxy(now = Date.now()): void {
 		state.recreatingUntil = now + (state.recreateMs ?? RECREATE_MS)
 		commit()
 	},
 
+	/**
+	 * `GET /proxy`: sincronizado, salvo que algún dominio tenga `caddy-rechaza`. Sin dominio
+	 * del panel, `disabled`: no hay contenedor (`image: null`) y no se consulta Docker.
+	 * `ports_rollback` viene siempre (contrato §3.3).
+	 */
 	proxy(now = Date.now()) {
-		const settings = adminDb.state
-		if (settings.panelDomain === '') {
-			return {
-				status: 'disabled' as const,
-				error: null,
-				synced_at: null,
-				caddy: {
-					image: null,
-					running: false,
-					http_port: settings.proxyHttpPort,
-					https_port: settings.proxyHttpsPort,
-				},
-			}
-		}
-		// Sin contenedor (se está recreando, o no arrancó): nada corre (contrato §3.3).
-		const noContainer = { image: null, running: false, http_port: null, https_port: null }
-		if (state.recreatingUntil != null && now < state.recreatingUntil) {
-			return {
-				status: 'recreating' as const,
-				error: null,
-				synced_at: new Date(now - 60_000).toISOString(),
-				caddy: noContainer,
-			}
-		}
-		const busy = [settings.proxyHttpPort, settings.proxyHttpsPort].find(
-			(port) => port === MOCK_BUSY_PORT,
-		)
-		if (busy !== undefined) {
-			return {
-				status: 'out_of_sync' as const,
-				error: `no se pudo crear muelle-caddy: el puerto ${String(busy)} ya está en uso en el host`,
-				synced_at: new Date(now - 60_000).toISOString(),
-				caddy: noContainer,
-			}
-		}
-		const caddy = {
-			image: CADDY_IMAGE,
-			running: true,
-			http_port: settings.proxyHttpPort,
-			https_port: settings.proxyHttpsPort,
-		}
-		const rejected = state.domains.find((domain) =>
-			firstLabel(domain.hostname).includes('caddy-rechaza'),
-		)
-		if (rejected) {
-			return {
-				status: 'out_of_sync' as const,
-				error: `Caddy rechazó la configuración: la ruta de ${rejected.hostname} no es válida`,
-				synced_at: new Date(now - 5 * 60_000).toISOString(),
-				caddy,
-			}
-		}
-		return {
-			status: 'synced' as const,
-			error: null,
-			synced_at: new Date(now - 60_000).toISOString(),
-			caddy,
-		}
+		return { ...proxyState(now), ports_rollback: null }
 	},
 
 	/** Cloudflare falla al escribir (`cf-intermitente`): el dominio queda en error. */

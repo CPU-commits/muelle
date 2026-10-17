@@ -46,6 +46,7 @@ function proxyStatus(overrides: Partial<ProxyStatus> = {}): ProxyStatus {
 			httpPort: 8080,
 			httpsPort: 443,
 		},
+		portsRollback: null,
 		...overrides,
 	}
 }

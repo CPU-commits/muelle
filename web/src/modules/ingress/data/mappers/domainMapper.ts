@@ -3,6 +3,7 @@ import {
 	asHostname,
 	type DomainChanges,
 	type NewDomain,
+	type ProxyPorts,
 	type ProxyStatus,
 } from '../../domain'
 import type {
@@ -63,5 +64,17 @@ export function proxyFromDto(dto: ProxyDto): ProxyStatus {
 			httpPort: dto.caddy.http_port ?? null,
 			httpsPort: dto.caddy.https_port ?? null,
 		},
+		portsRollback: dto.ports_rollback
+			? {
+					attempted: proxyPortsFromDto(dto.ports_rollback.attempted),
+					restored: proxyPortsFromDto(dto.ports_rollback.restored),
+					error: dto.ports_rollback.error,
+					at: new Date(dto.ports_rollback.at),
+				}
+			: null,
 	}
+}
+
+function proxyPortsFromDto(dto: { http_port: number; https_port: number }): ProxyPorts {
+	return { httpPort: dto.http_port, httpsPort: dto.https_port }
 }
