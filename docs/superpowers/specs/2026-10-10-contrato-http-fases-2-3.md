@@ -1,6 +1,6 @@
 # muelle — Contrato de las Fases 2, 3 y 5
 
-> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos) y 2026-10-17 (lo que pidió el panel, §7) · Estado: aprobado para la etapa de contratos, e implementado en este árbol (Fases 2, 3 y 5).
+> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos), 2026-10-17 (lo que pidió el panel, §7) y 2026-10-21 (tokens de solo lectura y de todos los proyectos, y el servidor MCP, §8) · Estado: aprobado para la etapa de contratos, e implementado en este árbol (Fases 2, 3 y 5). La §8 está aprobada y todavía no implementada.
 > Complementa el diseño ([`2026-10-09-muelle-design.md`](2026-10-09-muelle-design.md)); las referencias `§N` apuntan a sus secciones. Donde este documento y el diseño difieren, manda este documento, y el diseño ya se actualizó.
 
 Las Fases 2 (deploy), 3 (ingress) y 5 (distribución) se implementan **en paralelo**, cada una en su rama y sin hablar con las otras. Este documento fija lo que comparten:
@@ -10,6 +10,8 @@ Las Fases 2 (deploy), 3 (ingress) y 5 (distribución) se implementan **en parale
 - cómo `muelle install` le pasa la configuración al primer arranque.
 
 El panel (`web/`, Fase 4) ya está hecho contra una versión supuesta de este contrato (`web/src/modules/{deploy,ingress}/README.md` y los DTOs de `admin`). La sección 7 lista dónde el contrato decidió algo distinto.
+
+La sección 8 fija los tokens de solo lectura y de todos los proyectos, y el servidor MCP para Claude Code. Los implementan en paralelo el backend y el panel, cada uno en su rama ([diseño](2026-10-21-mcp-design.md)).
 
 ## 0. Convenciones
 
@@ -25,6 +27,7 @@ El panel (`web/`, Fase 4) ya está hecho contra una versión supuesta de este co
 |---|---|---|
 | sesión | `utils.AccessSession` | Solo la cookie `muelle_session` (sesión completa). Un token recibe `403 token_not_allowed`. |
 | token | `utils.AccessToken` | La sesión, o un token de API dentro de su alcance. `GET` es lectura; cualquier otro método es escritura (`Principal.Allows`). |
+| token de solo lectura | `TokenScope.ReadOnly` | Un token con `read_only` en una ruta `· token`: `GET` y `HEAD` como cualquier token; otro método, `403 read_only_token`, antes que el alcance. Un token de todos los proyectos (`all_projects`) es siempre de solo lectura y lee cualquier proyecto (§8.1). |
 
 Las peticiones con cookie que modifican algo exigen un `Origin` permitido, que se compara exacto (esquema, host y puerto); si no, `403 bad_origin`. Los tokens no lo necesitan. Hay dos permitidos (`cmd/http`, hecho):
 - el origen en que muelle-caddy sirve el panel según los ajustes **de ese momento**: `https://<panel_domain>`, con `:<proxy_https_port>` si no es 443 (`ProxySettings.PanelOrigin`, que da `admin.Module.PanelOrigin`). `""` sin `panel_domain` (en desarrollo), y entonces no pasa ninguno por acá. Va en memoria: `PATCH /settings` lo invalida cuando cambia algún ajuste del proxy, así después de cambiar `proxy_https_port` (§4.1) el origen nuevo pasa desde que responde el `PATCH`, y el viejo ya no. Un cambio hecho fuera de muelle (el `UPDATE` a mano de §4.1) se ve en 30 s como mucho (`usecases.PanelOriginTTL`);
@@ -38,7 +41,7 @@ Los links de setup (`<origen>/setup?token=…`) y de las invitaciones (`POST /in
 |---|---|---|
 | 400 | `invalid_json` | El cuerpo no es el esperado (campo desconocido, tipo equivocado, JSON roto) |
 | 401 | `unauthenticated`, `mfa_required` | Sin sesión, o con el 2FA a medias |
-| 403 | `forbidden`, `token_not_allowed`, `out_of_scope`, `bad_origin`, `totp_setup_required` | Ver §10.1 |
+| 403 | `forbidden`, `token_not_allowed`, `out_of_scope`, `read_only_token`, `bad_origin`, `totp_setup_required` | Ver §10.1. `read_only_token`: un token de solo lectura en una escritura (§8.1) |
 | 404 | `no_route` | **La ruta no existe** (una fase que todavía no llegó). El panel muestra "Llega con la Fase N" |
 | 404 | `not_found` | La ruta existe, pero el recurso no |
 | 405 | `method_not_allowed` | La ruta existe con otro método (header `Allow`) |
@@ -1147,7 +1150,9 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
   - `cf_record_id_aaaa`, `last_error_code`, `created_at` y `updated_at`;
   - `app_id` con `ON DELETE RESTRICT`: catalog no borra una app con dominios, `409 not_empty`.
 - **0004** (Fase 1, un pendiente de su revisión final): `audit_events.actor_name` (§4.2), con los eventos que ya había llenados con lo que se sabe de su autor. Es una migración nueva, y no un cambio a `0001_init.sql` (que no se edita, §1.3), para que corra también sobre una base de la Fase 1.
-- **0005** (lo pidió el panel): `deploys.routes_warning` (§2.1), 0 o 1. Los deploys que ya había quedan con 1 si son `succeeded` y su log trae la advertencia del paso 7 (§2.11). Uno anterior a la 0005 cuya advertencia no entró en el log (el tope de 256 KB, §2.5) queda con 0: la migración solo tiene el texto. Es nueva, y no un cambio a `0002_deploy.sql`, por lo mismo que la 0004: para que corra también sobre una base que ya tiene deploys. La próxima migración nueva es la 0006.
+- **0005** (lo pidió el panel): `deploys.routes_warning` (§2.1), 0 o 1. Los deploys que ya había quedan con 1 si son `succeeded` y su log trae la advertencia del paso 7 (§2.11). Uno anterior a la 0005 cuya advertencia no entró en el log (el tope de 256 KB, §2.5) queda con 0: la migración solo tiene el texto. Es nueva, y no un cambio a `0002_deploy.sql`, por lo mismo que la 0004: para que corra también sobre una base que ya tiene deploys.
+- **0006**: reservada para los certificados de Cloudflare (Origin CA), que la agregan en su rama.
+- **0007** (MCP, §8.1): `api_tokens` con `project_id` opcional (`NULL` es "todos los proyectos"), `read_only` y `all_projects`, con dos `CHECK`: sin proyecto si y solo si es de todos los proyectos, y uno de todos los proyectos es de solo lectura y no tiene stage. SQLite no le quita el `NOT NULL` a una columna, así que la tabla se reconstruye y conserva su secuencia de `AUTOINCREMENT` (un id borrado no vuelve). Los tokens que ya había quedan con `read_only = 0` y `all_projects = 0`. Es nueva, y no un cambio a `0001_init.sql`, por lo mismo que la 0004. Entra a `main` después de la 0006: el runner solo aplica las versiones mayores que la última aplicada, y una base que corrió la 0007 nunca aplicaría una 0006 que llega después. La próxima migración nueva es la 0008.
 
 ## 7. Diferencias con lo que supuso el panel
 
@@ -1211,3 +1216,121 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | Registries: host | Normalizado por el panel | El backend exige la forma canónica y no normaliza; Docker Hub es `docker.io`, y sus alias (`index.docker.io`…) son `422` | Una credencial con un alias nunca se usaría |
 | Registries: respuesta | `{host, username}` | Suma `created_at` y `updated_at` | Compatible |
 | Auditoría: `actor_name` | Lo pide en `GET /audit` | Siempre string, copiado al escribir el evento: el username, el nombre del token o `system` (§4.2) | Como el de un deploy: no se pierde al borrar el usuario o el token |
+| `GET /tokens`: `project` | Siempre un string no vacío | Falta en un token con `all_projects: true` (§8.1) | Un token de todos los proyectos no tiene proyecto |
+| `GET /tokens`: permisos | — | Suma `read_only` y `all_projects`, bool, siempre presentes (§8.1) | Tokens de solo lectura para Claude Code |
+| `POST /tokens` | `{name, project, stage, expires_in_days}` | Suma `read_only` y `all_projects`, opcionales (`false`). `all_projects` con `project` o `stage` es `422 project`; sin `read_only`, `422 read_only` (§8.1) | La base no admite un token de escritura de todos los proyectos |
+| Vencimiento de un token de todos los proyectos | — | Opcional, como el de los demás. El panel propone 90 días, editable | Decisión del dueño; el backend no lo exige |
+| Un token de solo lectura en una escritura | — | `403 read_only_token`, antes que el alcance (§8.1) | El panel no lo ve (usa la sesión). La GitHub Action lo muestra con su `code` |
+
+## 8. MCP: tokens de solo lectura y el servidor para Claude Code
+
+> Diseño: [`2026-10-21-mcp-design.md`](2026-10-21-mcp-design.md). Esta sección es lo que implementan en paralelo el backend (identity, `cmd/http/utils`, `cmd/mcp` y el `infra/in/mcp` de catalog, secrets, deploy e ingress) y el panel (el módulo identity).
+
+muelle sirve un servidor MCP (Model Context Protocol) para que Claude Code, u otro cliente MCP, lea el estado, los deploys, los logs, las variables y los dominios de las apps y, con un token que no es de solo lectura, despliegue, haga rollback y cambie variables no secretas. Usa los mismos casos de uso que la API REST, la misma regla de alcance (`Principal.Allows`) y la misma auditoría: MCP no le da a un token nada que REST no le dé.
+
+### 8.1 Tokens: solo lectura y todos los proyectos
+
+Un token de API (`mk_…`, §10.1 del diseño) suma dos marcas:
+
+| Alcance | `project` | `stage` | `read_only` | `all_projects` |
+|---|---|---|---|---|
+| Un proyecto | el slug | — | `false` o `true` | `false` |
+| Un proyecto + stage | el slug | el slug | `false` o `true` | `false` |
+| Todos los proyectos | — | — | siempre `true` | `true` |
+
+No hay un token de escritura de todos los proyectos: la base lo impide con un `CHECK` (migración 0007, §6), y `POST /tokens` lo rechaza.
+
+**La regla** (`Principal.Allows(project, stage, write)`, en este orden):
+1. una sesión puede todo;
+2. un token `read_only` no escribe;
+3. un proyecto vacío nunca autoriza a un token (como hoy);
+4. un token `all_projects` lee cualquier proyecto y cualquier stage. Uno que no es `read_only`, o que trae un proyecto o un stage, no autoriza nada (no debería existir: es defensa en profundidad);
+5. los demás, como hoy: el proyecto exacto; un token de stage solo toca su stage, y de lo que es del proyecto entero solo lee.
+
+"Escribir" es lo mismo que hoy: en REST, todo método que no es `GET` ni `HEAD`; en MCP, las herramientas de escritura (§8.3).
+
+#### `POST /api/v1/tokens` → 201 · sesión
+
+Suma dos campos opcionales al cuerpo:
+
+| Campo | Tipo | Por defecto | Qué |
+|---|---|---|---|
+| `read_only` | bool | `false` | Solo lectura |
+| `all_projects` | bool | `false` | Todos los proyectos. Va sin `project` ni `stage`, y con `read_only: true` |
+
+```json
+{ "name": "claude-debug", "all_projects": true, "read_only": true, "expires_in_days": 90 }
+{ "name": "claude-staging", "project": "auditfy", "stage": "staging", "read_only": false }
+{ "name": "ci", "project": "auditfy" }
+```
+
+El último es un token como los de hoy: sin las marcas nuevas, nada cambia.
+
+**Validación**, en este orden:
+1. `name`, como hoy (`422 invalid`);
+2. `expires_in_days`, de 0 a 3650, como hoy (`422 invalid`);
+3. con `all_projects: true`:
+   - `project` o `stage` no vacíos: `422 invalid`, `project: un token de todos los proyectos no lleva proyecto ni stage`;
+   - `read_only` falso u omitido: `422 invalid`, `read_only: un token de todos los proyectos es de solo lectura`;
+   - no se busca ningún proyecto;
+4. sin `all_projects`: el proyecto y el stage, como hoy. Si no existen, `404 not_found` (también con `project` vacío).
+
+Un tipo equivocado (`"read_only": "sí"`) es `400 invalid_json`, como todo campo (§0).
+
+**Respuesta:** el token como en `GET /tokens`, más `token` (en claro, se muestra una sola vez).
+
+**Auditoría:** `token.create`, target `token:<id>`, con details:
+- de un proyecto: `{"project": "auditfy", "read_only": false, "stage": "staging"}`, con `stage` en `""` si es de todo el proyecto (como hoy);
+- de todos los proyectos: `{"all_projects": true, "read_only": true}`.
+
+**El vencimiento** sigue siendo opcional para todos (`expires_in_days` 0 u omitido: no vence). Al elegir "Todos los proyectos", el panel lo propone en 90 días y se puede cambiar o quitar (diseño del MCP, §9.3); el backend no lo exige.
+
+#### `GET /api/v1/tokens` → 200 · sesión
+
+Cada elemento:
+
+```json
+[
+  { "id": 4, "name": "github-actions", "project": "auditfy", "stage": "staging", "read_only": false, "all_projects": false,
+    "created_by": "felipe", "created_at": "2026-10-13T12:00:00.12Z", "last_used_at": "2026-10-21T09:12:44.5Z", "expires_at": null },
+  { "id": 7, "name": "claude-debug", "read_only": true, "all_projects": true,
+    "created_by": "felipe", "created_at": "2026-10-21T12:00:00.12Z", "last_used_at": null, "expires_at": "2027-01-19T12:00:00.12Z" }
+]
+```
+
+| Campo | Qué |
+|---|---|
+| `project` | El slug del proyecto. **Falta** solo con `all_projects: true` |
+| `stage` | El slug del stage. Falta si el token es de todo el proyecto o de todos los proyectos (como hoy, `omitempty`) |
+| `read_only`, `all_projects` | Bool, **siempre** presentes |
+| Los demás | Como hoy: `id`, `name`, `created_by` (null si el usuario se borró), `created_at`, `last_used_at`, `expires_at` |
+
+#### En la API REST
+
+Con un Bearer, `utils.Kit` revisa en este orden:
+1. una ruta que no es `· token`: `403 token_not_allowed` (como hoy);
+2. el token no existe, se revocó o venció: `401 unauthenticated` (como hoy);
+3. un token `read_only` con un método que no es `GET` ni `HEAD`: **`403 read_only_token`**. Va antes que el alcance, así no dice si el recurso existe;
+4. fuera del alcance: `403 out_of_scope` (como hoy).
+
+```json
+{ "error": { "code": "read_only_token", "message": "el token es de solo lectura" } }
+```
+
+`Kit.Revalidate` (§0.3) repite los pasos 2 y 4 como lectura: un token de solo lectura, o de todos los proyectos, abre y mantiene los streams de su alcance.
+
+Un token de todos los proyectos **no** abre `GET /projects` (listar), que sigue siendo de sesión (`403 token_not_allowed`). La lista la da `list_projects` por MCP (§8.3), que es exactamente la unión de los `GET /projects/{p}` que ese token ya lee.
+
+**La matriz REST**, con el proyecto `p1` (stages `s1` y `s2`) y otro proyecto `p2`:
+
+| Endpoint `· token` ↓ · token → | `p1` | `p1/s1` | `p1`, solo lectura | `p1/s1`, solo lectura | todos los proyectos |
+|---|---|---|---|---|---|
+| `GET` en `p1/s1` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `GET` en `p1/s2` | ✓ | `out_of_scope` | ✓ | `out_of_scope` | ✓ |
+| `GET /projects/p1`, `GET /projects/p1/stages` | ✓ | ✓ (sus stages: `[s1]`) | ✓ | ✓ (`[s1]`) | ✓ |
+| `GET` en `p2` | `out_of_scope` | `out_of_scope` | `out_of_scope` | `out_of_scope` | ✓ |
+| Escritura en `p1/s1` (variables, deploy, rollback) | ✓ | ✓ | `read_only_token` | `read_only_token` | `read_only_token` |
+| Escritura en `p1/s2` | ✓ | `out_of_scope` | `read_only_token` | `read_only_token` | `read_only_token` |
+| Escritura en `p2` | `out_of_scope` | `out_of_scope` | `read_only_token` | `read_only_token` | `read_only_token` |
+
+Los endpoints de sesión (`GET /projects`, `/tokens`, `/registries`, `/settings`, `/audit`, `/proxy`, los dominios…) responden `403 token_not_allowed` a todo token, como hoy.
