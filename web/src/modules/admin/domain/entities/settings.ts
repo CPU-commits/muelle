@@ -6,6 +6,12 @@ export interface CloudflareStatus {
 	readonly tokenSet: boolean
 	/** Cuántas zonas ve el token, si el backend lo sabe. */
 	readonly zones: number | null
+	/**
+	 * Los certificados de Cloudflare (Origin CA, contrato §3.7): con el token y el permiso
+	 * Zone → SSL and Certificates → Edit, los dominios con el proxy (nube naranja), también
+	 * el del panel, usan uno de Cloudflare en vez de Let's Encrypt. Apagado por defecto.
+	 */
+	readonly originCa: boolean
 }
 
 export interface ProxySettings {

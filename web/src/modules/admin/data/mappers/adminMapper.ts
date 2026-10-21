@@ -21,7 +21,11 @@ import type {
 
 function proxyFromDto(dto: SettingsDto): ProxySettings {
 	return {
-		cloudflare: { tokenSet: dto.cloudflare_token_set, zones: dto.cloudflare_zones },
+		cloudflare: {
+			tokenSet: dto.cloudflare_token_set,
+			zones: dto.cloudflare_zones,
+			originCa: dto.cloudflare_origin_ca,
+		},
 		publicIpv4: dto.public_ip,
 		publicIpv6: dto.public_ipv6,
 		acmeEmail: dto.acme_email,

@@ -74,7 +74,9 @@ describe('ajustes de proxy y DNS', () => {
 	it('token de Cloudflare: con forma de token, sin espacios en los bordes', async () => {
 		const settings = new InMemorySettingsRepository({
 			settings: fakeSettings({
-				proxy: fakeProxySettings({ cloudflare: { tokenSet: false, zones: null } }),
+				proxy: fakeProxySettings({
+					cloudflare: { tokenSet: false, zones: null, originCa: false },
+				}),
 			}),
 		})
 		const replace = makeReplaceCloudflareToken({ settings })
@@ -92,7 +94,7 @@ describe('ajustes de proxy y DNS', () => {
 		const settings = new InMemorySettingsRepository()
 
 		await expect(makeRemoveCloudflareToken({ settings })()).resolves.toMatchObject({
-			proxy: { cloudflare: { tokenSet: false, zones: null } },
+			proxy: { cloudflare: { tokenSet: false, zones: null, originCa: false } },
 		})
 		expect(settings.patches).toEqual([{ cloudflareToken: '' }])
 	})

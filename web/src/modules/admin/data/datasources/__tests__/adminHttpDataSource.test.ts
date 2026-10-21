@@ -7,6 +7,7 @@ const SETTINGS = {
 	require_2fa: false,
 	cloudflare_token_set: false,
 	cloudflare_zones: null,
+	cloudflare_origin_ca: false,
 	public_ip: '',
 	public_ipv6: '',
 	acme_email: '',

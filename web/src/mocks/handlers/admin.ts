@@ -37,6 +37,7 @@ function settingsRes() {
 		require_2fa: authDb.state.require2fa,
 		cloudflare_token_set: s.cloudflareToken !== null,
 		cloudflare_zones: s.cloudflareToken !== null ? s.cloudflareZones : null,
+		cloudflare_origin_ca: s.cloudflareOriginCa,
 		public_ip: s.publicIp,
 		public_ipv6: s.publicIpv6,
 		acme_email: s.acmeEmail,

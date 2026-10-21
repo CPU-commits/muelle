@@ -44,6 +44,7 @@ const SETTINGS_DTO = {
 	require_2fa: true,
 	cloudflare_token_set: false,
 	cloudflare_zones: null,
+	cloudflare_origin_ca: false,
 	public_ip: '',
 	public_ipv6: '',
 	acme_email: '',
@@ -59,7 +60,7 @@ describe('settings', () => {
 		await expect(adminUseCases.getSettings()).resolves.toEqual({
 			require2fa: false,
 			proxy: {
-				cloudflare: { tokenSet: true, zones: 4 },
+				cloudflare: { tokenSet: true, zones: 4, originCa: false },
 				publicIpv4: '203.0.113.24',
 				publicIpv6: '2001:db8::24',
 				acmeEmail: 'ops@tudominio.cl',
@@ -381,6 +382,7 @@ describe('settings', () => {
 					require_2fa: false,
 					cloudflare_token_set: false,
 					cloudflare_zones: null,
+					cloudflare_origin_ca: false,
 					public_ip: '',
 					public_ipv6: '',
 					acme_email: '',
@@ -418,7 +420,7 @@ describe('settings', () => {
 		const token = 'cf_secreto_nuevo_de_cuarenta_caracteres'
 		const settings = await adminUseCases.replaceCloudflareToken(token)
 
-		expect(settings.proxy?.cloudflare).toEqual({ tokenSet: true, zones: 3 })
+		expect(settings.proxy?.cloudflare).toEqual({ tokenSet: true, zones: 3, originCa: false })
 		expect(JSON.stringify(settings)).not.toContain(token)
 		// En la auditoría queda que se guardó uno, no cuál.
 		expect(JSON.stringify(adminDb.state.audit)).not.toContain(token)
@@ -431,7 +433,11 @@ describe('settings', () => {
 	it('quitar el token borra también las zonas', async () => {
 		const settings = await adminUseCases.removeCloudflareToken()
 
-		expect(settings.proxy?.cloudflare).toEqual({ tokenSet: false, zones: null })
+		expect(settings.proxy?.cloudflare).toEqual({
+			tokenSet: false,
+			zones: null,
+			originCa: false,
+		})
 		expect(adminDb.state.cloudflareToken).toBeNull()
 		expect(adminDb.state.audit.at(-1)?.details).toEqual({ cloudflare_token: 'removed' })
 	})

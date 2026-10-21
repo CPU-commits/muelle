@@ -74,7 +74,7 @@ vi.mock('@/modules/admin/container', () => ({
 }))
 
 const PROXY: ProxySettings = {
-	cloudflare: { tokenSet: false, zones: null },
+	cloudflare: { tokenSet: false, zones: null, originCa: false },
 	publicIpv4: '203.0.113.24',
 	publicIpv6: '',
 	acmeEmail: 'ops@tudominio.cl',
@@ -132,17 +132,21 @@ describe('ProxySettingsViewModel', () => {
 		mocks.updateAcmeEmail.mockResolvedValue(saved({}))
 		mocks.updateProxyPorts.mockResolvedValue(saved({ httpPort: 8080, httpsPort: 8443 }))
 		mocks.replaceCloudflareToken.mockResolvedValue(
-			saved({ cloudflare: { tokenSet: true, zones: 2 } }),
+			saved({ cloudflare: { tokenSet: true, zones: 2, originCa: false } }),
 		)
 		mocks.removeCloudflareToken.mockResolvedValue(
-			saved({ cloudflare: { tokenSet: false, zones: null } }),
+			saved({ cloudflare: { tokenSet: false, zones: null, originCa: false } }),
 		)
 	})
 
 	it('dice cuántas zonas ve el token, en singular o plural, o solo "cifrado"', async () => {
 		const zones = async (count: number | null) =>
-			(await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: count } }))
-				.cloudflareMeta
+			(
+				await mountViewModel({
+					...PROXY,
+					cloudflare: { tokenSet: true, zones: count, originCa: false },
+				})
+			).cloudflareMeta
 
 		expect(await zones(4)).toBe(m.admin_cf_zones({ count: 4 }))
 		expect(await zones(1)).toBe(m.admin_cf_zones_one())
@@ -170,7 +174,10 @@ describe('ProxySettingsViewModel', () => {
 	})
 
 	it('cada cambio que sale bien vuelve a pedir los dominios y el proxy (records, estado)', async () => {
-		const vm = await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: 4 } })
+		const vm = await mountViewModel({
+			...PROXY,
+			cloudflare: { tokenSet: true, zones: 4, originCa: false },
+		})
 		const invalidate = vi.spyOn(client, 'invalidateQueries')
 		const refreshedIngress = () =>
 			invalidate.mock.calls.filter(([filters]) => filters?.queryKey === ingressKeys.all)
@@ -358,7 +365,10 @@ describe('ProxySettingsViewModel', () => {
 
 	it('quitar el token pide confirmación y lo borra', async () => {
 		const success = vi.spyOn(toast, 'success')
-		const vm = await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: 4 } })
+		const vm = await mountViewModel({
+			...PROXY,
+			cloudflare: { tokenSet: true, zones: 4, originCa: false },
+		})
 
 		vm.askRemoveCloudflare()
 		expect(vm.confirmingRemoveCloudflare).toBe(true)
@@ -373,7 +383,10 @@ describe('ProxySettingsViewModel', () => {
 
 	it('si quitar el token falla, el error queda en la confirmación', async () => {
 		mocks.removeCloudflareToken.mockRejectedValueOnce(new UnavailableError('caído'))
-		const vm = await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: 4 } })
+		const vm = await mountViewModel({
+			...PROXY,
+			cloudflare: { tokenSet: true, zones: 4, originCa: false },
+		})
 
 		vm.askRemoveCloudflare()
 		await vm.removeCloudflare()

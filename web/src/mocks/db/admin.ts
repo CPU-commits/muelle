@@ -34,6 +34,8 @@ export interface AdminState {
 	cloudflareToken: string | null
 	/** Las zonas que veía el token al guardarlo (un valor guardado, no una consulta). */
 	cloudflareZones: number | null
+	/** Los certificados de Cloudflare (Origin CA, contrato §3.7): apagados por defecto. */
+	cloudflareOriginCa: boolean
 	publicIp: string
 	publicIpv6: string
 	acmeEmail: string
@@ -50,8 +52,9 @@ export interface AdminState {
 }
 
 // Con versión: una pestaña con el estado de antes (registries sin fechas, la auditoría sin
-// el primer arranque o sin `actor_name`) empieza de cero.
-const STORAGE_KEY = 'admin-v4'
+// el primer arranque o sin `actor_name`, los ajustes sin `cloudflareOriginCa`) empieza de
+// cero.
+const STORAGE_KEY = 'admin-v5'
 const MINUTE_MS = 60_000
 
 /** Cuántos eventos trae la auditoría al empezar: más de una página, para ver "Cargar más". */
@@ -140,6 +143,7 @@ function seed(): AdminState {
 	return {
 		cloudflareToken: 'cf_token_demo_de_cuarenta_caracteres_xx',
 		cloudflareZones: 4,
+		cloudflareOriginCa: false,
 		publicIp: '203.0.113.24',
 		publicIpv6: '2001:db8::24',
 		acmeEmail: 'ops@tudominio.cl',

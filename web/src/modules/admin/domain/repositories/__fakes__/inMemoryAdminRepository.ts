@@ -22,7 +22,7 @@ import {
 
 export function fakeProxySettings(overrides: Partial<ProxySettings> = {}): ProxySettings {
 	return {
-		cloudflare: { tokenSet: true, zones: 4 },
+		cloudflare: { tokenSet: true, zones: 4, originCa: false },
 		publicIpv4: '203.0.113.24',
 		publicIpv6: '',
 		acmeEmail: 'ops@tudominio.cl',
@@ -89,9 +89,9 @@ export class InMemorySettingsRepository implements SettingsRepository {
 				httpPort: patch.httpPort ?? proxy.httpPort,
 				httpsPort: patch.httpsPort ?? proxy.httpsPort,
 				cloudflare: removingToken
-					? { tokenSet: false, zones: null }
+					? { tokenSet: false, zones: null, originCa: proxy.cloudflare.originCa }
 					: patch.cloudflareToken !== undefined
-						? { tokenSet: true, zones: 3 }
+						? { tokenSet: true, zones: 3, originCa: proxy.cloudflare.originCa }
 						: proxy.cloudflare,
 			},
 			panelAccess: {

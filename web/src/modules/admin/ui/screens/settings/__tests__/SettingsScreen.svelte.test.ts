@@ -55,7 +55,7 @@ vi.mock('@/modules/identity/container', () => ({
 const SETTINGS: Settings = {
 	require2fa: false,
 	proxy: {
-		cloudflare: { tokenSet: true, zones: 4 },
+		cloudflare: { tokenSet: true, zones: 4, originCa: false },
 		publicIpv4: '203.0.113.24',
 		publicIpv6: '',
 		acmeEmail: 'ops@tudominio.cl',
