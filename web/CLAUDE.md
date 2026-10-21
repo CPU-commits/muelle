@@ -587,8 +587,9 @@ Un `UnavailableError` sin `phase` es un backend caído o sin red: eso sí es un 
 Si lo nuevo son **campos** de un endpoint que ya existe, no hay 404: el DTO los declara
 opcionales y que falten quiere decir "fase pendiente". Así están los campos de proxy y DNS
 de `GET /settings` (en el contrato, §4, vienen siempre; opcionales solo por un backend de
-la Fase 1 sola, que tiene nada más que `require_2fa`) y los `services` de una app de catalog
-(§2.12, Fase 2: sin ellos, Dominios sugiere solo los destinos que ya usan sus dominios).
+la Fase 1 sola, que tiene nada más que `require_2fa`). Los `services` de una app de catalog
+(§2.12) son obligatorios: `[]` es un compose guardado que no se puede leer, y ahí Dominios
+sugiere solo los destinos que ya usan sus dominios.
 `requested_images` y `routes_warning` de un deploy (§2.1) ya son obligatorios: lo fijado en
 un digest sale solo de `requested_images` (`pinnedImages`), sin deducirlo del historial.
 También el `actor_name` de cada evento de `GET /audit` (§4.2): la Auditoría muestra el

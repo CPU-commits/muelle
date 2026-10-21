@@ -57,8 +57,9 @@ describe('DomainsViewModel', () => {
 		vi.clearAllMocks()
 		mocks.listDomains.mockResolvedValue([ACTIVE, MANUAL, EXISTING])
 		mocks.getProxyStatus.mockResolvedValue(makeProxyStatus())
-		// Un backend sin la Fase 2 no manda los servicios: sin sugerencias del catálogo.
-		catalog.getApp.mockResolvedValue({ services: null })
+		// Una app sin servicios en el catálogo (un compose que no se puede leer): sin
+		// sugerencias del catálogo.
+		catalog.getApp.mockResolvedValue({ services: [] })
 	})
 
 	it('lista los dominios y sugiere destinos (los del catálogo primero)', async () => {

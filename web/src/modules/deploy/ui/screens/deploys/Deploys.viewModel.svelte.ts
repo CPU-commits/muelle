@@ -270,7 +270,7 @@ export class DeploysViewModel {
 	/** Los servicios del diálogo de deploy: los de la configuración o, sin ella, los de Swarm. */
 	get deployServices(): readonly string[] {
 		return deployableServices(
-			this.#catalogApp.data?.services?.map((service) => service.name),
+			this.#catalogApp.data?.services.map((service) => service.name),
 			(this.status.data?.services ?? []).map((service) => service.name),
 		)
 	}

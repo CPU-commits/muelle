@@ -33,8 +33,8 @@ interface AppBase {
 	/** La configuración cambió después del último deploy. Sin deploys, nunca. */
 	readonly pendingChanges: boolean
 	readonly createdAt: Date
-	/** Sus servicios (contrato §2.12); null si el backend no los manda (sin la Fase 2). */
-	readonly services: readonly AppService[] | null
+	/** Sus servicios, de la configuración guardada (contrato §2.12). */
+	readonly services: readonly AppService[]
 }
 
 /** Una app de formulario: un servicio descrito por su spec. */
@@ -82,7 +82,7 @@ export function appStackName(ref: AppRef): string {
  * (el puerto no se adivina).
  */
 export function serviceTargets(app: Pick<App, 'services'>): string[] {
-	return (app.services ?? []).flatMap((service) =>
+	return app.services.flatMap((service) =>
 		service.ports.map((port) => `${service.name}:${String(port)}`),
 	)
 }

@@ -81,9 +81,10 @@ export function appFromDto(dto: AppDto): App {
 		lastDeployedAt: dto.last_deployed_at ? new Date(dto.last_deployed_at) : null,
 		pendingChanges: dto.pending_changes,
 		createdAt: new Date(dto.created_at),
-		services:
-			dto.services?.map((service) => ({ name: service.name, ports: [...service.ports] })) ??
-			null,
+		services: dto.services.map((service) => ({
+			name: service.name,
+			ports: [...service.ports],
+		})),
 	}
 	return dto.kind === 'service'
 		? { ...base, kind: 'service', spec: specFromDto(dto.spec) }

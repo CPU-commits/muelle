@@ -87,8 +87,7 @@ describe('deployableServices', () => {
 		expect(deployableServices(['web'], ['web', 'old'])).toEqual(['web'])
 	})
 
-	it('sin la configuración (un backend sin la Fase 2, o el catálogo que no cargó), los de Swarm', () => {
-		expect(deployableServices(null, ['api'])).toEqual(['api'])
+	it('sin la configuración (el catálogo que no cargó), los de Swarm', () => {
 		expect(deployableServices(undefined, ['api'])).toEqual(['api'])
 		// `[]`: el compose guardado no se pudo leer (§2.12).
 		expect(deployableServices([], ['api'])).toEqual(['api'])

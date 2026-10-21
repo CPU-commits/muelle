@@ -51,12 +51,11 @@ export function buildDeployRequest(input: DeployOverridesInput): DeployRequest {
 /**
  * Los servicios a los que se les puede pedir una imagen: los de la configuración (los
  * `services` del catálogo, contrato §2.12), que son contra los que el backend valida
- * `images` (§2.2), aunque la app no se haya desplegado nunca. Sin ellos (un backend sin la
- * Fase 2, el catálogo que no cargó, o `[]` de un compose guardado que no se puede leer), los
- * que corren en Swarm.
+ * `images` (§2.2), aunque la app no se haya desplegado nunca. Sin ellos (el catálogo que no
+ * cargó, o `[]` de un compose guardado que no se puede leer), los que corren en Swarm.
  */
 export function deployableServices(
-	configured: readonly string[] | null | undefined,
+	configured: readonly string[] | undefined,
 	running: readonly string[],
 ): readonly string[] {
 	return configured && configured.length > 0 ? configured : running

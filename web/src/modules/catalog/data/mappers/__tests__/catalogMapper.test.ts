@@ -27,6 +27,7 @@ const base = {
 	last_deployed_at: '2026-10-10T12:00:00Z',
 	pending_changes: true,
 	created_at: '2026-09-01T00:00:00Z',
+	services: [{ name: 'api', ports: [3000] }],
 }
 
 // El spec tal como lo guarda el backend (vo.AppSpec.JSON()).
@@ -70,8 +71,7 @@ describe('catalogMapper', () => {
 			lastDeployedAt: new Date(base.last_deployed_at),
 			pendingChanges: true,
 			createdAt: new Date(base.created_at),
-			// Un backend sin la Fase 2 no manda `services` (contrato §2.12).
-			services: null,
+			services: [{ name: 'api', ports: [3000] }],
 			spec: {
 				image: 'ghcr.io/aumi-app/backend-app:sha-3f9c2e1',
 				port: 3000,
@@ -115,6 +115,14 @@ describe('catalogMapper', () => {
 			{ name: 'api', ports: [3000] },
 			{ name: 'web', ports: [] },
 		])
+	})
+
+	it('services viene siempre (contrato §2.12): sin él no es una app', () => {
+		const app = { ...base, kind: 'service', spec: storedSpec }
+		expect(appDtoSchema.safeParse(app).success).toBe(true)
+		const { services: _services, ...missing } = app
+		expect(_services).toHaveLength(1)
+		expect(appDtoSchema.safeParse(missing).success).toBe(false)
 	})
 
 	it('una app de formulario sin spec no pasa el contrato', () => {
