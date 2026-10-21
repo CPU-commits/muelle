@@ -825,8 +825,11 @@ violaciones de CSP y los errores de la consola, como los de `e2e/`.
   muelle en `test-results/real-muelle.log` (con la traza de Playwright en
   `test-results/real/`). El log y el borrado de la carpeta temporal (la clave maestra y la
   base) van aunque falle el CLI de docker (`teardown.ts`, con sus tests en
-  `teardown.test.ts`); lo que quedó de Docker se avisa después. Al empezar, borra lo `it7p…`
-  de más de 30 min (una corrida que murió con SIGKILL).
+  `teardown.test.ts`); lo que quedó de Docker se avisa después. La corrida también falla si
+  el log de muelle trae un `error interno` (un 500, aunque el panel no lo mostrara); un
+  pedido que el panel cortó al cambiar de pantalla no cuenta (el backend no lo registra
+  como error). Al empezar, borra lo `it7p…` de más de 30 min (una corrida que murió con
+  SIGKILL).
 - Con un SIGKILL a Playwright la limpieza no corre: quedan el muelle de la corrida y su
   carpeta (`$TMPDIR/muelle-it7-*`). Ese muelle no tiene el candado del Swarm (node le pone
   CLOEXEC a lo heredado: el fd de `flock` lo tiene solo el node de `isolated-net.mjs`, que sale

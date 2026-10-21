@@ -49,6 +49,25 @@ describe('cleanUpRun', () => {
 		expect(existsSync(files.dir)).toBe(false)
 	})
 
+	it('falla si muelle registró un error interno (un 500), después de limpiar', async () => {
+		const internal =
+			'{"level":"ERROR","msg":"error interno","method":"GET","path":"/api/v1/projects","err":"falló la base"}'
+		writeFileSync(
+			files.logPath,
+			[
+				'{"level":"INFO","msg":"listening"}',
+				'{"level":"ERROR","msg":"tarea periódica","job":"dns","err":"sin red"}',
+				internal,
+				'no es JSON',
+			].join('\n'),
+		)
+		await expect(cleanUpRun(files, () => Promise.resolve([]), 'it7pabcd')).rejects.toThrow(
+			internal,
+		)
+		expect(existsSync(files.dir)).toBe(false)
+		expect(readFileSync(files.logCopy, 'utf8')).toContain(internal)
+	})
+
 	it('sin log (muelle no llegó a escribir), borra la carpeta igual', async () => {
 		rmSync(files.logPath)
 		await cleanUpRun(files, () => Promise.resolve([]), 'it7pabcd')
