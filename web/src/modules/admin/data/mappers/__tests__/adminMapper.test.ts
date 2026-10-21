@@ -116,7 +116,7 @@ describe('adminMapper', () => {
 		expect(actor('token', 9, '')).toEqual({ kind: 'token', id: 9, name: '' })
 	})
 
-	it('un backend sin actor_name (la Fase 1 de main) no tiene nombres', () => {
+	it('un backend sin actor_name (solo la Fase 1) no tiene nombres', () => {
 		const dto = auditEventDtoSchema.parse({
 			id: 1,
 			actor_type: 'user',

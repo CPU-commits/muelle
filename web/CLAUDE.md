@@ -541,23 +541,24 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
 **El estado real.** Las Fases 2 (deploys, status, logs, rollback, registries y los
 `services` de una app), 3 (dominios, `GET /proxy` y, en Ajustes, Cloudflare, IP pública,
 email ACME, puertos e IPs permitidas) y 5 (install y el panel embebido) están en este mismo
-árbol que el panel (`integracion-final`, que pasa a `main`), y `deploy` e `ingress` registran
-todas sus rutas (contrato §1): ahí un `404 no_route` es solo una ruta que no existe. La única
-fuente para §0–§5 es el contrato, `docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md`,
+árbol que el panel, y `deploy` e `ingress` registran todas sus rutas (contrato §1): ahí un
+`404 no_route` es solo una ruta que no existe. La única fuente para §0–§5 es el contrato,
+`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md`,
 resumido en `src/modules/{deploy,ingress}/README.md`, sin diferencias. `pnpm test:e2e:real`
 recorre el panel contra ese backend (ver [E2E contra muelle](#e2e-contra-muelle)).
 
 En producción el panel va embebido en el binario que lo sirve (contrato §5.5): las rutas del
 panel y las del backend llegan juntas, y `<ComingSoon>` no aparece. **El fallback se queda**
 por una sola razón, y cuesta poco (un `phase` en el `DomainErrorMap` y un `<ComingSoon>`):
-`pnpm dev` contra un `muelle serve` de una rama con solo la Fase 1 (el `main` de antes de
-`integracion-final`). Sin el fallback, Resumen, Deploys, Logs, Dominios y Registries
-mostrarían un error de verdad, con reintentos.
+`pnpm dev` contra un `muelle serve` de un backend con solo la Fase 1 (como el de 8a12ee5).
+Sin el fallback, Resumen, Deploys, Logs, Dominios y Registries mostrarían un error de
+verdad, con reintentos.
 
 **Lo que cuesta:** con el panel embebido, un 404 `no_route` en una de esas rutas solo puede
 ser un bug del panel (una ruta mal armada), y `<ComingSoon>` lo esconde detrás de "todavía
-no está". Cuando las fases lleguen a `main`, el fallback se saca (el `phase` de los mapas,
-`pendingPhase` y `<ComingSoon>`) y ese 404 vuelve a ser un error.
+no está". Cuando ya no haga falta correr el panel contra un backend de solo la Fase 1, el
+fallback se saca (el `phase` de los mapas, `pendingPhase` y `<ComingSoon>`) y ese 404 vuelve
+a ser un error.
 
 Cómo funciona:
 
@@ -581,7 +582,7 @@ Un `UnavailableError` sin `phase` es un backend caído o sin red: eso sí es un 
 Si lo nuevo son **campos** de un endpoint que ya existe, no hay 404: el DTO los declara
 opcionales y que falten quiere decir "fase pendiente". Así están los campos de proxy y DNS
 de `GET /settings` (en el contrato, §4, vienen siempre; opcionales solo por un backend de
-`main`, que tiene nada más que `require_2fa`) y los `services` de una app de catalog
+la Fase 1 sola, que tiene nada más que `require_2fa`) y los `services` de una app de catalog
 (§2.12, Fase 2: sin ellos, Dominios sugiere solo los destinos que ya usan sus dominios).
 Lo mismo con `requested_images` y `routes_warning` de un deploy (§2.1, revisión del
 2026-10-17): sin `requested_images` (`requestedImages: null`), lo fijado en un digest se
@@ -589,8 +590,8 @@ deduce del historial como antes (`pinnedImages`); sin `routes_warning`, es `fals
 También el `actor_name` de cada evento de `GET /audit` (§4.2): la Auditoría muestra el
 nombre que trae el evento (el username, el del token; `system` es "sistema"), copiado al
 escribirlo, así sigue aunque se borre el usuario o el token. Sin nombre (`""`: un evento de
-antes de la migración 0004 cuyo autor ya no estaba, o un backend de `main`), el tipo y el id
-("token #9").
+antes de la migración 0004 cuyo autor ya no estaba, o un backend de la Fase 1 sola), el
+tipo y el id ("token #9").
 Mandarlos en un `PATCH` a ese backend responde 400 `invalid_json` (rechaza campos
 desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es un ajuste
 (§4.1: solo lo fija install): Ajustes no lo muestra ni lo manda, y el mock lo rechaza.

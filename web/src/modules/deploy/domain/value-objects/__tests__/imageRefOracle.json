@@ -1,5 +1,5 @@
 {
-	"source": "validate.ImageRef de fase-23-base: reference.ParseNormalizedNamed (github.com/distribution/reference v0.6.0, go-digest v1.0.0) más el corte de 512, el - inicial y el $",
+	"source": "validate.ImageRef (src/shared/domain/validate, Fase 2): reference.ParseNormalizedNamed (github.com/distribution/reference v0.6.0, go-digest v1.0.0) más el corte de 512, el - inicial y el $",
 	"cases": [
 		{
 			"input": "nginx",

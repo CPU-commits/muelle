@@ -1,6 +1,6 @@
 # muelle — Contrato de las Fases 2, 3 y 5
 
-> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos) y 2026-10-17 (lo que pidió el panel, §7) · Estado: aprobado para la etapa de contratos (rama `fase-23-base`).
+> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos) y 2026-10-17 (lo que pidió el panel, §7) · Estado: aprobado para la etapa de contratos, e implementado en este árbol (Fases 2, 3 y 5).
 > Complementa el diseño ([`2026-10-09-muelle-design.md`](2026-10-09-muelle-design.md)); las referencias `§N` apuntan a sus secciones. Donde este documento y el diseño difieren, manda este documento, y el diseño ya se actualizó.
 
 Las Fases 2 (deploy), 3 (ingress) y 5 (distribución) se implementan **en paralelo**, cada una en su rama y sin hablar con las otras. Este documento fija lo que comparten:

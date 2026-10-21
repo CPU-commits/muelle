@@ -8,7 +8,7 @@ import {
 } from '../../domain'
 
 // La forma del contrato HTTP de la Fase 3 (`docs/superpowers/specs/2026-10-10-contrato-
-// http-fases-2-3.md`, §3, en `fase-23-base`), resumido en ../../README.md. snake_case como
+// http-fases-2-3.md`, §3, en este árbol), resumido en ../../README.md. snake_case como
 // el resto de la API; los campos desconocidos se descartan.
 
 const timestamp = z.iso.datetime({ offset: true })

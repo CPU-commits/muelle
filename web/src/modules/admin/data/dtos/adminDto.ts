@@ -40,7 +40,7 @@ export const auditEventDtoSchema = z.object({
 	actor_type: z.string(),
 	actor_id: z.number().int().nullable(),
 	// El username, el nombre del token o "system", copiado al escribir el evento (contrato
-	// §4.2): nunca null. Opcional solo por un backend de la Fase 1 (`main`), que no lo tiene.
+	// §4.2): nunca null. Opcional solo por un backend de solo la Fase 1, que no lo tiene.
 	actor_name: z.string().optional(),
 	action: z.string(),
 	target: z.string(),

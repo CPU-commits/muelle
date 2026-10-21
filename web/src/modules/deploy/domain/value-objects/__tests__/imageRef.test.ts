@@ -26,7 +26,7 @@ describe('splitImageRef', () => {
 	})
 })
 
-// La regla es la del backend (validate.ImageRef de fase-23-base): lo que uno acepta y el
+// La regla es la del backend (validate.ImageRef, de la Fase 2): lo que uno acepta y el
 // otro no es un 422 que el panel podría haber evitado, o un deploy que el panel frena sin
 // razón. imageRefOracle.json salió de correr el código de Go con estas entradas.
 describe('isValidImageRef: igual que el backend', () => {

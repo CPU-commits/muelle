@@ -13,11 +13,11 @@ export const IMAGE_REF_MAX_LENGTH = 512
 
 // --- La gramática de una referencia de Docker -----------------------------------------
 //
-// Es la del backend, línea por línea: `validate.ImageRef` (fase-23-base) llama a
-// `reference.ParseNormalizedNamed` de github.com/distribution/reference v0.6.0 (que
-// valida el digest con go-digest v1.0.0). Si el panel acepta algo que el backend rechaza,
-// el usuario ve un 422 que se podía evitar; al revés, un deploy frenado sin razón. Los
-// tests comparan contra la salida del código de Go (__tests__/imageRefOracle.json).
+// Es la del backend, línea por línea: `validate.ImageRef` (src/shared/domain/validate)
+// llama a `reference.ParseNormalizedNamed` de github.com/distribution/reference v0.6.0
+// (que valida el digest con go-digest v1.0.0). Si el panel acepta algo que el backend
+// rechaza, el usuario ve un 422 que se podía evitar; al revés, un deploy frenado sin razón.
+// Los tests comparan contra la salida del código de Go (__tests__/imageRefOracle.json).
 
 const alphanumeric = '[a-z0-9]+'
 const separator = '(?:[._]|__|[-]+)'
