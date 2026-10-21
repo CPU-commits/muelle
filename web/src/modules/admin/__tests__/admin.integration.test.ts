@@ -163,6 +163,22 @@ describe('settings', () => {
 		expect((error as ValidationError).message).toBe('no es pública')
 	})
 
+	it('el mismo puerto para HTTP y HTTPS es 422 en proxy_https_port, con el texto del backend', async () => {
+		const response = await fetch(api('/settings'), {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ proxy_http_port: 8443, proxy_https_port: 8443 }),
+		})
+		expect(response.status).toBe(422)
+		// src/internal/admin/app/usecases/settings.go
+		expect(await response.json()).toMatchObject({
+			error: {
+				code: 'invalid',
+				message: 'proxy_https_port: no puede ser el mismo que proxy_http_port (8443)',
+			},
+		})
+	})
+
 	it('el backend rechaza { y } en el email ACME y en el token (422 en ese campo) y no guarda nada', async () => {
 		// Directo contra el endpoint, sin el chequeo del panel: el 422 lo tiene que dar el mock.
 		const patch = (body: Record<string, unknown>) =>
