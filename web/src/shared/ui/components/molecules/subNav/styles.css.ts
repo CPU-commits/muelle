@@ -1,4 +1,4 @@
-import { createContainer, style } from '@vanilla-extract/css'
+import { createContainer, globalStyle, style } from '@vanilla-extract/css'
 import { theme } from '@/shared/ui/themes/theme.css'
 
 // La nav vertical de Ajustes y de Configuración (`m-sub` en el diseño).
@@ -52,14 +52,17 @@ export const layout = style({
 })
 
 // Al costado del contenido, la nav acompaña el scroll. El header del AppShell no es sticky
-// (se va con la página), así que arriba no hay nada que esquivar: solo el aire de `top`.
-// Si la nav no entra en la pantalla, scrollea adentro en vez de quedar cortada. Arriba del
-// contenido (teléfono) se queda quieta: sticky, taparía lo que viene abajo.
+// (se va con la página), así que arriba no hay nada que esquivar: solo el aire de
+// `stickyTop`, entre el borde de la pantalla y los links. Si la nav no entra en la pantalla,
+// scrollea adentro en vez de quedar cortada. Arriba del contenido (teléfono) se queda quieta:
+// sticky, taparía lo que viene abajo.
 const stickyTop = theme.space[24]
 // Con overflow, la nav recortaría el anillo de foco global de sus links (2 px de outline a
 // 2 px del borde: 4 px por fuera). El padding le hace lugar y el margen negativo lo
-// compensa: los links y el contenido quedan donde estaban.
+// compensa: los links y el contenido quedan donde estaban. Pegada arriba, la caja empieza
+// ese padding antes, así los links quedan a `stickyTop`.
 const ringRoom = theme.space[4]
+const asideTop = `calc(${stickyTop} - ${ringRoom})`
 
 export const aside = style({
 	flex: `1 1 ${NAV_BASIS}px`,
@@ -67,8 +70,8 @@ export const aside = style({
 	'@container': {
 		[sideBySide]: {
 			position: 'sticky',
-			top: stickyTop,
-			maxHeight: `calc(100dvh - ${stickyTop} * 2)`,
+			top: asideTop,
+			maxHeight: `calc(100dvh - ${asideTop} * 2)`,
 			overflowY: 'auto',
 			flexBasis: `calc(${NAV_BASIS}px + ${ringRoom} * 2)`,
 			padding: ringRoom,
@@ -83,4 +86,12 @@ export const content = style({
 	display: 'flex',
 	flexDirection: 'column',
 	gap: theme.space[20],
+})
+
+// Los destinos de los links de la nav (las secciones, por su id): al saltar a una, la
+// tarjeta queda a la altura de los links de la nav pegada arriba, no contra el borde. Lo
+// demás con id que haya adentro (un campo, un título) solo gana ese aire si algo lo trae a
+// la vista.
+globalStyle(`${content} [id]`, {
+	scrollMarginTop: stickyTop,
 })

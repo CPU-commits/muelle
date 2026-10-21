@@ -67,6 +67,7 @@ export { default as SegmentedControl } from './components/molecules/segmentedCon
 export type { ChoiceOption } from './components/molecules/segmentedControl/types'
 export { default as SubNav } from './components/molecules/subNav/SubNav.svelte'
 export { default as SubNavLayout } from './components/molecules/subNav/SubNavLayout.svelte'
+export type { SubNavItem } from './components/molecules/subNav/types'
 export {
 	SectionSpy,
 	type SectionSpyOptions,

@@ -7,6 +7,9 @@
 //   ("Eliminar app").
 // - Las secciones pueden aparecer después (cada una con su query) o irse: un
 //   MutationObserver sobre el contenedor las vuelve a buscar.
+// La raíz de los dos observers es el documento (`root: document`): su pantalla, la misma que
+// la implícita en la app. Adentro de un iframe (el de los tests de componentes, escalado
+// dentro de la página de vitest), la implícita sería la pantalla de la página de afuera.
 
 // La franja que mira el observer: el 30 % de arriba de la pantalla. Una sección que la toca
 // ya cruzó la línea (su borde de abajo).
@@ -69,7 +72,7 @@ export function watchSections(
 			compute()
 			onChange()
 		},
-		{ rootMargin: BAND },
+		{ root: document, rootMargin: BAND },
 	)
 	const bottom = new IntersectionObserver(
 		(entries) => {
@@ -77,7 +80,7 @@ export function watchSections(
 			compute()
 			onChange()
 		},
-		{ rootMargin: ABOVE_THE_VIEWPORT, threshold: 1 },
+		{ root: document, rootMargin: ABOVE_THE_VIEWPORT, threshold: 1 },
 	)
 	bottom.observe(document.documentElement)
 

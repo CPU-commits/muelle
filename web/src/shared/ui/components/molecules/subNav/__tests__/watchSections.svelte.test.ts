@@ -72,9 +72,11 @@ describe('watchSections', () => {
 	it('mira una franja en la parte de arriba de la pantalla y el fondo de la página', () => {
 		start()
 
+		expect(band().options.root).toBe(document)
 		expect(band().options.rootMargin).toBe('0px 0px -70% 0px')
 		expect([...band().targets]).toEqual(IDS.map(sectionEl))
 		// El fondo: el documento entero adentro de la pantalla estirada hacia arriba.
+		expect(bottom().options.root).toBe(document)
 		expect(bottom().options.threshold).toBe(1)
 		expect(bottom().options.rootMargin).toMatch(/^\d+px 0px 0px 0px$/)
 	})
