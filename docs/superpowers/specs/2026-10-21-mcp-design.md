@@ -677,7 +677,7 @@ Los códigos de ejecución:
 | `read_only_token` | Kit: una escritura con un token de solo lectura. Defensa en profundidad: el servidor de solo lectura no la lista |
 | `out_of_scope` | Kit, antes del caso de uso |
 | `rate_limited` | Kit: más de 8 llamadas en curso del mismo token, o sin lugar en los 8 streams. El mensaje dice que espere unos segundos |
-| `invalid` | `*validate.Error`. El mensaje empieza con `"<campo>: "` (`tail`, `since`, `offset`, `image`, `images.<servicio>`, `set`, `unset`) |
+| `invalid` | `*validate.Error`. El mensaje empieza con `"<campo>: "` (`since`, `contains`, `stream`, `after`, `offset`, `image`, `images.<servicio>`, `vars`, `keys`, `set`, `unset`). Los rangos de los enteros los rechaza antes el esquema (texto del SDK) |
 | `not_found` | `repository.ErrNotFound`: la app, el deploy o el servicio en Swarm |
 | `conflict`, `no_previous_deploy` | Los de deploy: la app se está borrando; rollback sin anterior |
 | `docker_unavailable` | `entity.ErrDockerUnavailable` |
