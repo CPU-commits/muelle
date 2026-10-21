@@ -114,3 +114,46 @@ jobs:
           go test -race -tags panel ./src/cmd/http/... ./src/shared/infra/container/
       - name: build con el panel
         run: CGO_ENABLED=0 go build -tags panel -o muelle .
+
+  # El panel contra un muelle de verdad (pnpm test:e2e:real, web/e2e-real/): construye el
+  # panel y muelle con -tags panel, y recorre setup, 2FA, catálogo, deploys y rollback contra
+  # un Swarm. El runner es efímero: acá sí se crea un Swarm de un nodo (el script nunca lo
+  # hace).
+  e2e-real:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+          cache: true
+          cache_dependency_path: web/pnpm-lock.yaml
+      - name: pnpm install
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Chromium de Playwright
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+      # Ver el job web: el e2e real también corre en el network namespace propio.
+      - name: user namespaces sin privilegios
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Swarm de un nodo
+        run: |
+          docker swarm init || docker swarm init --advertise-addr 127.0.0.1
+          docker info --format '{{.Swarm.LocalNodeState}} {{.Swarm.ControlAvailable}}'
+      - name: e2e real
+        working-directory: web
+        run: pnpm test:e2e:real
+      # La traza de Playwright y el log de muelle (test-results/real-muelle.log).
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-real
+          path: web/test-results/
+          retention-days: 7
