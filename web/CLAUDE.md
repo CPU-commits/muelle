@@ -826,6 +826,12 @@ violaciones de CSP y los errores de la consola, como los de `e2e/`.
   base) van aunque falle el CLI de docker (`teardown.ts`, con sus tests en
   `teardown.test.ts`); lo que quedó de Docker se avisa después. Al empezar, borra lo `it7p…`
   de más de 30 min (una corrida que murió con SIGKILL).
+- Con un SIGKILL a Playwright la limpieza no corre: quedan el muelle de la corrida y su
+  carpeta (`$TMPDIR/muelle-it7-*`). Ese muelle no tiene el candado del Swarm (node le pone
+  CLOEXEC a lo heredado: el fd de `flock` lo tiene solo el node de `isolated-net.mjs`, que sale
+  y lo suelta), así que no frena a los tests de Go; y si `unshare -rn` anduvo, escucha en el
+  network namespace de su corrida y no choca con la próxima. Se mata con
+  `pkill -f 'muelle-it7-bin-.*/muelle serve'` (o con la ruta de `E2E_REAL_BIN`).
 - Un test nuevo va en `e2e-real/*.real.ts`, con los mismos selectores que `e2e/` (roles y
   textos en español). Lo que necesite de Docker, por `e2e-real/docker.ts` y solo con nombres
   `it7p<id>`.

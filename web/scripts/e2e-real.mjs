@@ -108,7 +108,11 @@ let command = playwright
 if (quiet('flock', ['--version']).status === 0) {
 	step(`esperando el candado del Swarm (${lock})`)
 	// --no-fork: flock se reemplaza por el comando (que sigue con el candado), y las señales
-	// que se reenvían abajo le llegan a él y no solo a flock.
+	// que se reenvían abajo le llegan a él y no solo a flock. El fd del candado no tiene
+	// CLOEXEC, pero node se lo pone a todo lo heredado al arrancar
+	// (uv_disable_stdio_inheritance): lo tiene solo el node de isolated-net.mjs, no Playwright,
+	// muelle ni Chromium. Si Playwright muere (un SIGKILL), isolated-net.mjs sale y lo suelta,
+	// aunque quede un muelle huérfano.
 	command = ['flock', '--no-fork', lock, ...playwright]
 } else {
 	console.warn('[e2e-real] sin flock: corre sin el candado del Swarm de los tests de Go')
