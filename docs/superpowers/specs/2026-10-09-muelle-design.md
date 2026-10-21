@@ -1,7 +1,8 @@
 # muelle — Diseño
 
 > Deploy manager ultraligero sobre Docker Swarm: panel web + API, secretos, stages y proxy con certificados automáticos.
-> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
+> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1), 2026-10-13 (etapa de contratos de las Fases 2, 3 y 5) y 2026-10-14 (su revisión: §6.3, Caddy en JSON, el cambio de puertos) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
+> La API, los puertos entre módulos y la configuración de install de las Fases 2, 3 y 5 están en detalle en [`2026-10-10-contrato-http-fases-2-3.md`](2026-10-10-contrato-http-fases-2-3.md).
 > "muelle" es un nombre provisional.
 
 ## 1. Contexto y objetivo
@@ -71,9 +72,9 @@ Ambos viven en el nodo manager.
 - `--restart unless-stopped`.
 - Volúmenes: `muelle_caddy_data` (certificados), `muelle_caddy_config` (autosave) y `muelle_caddy_admin` (socket).
 - Redes: `muelle_panel` y todas las redes de stage.
-- Arranca con `caddy run --resume` y una configuración inicial cuyo único contenido es `admin.listen: unix//run/caddy-admin/admin.sock`.
+- Arranca con `caddy run --resume` y `CADDY_ADMIN=unix//run/caddy-admin/admin.sock`, que pone ingress al crear el contenedor (`naming.CaddyCommand` y `naming.CaddyEnv`), sin depender del CMD de la imagen. Sin autosave, Caddy arranca vacío con la admin API en el socket; con autosave, retoma la última configuración (contrato §3.4).
 - **Por qué no es servicio Swarm:** un contenedor standalone se puede conectar a una red overlay attachable **en caliente** (`docker network connect`). A un servicio Swarm, agregarle una red lo recrea, y eso tumbaría todos los sitios cada vez que se crea un stage.
-- **Ciclo de vida:** al arrancar, y cada vez que cambian la imagen o los puertos de Caddy, muelle se asegura de que el contenedor exista con la imagen, los puertos, los volúmenes y las redes correctas. Recrearlo (al actualizar Caddy o cambiar puertos) provoca una caída de pocos segundos.
+- **Ciclo de vida:** al arrancar, y cada vez que cambian la imagen o los puertos de Caddy, muelle se asegura de que el contenedor exista con la imagen, los puertos, los volúmenes y las redes correctas. Recrearlo (al actualizar Caddy o cambiar puertos) provoca una caída de pocos segundos. Cuando el cambio viene de Ajustes, se recrea 2 s después de responder el `PATCH`, que también pasa por Caddy (contrato §3.5). Un puerto nuevo ocupado no deja el panel sin Caddy: el `PATCH` prueba los puertos nuevos antes de guardarlos (uno ocupado es un `422` en su campo), y si igual el contenedor no arranca con ellos, muelle vuelve a los anteriores, en los ajustes y en el contenedor, y lo dice en `GET /proxy` y en la auditoría (contrato §3.5). En desarrollo (sin dominio del panel o sin imagen de Caddy) muelle no crea el contenedor ni le manda configuración (contrato §3.4).
 
 **muelle** (servicio Swarm del stack `muelle`, restricción `node.role == manager`)
 - Imagen mínima con el binario de muelle (estático, sin CGO) y el CLI de `docker` (para `docker stack deploy`).
@@ -94,23 +95,34 @@ Ambos viven en el nodo manager.
 
 ```
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/cpu-commits/muelle install \
+  -v ~/.docker/config.json:/root/.docker/config.json:ro \
+  ghcr.io/cpu-commits/muelle:<versión> install \
   --panel-domain panel.tudominio.cl --email tu@correo \
-  [--cloudflare-token …] [--public-ip …] [--advertise-addr …] [--http-port 80] [--https-port 443]
+  [--cloudflare-token …] [--public-ip …] [--public-ipv6 …] [--advertise-addr …] \
+  [--http-port 80] [--https-port 443] [--caddy-image …] [--reinstall] \
+  [--registry-user … --registry-password-stdin]
 ```
 
-Pasos:
-1. Verifica Docker. Si Swarm no está activo, ejecuta `docker swarm init` (con `--advertise-addr` si la máquina tiene varias IPs).
-2. **Si los puertos elegidos para el proxy están ocupados (p. ej. 80/443 por el Traefik de Dokploy), aborta** con un mensaje claro que sugiere `--http-port`/`--https-port` (ver §16).
-3. Crea la red `muelle_panel`.
-4. Genera una clave maestra de 32 bytes, la guarda como secreto Swarm `muelle_master_key` e **imprime la clave una sola vez** para que el usuario la respalde.
-5. Detecta la IP pública si no se pasó `--public-ip` (vía `https://1.1.1.1/cdn-cgi/trace`) y la imprime.
-6. Despliega el stack `muelle` (solo el servicio muelle). Los flags de instalación se le pasan como configuración inicial y muelle los guarda en settings en su primer arranque.
-7. En ese primer arranque, muelle crea el contenedor muelle-caddy (§3.1) y envía la ruta del panel.
-8. Imprime una URL de setup de un solo uso (`https://panel…/setup?token=…`, vence en 24 h) para crear el primer usuario.
-9. Sobre el dominio del panel: con `--cloudflare-token`, muelle crea su registro DNS y usa DNS-01; sin token, el registro DNS tiene que existir de antemano y se usa HTTP-01 (que exige `--http-port 80`).
+Sin `:<versión>` se usa `:latest`, la última versión final. `--cloudflare-token -` lee el token de stdin (`docker run -i`), así no queda en el historial de la shell.
 
-**Actualizar muelle:** `docker service update --image ghcr.io/cpu-commits/muelle:<versión> muelle_muelle`. Los sitios no se ven afectados, porque Caddy es un contenedor aparte.
+Las imágenes de muelle son privadas: antes se hace `docker login ghcr.io` en el servidor (un token de GitHub con `read:packages`) y se monta su `config.json`, o se pasa la credencial con `--registry-user` y `--registry-password-stdin`. install baja con ella las imágenes de muelle y de Caddy, y se la pasa a muelle, que la guarda como el registry `ghcr.io` en su primer arranque (contrato §5.2).
+
+Pasos (el orden y los detalles están en el contrato de las fases 2 y 3, §5.4). install no cambia nada hasta el paso 4, así un puerto ocupado aborta sin dejar nada:
+1. Verifica Docker y el estado del Swarm, y que no haya una instalación anterior (con `--reinstall`, reusa la clave maestra de una que se borró con `docker stack rm muelle`).
+2. Detecta la IP pública si no se pasó `--public-ip` (vía `https://1.1.1.1/cdn-cgi/trace`) y la imprime. Si no puede, avisa y sigue.
+3. **Si los puertos elegidos para el proxy están ocupados (p. ej. 80/443 por el Traefik de Dokploy), aborta** con un mensaje claro que sugiere `--http-port`/`--https-port` (ver §16).
+4. Si Swarm no está activo, ejecuta `docker swarm init` (con `--advertise-addr` si la máquina tiene varias IPs).
+5. Crea la red `muelle_panel`.
+6. Genera una clave maestra de 32 bytes y la guarda como secreto Swarm `muelle_master_key`.
+7. Despliega el stack `muelle` (solo el servicio muelle, fijo al nodo donde corrió install, porque `muelle_data` es un volumen local). Los flags de instalación se le pasan como configuración inicial (variables `MUELLE_INIT_*`; el token de Cloudflare, como el secreto Swarm `muelle_init_cloudflare_token`). muelle la guarda en settings solo en el primer arranque de la base: después mandan los cambios del panel, y un reinicio no devuelve lo que se borró ahí. El detalle está en el contrato de las fases 2 y 3, §5. Si algo falla antes de que el deploy funcione (también un Ctrl-C), install borra lo que creó: el stack y sus volúmenes si alcanzó a arrancar, la red y los secretos.
+8. **Imprime la clave maestra una sola vez** para que el usuario la respalde.
+9. En ese primer arranque, muelle crea el contenedor muelle-caddy (§3.1) y envía la ruta del panel.
+10. Imprime una URL de setup de un solo uso (`https://panel…/setup?token=…`, vence en 24 h) para crear el primer usuario. Si muelle ya tiene usuarios (una reinstalación), lo dice.
+11. Sobre el dominio del panel: con `--cloudflare-token`, muelle crea su registro DNS y usa DNS-01; sin token, el registro DNS tiene que existir de antemano y se usa HTTP-01, que necesita que el puerto 80 público llegue a `--http-port` (install avisa si no es 80).
+
+**Actualizar muelle:** `docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<versión> muelle_muelle`, con el `docker login ghcr.io` del servidor. Caddy es un contenedor aparte, pero sigue a la versión de muelle: con `caddy_image` vacío, el job `"proxy"` del arranque recrea muelle-caddy con la imagen de la versión nueva, y los sitios se cortan unos segundos. Si `caddy_image` se fijó en la instalación (`--caddy-image`), Caddy no cambia (contrato de las fases 2 y 3, §5.4).
+
+**Recuperar el acceso** si la lista de IPs permitidas te deja fuera del panel: `docker exec <contenedor de muelle> muelle settings reset-panel-ips` vacía la lista y reinicia muelle, que al arrancar reenvía la configuración a Caddy (contrato §4.1 y §5.4).
 
 ## 4. Componentes (Go)
 
@@ -141,13 +153,14 @@ src/
 │   ├── catalog/        proyectos, stages y apps (el spec de formulario es un value object)
 │   ├── secrets/        variables cifradas de stage y app: leer enmascaradas, PUT, PATCH, mezclar
 │   ├── admin/          settings, auditoría, backup y limpieza periódica
-│   ├── deploy/         (Fase 2) render, cola de deploys, cliente de Docker, rollback, reconciliación
-│   └── ingress/        (Fase 3) dominios, Cloudflare, contenedor muelle-caddy y sus rutas
+│   ├── deploy/         (Fase 2) render, cola de deploys, rollback, reconciliación, registries, estado y logs de las apps
+│   └── ingress/        (Fase 3) red de cada stage, dominios, Cloudflare, contenedor muelle-caddy y sus rutas
 ├── shared/
 │   ├── domain/         errores comunes, Transactor, Principal y alcance de tokens, reglas de validación
 │   └── infra/
 │       ├── container/  container.New(settings): arma todo; lo usan main y los tests de integración
-│       └── out/        sqlite (conexión, migraciones, Transactor, registro de auditoría), crypto (AES-256-GCM)
+│       └── out/        sqlite (conexión, migraciones, Transactor, registro de auditoría), crypto (AES-256-GCM),
+│                       docker (cliente compartido por deploy, ingress e install, con su fake dockertest)
 ├── package/            interfaces finas: cipher, clock, audit
 └── settings/           carga y validación de MUELLE_*
 web/                    (Fase 4) SvelteKit con adapter-static, embebido con go:embed
@@ -176,7 +189,7 @@ web/                    (Fase 4) SvelteKit con adapter-static, embebido con go:e
 | TOTP | `identity` (puerto `TOTP`) | `github.com/pquerna/otp` |
 | Render | `deploy/domain/service` (Fase 2) | App (formulario o compose) + variables + dominios → compose final validado, con `github.com/compose-spec/compose-go/v2`; funciones puras |
 | Deployer | `deploy/app` + worker en `deploy/infra/in` (Fase 2) | Cola por app, resolución de digests, `docker stack deploy`, espera de convergencia, log de deploy, reconciliación al arrancar |
-| Docker | `deploy/infra/out/service/docker` (Fase 2) | SDK oficial (moby): servicios, tareas, logs en vivo, stats, inspección de distribución |
+| Docker | `shared/infra/out/docker` | SDK oficial (moby): servicios, tareas, logs en vivo, stats, inspección de distribución, redes, contenedores, secretos de Swarm, y `docker stack deploy/rm` por el CLI. Lo comparten deploy, ingress e install; cada módulo pide solo las partes que usa, y los tests usan el fake `dockertest` |
 | Proxy | `ingress/infra/out/service/caddy` (Fase 3) | Ciclo de vida de muelle-caddy (crear o recrear según imagen y puertos, conectar y desconectar redes de stage) y configuración: rutas → JSON de Caddy, `POST /load` por el socket unix, mutex global |
 | DNS | `ingress/infra/out/service/cloudflare` (Fase 3) | Cliente mínimo propio de la API de Cloudflare (zonas y registros) |
 | API | `cmd/http` + `infra/in/http` de cada módulo | REST `/api/v1`, autenticación por sesión o token, SSE para logs; sirve el SPA embebido |
@@ -208,17 +221,17 @@ proyecto (auditfy)
 | `stages` | `id`, `project_id`, `slug` (único por proyecto), `created_at` |
 | `apps` | `id`, `stage_id`, `slug` (único por stage), `kind` (`service`\|`compose`), `spec` (JSON, solo si es `service`), `compose_yaml` (solo si es `compose`), `deploy_timeout_s` (por defecto 300), `storage_node_id` (nodo donde viven sus volúmenes), `config_changed_at`, `last_deployed_at` |
 | `env_vars` | `id`, `stage_id` o `app_id` (exactamente uno, con borrado en cascada), `key`, `value` (cifrado, siempre), `secret` (bool), `updated_at`; única la clave por dueño |
-| `domains` | `id`, `app_id`, `hostname` (único global), `target_service`, `target_port`, `proxied` (bool), `tls_mode` (`cloudflare`\|`http`), `cf_zone_id`, `cf_record_id` (nulo si muelle no maneja el registro), `status` (`pending`\|`active`\|`error`), `last_error`, `cert_issuer`, `cert_expires_at` |
-| `deploys` | `id`, `app_id`, `status` (`queued`\|`running`\|`succeeded`\|`failed`\|`superseded`), `images` (JSON `servicio → ref@digest`), `trigger` (`panel`\|`api`\|`rollback`), `actor_type` (`user`\|`token`), `actor_id`, `error`, `log` (texto, truncado a 256 KB), `created_at`, `started_at`, `finished_at` |
-| `registries` | `id`, `host` (único), `username`, `password` (cifrado) |
+| `domains` | `id`, `app_id` (una app con dominios no se borra), `hostname` (único global), `target_service`, `target_port`, `proxied` (bool), `tls_mode` (`cloudflare`\|`http`), `cf_zone_id`, `cf_record_id` y `cf_record_id_aaaa` (nulos si muelle no maneja el registro), `status` (`pending`\|`active`\|`error`), `last_error_code` (`record_exists`\|`cloudflare`\|`certificate`, solo con `error`), `last_error`, `cert_issuer`, `cert_expires_at`, `created_at`, `updated_at` |
+| `deploys` | `id`, `app_id`, `status` (`queued`\|`running`\|`succeeded`\|`failed`\|`superseded`), `images` (JSON `servicio → ref@digest`), `requested_images` (las refs pedidas, antes de resolver), `config_images` (las refs de la configuración que leyó el deploy), `trigger` (`panel`\|`api`\|`rollback`), `actor_type` (`user`\|`token`), `actor_id`, `actor_name` (copiado al crear), `superseded_by`, `error`, `log` (texto, truncado a 256 KB, con `log_truncated`), `routes_warning` (el paso 7 no pudo actualizar Caddy), `created_at`, `started_at`, `finished_at` |
+| `registries` | `id`, `host` (único), `username`, `password` (cifrado), `created_at`, `updated_at` |
 | `users` | `id`, `username` (único), `password_hash`, `totp_secret` (cifrado, nulo si no tiene 2FA), `totp_pending` (cifrado, generado pero sin confirmar), `created_by`, `created_at` |
 | `invites` | `id`, `token_hash`, `created_by`, `expires_at`, `used_at` |
 | `sessions` | `id_hash`, `user_id`, `mfa_pending` (contraseña correcta, falta el código TOTP), `created_at`, `last_seen_at`, `expires_at`, `user_agent`, `ip` |
 | `api_tokens` | `id`, `name`, `token_hash`, `project_id`, `stage_id` (nulo = todo el proyecto), `created_by`, `last_used_at`, `expires_at` (opcional) |
-| `audit_events` | `id`, `actor_type`, `actor_id`, `action`, `target`, `details` (JSON, sin valores secretos), `at` |
-| `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain`, `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` |
+| `audit_events` | `id`, `actor_type` (`user`\|`token`\|`system`), `actor_id`, `actor_name` (el username, el nombre del token o `system`, copiado al escribir), `action`, `target`, `details` (JSON, sin valores secretos), `at` |
+| `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `cloudflare_zones`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain` (`MUELLE_PANEL_DOMAIN`, o el host de `MUELLE_PANEL_ORIGIN`; de solo lectura), `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` (vacío: la imagen de Caddy de la misma versión de muelle) y las del registro DNS del panel (`panel_cf_*`, de ingress) |
 
-La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con una migración de la Fase 2, y `domains` con una de la Fase 3.
+La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con la migración `0002_deploy.sql`, y `domains` con `0003_ingress.sql`. Las dos las reservó la etapa de contratos; cada fase edita la suya, en vez de agregar otra, mientras no haya una versión publicada. `0004_audit_actor_name.sql`, un pendiente de la Fase 1, suma `audit_events.actor_name` y lo llena en los eventos que ya había, y `0005_deploy_routes_warning.sql` suma `deploys.routes_warning` (contrato §6).
 
 ### 5.2 Reglas
 
@@ -231,8 +244,8 @@ La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`
    - **Claves:** el prefijo `COMPOSE_` está reservado, porque compose-go lee esas variables del entorno (nombre del proyecto, perfiles).
 4. **Cambios pendientes.** Cambiar variables (de la app o de su stage), spec o compose actualiza `config_changed_at` y no redespliega. El panel muestra "cambios pendientes" mientras `config_changed_at > last_deployed_at`. **Los dominios no pasan por el deploy:** crearlos, editarlos o borrarlos aplica de inmediato el DNS y las rutas de Caddy, porque no afectan al compose.
 5. **Digest.** Cada deploy guarda el digest exacto de cada imagen, y el compose final referencia `repo:tag@sha256:…`.
-6. **Rollback.** El deploy "actual" es el `succeeded` más reciente. El rollback toma las imágenes (con digest) del `succeeded` inmediatamente anterior y despliega con la configuración **actual** (variables, spec). Si no hay un `succeeded` anterior, responde `409`. Las variables no se versionan en la v1.
-7. **Retención.** Últimos 20 deploys por app; `audit_events` 180 días; las sesiones vencidas o sin uso se borran cada hora.
+6. **Rollback.** El deploy "actual" es el `succeeded` más reciente. El rollback toma las imágenes (con digest) del `succeeded` inmediatamente anterior y despliega con la configuración **actual** (variables, spec). Si no hay un `succeeded` anterior, responde `409`. Las variables no se versionan en la v1. Un deploy sin cuerpo después del rollback repite esas imágenes con su digest: el rollback no se deshace solo (contrato §2.2).
+7. **Retención.** Últimos 20 deploys por app, más siempre el actual y el `succeeded` anterior (el destino del rollback), aunque sean más viejos; `audit_events` 180 días; las sesiones vencidas o sin uso se borran cada hora.
 
 ## 6. Render: del modelo al compose final
 
@@ -252,9 +265,11 @@ La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`
 
 - `healthcheck.type` (Swarm ejecuta el healthcheck **dentro** del contenedor, así que el binario tiene que existir en la imagen):
   - `http`: genera la forma exec `["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:<port><path>"]`, sin shell; requiere `wget`. El path tampoco admite metacaracteres de shell (`&`, `;`, `|`, `$`, comillas, espacios).
-  - `bun-http`: genera `CMD bun -e "fetch('http://127.0.0.1:<port><path>').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`.
-  - `command`: un comando libre.
-  - `none`: sin healthcheck. El panel advierte que entonces no hay garantía de cero downtime.
+  - `bun-http`: genera la forma exec `["CMD", "bun", "-e", "fetch('http://127.0.0.1:<port><path>').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]`.
+  - `command`: un comando libre, en forma exec (`["CMD", …command]`, sin shell; para un shell, `["sh", "-c", "…"]`).
+  - `none`: muelle no agrega healthcheck (si la imagen trae un `HEALTHCHECK`, sigue valiendo). El panel advierte que entonces no hay garantía de cero downtime.
+  - Los tiempos (`interval_s`, `timeout_s`, `start_period_s`) van como duraciones (`10s`) y `retries` tal cual.
+- `command`, si no está vacío, va en forma exec (`command: [...]`). `resources.memory_mb` y `resources.cpus` van a `deploy.resources.limits`. Cada volumen es un volumen nombrado del stack (`<stack>_<name>`) montado en `mount`. Todas las variables resueltas van como `environment`.
 
 ### 6.2 Inyecciones (las mismas para ambos tipos)
 
@@ -267,18 +282,53 @@ Para cada servicio del compose resultante:
 | `deploy.update_config` | `parallelism: 1`, `order: start-first`, `failure_action: rollback`, `monitor: 30s` | Sí, si lo define |
 | `deploy.rollback_config` | `parallelism: 1`, `order: start-first` | Sí, si lo define |
 | Servicios con volúmenes | `order: stop-first` en update y rollback (dos instancias escribiendo el mismo volumen lo corrompen) y la restricción `node.id == <storage_node_id>` | Sí, si define su propia restricción de nodo |
-| Etiquetas | `muelle.project`, `muelle.stage`, `muelle.app`, `muelle.deploy` | Se agregan |
+| Etiquetas | `muelle.project`, `muelle.stage`, `muelle.app` y `muelle.deploy` en el servicio (`deploy.labels`); las tres primeras en sus contenedores (`labels`) | Se agregan. Una etiqueta `muelle.*` del usuario es un error de render (§6.3) |
 | Imagen | `ref@sha256:…` resuelta | — |
+
+- **Campo por campo:** en `logging`, `update_config` y `rollback_config`, lo que el usuario define gana, y los campos que no define se completan con los de la tabla. Un servicio con volúmenes recibe `order: stop-first` en vez de `start-first`, salvo que el usuario ponga su propio `order`.
+- **`muelle.deploy` no va en los contenedores:** cambia en cada deploy, y en el contenedor cambiaría la plantilla de las tareas, así que Swarm reiniciaría todos los servicios de la app en cada deploy, aunque no cambien. Con la etiqueta solo en el servicio, un deploy que no cambia nada de un servicio no lo reinicia.
+- **El compose final va en JSON** (YAML 1.2 es un superconjunto: `docker stack deploy` lo lee igual), con las claves ordenadas. Así no hay ambigüedades de tipos de YAML (`on`, `no`, `010`) y el golden de los tests es estable.
 
 `storage_node_id` toma por defecto el `manager_node_id` en el primer deploy de una app con volúmenes. Los volúmenes nombrados quedan como `<stack>_<nombre>`, con el driver local.
 
 ### 6.3 Restricciones validadas (son errores de render)
 
-- `ports:` publicados: no soportado en la v1.
-- `build:`: no soportado; las imágenes vienen de un registry.
-- Bind mounts a rutas del host: no soportados en la v1, solo volúmenes nombrados.
-- `container_name`, `network_mode`, servicios con `privileged` y secciones `networks:` propias: rechazados.
-- El destino de un dominio tiene que existir en el compose y su puerto tiene que ser un entero válido.
+muelle tiene `docker.sock` (es root en el host) y la clave maestra. Una app nunca puede montar el socket (contrato §5.3), salir de su contenedor ni leer archivos de muelle. Son errores de render, y también `422` en `compose_yaml` al guardar (la parte pura va en un paquete de `shared/domain`, que usan catalog y deploy). La excepción son los destinos de dominio (abajo), que en la v1 solo verifica el render.
+
+**Lista de permitidos.** El render arma el compose final solo con las claves que conoce. Cualquier otra, en un servicio o en el primer nivel, es un error, salvo las extensiones `x-*`. Así, una clave nueva de la especificación de compose no pasa sin revisarla: `use_api_socket` monta el socket de Docker, y `models`, `provider` o `gpus` no tienen sentido acá.
+
+- **Primer nivel:** `services`, `volumes` (ver abajo) y `x-*`. `version` se acepta y se descarta. `name` no: el nombre del proyecto lo fija el render.
+- **Servicio:** `image` (obligatoria), `command`, `entrypoint`, `environment`, `healthcheck`, `deploy`, `labels`, `logging`, `volumes`, `tmpfs`, `user`, `working_dir`, `stop_grace_period`, `stop_signal`, `read_only`, `init`, `ulimits`, `cap_drop`, `hostname`, `domainname`, `extra_hosts`, `dns`, `dns_search`, `expose`, `tty`, `stdin_open` y `x-*`. `depends_on`, `restart` y `platform` se aceptan y se descartan: Swarm los ignora (la plataforma la elige por el manifiesto de la imagen y el nodo), y así no se rompe un compose que ya existe.
+- **Dentro de `healthcheck`:** `test`, `interval`, `timeout`, `retries`, `start_period`, `start_interval` y `disable`.
+- **Dentro de `deploy`:** `mode` (`replicated` o `global`; los jobs no: son comandos de release, §1), `replicas`, `placement` (`constraints`, `preferences` con `spread`, `max_replicas_per_node`), `resources` (`cpus` y `memory` en `limits` y `reservations`), `restart_policy` (`condition`, `delay`, `max_attempts`, `window`), `update_config` y `rollback_config` (`parallelism`, `delay`, `failure_action`, `monitor`, `max_failure_ratio`, `order`), `endpoint_mode` y `labels`.
+- **Dentro de `logging`:** `driver` y `options` (libres, porque el driver ya está acotado: abajo).
+- **Nombres:** cada servicio y cada volumen es un slug de hasta 16 caracteres (§5.2 regla 1), y un compose tiene de 1 a 32 servicios.
+- **`dns_opt` no:** `docker stack deploy` lo rechaza (su esquema no lo tiene), así que se rechaza al guardar, con ese motivo.
+
+**Rechazados, y por qué** (la lista de permitidos ya los deja fuera; se nombran para que el mensaje lo explique y para que haya un test por cada uno):
+
+- **Publicar o construir:** `ports:` (no soportado en la v1) y `build:` (las imágenes vienen de un registry).
+- **Montar el host:**
+  - en `volumes:` de un servicio, todo lo que no sea `type: volume` sobre un volumen del compose (con `read_only` y `volume.nocopy`), o `type: tmpfs` (con `tmpfs.size` y `tmpfs.mode`): los bind mounts (`/ruta:/x`, `./x:/x`, `type: bind`), `npipe`, `cluster` e `image`, un volumen anónimo (sin `source`), y `volume.subpath`;
+  - en `volumes:` de primer nivel, `driver`, `driver_opts`, `external` y `name` (solo queda `labels`). Un volumen con `driver_opts: {type: none, o: bind, device: /var/run}` monta una ruta del host con el driver local, y le da a la app `docker.sock`. `external` o `name` llegan a volúmenes de otro stack o de muelle (`muelle_data`). Los volúmenes quedan como `<stack>_<nombre>` con el driver local (§6.2);
+  - `devices`, `device_cgroup_rules` y `volumes_from`.
+- **Escalar privilegios o salir del aislamiento:** `privileged`, `cap_add`, `security_opt`, `sysctls`, `pid`, `ipc`, `uts`, `userns_mode`, `cgroup`, `cgroup_parent`, `runtime`, `isolation` y `credential_spec`.
+- **Leer archivos de muelle:** compose-go y `docker stack deploy` leen archivos del sistema de archivos **de muelle**, no del de la app.
+  - `secrets:` y `configs:`, de primer nivel y de servicio, no se soportan en la v1: las apps reciben sus secretos como variables (§5.2 regla 3). Con `file:`, `docker stack deploy` leería `/run/secrets/muelle_master_key` o `/data/muelle.db` y los montaría en la app. Con `external: true` o `name:`, la app montaría `muelle_master_key` o `muelle_init_cloudflare_token`.
+  - `env_file`, `label_file`, `extends` e `include`, que hacen que compose-go lea archivos.
+- **Redes y nombres:** `container_name`, `network_mode`, `links`, `external_links` y `networks:` propias, de primer nivel o de servicio. El render pone la red del stage (§6.2).
+- **Logging:** solo los drivers `json-file`, `local` y `none`. Los demás (`syslog`, `gelf`, `fluentd`…) los corre el daemon en la red del host, y su dirección podría apuntar a un servicio local del host.
+- **Etiquetas `muelle.*`:** las inyecta el render (§6.2), y deploy, ingress y el estado de las apps filtran por ellas. Una del usuario con ese prefijo se rechaza en `labels` y en `deploy.labels` del servicio, y en las de un volumen. Si no, una app podría hacerse pasar por otra app, o por otro stage. Lo mismo con `com.docker.stack.*`, que pone `docker stack deploy` (y con la que `docker stack rm` encuentra lo que borra).
+- **El entorno de cada servicio** (sus variables ya interpoladas; en una app de formulario, todas las del stage y la app) tiene que caber en lo que Linux le da a un proceso al arrancar (`execve`): cada `CLAVE=valor` hasta 128 KiB, y el total (con 8 bytes más por variable) hasta 1,5 MiB. `ARG_MAX` suele ser 2 MiB, y el resto queda para los argumentos y el entorno de la imagen. Si no cabe, el contenedor ni arranca (`E2BIG`). Solo lo verifica el render.
+- **Destinos de dominio:** el destino de un dominio tiene que existir en el compose, y su puerto tiene que ser un entero válido. Solo lo verifica el render, con los destinos que lee deploy de `domains` (contrato §1.1): catalog no lee los dominios, así que guardar un compose que deja un dominio sin su servicio no es un error, y el próximo deploy falla con el dominio y el servicio en el mensaje (contrato §3.2).
+
+**La interpolación** de `${VAR}` usa solo las variables resueltas de la app (`ResolveEnv`), nunca el entorno de muelle: en compose-go, el `loader` con `ConfigDetails.Environment` = esas variables y un `LookupValue` que solo mira ahí, sin `cli.WithOsEnv` ni `cli.WithDotEnv` (que leería un `.env`). Una `${VAR}` sin definir y sin valor por defecto es un error de render (`${VAR:-x}`, `${VAR-x}` y `${VAR:+x}` no). Una variable de `environment` sin valor (`- VAR` o `VAR:`) toma el de la variable `VAR` de la app, como en compose con el entorno de la shell; si la app no la tiene, no va al compose final (sin valor, `docker stack deploy` la tomaría del entorno de muelle). Después, `docker stack deploy` vuelve a interpolar el compose final con el entorno de su proceso. Por eso, en el compose final todo `$` va como `$$`, venga del spec de formulario, del compose o del valor de una variable (en los valores; las claves no se interpolan).
+
+**Al guardar**, catalog valida sin interpolar (todavía no hay variables): la lista de permitidos, los rechazos y los nombres. Lo que depende del valor de una variable (un `logging.driver: ${D}`, la imagen) se verifica en el render.
+
+**compose-go no lee archivos:** el compose va en memoria (`ConfigFile.Content`), con `SkipInclude`, `SkipExtends`, `SkipResolveEnvironment` y `SkipResolveLabels` (que leerían `include`, `extends.file`, `env_file` y `label_file`), `ResolvePaths: false` y un `WorkingDir` que no existe. Esas claves quedan en el modelo y la lista de permitidos las rechaza.
+
+**Defensa extra:** el CLI corre en un directorio temporal vacío (`runCLI`), así una ruta relativa que se le escape al render no resuelve dentro de los archivos de muelle. No reemplaza a la validación: una ruta absoluta, o con `..`, no se frena con eso.
 
 ## 7. Flujo de deploy
 
@@ -292,22 +342,27 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
 **Pasos:**
 
 1. **Encolar.** Se valida la autenticación y el alcance. Se crea el deploy `queued` y se responde `202 {id, status_url}`. Si la app ya tenía deploys `queued`, se marcan `superseded`: solo sobrevive el último. Cada app tiene un worker que corre un deploy a la vez; apps distintas pueden desplegar en paralelo.
-2. **Resolver imágenes.** Se llama a `GET /distribution/{ref}/json` de la API de Docker con `X-Registry-Auth` del registry que corresponda. Si falla (no existe, sin permiso): `failed` y Swarm no se toca.
-3. **Render.** Ver §6. Si falla: `failed` y Swarm no se toca.
+2. **Resolver imágenes.** Se lee la configuración de la app (el spec, o el compose interpolado con sus variables: de ahí salen los servicios y sus refs) y se elige la ref de cada servicio (contrato §2.2). Para cada una se llama a `GET /distribution/{ref}/json` de la API de Docker con `X-Registry-Auth` del registry que corresponda (exacto por host; sin credencial, anónimo), con un plazo de 60 s por imagen. Si falla (no existe, sin permiso, Docker no responde): `failed` y Swarm no se toca.
+3. **Render.** Ver §6. Si falla: `failed` y Swarm no se toca. Si la app tiene volúmenes y todavía no tiene `storage_node_id`, se fija acá (§6.2).
 4. **Asegurar redes.** Se crea la red del stage si no existe y se verifica que muelle-caddy esté conectado a ella.
 5. **Aplicar.**
    - Se escribe un `DOCKER_CONFIG` temporal (`0700`) con las credenciales de los registries.
    - Se ejecuta `docker stack deploy --with-registry-auth --prune --detach=true -c - <stack>`, pasando el compose por stdin.
    - Se borra el directorio temporal, aunque el comando falle.
-   - El stderr del comando va al log.
-6. **Esperar convergencia** (polling cada 2 s por el SDK, con el `deploy_timeout_s` de la app):
-   - Servicio con `UpdateStatus`:
+   - La salida del comando (stdout y stderr) va al log, enmascarada. El comando tiene un plazo de 2 min.
+6. **Esperar convergencia** (polling cada 2 s por el SDK, con el `deploy_timeout_s` de la app). Se miran los servicios del compose final, y para cada uno el `UpdateStatus` de **este** deploy: el que empezó después de aplicar (`StartedAt` ≥ el momento en que se aplicó, con 2 s de margen). Uno más viejo es de un deploy anterior.
+   - Servicio con `UpdateStatus` de este deploy:
      - `completed` → OK.
-     - `rollback_started`, `rollback_completed` o `paused` → `failed`. El log recibe el `Status.Err` de la última tarea fallida y sus últimas 50 líneas de log.
-   - Servicio nuevo (sin `UpdateStatus`): OK cuando las tareas corriendo igualan a `replicas` y, si hay healthcheck, todas están `healthy`.
-   - Se pasa el timeout → `failed` con "timeout esperando convergencia". Swarm sigue actuando por su cuenta; el estado real se ve en el panel.
-7. **Rutas.** Se regenera y envía la configuración de Caddy (§8), por si el deploy agregó o quitó servicios que son destino de un dominio.
-8. **Cerrar.** El deploy pasa a `succeeded`, se guardan las imágenes con digest y se actualiza `last_deployed_at`.
+     - `rollback_started`, `rollback_completed`, `rollback_paused` o `paused` → `failed`. El log recibe el `Status.Err` de la última tarea fallida y sus últimas 50 líneas de log.
+     - `updating` → se sigue esperando.
+   - Servicio nuevo (creado por este deploy): OK cuando las tareas corriendo llegan a las deseadas (`replicas`, o `DesiredTasks` en uno global). Con healthcheck, Swarm deja la tarea en `starting` hasta que está `healthy`, así que ya cuenta solo las sanas.
+   - Servicio que ya existía y sin `UpdateStatus` de este deploy: su plantilla no cambió (solo `muelle.deploy`, §6.2) y Swarm no lo actualiza. OK cuando pasaron 5 s desde que se aplicó (lo que tarda Swarm en empezar una actualización) y las tareas corriendo llegan a las deseadas.
+   - Se pasa el timeout → `failed` con "timeout esperando convergencia", y el estado de cada servicio que no llegó. Swarm sigue actuando por su cuenta; el estado real se ve en el panel.
+   - Si Docker deja de responder mientras se espera, se reintenta hasta el timeout.
+7. **Rutas.** Se regenera y envía la configuración de Caddy (§8), por si el deploy agregó o quitó servicios que son destino de un dominio. Un error es solo una advertencia en el log (§13).
+8. **Cerrar.** El deploy pasa a `succeeded` (las imágenes con digest ya quedaron en el paso 2), `last_deployed_at` avanza hasta el `started_at` del deploy (el momento en que leyó la configuración: un cambio guardado mientras corría sigue pendiente) y se aplica la retención (§5.2 regla 7).
+
+Un deploy que termina `failed` también aplica la retención. El apagado de muelle nunca cierra un deploy: lo deja `running` para la reconciliación.
 
 **Log del deploy:**
 - Cada paso escribe en el log, con timestamp.
@@ -315,7 +370,7 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
 - El panel lo recibe por SSE; la API, por polling con `?offset=N`.
 
 **Reconciliación al arrancar muelle:**
-- Los deploys en `running` se reevalúan contra el estado real del servicio y se cierran como `succeeded` o `failed`.
+- Los deploys en `running` se reevalúan contra el estado real del servicio y se cierran como `succeeded` o `failed`: si sus servicios llevan su etiqueta `muelle.deploy`, se sigue esperando la convergencia (paso 6); si ninguno la lleva, nunca llegó a Swarm (detalle en el contrato, §1.2).
 - Los deploys en `queued` se retoman.
 - Se asegura el contenedor muelle-caddy y sus redes (§3.1), se reenvía la configuración a Caddy y se verifica que existan las redes de todos los stages.
 
@@ -327,16 +382,16 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
 - **La configuración generada siempre incluye `admin.listen` apuntando al socket**; si se omitiera, Caddy volvería a su admin por defecto en TCP.
 - **Rutas:**
   - Una por dominio: `hostname → reverse_proxy <proyecto>_<stage>_<app>_<servicio>:<puerto>`, usando el nombre DNS de Swarm (IP virtual del servicio).
-  - El panel: `panel_domain → muelle_muelle:8080`. Si hay `panel_allowed_cidrs`, va con un matcher `remote_ip`.
+  - El panel: `panel_domain → muelle_muelle:8080`. Si hay `panel_allowed_cidrs`, va con un matcher `client_ip` (no `remote_ip`, que con el panel `proxied` vería el edge de Cloudflare): usa la IP real que resuelve `trusted_proxies`, la misma que muelle recibe en `X-Real-IP`.
   - Un servicio que es destino de un dominio pero todavía no existe (antes de su primer deploy) responde `502` hasta que exista. La ruta igual se crea.
 - **TLS** (políticas de automatización por dominio):
   - `tls_mode: cloudflare` → emisor ACME con el desafío DNS `cloudflare` y el token incluido en el JSON.
   - `tls_mode: http` → emisor ACME por defecto.
   - Email ACME tomado de settings.
   - Nota: el token de Cloudflare queda en el `autosave.json` del volumen `muelle_caddy_config`.
-- **IP real del cliente:** `servers.trusted_proxies` con los rangos de IP de Cloudflare (lista estática dentro de muelle, que se actualiza con cada versión) y `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`. En la ruta del panel, Caddy reenvía a muelle la IP real en `X-Real-IP` (`header_up X-Real-IP {client_ip}`). muelle confía en ese header porque Caddy es el único otro miembro de `muelle_panel`, la única red de muelle: lo acepta solo si la conexión viene de loopback o de una dirección privada (RFC 1918, ULA), y si no usa la IP de la conexión. Por eso el puerto de muelle (`MUELLE_LISTEN`, `:8080`) nunca se publica.
-- Las escrituras a Caddy pasan por un mutex global. Si fallan, el panel muestra "proxy desincronizado" y se reintenta con backoff (1 s, 2 s, 4 s… hasta 60 s). Además, cada 5 minutos un proceso reenvía todo.
-- **Verificación de certificados:** cada hora, y 30 s después de crear un dominio, muelle se conecta por TLS a `muelle-caddy:443` con SNI = hostname a través de `muelle_panel`. Lee el emisor y el vencimiento del certificado servido y actualiza `cert_issuer`/`cert_expires_at`. Si el certificado es inválido o vence en menos de 14 días, el dominio pasa a `error`.
+- **IP real del cliente:** `servers.trusted_proxies` con los rangos de IP de Cloudflare (lista estática dentro de muelle, que se actualiza con cada versión) y `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`, con `trusted_proxies_strict` (`X-Forwarded-For` de derecha a izquierda: no cuenta una IP que el cliente puso adelante). En la ruta del panel, Caddy reenvía a muelle la IP real en `X-Real-IP`: en el JSON, `"headers": {"request": {"set": {"X-Real-IP": ["{http.vars.client_ip}"]}}}` en el `reverse_proxy`. El atajo `{client_ip}` es solo del Caddyfile y en JSON no se reemplaza (contrato §3.4). muelle confía en ese header porque Caddy es el único otro miembro de `muelle_panel`, la única red de muelle: lo acepta solo si la conexión viene de loopback o de una dirección privada (RFC 1918, ULA), y si no usa la IP de la conexión. Por eso el puerto de muelle (`MUELLE_LISTEN`, `:8080`) nunca se publica.
+- Las escrituras a Caddy pasan por un mutex global. Si fallan, el panel muestra "proxy desincronizado" (`GET /proxy`) y se reintenta con backoff (1 s, 2 s, 4 s… hasta 60 s). Además, cada 5 minutos un proceso reenvía todo.
+- **Verificación de certificados:** 30 s después de crear, adoptar o reintentar un dominio, cada minuto mientras sigue `pending` y cada hora para todos, muelle se conecta por TLS a `muelle-caddy:443` con SNI = hostname a través de `muelle_panel`. Lee el emisor y el vencimiento del certificado servido y, si es válido, actualiza `cert_issuer`/`cert_expires_at`. Si el certificado es inválido o vence en menos de 14 días, el dominio pasa a `error` (uno `pending`, recién 10 min después de su último cambio); uno en `error` por el certificado vuelve a `active` cuando ya es válido. Si muelle no llega a Caddy, o el proxy no está sincronizado, no cambia nada (contrato §3.1).
 
 ## 9. DNS (Cloudflare)
 
@@ -345,9 +400,9 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
   2. Se crea un registro `A` (y `AAAA` si hay `public_ipv6`) apuntando a la IP pública, con el `proxied` elegido. Se guarda `cf_record_id`.
   3. Se usa `tls_mode: cloudflare`.
 - **Si el hostname no pertenece a ninguna zona:** `tls_mode: http`, `cf_record_id` nulo, y el panel indica que el registro DNS se crea a mano.
-- **Si el registro ya existe y no lo creó muelle:** no se sobrescribe. El dominio queda en `error` ("el registro ya existe") con la acción **Adoptar**, que actualiza el contenido y guarda el `cf_record_id`.
+- **Si el registro ya existe y no lo creó muelle** (un `A`, `AAAA` o `CNAME` de ese nombre): no se sobrescribe. El dominio queda en `error` ("el registro ya existe") con la acción **Adoptar**, que actualiza el contenido y guarda el `cf_record_id`.
 - **Cambiar `proxied` o la IP pública:** actualiza los registros que maneja muelle.
-- **Al borrar un dominio:** solo se borra el registro en Cloudflare si `cf_record_id` no es nulo.
+- **Al borrar un dominio:** solo se borra el registro en Cloudflare si `cf_record_id` no es nulo. Si Cloudflare no responde o rechaza el borrado, no se borra nada (`502`), así no quedan registros huérfanos.
 - **Si Cloudflare responde con error:** el dominio queda en `error` con el mensaje y un botón para reintentar. **Un error de DNS nunca bloquea un deploy.**
 
 ## 10. API (`/api/v1`)
@@ -366,15 +421,15 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 | Variables | `GET …/stages/{s}/env`, `PUT …/stages/{s}/env`, `PATCH …/stages/{s}/env`; lo mismo en `…/apps/{a}/env`. `GET` enmascara los secretos. `PUT` reemplaza todo el set (`{"vars": {"K": "v"}, "secret": true}`, donde `secret` aplica a todas por defecto). `PATCH` hace upsert o borra (`{"set": {...}, "unset": ["K"]}`) |
 | Deploys | `POST …/apps/{a}/deploys`, `GET …/apps/{a}/deploys`, `GET …/deploys/{id}`, `GET …/deploys/{id}/log?offset=N` → `{chunk, next_offset, status}`, `GET …/deploys/{id}/log/stream` (SSE), `POST …/apps/{a}/rollback` |
 | Dominios | `GET/POST …/apps/{a}/domains`, `PATCH/DELETE …/domains/{hostname}`, `POST …/domains/{hostname}/adopt`, `POST …/domains/{hostname}/retry` |
-| Estado | `GET …/apps/{a}/status` (por servicio: réplicas deseadas y corriendo, tareas con estado y error, CPU% y RAM actuales) |
-| Logs | `GET …/apps/{a}/logs?service=<s>&tail=200&follow=1` (SSE; no se guarda nada) |
+| Estado | `GET …/apps/{a}/status` (por servicio: réplicas deseadas y corriendo, tareas con estado y error, CPU% y RAM actuales); `GET /proxy` (estado del proxy) |
+| Logs | `GET …/apps/{a}/logs?service=<s>&tail=200&follow=1`, o `since=<fecha>` en vez de `tail` al reconectar (SSE; no se guarda nada; contrato §2.9) |
 | Administración | `/users` (incluye `DELETE /users/{username}` y `DELETE /users/{username}/totp` para quien perdió su teléfono), `/invites`, `/tokens`, `/registries`, `/settings`, `/audit` |
 | Sesión | `POST /auth/login`, `POST /auth/totp`, `POST /auth/logout`, `POST /auth/setup`, `POST /auth/invite/{token}`, `GET /auth/me`, `POST /auth/totp/setup`, `POST /auth/totp/enable` |
 
 ### 10.1 Autenticación y permisos
 
-- **Sesión del panel:** cookie `muelle_session` (`HttpOnly`, `Secure`, `SameSite=Strict`). Se cierra tras 12 h sin uso y dura 7 días como máximo. Las peticiones que modifican algo exigen que el `Origin` coincida con `MUELLE_PANEL_ORIGIN`, una variable de entorno, y no con el setting `panel_domain`: el origen lleva el esquema y el puerto, y así el panel funciona en `https://panel…:8443` durante la migración (§16), mientras `panel_domain` es solo el host que enruta Caddy. Como la comparación es literal, el origen configurado tiene que estar en forma canónica: esquema y host en minúsculas, sin puerto por defecto y con las IP en su forma estándar. Si no lo está, muelle no arranca y sugiere el valor correcto. Una sesión puede hacer todo.
-  - `MUELLE_SECURE_COOKIES=false` (la cookie sin `Secure`) existe solo para desarrollo por http: con un `MUELLE_PANEL_ORIGIN` https, muelle no arranca.
+- **Sesión del panel:** cookie `muelle_session` (`HttpOnly`, `Secure`, `SameSite=Strict`). Se cierra tras 12 h sin uso y dura 7 días como máximo. Las peticiones que modifican algo exigen que el `Origin` coincida exactamente con el origen en que muelle-caddy sirve el panel según los ajustes de ese momento (`https://<panel_domain>`, con `:<proxy_https_port>` si no es 443), o con `MUELLE_PANEL_ORIGIN`, una variable de entorno opcional para un origen más (detrás de otro proxy, o en desarrollo). install no la escribe: escribe `MUELLE_PANEL_DOMAIN`, el dominio sin puerto. El origen lleva el esquema y el puerto: así el panel funciona en `https://panel…:8443` durante la migración (§16), y en `https://panel…` en cuanto los puertos del proxy pasan a 80/443, sin tocar la configuración de muelle; desde ese momento `:8443` ya no pasa (contrato §0.1). Los links de setup y de las invitaciones usan el mismo origen (`MUELLE_PANEL_ORIGIN` si está). Como la comparación es literal, el origen configurado tiene que estar en forma canónica: esquema y host en minúsculas, sin puerto por defecto y con las IP en su forma estándar. Si no lo está, muelle no arranca y sugiere el valor correcto. Una sesión puede hacer todo.
+  - `MUELLE_SECURE_COOKIES=false` (la cookie sin `Secure`) existe solo para desarrollo por http: con un `MUELLE_PANEL_ORIGIN` https, o con `MUELLE_PANEL_DOMAIN`, muelle no arranca.
 - **Token de API:** `Authorization: Bearer mk_<43 caracteres base64url>` (32 bytes aleatorios). Se guarda su SHA-256 y se muestra una sola vez. Su alcance es un proyecto, o un proyecto + stage. **Solo permite:** leer proyecto/stage/app/estado/deploys/logs dentro del alcance, `GET/PUT/PATCH` de variables, crear deploys y hacer rollback. Cualquier otra operación responde `403`.
   - `GET /tokens` dice quién creó cada token (`created_by`: el username, o `null` si ese usuario se borró), para encontrar los tokens de una persona que se va.
   - **Borrar un usuario no revoca sus tokens:** un token es del proyecto, no de quien lo creó, y el CI depende de él. Al dar de baja a alguien, se revisan sus tokens en `GET /tokens` y se revocan a mano (`DELETE /tokens/{id}`) los que haga falta.
@@ -417,11 +472,13 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
   - El compose final no se persiste.
   - `details` de la auditoría nunca incluye valores.
 - **Limitación aceptada:** quien tenga acceso a Docker en el host puede ver las variables con `docker inspect`. Esa persona ya es root.
+- **Limitación aceptada:** las credenciales de los registries son de todo muelle, una por host. Un token con alcance a un proyecto puede desplegar en sus apps cualquier imagen que vea esa credencial, también una privada de otro proyecto (contrato §2.10).
 - **Clave maestra:** se imprime en la instalación y se puede volver a leer con `docker exec` en el contenedor de muelle (`/run/secrets/muelle_master_key`). Si se pierde junto con el secreto Swarm, los secretos no se pueden recuperar.
 - **Verificación de la clave:** en el primer arranque muelle guarda en `settings` un valor de control cifrado con la clave maestra. En cada arranque lo descifra, y si falla no arranca ("clave maestra incorrecta"). Así, recrear el secreto Swarm con otra clave no mezcla datos cifrados con dos claves.
 - **Ids no reutilizables:** las tablas cuyos ids forman parte de la AAD (`stages`, `apps`, `users`) usan `AUTOINCREMENT`, para que un valor cifrado sacado de un backup no descifre en una fila nueva con el mismo id.
 - **Respaldo de muelle:** a diario, `VACUUM INTO /data/backups/muelle-<fecha>.db`, guardando los últimos 7.
 - **Redes:** ver §3.2. Cada stage está aislado en su red; solo Caddy toca varias. La admin API de Caddy solo es accesible por el socket unix.
+- **Apps:** nunca montan `docker.sock`, ni una ruta del host, ni los secretos o los archivos de muelle. El render solo acepta las claves de compose que conoce (§6.3).
 
 ## 13. Manejo de errores
 
@@ -440,22 +497,36 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 
 ## 14. GitHub Action (`action/action.yml`)
 
-Composite action en bash, con `curl` y `jq` (ambos vienen en los runners de GitHub).
+Composite action en bash, con `curl` y `jq` (ambos vienen en los runners de GitHub). El script es `action/deploy.sh`; `action.yml` solo le pasa las entradas por variables de entorno, nunca dentro del `run:` (así una entrada no puede inyectar comandos).
 
 **Entradas:**
 - `url`, `token`, `app` (`proyecto/stage/app`): obligatorias.
+  - `url` es el origen del panel (`https://panel.tudominio.cl`); una `/` final se quita. Tiene que ser `https://`, salvo `http://localhost` o `http://127.0.0.1` (el token nunca viaja en claro).
+  - `app` son tres slugs separados por `/` (§5.2 regla 1), así no puede cambiar la ruta de la petición.
 - `image`: opcional.
-- `images-json`: opcional, para apps compose.
-- `env-json`: opcional.
-- `env-exclude`: lista separada por comas; siempre se agregan `GITHUB_TOKEN`, `MUELLE_URL` y `MUELLE_TOKEN`.
+- `images-json`: opcional, para apps compose (un objeto `servicio → ref`). `image` e `images-json` juntos son un error.
+- `env-json`: opcional (un objeto de strings).
+- `env-exclude`: lista separada por comas; siempre se agregan `GITHUB_TOKEN`, `MUELLE_URL` y `MUELLE_TOKEN`. La comparación no distingue mayúsculas: `toJson(secrets)` trae el token del runner como `github_token`.
 - `env-secret`: por defecto `true`.
-- `timeout`: segundos, por defecto 600.
+- `timeout`: segundos, por defecto 600, contados desde que se creó el deploy.
+
+Las entradas se validan antes de cualquier petición: `images-json` y `env-json` tienen que ser objetos JSON con valores string, `env-secret` es `true` o `false`, y `timeout` un entero mayor que 0. Si algo no sirve, un `::error::` y código 1, sin tocar muelle.
+
+**Salidas:** `deploy-id` y `status` (el estado final, o el último que vio si se pasó el timeout).
 
 **Pasos:**
-1. Si viene `env-json`, filtra las claves excluidas y hace `PUT …/apps/{a}/env`.
-2. `POST …/deploys`.
-3. Hace polling de `…/log?offset=N` cada 3 s e imprime el log.
-4. Sale con código ≠ 0 si el deploy termina `failed` o si se pasa el timeout. Si termina `superseded` (lo reemplazó un deploy más nuevo de la misma app), emite un `::warning::` con el id del nuevo deploy y sale con 0.
+1. Si viene `env-json`, filtra las claves excluidas y hace `PUT …/apps/{a}/env` con `{"vars": {…}, "secret": <env-secret>}`. `PUT` reemplaza todo el set de la app: una variable que no viene se borra. Hasta 3 intentos (con 2 s y 4 s entre ellos) si muelle no responde o responde 5xx o 429. Con un 429 espera lo que pide `Retry-After` si es más, hasta 60 s; si pide más que eso, falla.
+2. `POST …/deploys`, una sola vez (no es idempotente). Si no hay respuesta, falla sin reintentar: el deploy puede haberse creado, y el mensaje dice que se revise en el panel.
+3. Hace polling de `…/log?offset=N` (sobre el `status_url` de la respuesta, que tiene que empezar con `/api/v1/`: el token solo va a `url`) e imprime el log. Mientras llegan líneas pide la siguiente parte enseguida; con un `chunk` vacío espera 3 s. Si muelle no responde, o responde 5xx o 429, reintenta hasta el timeout. El log va entre `::stop-commands::<token al azar>` y `::<token>::`: lo que imprime una app nunca se lee como un comando del runner (`::error::`, `::add-mask::`…).
+4. Termina cuando el `status` es final y el `chunk` viene vacío:
+   - `succeeded`: código 0;
+   - `failed`: un `::error::` con el `error` del deploy (lo lee de `GET` sobre el `status_url`) y código 1;
+   - `superseded` (lo reemplazó un deploy más nuevo de la misma app): un `::warning::` con el id del nuevo (`superseded_by`, que trae la respuesta del log) y código 0;
+   - el timeout: un `::error::` y código 1. El deploy sigue en muelle.
+
+Una respuesta de error de muelle se muestra con su `code` y su `message`; un `404 no_route` dice que ese muelle todavía no tiene la API de deploys. Un `4xx` que no es `429` no se reintenta, en ningún paso. Los mensajes de `::error::` y `::warning::` van escapados como pide GitHub (`%`, `\r`, `\n`).
+
+**Versión de la action:** se referencia con el tag de una versión (`@v0.1.0`) o con el de su versión mayor, que se mueve en cada release (`@v0` mientras no haya 1.0; README, "Publicar una versión").
 
 **Ejemplo para auditfy** (reemplaza `sync-env.yaml` y `deploy.yaml`; `migrate.yaml` no cambia):
 
@@ -465,7 +536,7 @@ deploy:
   runs-on: ubuntu-latest
   environment: ${{ github.ref_name == 'master' && 'production' || 'staging' }}
   steps:
-    - uses: CPU-commits/muelle/action@v1
+    - uses: CPU-commits/muelle/action@v0
       with:
         url: ${{ secrets.MUELLE_URL }}
         token: ${{ secrets.MUELLE_TOKEN }}
@@ -488,13 +559,13 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - **Contratos entre módulos:** como los módulos no se importan (§4.1), lo que uno lee o escribe de las tablas de otro se prueba con el contenedor completo (`shared/infra/container`).
 
 **Unitarios:**
-- `render`: golden files (`testdata/*.input.yaml` → `*.golden.yaml`) cubriendo:
+- `render`: golden files (`testdata/render/*.input.json` → `*.golden.json`, porque el compose final va en JSON, §6.2) cubriendo:
   - inyección de la red del stage, logging, update_config y etiquetas
   - servicios con volúmenes (stop-first y restricción de nodo)
   - respeto de los overrides del usuario
   - interpolación y variables faltantes
   - cada restricción de §6.3
-- `proxy`: rutas → JSON golden de Caddy (incluye `admin.listen`, políticas TLS y `trusted_proxies`).
+- `proxy`: rutas → JSON golden de Caddy (incluye `admin.listen`, políticas TLS y `trusted_proxies`, y ningún atajo del Caddyfile como `{client_ip}`).
 - `crypto`: ida y vuelta; un valor alterado o una AAD distinta fallan.
 - `auth`:
   - matriz de alcance de tokens (operación × alcance → permitido o 403)
@@ -527,14 +598,15 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 Dokploy también usa Swarm, así que ambos pueden convivir en el mismo cluster. Lo único que choca son los puertos 80/443 que ocupa el Traefik de Dokploy. DNS-01 no necesita esos puertos, y eso permite preparar todo sin downtime:
 
 1. Probar muelle completo en una VM local con Swarm.
-2. En el servidor: `muelle install --cloudflare-token … --http-port 8080 --https-port 8443`. El panel queda en `https://panel…:8443`, con certificado por DNS-01.
+2. En el servidor: `muelle install --cloudflare-token … --http-port 8080 --https-port 8443`. El panel queda en `https://panel…:8443`, con certificado por DNS-01. La configuración de muelle lleva solo el dominio (`MUELLE_PANEL_DOMAIN`): el puerto sale de los ajustes.
 3. Crear proyectos, stages, apps (mismas imágenes de GHCR), variables y dominios en muelle.
    - Los registros DNS de Cloudflare ya existen (apuntan al mismo servidor), así que cada dominio queda en "el registro ya existe" → **Adoptar**.
    - Como la IP pública es la misma, adoptar no cambia hacia dónde va el tráfico: sigue entrando por 80/443 al Traefik de Dokploy. Conviene adoptar con el mismo `proxied` que tiene hoy el registro.
 4. Desplegar cada app y probarla contra muelle: `curl --resolve host:8443:<ip> https://host:8443/health`.
 5. Cambio (segundos de downtime):
    - bajar el Traefik de Dokploy (`docker service scale dokploy-traefik=0`, o el nombre que corresponda)
-   - en Ajustes de muelle, cambiar los puertos del proxy a 80/443; muelle recrea muelle-caddy
+   - en Ajustes de muelle, cambiar los puertos del proxy a 80/443. El `PATCH` responde, y 2 s después muelle recrea muelle-caddy en los puertos nuevos. Si el Traefik sigue con 80 o 443, el `PATCH` responde `422` en ese puerto y no cambia nada; si algo los toma justo después, muelle vuelve a 8080/8443 y el panel sigue en `:8443`
+   - el panel pasa a `https://panel…`, con la misma sesión: ese origen se acepta desde que responde el `PATCH`, y `:8443` ya no. Los links de invitación también salen con el origen nuevo; no hay que tocar la configuración de muelle
 6. Cambiar los workflows a la action de muelle.
 7. Dokploy queda detenido hasta confirmar que todo funciona y después se desinstala.
 
@@ -546,7 +618,9 @@ Cada fase deja algo que se puede probar de punta a punta:
    1. **Base compartida** (secuencial): `settings`, `package/`, `shared/domain`, SQLite con la migración inicial (las tablas de la Fase 1, §5.1; `deploys`/`registries` y `domains` llegan con migraciones de las fases 2 y 3), `crypto` y el esqueleto de `cmd/http`.
    2. **Módulos** (en paralelo): `identity`, `catalog`, `secrets` y `admin`, cada uno completo con sus tests.
    3. **Integración** (secuencial): el contenedor, `main.go`, el cron, la prueba de punta a punta, CI y el README.
-2. **Deploy:** el módulo `deploy` (`docker`, `render` y `deployer`). Apps de formulario y compose desplegables por API, con log, rollback y reconciliación.
-3. **Proxy y DNS:** el módulo `ingress`: el contenedor muelle-caddy, las rutas, `dns` de Cloudflare, la verificación de certificados, el estado y los logs en vivo.
+2. **Deploy:** el módulo `deploy` (`render` y `deployer`, sobre el cliente compartido `shared/infra/out/docker`). Apps de formulario y compose desplegables por API, con log, rollback, reconciliación, registries, y el estado y los logs en vivo de cada app.
+3. **Proxy y DNS:** el módulo `ingress`: el contenedor muelle-caddy, las rutas, `dns` de Cloudflare, la verificación de certificados y el estado del proxy.
 4. **Panel:** el SPA de Svelte sobre la API ya existente.
 5. **Distribución:** `install`, las imágenes (muelle y Caddy) y la GitHub Action. Después, la migración de auditfy.
+
+Antes de las Fases 2, 3 y 5, una etapa de contratos (secuencial) dejó el cliente de Docker compartido, los nombres (`shared/domain/naming`), las migraciones reservadas, los esqueletos de `deploy` e `ingress` con sus puertos, los ajustes del proxy en `/settings` y el contrato HTTP. Después, las tres fases corren en paralelo.

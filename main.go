@@ -1,11 +1,15 @@
-// Comando muelle: `muelle serve` levanta el panel y la API; `muelle genkey`
-// imprime una clave maestra nueva (para desarrollo local; en producción la
-// genera `muelle install`, Fase 5).
+// Comando muelle: `muelle serve` levanta el panel y la API; `muelle install`
+// instala muelle en un servidor (desde la imagen, contrato §5.4); `muelle
+// genkey` imprime una clave maestra nueva (para desarrollo local; en
+// producción la genera install); `muelle version` imprime la versión del
+// binario; `muelle settings reset-panel-ips` recupera el acceso al panel desde
+// el contenedor de muelle.
 package main
 
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,17 +22,29 @@ import (
 	"time"
 
 	"github.com/CPU-commits/muelle/src/cmd/cron"
+	"github.com/CPU-commits/muelle/src/cmd/install"
+	"github.com/CPU-commits/muelle/src/cmd/settingscli"
 	"github.com/CPU-commits/muelle/src/settings"
 	"github.com/CPU-commits/muelle/src/shared/infra/container"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
 )
 
 const usage = `uso: muelle <comando>
 
 comandos:
-  serve    levanta el panel y la API (configuración por variables MUELLE_*)
-  genkey   imprime una clave maestra nueva en base64
-  help     muestra esta ayuda (también -h y --help)`
+  serve     levanta el panel y la API (configuración por variables MUELLE_*)
+  install   instala muelle en este servidor (muelle install -h para los flags)
+  genkey    imprime una clave maestra nueva en base64
+  settings  ajustes desde el servidor (reset-panel-ips recupera el acceso al panel)
+  version   imprime la versión de muelle
+  help      muestra esta ayuda (también -h y --help)`
+
+// version es la versión de muelle. La imagen la fija al compilar (Fase 5):
+// go build -ldflags "-X main.version=v0.1.0". Con una versión publicada,
+// muelle-caddy usa la imagen del mismo tag (naming.CaddyImageFor); "dev" no
+// tiene imagen por defecto.
+var version = "dev"
 
 const (
 	// memoryLimit es el límite blando de memoria de serve si GOMEMLIMIT no
@@ -52,41 +68,117 @@ func main() {
 }
 
 // run ejecuta el comando de args (sin el nombre del programa) y devuelve el
-// código de salida: 0 si terminó bien, 1 si serve falló y 2 si los
-// argumentos no sirven (con el uso en stderr).
+// código de salida: 0 si terminó bien, 1 si serve, install o settings fallaron y 2 si
+// los argumentos no sirven (con el uso en stderr).
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
 	}
+	// Cada comando valida sus propios argumentos.
 	cmd, extra := args[0], args[1:]
 	switch cmd {
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, usage)
 		return 0
-	case "serve", "genkey":
-		if len(extra) > 0 {
-			fmt.Fprintf(stderr, "muelle %s: no recibe argumentos (sobra %q)\n\n%s\n", cmd, extra[0], usage)
+	case "version":
+		if !noArgs(cmd, extra, stderr) {
 			return 2
 		}
+		fmt.Fprintln(stdout, version)
+		return 0
+	case "genkey":
+		if !noArgs(cmd, extra, stderr) {
+			return 2
+		}
+		fmt.Fprintln(stdout, crypto.GenerateKey())
+		return 0
+	case "settings":
+		return runSettings(extra, stdout, stderr)
+	case "install":
+		return runInstall(extra, stdout, stderr)
+	case "serve":
+		if !noArgs(cmd, extra, stderr) {
+			return 2
+		}
+		// También el error final y lo que se registre con slog.Default o el
+		// paquete log sale en JSON.
+		log := slog.New(slog.NewJSONHandler(stdout, nil))
+		slog.SetDefault(log)
+		if err := serve(log); err != nil {
+			log.Error("muelle terminó con error", "err", err)
+			return 1
+		}
+		return 0
 	default:
 		fmt.Fprintf(stderr, "muelle: comando desconocido %q\n\n%s\n", cmd, usage)
 		return 2
 	}
+}
 
-	if cmd == "genkey" {
-		fmt.Fprintln(stdout, crypto.GenerateKey())
+// runSettings es muelle settings <subcomando> (settingscli), con el entorno
+// de muelle y el Docker del socket. Corre dentro del contenedor de muelle.
+func runSettings(args []string, stdout, stderr io.Writer) int {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return settingscli.Run(ctx, args, settingscli.Deps{
+		// settings.Load ya dice qué variable falta; settingscli le agrega la
+		// pista de docker exec.
+		DataDir: func() (string, error) {
+			s, err := settings.Load()
+			if err != nil {
+				return "", err
+			}
+			return s.DataDir, nil
+		},
+		Hostname: os.Hostname,
+		Docker: func() (settingscli.Engine, func() error, error) {
+			c, err := docker.New(docker.Options{})
+			if err != nil {
+				return nil, nil, err
+			}
+			return c, c.Close, nil
+		},
+		Log: slog.New(slog.NewTextHandler(stderr, nil)),
+	}, stdout, stderr)
+}
+
+// runInstall es muelle install (contrato §5.4): la clave y el link a stdout,
+// el avance y los avisos a stderr. 2 si un flag no sirve, 1 si algo falló.
+func runInstall(args []string, stdout, stderr io.Writer) int {
+	o, err := install.ParseArgs(args, os.Stdin)
+	if errors.Is(err, flag.ErrHelp) {
+		fmt.Fprintln(stdout, install.Usage)
 		return 0
 	}
-	// También el error final y lo que se registre con slog.Default o el
-	// paquete log sale en JSON.
-	log := slog.New(slog.NewJSONHandler(stdout, nil))
-	slog.SetDefault(log)
-	if err := serve(log); err != nil {
-		log.Error("muelle terminó con error", "err", err)
+	if err != nil {
+		fmt.Fprintf(stderr, "muelle install: %v\n\n%s\n", err, install.Usage)
+		return 2
+	}
+	// Un Ctrl-C cancela; lo creado antes de que el deploy funcione se borra igual.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	cli, err := docker.New(docker.Options{})
+	if err != nil {
+		fmt.Fprintf(stderr, "muelle install: %v\n", err)
+		return 1
+	}
+	defer cli.Close()
+	if err := install.Run(ctx, o, install.Config{Version: version, Docker: cli, Stdout: stdout, Stderr: stderr}); err != nil {
+		fmt.Fprintf(stderr, "muelle install: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// noArgs dice si un comando sin argumentos no recibió ninguno; si recibió
+// alguno, escribe el error y el uso en stderr.
+func noArgs(cmd string, extra []string, stderr io.Writer) bool {
+	if len(extra) == 0 {
+		return true
+	}
+	fmt.Fprintf(stderr, "muelle %s: no recibe argumentos (sobra %q)\n\n%s\n", cmd, extra[0], usage)
+	return false
 }
 
 func serve(log *slog.Logger) error {
@@ -97,6 +189,7 @@ func serve(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	s.Version = version
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -125,26 +218,34 @@ func serve(log *slog.Logger) error {
 	if token, created, err := c.Identity.EnsureSetupInvite(ctx); err != nil {
 		return err
 	} else if created {
-		log.Info("todavía no hay usuarios: abre este link para crear el primero (vence en 24 h)",
-			"url", s.PanelOrigin+"/setup?token="+token)
+		if err := logSetupURL(log, c.PanelOrigin(ctx), token); err != nil {
+			return err
+		}
 	}
 
-	// Las tareas periódicas usan la base: antes de cerrarla (el defer de
-	// arriba) se detienen y se espera a que terminen.
-	cronCtx, stopCron := context.WithCancel(ctx)
-	cronDone := make(chan struct{})
+	// Las tareas periódicas y los workers de los módulos (deploy, ingress)
+	// usan la base: antes de cerrarla (el defer de arriba) se detienen y se
+	// espera a que terminen.
+	bgCtx, stopBackground := context.WithCancel(ctx)
+	cronDone, runDone := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(cronDone)
-		cron.Run(cronCtx, c.Jobs, log)
+		cron.Run(bgCtx, c.Jobs, log)
+	}()
+	go func() {
+		defer close(runDone)
+		c.Run(bgCtx)
 	}()
 	defer func() {
-		stopCron()
+		stopBackground()
 		<-cronDone
+		<-runDone
 	}()
 
 	errc := make(chan error, 1)
+	panel := c.PanelOrigin(ctx)
 	go func() {
-		log.Info("muelle escuchando", "addr", ln.Addr().String())
+		logListening(log, ln.Addr().String(), panel)
 		errc <- srv.Serve(ln)
 	}()
 	select {
@@ -166,6 +267,37 @@ func serve(log *slog.Logger) error {
 		}
 		return nil
 	}
+}
+
+// logSetupURL deja en el log el link de setup de un solo uso. La línea lleva
+// event=setup_url: muelle install (Fase 5) sigue los logs del servicio hasta
+// encontrarla y le imprime la url al usuario (§3.3 paso 8). El mensaje se
+// puede cambiar; event y url no.
+//
+// Sin origin (sin MUELLE_PANEL_ORIGIN, y los ajustes no se pudieron leer)
+// devuelve un error, sin el token, en vez de un link relativo que no abre
+// nada: serve termina con él, y el próximo arranque (Swarm lo reinicia) arma
+// un link nuevo. install muestra la línea ERROR y sigue esperando.
+func logSetupURL(log *slog.Logger, origin, token string) error {
+	if origin == "" {
+		return errors.New("no se pudo armar el link de setup: falta el origen del panel (sin MUELLE_PANEL_ORIGIN, y el de los ajustes no se pudo leer); el próximo arranque arma uno nuevo")
+	}
+	log.Info("todavía no hay usuarios: abre este link para crear el primero (vence en 24 h)",
+		"event", "setup_url", "url", origin+"/setup?token="+token)
+	return nil
+}
+
+// logListening deja en el log que serve empezó a atender, con
+// event=listening: install la espera después del setup_url (contrato
+// §5.4). Lleva el origen del panel (panel, si hay uno): con usuarios, install
+// dice que se entre ahí, que sale de los ajustes y no de sus flags. El
+// mensaje se puede cambiar; event y panel no.
+func logListening(log *slog.Logger, addr, panel string) {
+	attrs := []any{"event", "listening", "addr", addr}
+	if panel != "" {
+		attrs = append(attrs, "panel", panel)
+	}
+	log.Info("muelle escuchando", attrs...)
 }
 
 // newHTTPServer arma el servidor HTTP con los plazos de muelle. En producción

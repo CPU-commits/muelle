@@ -288,7 +288,7 @@ func TestCreateComposeApp(t *testing.T) {
 	_, err = NewCreateApp(e.d).Execute(ctx, in) // sin compose_yaml
 	wantInvalid(t, err)
 
-	a1 := "a: 1"
+	a1 := "services:\n  x:\n    image: nginx\n"
 	in = base
 	in.Slug, in.ComposeYAML, in.Spec = "x", &a1, jsontext.Value(`{"image":"x"}`)
 	_, err = NewCreateApp(e.d).Execute(ctx, in)
@@ -304,6 +304,98 @@ func TestCreateComposeApp(t *testing.T) {
 	in.Slug, in.ComposeYAML, in.DeployTimeoutS = "y", &a1, &five
 	_, err = NewCreateApp(e.d).Execute(ctx, in)
 	wantInvalid(t, err)
+
+	// Las reglas de §6.3 (shared/domain/compose).
+	ports := "services:\n  y:\n    image: nginx\n    ports: [\"80:80\"]\n"
+	in = base
+	in.Slug, in.ComposeYAML = "y", &ports
+	_, err = NewCreateApp(e.d).Execute(ctx, in)
+	wantInvalidField(t, err, "compose_yaml", "services.y.ports")
+}
+
+func wantInvalidField(t *testing.T, err error, field string, parts ...string) {
+	t.Helper()
+	ve, ok := errors.AsType[*validate.Error](err)
+	if !ok || ve.Field != field {
+		t.Fatalf("esperaba *validate.Error en %s, got %v", field, err)
+	}
+	for _, p := range parts {
+		if !strings.Contains(ve.Error(), p) {
+			t.Fatalf("el error %q no contiene %q", ve.Error(), p)
+		}
+	}
+}
+
+// §5.2 regla 2 del diseño: los servicios de un stage comparten la red, así
+// que ningún nombre de servicio se repite entre las apps del stage (el de una
+// app de formulario es su slug).
+func TestServiceNamesUniquePerStage(t *testing.T) {
+	e := newEnv(t)
+	e.seedStage()
+	ctx := e.ctx()
+	if _, err := NewCreateStage(e.d).Execute(ctx, dto.CreateStageInput{Project: "auditfy", Slug: "production"}); err != nil {
+		t.Fatal(err)
+	}
+	create := func(stage, slug, kind, body string) (dto.AppOutput, error) {
+		in := dto.CreateAppInput{Project: "auditfy", Stage: stage, Slug: slug, Kind: kind}
+		if kind == "compose" {
+			in.ComposeYAML = &body
+		} else {
+			in.Spec = jsontext.Value(`{"image":"` + body + `","port":80}`)
+		}
+		return NewCreateApp(e.d).Execute(ctx, in)
+	}
+	compose := func(names ...string) string {
+		var b strings.Builder
+		b.WriteString("services:\n")
+		for _, n := range names {
+			b.WriteString("  " + n + ":\n    image: nginx\n")
+		}
+		return b.String()
+	}
+
+	if _, err := create("staging", "front", "compose", compose("web", "worker")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := create("staging", "api", "service", "x"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Una compose con un servicio que ya tiene otra compose del stage.
+	_, err := create("staging", "back", "compose", compose("db", "web"))
+	wantInvalidField(t, err, "compose_yaml", `el servicio "web" ya existe en la app "front" del stage`)
+	// Una compose con un servicio que se llama como una app de formulario.
+	_, err = create("staging", "back", "compose", compose("api"))
+	wantInvalidField(t, err, "compose_yaml", `el servicio "api" ya existe en la app "api" del stage`)
+	// Una app de formulario que se llama como un servicio de una compose.
+	_, err = create("staging", "web", "service", "x")
+	wantInvalidField(t, err, "slug", `"web" ya es un servicio de la app compose "front" del stage`)
+	// Dos de formulario con el mismo slug: el 409 del índice único, como antes.
+	_, err = create("staging", "api", "service", "y")
+	wantErr(t, err, srepo.ErrConflict)
+
+	// Editar el compose sin cambiar los nombres no choca consigo mismo; con un
+	// nombre de otra app, sí.
+	y := compose("web", "worker", "cron")
+	if _, err := NewUpdateApp(e.d).Execute(ctx, dto.UpdateAppInput{Project: "auditfy", Stage: "staging", Slug: "front", ComposeYAML: &y}); err != nil {
+		t.Fatal(err)
+	}
+	y = compose("web", "api")
+	_, err = NewUpdateApp(e.d).Execute(ctx, dto.UpdateAppInput{Project: "auditfy", Stage: "staging", Slug: "front", ComposeYAML: &y})
+	wantInvalidField(t, err, "compose_yaml", `el servicio "api" ya existe en la app "api" del stage`)
+	if got, _ := NewGetApp(e.d).Execute(ctx, "auditfy", "staging", "front"); !strings.Contains(got.ComposeYAML, "cron") {
+		t.Fatalf("un cambio rechazado no se guarda: %q", got.ComposeYAML)
+	}
+
+	// En otro stage no hay choque: no comparten la red.
+	if _, err := create("production", "back", "compose", compose("web", "api")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = create("production", "web", "service", "x")
+	wantInvalidField(t, err, "slug", `"web" ya es un servicio de la app compose "back" del stage`)
+	if _, err := create("production", "front", "compose", compose("worker")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestUpdateApp(t *testing.T) {
@@ -311,7 +403,7 @@ func TestUpdateApp(t *testing.T) {
 	e.seedStage()
 	ctx := e.ctx()
 	api := e.createService("api", "x:1")
-	yaml := "a: 1"
+	yaml := "services:\n  nats:\n    image: nats:2\n"
 	e.createCompose("nats", yaml)
 
 	key := dto.UpdateAppInput{Project: "auditfy", Stage: "staging", Slug: "api"}
@@ -383,7 +475,7 @@ func TestListGetDeleteApp(t *testing.T) {
 	e.seedStage()
 	ctx := e.ctx()
 	e.createService("api", "x:1")
-	yaml := "a: 1"
+	yaml := "services:\n  nats:\n    image: nats:2\n"
 	e.createCompose("nats", yaml)
 
 	list, err := NewListApps(e.d).Execute(ctx, "auditfy", "staging")
@@ -448,14 +540,14 @@ func TestAuditDetails(t *testing.T) {
 	e.seedStage()
 	ctx := e.ctx()
 	e.createService("api", "x")
-	yaml := "a: 1"
+	yaml := "services:\n  nats:\n    image: nats:2\n"
 	e.createCompose("nats", yaml)
 	if got := e.auditDetails("app.create"); got != `{"kind":"compose"}` {
 		t.Errorf("app.create details = %s", got)
 	}
 
 	timeout := 90
-	y2 := "b: 2"
+	y2 := "services:\n  nats:\n    image: nats:2.10\n"
 	_, err := NewUpdateApp(e.d).Execute(ctx, dto.UpdateAppInput{Project: "auditfy", Stage: "staging", Slug: "nats",
 		ComposeYAML: &y2, DeployTimeoutS: &timeout})
 	if err != nil {
@@ -482,11 +574,11 @@ func TestUpdateComposeSucceeds(t *testing.T) {
 	e := newEnv(t)
 	e.seedStage()
 	ctx := e.ctx()
-	yaml := "a: 1"
+	yaml := "services:\n  nats:\n    image: nats:2\n"
 	created := e.createCompose("nats", yaml)
 
 	e.clock.Advance(time.Minute)
-	next := "services: {}\n"
+	next := "services:\n  nats:\n    image: nats:2.10\n"
 	out, err := NewUpdateApp(e.d).Execute(ctx, dto.UpdateAppInput{Project: "auditfy", Stage: "staging", Slug: "nats", ComposeYAML: &next})
 	if err != nil || out.ComposeYAML != next || !out.ConfigChangedAt.After(created.ConfigChangedAt) {
 		t.Fatalf("out=%+v err=%v", out, err)

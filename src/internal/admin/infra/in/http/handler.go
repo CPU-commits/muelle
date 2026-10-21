@@ -31,7 +31,7 @@ func (h *Handler) Register(k *utils.Kit) {
 
 func (h *Handler) handleGetSettings(k *utils.Kit) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		out, err := h.getSettings.Execute(r.Context())
+		out, err := h.getSettings.Execute(r.Context(), dto.GetSettingsInput{ClientIP: utils.ClientIP(r)})
 		if err != nil {
 			k.Fail(w, r, err)
 			return
@@ -40,14 +40,15 @@ func (h *Handler) handleGetSettings(k *utils.Kit) http.HandlerFunc {
 	}
 }
 
-// handlePatchSettings: en la Fase 1 solo existe require_2fa. Las fases
-// siguientes agregan Cloudflare, IP pública, email ACME, etc.
+// handlePatchSettings: require_2fa y los ajustes del proxy y el DNS (ver
+// dto.PatchSettingsInput y el contrato de las fases 2 y 3).
 func (h *Handler) handlePatchSettings(k *utils.Kit) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in dto.PatchSettingsInput
 		if !utils.DecodeJSON(w, r, &in) {
 			return
 		}
+		in.ClientIP = utils.ClientIP(r)
 		out, err := h.patchSettings.Execute(r.Context(), in)
 		if err != nil {
 			k.Fail(w, r, err)

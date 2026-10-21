@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -106,19 +107,19 @@ func TestProjectsAndStagesAPI(t *testing.T) {
 	// Todo quedó en la auditoría.
 	want := []string{"project.delete", "stage.delete", "stage.create", "project.update", "project.create"}
 	rows, err := e.db.Conn(context.Background()).QueryContext(context.Background(),
-		`SELECT actor_type, action FROM audit_events ORDER BY id DESC`)
+		`SELECT actor_type, actor_name, action FROM audit_events ORDER BY id DESC`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
 	i := 0
 	for rows.Next() {
-		var actor, action string
-		if err := rows.Scan(&actor, &action); err != nil {
+		var actor, name, action string
+		if err := rows.Scan(&actor, &name, &action); err != nil {
 			t.Fatal(err)
 		}
-		if i >= len(want) || action != want[i] || actor != "user" {
-			t.Errorf("evento %d = %s/%s, esperaba user/%v", i, actor, action, want)
+		if i >= len(want) || action != want[i] || actor != "user" || name != "ana" {
+			t.Errorf("evento %d = %s/%s/%s, esperaba user/ana/%v", i, actor, name, action, want)
 		}
 		i++
 	}
@@ -189,12 +190,40 @@ func TestCreateComposeApp(t *testing.T) {
 		t.Fatalf("app=%v", app)
 	}
 	expect(c.Do("POST", appsPath, map[string]any{"slug": "x", "kind": "compose", "compose_yaml": "  "}, s), http.StatusUnprocessableEntity)
-	expect(c.Do("POST", appsPath, map[string]any{"slug": "x", "kind": "compose", "compose_yaml": "a: 1",
+	expect(c.Do("POST", appsPath, map[string]any{"slug": "x", "kind": "compose", "compose_yaml": validCompose,
 		"spec": map[string]any{"image": "x"}}, s), http.StatusUnprocessableEntity)
-	expect(c.Do("POST", appsPath, map[string]any{"slug": "x", "kind": "compose", "compose_yaml": "a: 1",
+	expect(c.Do("POST", appsPath, map[string]any{"slug": "x", "kind": "compose", "compose_yaml": validCompose,
 		"deploy_timeout_s": 5}, s), http.StatusUnprocessableEntity)
 	expect(c.Do("POST", appsPath, map[string]any{"slug": "x", "kind": "compose",
 		"compose_yaml": strings.Repeat("a", 256<<10+1)}, s), http.StatusUnprocessableEntity)
+
+	// El compose se valida con shared/domain/compose (§6.3 del diseño).
+	w = c.Do("POST", appsPath, map[string]any{"slug": "x", "kind": "compose",
+		"compose_yaml": "services:\n  web:\n    image: nginx\n    ports: [\"80:80\"]\n"}, s)
+	expect(w, http.StatusUnprocessableEntity)
+	if msg := errorMessage(t, w); httptestutil.ErrorCode(t, w) != "invalid" || !strings.HasPrefix(msg, "compose_yaml: services.web.ports: ") {
+		t.Fatalf("code=%s message=%q", httptestutil.ErrorCode(t, w), msg)
+	}
+	// Y un servicio no se repite en el stage (§5.2 regla 2).
+	w = c.Do("POST", appsPath, map[string]any{"slug": "x", "kind": "compose", "compose_yaml": "services:\n  nats:\n    image: nats:2\n"}, s)
+	expect(w, http.StatusUnprocessableEntity)
+	if msg := errorMessage(t, w); !strings.HasPrefix(msg, `compose_yaml: el servicio "nats" ya existe en la app "nats" del stage`) {
+		t.Fatalf("message=%q", msg)
+	}
+}
+
+// validCompose es un compose válido (§6.3 del diseño) con un servicio x.
+const validCompose = "services:\n  x:\n    image: nginx\n"
+
+// errorMessage devuelve el mensaje de una respuesta {"error": {"code", "message"}}.
+func errorMessage(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	body := httptestutil.Decode[struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}](t, w)
+	return body.Error.Message
 }
 
 func TestUpdateListDeleteApp(t *testing.T) {
@@ -203,14 +232,14 @@ func TestUpdateListDeleteApp(t *testing.T) {
 	c := e.c
 	expect := func(w *httptest.ResponseRecorder, status int) { t.Helper(); httptestutil.Expect(t, w, status) }
 	c.Do("POST", appsPath, map[string]any{"slug": "api", "kind": "service", "spec": map[string]any{"image": "x:1", "port": 80}}, s)
-	c.Do("POST", appsPath, map[string]any{"slug": "nats", "kind": "compose", "compose_yaml": "a: 1"}, s)
+	c.Do("POST", appsPath, map[string]any{"slug": "nats", "kind": "compose", "compose_yaml": "services:\n  nats:\n    image: nats:2\n"}, s)
 
 	w := c.Do("PATCH", appsPath+"/api", map[string]any{"spec": map[string]any{"image": "x:2", "port": 80}}, s)
 	expect(w, http.StatusOK)
 	if app := httptestutil.Decode[map[string]any](t, w); app["spec"].(map[string]any)["image"] != "x:2" {
 		t.Fatalf("app=%v", app)
 	}
-	w = c.Do("PATCH", appsPath+"/api", map[string]any{"compose_yaml": "a: 1"}, s)
+	w = c.Do("PATCH", appsPath+"/api", map[string]any{"compose_yaml": validCompose}, s)
 	expect(w, http.StatusUnprocessableEntity)
 	if code := httptestutil.ErrorCode(t, w); code != "kind_mismatch" {
 		t.Fatalf("code=%s", code)
@@ -278,7 +307,7 @@ func TestTokenAccess(t *testing.T) {
 		{"DELETE", "/api/v1/projects/auditfy", nil},
 		{"POST", "/api/v1/projects/auditfy/stages", map[string]string{"slug": "qa"}},
 		{"DELETE", "/api/v1/projects/auditfy/stages/staging", nil},
-		{"POST", appsPath, map[string]any{"slug": "x", "kind": "compose", "compose_yaml": "a: 1"}},
+		{"POST", appsPath, map[string]any{"slug": "x", "kind": "compose", "compose_yaml": validCompose}},
 		{"PATCH", appsPath + "/api", map[string]any{"deploy_timeout_s": 60}},
 		{"DELETE", appsPath + "/api", nil},
 	}
@@ -326,20 +355,22 @@ func TestStageListIsFilteredByTokenScope(t *testing.T) {
 func TestPatchComposeSucceeds(t *testing.T) {
 	e := newEnv(t)
 	e.seedStage(t)
-	httptestutil.Expect(t, e.c.Do("POST", appsPath, map[string]any{"slug": "nats", "kind": "compose", "compose_yaml": "a: 1"}, s), http.StatusCreated)
+	httptestutil.Expect(t, e.c.Do("POST", appsPath, map[string]any{"slug": "nats", "kind": "compose", "compose_yaml": "services:\n  nats:\n    image: nats:2\n"}, s), http.StatusCreated)
 
-	w := e.c.Do("PATCH", appsPath+"/nats", map[string]any{"compose_yaml": "services: {}\n", "deploy_timeout_s": 90}, s)
+	next := "services:\n  nats:\n    image: nats:2.10\n"
+	w := e.c.Do("PATCH", appsPath+"/nats", map[string]any{"compose_yaml": next, "deploy_timeout_s": 90}, s)
 	httptestutil.Expect(t, w, http.StatusOK)
 	app := httptestutil.Decode[map[string]any](t, w)
-	if app["compose_yaml"] != "services: {}\n" || app["deploy_timeout_s"] != float64(90) || app["kind"] != "compose" {
+	if app["compose_yaml"] != next || app["deploy_timeout_s"] != float64(90) || app["kind"] != "compose" {
 		t.Fatalf("app=%v", app)
 	}
 	w = e.c.Do("GET", appsPath+"/nats", nil, s)
-	if got := httptestutil.Decode[map[string]any](t, w); got["compose_yaml"] != "services: {}\n" {
+	if got := httptestutil.Decode[map[string]any](t, w); got["compose_yaml"] != next {
 		t.Fatalf("got=%v", got)
 	}
-	// Y un compose vacío sigue siendo 422.
+	// Y un compose vacío sigue siendo 422, como uno con una clave rechazada.
 	httptestutil.Expect(t, e.c.Do("PATCH", appsPath+"/nats", map[string]any{"compose_yaml": " "}, s), http.StatusUnprocessableEntity)
+	httptestutil.Expect(t, e.c.Do("PATCH", appsPath+"/nats", map[string]any{"compose_yaml": next + "    privileged: true\n"}, s), http.StatusUnprocessableEntity)
 }
 
 func TestSessionRequired(t *testing.T) {
@@ -348,4 +379,58 @@ func TestSessionRequired(t *testing.T) {
 		httptestutil.Expect(t, e.c.Do("GET", path, nil), http.StatusUnauthorized)
 	}
 	httptestutil.Expect(t, e.c.Do("POST", "/api/v1/projects", map[string]string{"slug": "a", "name": "A"}), http.StatusUnauthorized)
+}
+
+// Contrato §2.12: cada app trae sus servicios y sus puertos, para que el
+// formulario de un dominio ofrezca los destinos sin esperar al primer deploy.
+func TestAppServices(t *testing.T) {
+	e := newEnv(t)
+	e.seedStage(t)
+	c := e.c
+	httptestutil.Expect(t, c.Do("POST", appsPath, map[string]any{"slug": "api", "kind": "service",
+		"spec": map[string]any{"image": "x", "port": 3000}}, s), http.StatusCreated)
+	w := c.Do("POST", appsPath, map[string]any{"slug": "front", "kind": "compose",
+		"compose_yaml": "services:\n  worker:\n    image: y\n  web:\n    image: nginx\n    expose: [\"80\"]\n"}, s)
+	httptestutil.Expect(t, w, http.StatusCreated)
+	if got := httptestutil.Decode[map[string]any](t, w)["services"]; jsonOf(t, got) != `[{"name":"web","ports":[80]},{"name":"worker","ports":[]}]` {
+		t.Fatalf("POST: services = %s", jsonOf(t, got))
+	}
+
+	want := map[string]string{
+		"api":   `[{"name":"api","ports":[3000]}]`,
+		"front": `[{"name":"web","ports":[80]},{"name":"worker","ports":[]}]`,
+	}
+	for slug, services := range want {
+		w := c.Do("GET", appsPath+"/"+slug, nil, s)
+		httptestutil.Expect(t, w, http.StatusOK)
+		if got := jsonOf(t, httptestutil.Decode[map[string]any](t, w)["services"]); got != services {
+			t.Errorf("GET %s: services = %s, esperaba %s", slug, got, services)
+		}
+	}
+	w = c.Do("GET", appsPath, nil, s)
+	httptestutil.Expect(t, w, http.StatusOK)
+	for _, app := range httptestutil.Decode[[]map[string]any](t, w) {
+		if got := jsonOf(t, app["services"]); got != want[app["slug"].(string)] {
+			t.Errorf("GET apps %s: services = %s", app["slug"], got)
+		}
+	}
+
+	// Un compose que se guardó antes de validarlo (Fase 1) y no se puede leer: [], no null.
+	if _, err := e.db.Conn(context.Background()).ExecContext(context.Background(),
+		`UPDATE apps SET compose_yaml = 'a: 1' WHERE slug = 'front'`); err != nil {
+		t.Fatal(err)
+	}
+	w = c.Do("GET", appsPath+"/front", nil, s)
+	if got := jsonOf(t, httptestutil.Decode[map[string]any](t, w)["services"]); got != `[]` {
+		t.Errorf("compose ilegible: services = %s", got)
+	}
+}
+
+func jsonOf(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }

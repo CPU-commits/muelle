@@ -1,0 +1,207 @@
+package deploy
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
+	"github.com/CPU-commits/muelle/src/package/clock"
+	"github.com/CPU-commits/muelle/src/shared/domain/entity"
+	"github.com/CPU-commits/muelle/src/shared/domain/naming"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/docker/dockertest"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/sqlite"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/sqlite/sqlitetest"
+)
+
+// fakeEnv y fakeIngress cumplen los puertos que conecta el contenedor
+// (secrets.Module e ingress.Module).
+type fakeEnv struct{}
+
+func (fakeEnv) ResolveEnv(ctx context.Context, appID int64) (map[string]string, []string, error) {
+	return map[string]string{}, nil, nil
+}
+
+type fakeIngress struct{}
+
+func (fakeIngress) EnsureStageNetwork(ctx context.Context, project, stage string) error { return nil }
+func (fakeIngress) SyncRoutes(ctx context.Context) error                                { return nil }
+
+func newTestModule(t *testing.T) (*Module, *dockertest.Fake) {
+	t.Helper()
+	m, f, _ := newTestModuleDB(t)
+	return m, f
+}
+
+func newTestModuleDB(t *testing.T) (*Module, *dockertest.Fake, *sqlite.DB) {
+	t.Helper()
+	db := sqlitetest.New(t)
+	f := dockertest.New()
+	return newModuleOn(t, db, f), f, db
+}
+
+// newModuleOn arma un módulo sobre esa base y ese Docker (como un arranque nuevo de muelle).
+func newModuleOn(t *testing.T, db *sqlite.DB, f *dockertest.Fake) *Module {
+	t.Helper()
+	c, err := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return New(Deps{DB: db, Cipher: c, Clock: clock.System{}, Audit: sqlite.NewAuditRecorder(db, clock.System{}, log), Log: log,
+		Docker: f, Env: fakeEnv{}, Ingress: fakeIngress{}})
+}
+
+// Borrar una app (catalog) ejecuta docker stack rm de su stack: sus
+// servicios se van y sus volúmenes quedan (§5.2; los datos no se borran).
+func TestRemoveApp(t *testing.T) {
+	m, f := newTestModule(t)
+	ctx := context.Background()
+	stack := naming.Stack("auditfy", "staging", "api")
+	f.PutStackService(stack, docker.Service{Name: naming.Service("auditfy", "staging", "api", "api"), Labels: naming.AppLabels("auditfy", "staging", "api")})
+	f.PutStackService(naming.Stack("auditfy", "staging", "web"), docker.Service{Name: naming.Service("auditfy", "staging", "web", "web")})
+	f.PutVolume(docker.Volume{Name: naming.Volume(stack, "data"), Labels: map[string]string{naming.LabelStackNamespace: stack}})
+
+	if err := m.RemoveApp(ctx, "auditfy", "staging", "api"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.RemovedStacks(); !slices.Equal(got, []string{stack}) {
+		t.Fatalf("stack rm de %v", got)
+	}
+	list, _ := f.ListServices(ctx, nil)
+	if len(list) != 1 || list[0].Name != "auditfy_staging_web_web" {
+		t.Fatalf("quedaron %+v", list)
+	}
+	if v, _ := f.ListVolumes(ctx, nil); len(v) != 1 {
+		t.Fatalf("los volúmenes quedan: %+v", v)
+	}
+	// Una app que nunca se desplegó (sin stack) se borra igual.
+	if err := m.RemoveApp(ctx, "auditfy", "staging", "nunca"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Con Docker caído (o sin Swarm) no se borra: 503, y la app sigue en catalog.
+func TestRemoveAppDockerDown(t *testing.T) {
+	m, f := newTestModule(t)
+	f.SetUnavailable(true)
+	if err := m.RemoveApp(context.Background(), "auditfy", "staging", "api"); !errors.Is(err, entity.ErrDockerUnavailable) {
+		t.Fatalf("Docker caído: %v", err)
+	}
+	if len(f.RemovedStacks()) != 0 {
+		t.Fatal("no debió ejecutar docker stack rm")
+	}
+}
+
+// Todas las rutas de deploy de contrato §1 (las tres primeras filas) están
+// registradas con su método: ninguna responde no_route ni
+// method_not_allowed. Las de ingress (dominios, /proxy) son de la Fase 3.
+func TestModuleRoutes(t *testing.T) {
+	m, _ := newTestModule(t)
+	c := httptestutil.New(t, httptestutil.FakeAuth{Sessions: map[string]entity.Principal{"s": {UserID: 1, Username: "felipe"}}}, m.RegisterRoutes)
+	app := "/api/v1/projects/auditfy/stages/staging/apps/api"
+	for _, r := range []struct{ method, path string }{
+		{"POST", app + "/deploys"}, {"GET", app + "/deploys"},
+		{"GET", app + "/deploys/1"}, {"GET", app + "/deploys/1/log"}, {"GET", app + "/deploys/1/log/stream"},
+		{"POST", app + "/rollback"},
+		{"GET", app + "/status"}, {"GET", app + "/logs"},
+		{"GET", "/api/v1/registries"}, {"POST", "/api/v1/registries"},
+		{"PATCH", "/api/v1/registries/ghcr.io"}, {"DELETE", "/api/v1/registries/ghcr.io"},
+	} {
+		w := c.Do(r.method, r.path, map[string]string{}, httptestutil.WithSession("s"))
+		if bytes.Contains(w.Body.Bytes(), []byte(`"no_route"`)) || bytes.Contains(w.Body.Bytes(), []byte(`"method_not_allowed"`)) {
+			t.Errorf("%s %s: %d %s", r.method, r.path, w.Code, w.Body)
+		}
+	}
+	if jobs := m.Jobs(); len(jobs) != 0 {
+		t.Fatalf("Jobs: %v", jobs)
+	}
+}
+
+// Run corre los workers hasta que se cancela el ctx, y vuelve.
+func TestRun(t *testing.T) {
+	m, _ := newTestModule(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.Run(ctx); close(done) }()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run no volvió al cancelar el ctx")
+	}
+}
+
+// Run guarda manager_node_id al arrancar (contrato §1.2); con Docker caído no
+// lo guarda y Run igual corre (lo reintenta el primer deploy).
+func TestManagerNodeStored(t *testing.T) {
+	m, f, db := newTestModuleDB(t)
+	read := func() string {
+		var v []byte
+		ctx := context.Background()
+		err := db.Conn(ctx).QueryRowContext(ctx, `SELECT value FROM settings WHERE key = 'manager_node_id'`).Scan(&v)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			t.Fatal(err)
+		}
+		return string(v)
+	}
+	run := func(m *Module) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { m.Run(ctx); close(done) }()
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+		<-done
+	}
+
+	f.SetUnavailable(true)
+	run(m)
+	if got := read(); got != "" {
+		t.Fatalf("con Docker caído: %q", got)
+	}
+	f.SetUnavailable(false)
+	run(newModuleOn(t, db, f))
+	if got := read(); got != "node-1" {
+		t.Fatalf("manager_node_id = %q", got)
+	}
+}
+
+// SeedInitRegistry guarda Deps.InitRegistry en el primer arranque, y nada en
+// los siguientes.
+func TestModuleSeedInitRegistry(t *testing.T) {
+	db := sqlitetest.New(t)
+	c, err := crypto.New(bytes.Repeat([]byte{7}, crypto.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	newModule := func(r *InitRegistry) *Module {
+		return New(Deps{DB: db, Cipher: c, Audit: sqlite.NewAuditRecorder(db, clock.System{}, log), Log: log,
+			Docker: dockertest.New(), Env: fakeEnv{}, Ingress: fakeIngress{}, InitRegistry: r})
+	}
+	ctx := context.Background()
+	if err := newModule(&InitRegistry{Host: "ghcr.io", Username: "bot", Password: "s3cr3t-pass"}).SeedInitRegistry(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := newModule(&InitRegistry{Host: "docker.io", Username: "otro", Password: "s3cr3t-pass"}).SeedInitRegistry(ctx); err != nil {
+		t.Fatal(err)
+	}
+	m := newModule(nil)
+	if err := m.SeedInitRegistry(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cl := httptestutil.New(t, httptestutil.FakeAuth{Sessions: map[string]entity.Principal{"s": {UserID: 1, Username: "felipe"}}}, m.RegisterRoutes)
+	w := cl.Do("GET", "/api/v1/registries", nil, httptestutil.WithSession("s"))
+	if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte(`"host":"ghcr.io"`)) || bytes.Contains(w.Body.Bytes(), []byte("docker.io")) {
+		t.Fatalf("GET /registries: %d %s", w.Code, w.Body)
+	}
+}

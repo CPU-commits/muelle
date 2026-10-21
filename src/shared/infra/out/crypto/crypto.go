@@ -9,6 +9,7 @@
 //	users:totp:<id>          users.totp_secret (<id> es users.id)
 //	users:totp_pending:<id>  users.totp_pending
 //	settings:<key>           settings.value de un setting cifrado
+//	registries:password:<id> registries.password (<id> es registries.id, Fase 2)
 //
 // La regla: el prefijo fijo (todo antes del último segmento) es distinto para
 // cada tabla y columna, y solo el último segmento es texto libre (puede

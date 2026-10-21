@@ -12,6 +12,23 @@ import (
 
 var t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
+// Dos composes válidos (§6.3 del diseño).
+const (
+	composeA = "services:\n  web:\n    image: nginx\n"
+	composeB = "services:\n  web:\n    image: nginx:2\n"
+)
+
+// padCompose rellena un compose válido con un comentario hasta n bytes.
+func padCompose(t *testing.T, n int) string {
+	t.Helper()
+	s := composeA + "#"
+	s += strings.Repeat("x", n-len(s)-1) + "\n"
+	if len(s) != n {
+		t.Fatalf("len = %d", len(s))
+	}
+	return s
+}
+
 func wantInvalid(t *testing.T, err error, field string) {
 	t.Helper()
 	ve, ok := errors.AsType[*validate.Error](err)
@@ -82,7 +99,7 @@ func TestNewApps(t *testing.T) {
 		t.Fatalf("a=%+v", a)
 	}
 
-	c, err := NewComposeApp(st, "nats", "services: {}\n", 60, t0)
+	c, err := NewComposeApp(st, "nats", composeA, 60, t0)
 	if err != nil || c.Kind != KindCompose || c.DeployTimeoutS != 60 || c.Spec != nil {
 		t.Fatalf("c=%+v err=%v", c, err)
 	}
@@ -100,7 +117,7 @@ func TestNewApps(t *testing.T) {
 	wantInvalid(t, err, "compose_yaml")
 	_, err = NewComposeApp(st, "x", strings.Repeat("a", MaxComposeBytes+1), 0, t0)
 	wantInvalid(t, err, "compose_yaml")
-	if _, err := NewComposeApp(st, "x", strings.Repeat("a", MaxComposeBytes), 0, t0); err != nil {
+	if _, err := NewComposeApp(st, "x", padCompose(t, MaxComposeBytes), 0, t0); err != nil {
 		t.Errorf("256 KiB exactos deben aceptarse: %v", err)
 	}
 }
@@ -125,12 +142,13 @@ func TestAppChanges(t *testing.T) {
 	}
 	wantInvalid(t, a.SetDeployTimeout(1), "deploy_timeout_s")
 
-	c, _ := NewComposeApp(st, "nats", "a: 1", 0, t0)
+	c, _ := NewComposeApp(st, "nats", composeA, 0, t0)
 	wantInvalid(t, c.ChangeCompose("", t1), "compose_yaml")
-	if c.ComposeYAML != "a: 1" || !c.ConfigChangedAt.Equal(t0) {
+	wantInvalid(t, c.ChangeCompose(composeA+"    ports: [\"80:80\"]\n", t1), "compose_yaml")
+	if c.ComposeYAML != composeA || !c.ConfigChangedAt.Equal(t0) {
 		t.Fatalf("un cambio inválido no debe aplicarse: %+v", c)
 	}
-	if err := c.ChangeCompose("b: 2", t1); err != nil || c.ComposeYAML != "b: 2" || !c.ConfigChangedAt.Equal(t1) {
+	if err := c.ChangeCompose(composeB, t1); err != nil || c.ComposeYAML != composeB || !c.ConfigChangedAt.Equal(t1) {
 		t.Fatalf("c=%+v err=%v", c, err)
 	}
 }
@@ -138,10 +156,10 @@ func TestAppChanges(t *testing.T) {
 func TestChangesEnforceKind(t *testing.T) {
 	st := Stage{ID: 3, ProjectSlug: "p", Slug: "s"}
 	svc, _ := NewServiceApp(st, "api", specOf(t, "x"), 0, t0)
-	cmp, _ := NewComposeApp(st, "nats", "a: 1", 0, t0)
+	cmp, _ := NewComposeApp(st, "nats", composeA, 0, t0)
 	t1 := t0.Add(time.Minute)
 
-	if err := svc.ChangeCompose("b: 2", t1); !errors.Is(err, ErrWrongKind) {
+	if err := svc.ChangeCompose(composeB, t1); !errors.Is(err, ErrWrongKind) {
 		t.Fatalf("esperaba ErrWrongKind, got %v", err)
 	}
 	if svc.ComposeYAML != "" || !svc.ConfigChangedAt.Equal(t0) {
@@ -153,6 +171,32 @@ func TestChangesEnforceKind(t *testing.T) {
 	if cmp.Spec != nil || !cmp.ConfigChangedAt.Equal(t0) {
 		t.Fatalf("no debe cambiar nada: %+v", cmp)
 	}
+}
+
+// La validación del compose es la de shared/domain/compose (§6.3 del diseño),
+// con los mismos mensajes de antes para el vacío y el tamaño.
+func TestValidateComposeSharedRules(t *testing.T) {
+	_, err := ValidateCompose(composeA + "    ports: [\"80:80\"]\n")
+	wantInvalid(t, err, "compose_yaml")
+	if !strings.HasPrefix(err.Error(), "compose_yaml: services.web.ports: ") {
+		t.Errorf("err = %v", err)
+	}
+	_, err = ValidateCompose(" \n")
+	wantInvalid(t, err, "compose_yaml")
+	if err.Error() != "compose_yaml: es obligatorio" {
+		t.Errorf("err = %v", err)
+	}
+	_, err = ValidateCompose(padCompose(t, MaxComposeBytes+1))
+	wantInvalid(t, err, "compose_yaml")
+	if err.Error() != "compose_yaml: no puede superar 256 KiB" {
+		t.Errorf("err = %v", err)
+	}
+	names, err := ValidateCompose("services:\n  web:\n    image: nginx\n  api:\n    image: x\n")
+	if err != nil || strings.Join(names, ",") != "api,web" {
+		t.Fatalf("names=%v err=%v", names, err)
+	}
+	_, err = NewComposeApp(Stage{ID: 3}, "x", composeA+"    privileged: true\n", 0, t0)
+	wantInvalid(t, err, "compose_yaml")
 }
 
 func TestPendingChanges(t *testing.T) {

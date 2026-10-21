@@ -59,6 +59,11 @@ func newTestServer(t *testing.T) *Server {
 		"not_empty":       repository.ErrNotEmpty,
 		"unauthenticated": entity.ErrUnauthenticated,
 		"forbidden":       entity.ErrForbidden,
+
+		"docker_unavailable": entity.ErrDockerUnavailable,
+		"not_implemented":    entity.ErrNotImplemented,
+
+		"cloudflare_unavailable": entity.ErrCloudflareUnavailable,
 	}
 	k.HandlePublic("GET /api/v1/fail/{code}", func(w http.ResponseWriter, r *http.Request) {
 		k.Fail(w, r, fmt.Errorf("envuelto: %w", common[r.PathValue("code")]))
@@ -168,6 +173,11 @@ func TestCommonErrors(t *testing.T) {
 		"not_empty":       http.StatusConflict,
 		"unauthenticated": http.StatusUnauthorized,
 		"forbidden":       http.StatusForbidden,
+
+		"docker_unavailable": http.StatusServiceUnavailable,
+		"not_implemented":    http.StatusNotImplemented,
+
+		"cloudflare_unavailable": http.StatusBadGateway,
 	}
 	for code, status := range want {
 		w := do(s, "GET", "/api/v1/fail/"+code, "")
@@ -201,18 +211,24 @@ func TestMethodNotAllowedIsJSON(t *testing.T) {
 	}
 }
 
-// Una ruta que no existe responde el mismo JSON de error que el resto de la API.
+// Una ruta que no existe responde el mismo JSON de error que el resto de la
+// API, con el código no_route: el panel lo distingue de un recurso que no
+// existe (not_found) para saber que el endpoint todavía no está en el backend.
 func TestUnmatchedRouteIsJSON(t *testing.T) {
 	s := newTestServer(t)
-	for _, path := range []string{"/api/v1/no-existe", "/api/v1/projects", "/otra-cosa"} {
+	for _, path := range []string{"/api/v1/no-existe", "/api/v1/projects", "/otra-cosa", "/api/v1/projects/auditfy/stages/x/apps/y/deploys"} {
 		w := do(s, "GET", path, "")
 		if w.Code != http.StatusNotFound || w.Header().Get("Content-Type") != "application/json" {
 			t.Errorf("%s: %d %v %s", path, w.Code, w.Header(), w.Body.String())
 			continue
 		}
-		if got := strings.TrimSpace(w.Body.String()); got != `{"error":{"code":"not_found","message":"no existe"}}` {
+		if got := strings.TrimSpace(w.Body.String()); got != `{"error":{"code":"no_route","message":"la ruta no existe"}}` {
 			t.Errorf("%s: body=%s", path, got)
 		}
+	}
+	// Un recurso que no existe en una ruta que sí existe sigue siendo not_found.
+	if w := do(s, "GET", "/api/v1/fail/not_found", ""); w.Code != http.StatusNotFound || errorCode(t, w) != "not_found" {
+		t.Fatalf("recurso inexistente: %d %s", w.Code, w.Body.String())
 	}
 	// Las rutas registradas siguen respondiendo.
 	if w := do(s, "GET", "/api/v1/ping", ""); w.Code != http.StatusOK {
@@ -235,5 +251,43 @@ func TestNewServerRequiresConfig(t *testing.T) {
 			}()
 			NewServer(c)
 		}()
+	}
+}
+
+// Después de cambiar los puertos del proxy (spec §16), muelle-caddy sirve el
+// panel en otro origen que MUELLE_PANEL_ORIGIN: ese también pasa, y solo ese.
+// Sin dominio del panel (ProxyOrigin da ""), solo pasa PanelOrigin.
+func TestOriginCheckProxyOrigin(t *testing.T) {
+	proxy := "https://panel.test:8443"
+	calls := 0
+	s := NewServer(Config{
+		PanelOrigin: testOrigin,
+		Auth:        fakeAuth{},
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ProxyOrigin: func(context.Context) string { calls++; return proxy },
+	})
+	s.Kit().HandlePublic("POST /api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
+		utils.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	})
+	for _, o := range []string{testOrigin, proxy} {
+		if w := do(s, "POST", "/api/v1/ping", o); w.Code != http.StatusOK {
+			t.Fatalf("Origin %s: %d %s", o, w.Code, w.Body.String())
+		}
+	}
+	for _, o := range []string{"", "null", "https://panel.test:9443", "http://panel.test:8443", proxy + "/"} {
+		if w := do(s, "POST", "/api/v1/ping", o); w.Code != http.StatusForbidden || errorCode(t, w) != "bad_origin" {
+			t.Fatalf("Origin %q: %d %s", o, w.Code, w.Body.String())
+		}
+	}
+	// PanelOrigin no consulta los ajustes, ni una petición sin Origin.
+	calls = 0
+	do(s, "POST", "/api/v1/ping", testOrigin)
+	do(s, "POST", "/api/v1/ping", "")
+	if calls != 0 {
+		t.Fatalf("ProxyOrigin se llamó %d veces", calls)
+	}
+	proxy = ""
+	if w := do(s, "POST", "/api/v1/ping", ""); w.Code != http.StatusForbidden {
+		t.Fatalf("sin origen del proxy y sin Origin: %d", w.Code)
 	}
 }

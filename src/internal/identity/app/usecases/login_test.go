@@ -29,7 +29,8 @@ func TestLoginAndAuthenticateSession(t *testing.T) {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
 	p, err := f.authSession.Execute(ctx, res.Token)
-	if err != nil || p.UserID != u.ID || p.Username != "felipe" || p.MFAPending || p.IsToken() ||
+	// ActorName() es el autor de la auditoría de cada petición con esta sesión.
+	if err != nil || p.UserID != u.ID || p.Username != "felipe" || p.ActorName() != "felipe" || p.MFAPending || p.IsToken() ||
 		p.SessionHash != service.HashToken(res.Token) {
 		t.Fatalf("p=%+v err=%v", p, err)
 	}

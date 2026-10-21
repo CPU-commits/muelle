@@ -31,11 +31,12 @@ func expectRow(t *testing.T, r auditRow, action, target, details string, actor *
 	if r.Action != action || r.Target != target || r.Details != details {
 		t.Fatalf("fila=%+v, esperaba %s %s %s", r, action, target, details)
 	}
-	if actor == nil && (r.ActorType != "system" || r.ActorID != nil) {
+	if actor == nil && (r.ActorType != "system" || r.ActorID != nil || r.ActorName != "system") {
 		t.Fatalf("fila=%+v, esperaba actor system", r)
 	}
-	if actor != nil && (r.ActorType != "user" || r.ActorID == nil || *r.ActorID != *actor) {
-		t.Fatalf("fila=%+v, esperaba actor user %d", r, *actor)
+	// actor_name es el username del actor, copiado al escribir.
+	if actor != nil && (r.ActorType != "user" || r.ActorID == nil || *r.ActorID != *actor || r.ActorName == "" || r.ActorName != r.Username) {
+		t.Fatalf("fila=%+v, esperaba actor user %d con su username", r, *actor)
 	}
 }
 

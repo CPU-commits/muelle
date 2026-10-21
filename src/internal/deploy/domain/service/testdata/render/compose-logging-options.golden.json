@@ -1,0 +1,83 @@
+{
+  "networks": {
+    "it2g_staging": {
+      "external": true,
+      "name": "it2g_staging"
+    }
+  },
+  "services": {
+    "quiet": {
+      "command": [
+        "sleep",
+        "infinity"
+      ],
+      "deploy": {
+        "labels": {
+          "muelle.app": "logs",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "rollback_config": {
+          "order": "start-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 1
+        }
+      },
+      "image": "alpine:3@sha256:c0ffee0000002222222222222222222222222222222222222222222222222222",
+      "labels": {
+        "muelle.app": "logs",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "none"
+      },
+      "networks": [
+        "it2g_staging"
+      ]
+    },
+    "web": {
+      "deploy": {
+        "labels": {
+          "muelle.app": "logs",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "rollback_config": {
+          "order": "start-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "start-first",
+          "parallelism": 1
+        }
+      },
+      "image": "nginx:1.27@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000",
+      "labels": {
+        "muelle.app": "logs",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "compress": "true",
+          "max-file": "3",
+          "max-size": "5m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ]
+    }
+  }
+}

@@ -3,8 +3,11 @@
 package service
 
 import (
+	"cmp"
 	"crypto/subtle"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/secrets/domain/entity"
@@ -131,6 +134,30 @@ func (e *EnvCrypto) decrypt(o entity.Owner, r entity.EncryptedEnvVar) ([]byte, e
 		return nil, fmt.Errorf("secrets: descifrando %s de %s %d: %w", r.Key, o.Kind, o.ID, err)
 	}
 	return plain, nil
+}
+
+// SecretValues son los valores de las variables secretas de los sets, sin
+// repetidos ni vacíos, de los más largos a los más cortos (a igual largo, en
+// orden alfabético): enmascarar primero el más largo evita dejar a la vista
+// la parte de un secreto que contiene a otro.
+func SecretValues(sets ...[]entity.EnvVar) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, set := range sets {
+		for _, v := range set {
+			if s := string(v.Value); v.Secret && s != "" && !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b string) int {
+		if c := cmp.Compare(len(b), len(a)); c != 0 {
+			return c
+		}
+		return strings.Compare(a, b)
+	})
+	return out
 }
 
 // Merge combina las variables del stage con las de la app; la app gana (§5.2 del spec).

@@ -28,3 +28,13 @@ type PatchEnv struct {
 type ResolveEnv struct {
 	AppID int64
 }
+
+// ResolvedEnv es lo que recibe el deploy. Nada de esto va a la API ni a la auditoría.
+type ResolvedEnv struct {
+	// Vars son las del stage con las de la app encima (la app gana).
+	Vars map[string]string
+	// SecretValues son los valores de las variables secretas del stage y de
+	// la app (también los que la app pisa), sin repetidos ni vacíos y los más
+	// largos primero: el deploy los reemplaza por *** en su log (§7).
+	SecretValues []string
+}

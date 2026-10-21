@@ -53,6 +53,11 @@ func (r *SettingsRepository) Set(ctx context.Context, key string, value []byte, 
 	return err
 }
 
+func (r *SettingsRepository) Delete(ctx context.Context, key string) error {
+	_, err := r.db.Conn(ctx).ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, key)
+	return err
+}
+
 func (r *SettingsRepository) Insert(ctx context.Context, key string, value []byte, encrypted bool) error {
 	v, enc := storable(value, encrypted)
 	res, err := r.db.Conn(ctx).ExecContext(ctx,

@@ -22,7 +22,7 @@ func NewAuditRepository(db *sqlite.DB) *AuditRepository {
 }
 
 func (r *AuditRepository) List(ctx context.Context, beforeID int64, limit int) ([]entity.AuditEvent, error) {
-	query := `SELECT id, actor_type, actor_id, action, target, details, at FROM audit_events`
+	query := `SELECT id, actor_type, actor_id, actor_name, action, target, details, at FROM audit_events`
 	args := []any{}
 	if beforeID > 0 {
 		query += ` WHERE id < ?`
@@ -42,7 +42,7 @@ func (r *AuditRepository) List(ctx context.Context, beforeID int64, limit int) (
 		var actor sql.NullInt64
 		var details string
 		var at int64
-		if err := rows.Scan(&e.ID, &e.ActorType, &actor, &e.Action, &e.Target, &details, &at); err != nil {
+		if err := rows.Scan(&e.ID, &e.ActorType, &actor, &e.ActorName, &e.Action, &e.Target, &details, &at); err != nil {
 			return nil, err
 		}
 		if actor.Valid {

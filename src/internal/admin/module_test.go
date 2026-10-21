@@ -66,7 +66,7 @@ func TestSettingsAndAuditAPI(t *testing.T) {
 
 	w := e.c.Do("GET", "/api/v1/settings", nil, sin)
 	httptestutil.Expect(t, w, http.StatusOK)
-	if httptestutil.Decode[map[string]bool](t, w)["require_2fa"] {
+	if httptestutil.Decode[map[string]any](t, w)["require_2fa"] == true {
 		t.Fatal("require_2fa debe empezar en false")
 	}
 
@@ -80,18 +80,19 @@ func TestSettingsAndAuditAPI(t *testing.T) {
 	// Con su propio 2FA configurado, sí.
 	w = e.c.Do("PATCH", "/api/v1/settings", map[string]bool{"require_2fa": true}, con)
 	httptestutil.Expect(t, w, http.StatusOK)
-	if !httptestutil.Decode[map[string]bool](t, w)["require_2fa"] {
+	if httptestutil.Decode[map[string]any](t, w)["require_2fa"] != true {
 		t.Fatal("require_2fa no se guardó")
 	}
 	w = e.c.Do("GET", "/api/v1/settings", nil, sin)
-	if !httptestutil.Decode[map[string]bool](t, w)["require_2fa"] {
+	if httptestutil.Decode[map[string]any](t, w)["require_2fa"] != true {
 		t.Fatal("GET no refleja el cambio")
 	}
 
 	w = e.c.Do("GET", "/api/v1/audit?limit=1", nil, con)
 	httptestutil.Expect(t, w, http.StatusOK)
 	events := httptestutil.Decode[[]map[string]any](t, w)
-	if len(events) != 1 || events[0]["action"] != "settings.update" || events[0]["actor_type"] != "user" {
+	if len(events) != 1 || events[0]["action"] != "settings.update" || events[0]["actor_type"] != "user" ||
+		events[0]["actor_name"] != "con-totp" {
 		t.Fatalf("events=%v", events)
 	}
 	if d, _ := events[0]["details"].(map[string]any); d["require_2fa"] != true {
@@ -121,6 +122,34 @@ func TestAuditPagination(t *testing.T) {
 	}
 	for _, q := range []string{"limit=501", "limit=abc", "before=0", "before=x"} {
 		httptestutil.Expect(t, e.c.Do("GET", "/api/v1/audit?"+q, nil, con), http.StatusUnprocessableEntity)
+	}
+}
+
+// actor_name siempre es un string: también en los eventos del sistema y en
+// los de un usuario que ya se borró (contrato §4.2).
+func TestAuditActorNameAPI(t *testing.T) {
+	e := newEnv(t)
+	con := httptestutil.WithSession("con")
+	ctx := context.Background()
+	rec := sqlite.NewAuditRecorder(e.db, e.clk, nil)
+	rec.Record(ctx, "settings.ports_rollback", "settings", nil)
+	gone := admintest.InsertUser(t, e.db, "ana", false)
+	rec.Record(entity.WithPrincipal(ctx, entity.Principal{UserID: gone, Username: "ana"}), "project.delete", "project:a", nil)
+	if _, err := e.db.Conn(ctx).ExecContext(ctx, `DELETE FROM users WHERE id = ?`, gone); err != nil {
+		t.Fatal(err)
+	}
+
+	events := httptestutil.Decode[[]map[string]any](t, e.c.Do("GET", "/api/v1/audit", nil, con))
+	if len(events) != 2 {
+		t.Fatalf("events=%v", events)
+	}
+	for i, want := range []string{"ana", "system"} {
+		if got, ok := events[i]["actor_name"].(string); !ok || got != want {
+			t.Errorf("evento %d: actor_name=%#v, esperaba %q", i, events[i]["actor_name"], want)
+		}
+	}
+	if events[0]["actor_type"] != "user" || events[0]["actor_id"] != float64(gone) {
+		t.Errorf("el actor borrado conserva su tipo y su id: %v", events[0])
 	}
 }
 
@@ -249,5 +278,62 @@ func TestJobs(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(e.dataDir, "backups", "muelle-*.db"))
 	if len(files) != 1 || filepath.Base(files[0]) != "muelle-2027-04-09.db" {
 		t.Fatalf("files=%v", files)
+	}
+}
+
+// GET /settings trae siempre las claves de la Fase 3 (el panel deja de
+// mostrar "Llega con la Fase 3" cuando están) y la IP con la que muelle ve la
+// petición.
+func TestSettingsProxyKeysAPI(t *testing.T) {
+	e := newEnv(t)
+	con := httptestutil.WithSession("con")
+	w := e.c.Do("GET", "/api/v1/settings", nil, con)
+	httptestutil.Expect(t, w, http.StatusOK)
+	got := httptestutil.Decode[map[string]any](t, w)
+	for _, k := range []string{"require_2fa", "cloudflare_token_set", "cloudflare_zones", "public_ip", "public_ipv6", "acme_email",
+		"panel_domain", "panel_allowed_cidrs", "proxy_http_port", "proxy_https_port", "client_ip"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("falta %q en %v", k, got)
+		}
+	}
+	if got["proxy_http_port"] != float64(80) || got["cloudflare_zones"] != nil || got["client_ip"] != "192.0.2.1" {
+		t.Fatalf("GET=%v", got)
+	}
+	if list, ok := got["panel_allowed_cidrs"].([]any); !ok || len(list) != 0 {
+		t.Fatalf("panel_allowed_cidrs=%v (una lista vacía, nunca null)", got["panel_allowed_cidrs"])
+	}
+
+	w = e.c.Do("PATCH", "/api/v1/settings", map[string]any{"public_ip": "203.0.113.7", "proxy_http_port": 8080, "proxy_https_port": 8443}, con)
+	httptestutil.Expect(t, w, http.StatusOK)
+	if got := httptestutil.Decode[map[string]any](t, w); got["public_ip"] != "203.0.113.7" || got["proxy_https_port"] != float64(8443) {
+		t.Fatalf("PATCH=%v", got)
+	}
+	// 422 con el campo simple; los puertos iguales, en proxy_https_port.
+	w = e.c.Do("PATCH", "/api/v1/settings", map[string]any{"proxy_https_port": 8080}, con)
+	httptestutil.Expect(t, w, http.StatusUnprocessableEntity)
+	if msg := httptestutil.Decode[map[string]map[string]string](t, w)["error"]["message"]; !strings.HasPrefix(msg, "proxy_https_port: ") {
+		t.Fatalf("message=%q", msg)
+	}
+	// panel_domain es de solo lectura: mandarlo es una clave desconocida.
+	w = e.c.Do("PATCH", "/api/v1/settings", map[string]any{"panel_domain": "otro.cl"}, con)
+	httptestutil.Expect(t, w, http.StatusBadRequest)
+	// Una lista de IPs que deja fuera la IP de la petición: 409 would_lock_out.
+	w = e.c.Do("PATCH", "/api/v1/settings", map[string]any{"panel_allowed_cidrs": []string{"198.51.100.0/24"}}, con)
+	httptestutil.Expect(t, w, http.StatusConflict)
+	if code := httptestutil.ErrorCode(t, w); code != "would_lock_out" {
+		t.Fatalf("code=%s", code)
+	}
+	w = e.c.Do("PATCH", "/api/v1/settings", map[string]any{"panel_allowed_cidrs": []string{"198.51.100.0/24"}, "confirm_lockout": true}, con)
+	httptestutil.Expect(t, w, http.StatusOK)
+}
+
+func TestApplyStartupSettingsModule(t *testing.T) {
+	e := newEnv(t)
+	if err := e.m.ApplyStartupSettings(context.Background(), "panel.tudominio.cl", InitialSettings{PublicIP: "203.0.113.7"}); err != nil {
+		t.Fatal(err)
+	}
+	got := httptestutil.Decode[map[string]any](t, e.c.Do("GET", "/api/v1/settings", nil, httptestutil.WithSession("con")))
+	if got["panel_domain"] != "panel.tudominio.cl" || got["public_ip"] != "203.0.113.7" {
+		t.Fatalf("GET=%v", got)
 	}
 }

@@ -4,6 +4,7 @@ package usecases
 
 import (
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/repository"
+	"github.com/CPU-commits/muelle/src/internal/catalog/domain/service"
 	"github.com/CPU-commits/muelle/src/package/audit"
 	"github.com/CPU-commits/muelle/src/package/clock"
 	srepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
@@ -17,6 +18,15 @@ type Deps struct {
 	Apps     repository.AppRepository
 	Clock    clock.Clock
 	Audit    audit.Recorder
+
+	// Networks crea y borra la red de cada stage (ingress). nil: catalog no
+	// toca Docker, como en la Fase 1 (los tests de un módulo solo).
+	Networks service.StageNetworks
+	// Runtime borra el stack de una app (deploy). nil: no toca Docker.
+	Runtime service.AppRuntime
+	// Domains cuenta los dominios de una app antes de borrarla. nil: solo la
+	// clave foránea lo impide, y eso pasa después de borrar el stack.
+	Domains service.AppDomains
 }
 
 func projectTarget(p string) string { return "project:" + p }

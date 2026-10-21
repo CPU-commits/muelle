@@ -91,8 +91,10 @@ func checkTokenPattern(pattern string) {
 
 // tokenPatternProblem revisa la ruta segmento por segmento, como la lee el mux:
 //   - empieza con /api/v1/projects/{p} y no termina en "/";
-//   - los únicos comodines son {p}, {s} y {a} (además de {$} al final), cada
-//     uno una vez y justo después de projects, stages y apps;
+//   - los comodines de alcance son {p}, {s} y {a}, cada uno una vez y justo
+//     después de projects, stages y apps; además de {$} al final, solo se
+//     permite otro comodín si es de un segmento y va después de {a}
+//     (…/apps/{a}/deploys/{id}): ahí ya no puede tragarse un segmento de alcance;
 //   - projects, stages y apps, si no son el último segmento, van seguidos de
 //     su comodín, y {a} solo aparece después de {s};
 //   - los literales se comparan decodificados (st%61ges es stages para el mux).
@@ -138,8 +140,10 @@ func tokenPatternProblem(pattern string) string {
 			}
 			before, ok := scopeWildcards[seg.s]
 			switch {
+			case !ok && seen["{a}"] && !strings.HasSuffix(seg.s, "...}"):
+				continue // un id dentro de la app (…/deploys/{id}): el alcance ya está fijado
 			case !ok:
-				return fmt.Sprintf("tiene el comodín %s; solo se permiten {p}, {s} y {a}", seg.s)
+				return fmt.Sprintf("tiene el comodín %s; solo se permiten {p}, {s} y {a} (y después de {a}, uno de un segmento como {id})", seg.s)
 			case seen[seg.s]:
 				return fmt.Sprintf("repite el comodín %s", seg.s)
 			case !literal(i-1, before):

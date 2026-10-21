@@ -1,0 +1,96 @@
+{
+  "services": {
+    "muelle": {
+      "image": "ghcr.io/cpu-commits/muelle:v0.1.0",
+      "environment": {
+        "MUELLE_DATA_DIR": "/data",
+        "MUELLE_INIT_ACME_EMAIL": "tu@correo.cl",
+        "MUELLE_INIT_PROXY_HTTPS_PORT": "8443",
+        "MUELLE_INIT_PROXY_HTTP_PORT": "8080",
+        "MUELLE_INIT_PUBLIC_IP": "203.0.113.24",
+        "MUELLE_INIT_REGISTRY_FILE": "/run/secrets/muelle_init_registry",
+        "MUELLE_LISTEN": ":8080",
+        "MUELLE_MASTER_KEY_FILE": "/run/secrets/muelle_master_key",
+        "MUELLE_PANEL_DOMAIN": "panel.tudominio.cl"
+      },
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "/var/run/docker.sock",
+          "target": "/var/run/docker.sock"
+        },
+        {
+          "type": "volume",
+          "source": "data",
+          "target": "/data"
+        },
+        {
+          "type": "volume",
+          "source": "caddy_admin",
+          "target": "/run/caddy-admin"
+        }
+      ],
+      "secrets": [
+        {
+          "source": "master_key",
+          "target": "muelle_master_key"
+        },
+        {
+          "source": "init_registry",
+          "target": "muelle_init_registry"
+        }
+      ],
+      "networks": [
+        "panel"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "deploy": {
+        "replicas": 1,
+        "placement": {
+          "constraints": [
+            "node.role == manager",
+            "node.id == abc123"
+          ]
+        },
+        "update_config": {
+          "order": "stop-first",
+          "failure_action": "rollback",
+          "monitor": "30s"
+        },
+        "rollback_config": {
+          "order": "stop-first"
+        }
+      }
+    }
+  },
+  "volumes": {
+    "caddy_admin": {
+      "name": "muelle_caddy_admin"
+    },
+    "data": {
+      "name": "muelle_data"
+    }
+  },
+  "secrets": {
+    "init_registry": {
+      "external": true,
+      "name": "muelle_init_registry"
+    },
+    "master_key": {
+      "external": true,
+      "name": "muelle_master_key"
+    }
+  },
+  "networks": {
+    "panel": {
+      "external": true,
+      "name": "muelle_panel"
+    }
+  }
+}

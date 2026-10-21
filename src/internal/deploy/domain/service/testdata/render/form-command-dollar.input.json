@@ -1,0 +1,21 @@
+{
+  "kind": "service",
+  "slug": "echo",
+  "spec": {
+    "image": "alpine:3",
+    "port": 80,
+    "replicas": 1,
+    "command": [
+      "sh",
+      "-c",
+      "echo $HOME && sleep 3600"
+    ],
+    "healthcheck": {
+      "type": "none"
+    },
+    "volumes": []
+  },
+  "images": {
+    "echo": "alpine:3@sha256:c0ffee0000002222222222222222222222222222222222222222222222222222"
+  }
+}

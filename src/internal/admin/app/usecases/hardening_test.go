@@ -30,7 +30,7 @@ func TestPatchSettingsRejectsTokens(t *testing.T) {
 			t.Fatalf("err=%v", err)
 		}
 	}
-	if out, _ := NewGetSettings(adminrepo.NewSettingsRepository(e.db)).Execute(ctx); out.Require2FA {
+	if out, _ := NewGetSettings(adminrepo.NewSettingsRepository(e.db), testCipher()).Execute(ctx, dto.GetSettingsInput{}); out.Require2FA {
 		t.Fatal("un token no debe poder cambiar ajustes")
 	}
 }

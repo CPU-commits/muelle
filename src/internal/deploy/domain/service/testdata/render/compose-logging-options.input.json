@@ -1,0 +1,9 @@
+{
+  "kind": "compose",
+  "slug": "logs",
+  "compose": "services:\n  web:\n    image: nginx:1.27\n    logging:\n      options:\n        max-size: 5m\n        compress: \"true\"\n  quiet:\n    image: alpine:3\n    command: [\"sleep\", \"infinity\"]\n    logging:\n      driver: none\n",
+  "images": {
+    "web": "nginx:1.27@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000",
+    "quiet": "alpine:3@sha256:c0ffee0000002222222222222222222222222222222222222222222222222222"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "kind": "service",
+  "slug": "redis",
+  "spec": {
+    "image": "redis:7",
+    "port": 6379,
+    "replicas": 0,
+    "command": [],
+    "healthcheck": {
+      "type": "none"
+    },
+    "volumes": []
+  },
+  "images": {
+    "redis": "redis:7@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000"
+  }
+}

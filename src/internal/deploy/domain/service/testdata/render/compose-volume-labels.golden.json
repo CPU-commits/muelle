@@ -1,0 +1,73 @@
+{
+  "networks": {
+    "it2g_staging": {
+      "external": true,
+      "name": "it2g_staging"
+    }
+  },
+  "services": {
+    "files": {
+      "deploy": {
+        "labels": {
+          "muelle.app": "files",
+          "muelle.deploy": "145",
+          "muelle.project": "it2g",
+          "muelle.stage": "staging"
+        },
+        "placement": {
+          "constraints": [
+            "node.id == abcdefghijklmnopqrstuvwxy"
+          ]
+        },
+        "rollback_config": {
+          "order": "stop-first",
+          "parallelism": 1
+        },
+        "update_config": {
+          "failure_action": "rollback",
+          "monitor": "30s",
+          "order": "stop-first",
+          "parallelism": 1
+        }
+      },
+      "image": "ghcr.io/x/files:2@sha256:9b2de1f4a7c30000000000000000000000000000000000000000000000000000",
+      "labels": {
+        "muelle.app": "files",
+        "muelle.project": "it2g",
+        "muelle.stage": "staging"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "networks": [
+        "it2g_staging"
+      ],
+      "read_only": true,
+      "tmpfs": [
+        "/tmp"
+      ],
+      "volumes": [
+        {
+          "source": "uploads",
+          "target": "/srv/uploads",
+          "type": "volume",
+          "volume": {
+            "nocopy": true
+          }
+        }
+      ]
+    }
+  },
+  "volumes": {
+    "uploads": {
+      "labels": {
+        "backup": "daily",
+        "owner": "files"
+      }
+    }
+  }
+}

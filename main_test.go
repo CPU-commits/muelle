@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/base64"
 	jsonv2 "encoding/json/v2"
 	"log/slog"
@@ -14,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CPU-commits/muelle/src/cmd/install"
+	"github.com/CPU-commits/muelle/src/cmd/settingscli"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
 )
 
@@ -51,15 +54,21 @@ func TestRunUsage(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
 		code int
+		use  string // el uso que se espera; "" es el de muelle
 	}{
-		{nil, 2},
-		{[]string{"otro"}, 2},
-		{[]string{"serve", "extra"}, 2},
-		{[]string{"genkey", "extra"}, 2},
-		{[]string{"genkey", "-h"}, 2},
-		{[]string{"-h"}, 0},
-		{[]string{"--help"}, 0},
-		{[]string{"help"}, 0},
+		{nil, 2, ""},
+		{[]string{"otro"}, 2, ""},
+		{[]string{"serve", "extra"}, 2, ""},
+		{[]string{"genkey", "extra"}, 2, ""},
+		{[]string{"genkey", "-h"}, 2, ""},
+		{[]string{"version", "extra"}, 2, ""},
+		{[]string{"-h"}, 0, ""},
+		{[]string{"--help"}, 0, ""},
+		{[]string{"help"}, 0, ""},
+		// muelle settings muestra su propio uso.
+		{[]string{"settings"}, 2, settingscli.Usage},
+		{[]string{"settings", "x"}, 2, settingscli.Usage},
+		{[]string{"settings", "-h"}, 0, settingscli.Usage},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := run(tc.args, &stdout, &stderr)
@@ -71,12 +80,28 @@ func TestRunUsage(t *testing.T) {
 		if tc.code == 0 {
 			out, other = &stdout, &stderr
 		}
-		if !strings.Contains(out.String(), usage) {
+		use := cmp.Or(tc.use, usage)
+		if !strings.Contains(out.String(), use) {
 			t.Errorf("%q: falta el uso en la salida: %q", tc.args, out.String())
 		}
 		if other.Len() != 0 {
 			t.Errorf("%q: salida inesperada: %q", tc.args, other.String())
 		}
+	}
+}
+
+// muelle version imprime la versión con que se compiló el binario (contrato
+// §5.1): la imagen la fija con -ldflags "-X main.version=…", y sin eso es dev.
+func TestRunVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"version"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("código %d: %s", code, stderr.String())
+	}
+	if stdout.String() != "dev\n" {
+		t.Errorf("stdout=%q, esperaba \"dev\\n\"", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr=%q", stderr.String())
 	}
 }
 
@@ -110,6 +135,8 @@ func serveEnv(t *testing.T, listen, key string) string {
 	t.Setenv("MUELLE_PANEL_ORIGIN", "http://127.0.0.1:8080")
 	t.Setenv("MUELLE_SECURE_COOKIES", "false")
 	t.Setenv("GOMEMLIMIT", "")
+	// Nunca el Docker real de la máquina: un socket que no existe.
+	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "sin-docker.sock"))
 
 	// serve cambia el logger por defecto y el límite de memoria del proceso.
 	prevLog := slog.Default()
@@ -196,5 +223,100 @@ func TestRunServeMemoryLimit(t *testing.T) {
 				t.Errorf("límite %d, esperaba %d", got, tc.want)
 			}
 		})
+	}
+}
+
+// La línea del link de setup lleva event=setup_url y la url completa: install
+// (Fase 5) la busca en los logs del servicio para imprimirla (§3.3 paso 8).
+func TestLogSetupURL(t *testing.T) {
+	var out bytes.Buffer
+	if err := logSetupURL(slog.New(slog.NewJSONHandler(&out, nil)), "https://panel.example.com", "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	m := lastLogLine(t, out.String())
+	if m["level"] != "INFO" || m["event"] != "setup_url" || m["url"] != "https://panel.example.com/setup?token=abc123" {
+		t.Fatalf("log=%v", m)
+	}
+}
+
+// Sin origen del panel (los ajustes no se pudieron leer) no sale un link
+// relativo, que no abre nada: logSetupURL devuelve un error sin el token, y
+// serve termina con él (el próximo arranque arma un link nuevo).
+func TestLogSetupURLWithoutOrigin(t *testing.T) {
+	var out bytes.Buffer
+	err := logSetupURL(slog.New(slog.NewJSONHandler(&out, nil)), "", "abc123")
+	if err == nil || !strings.Contains(err.Error(), "origen del panel") || strings.Contains(err.Error(), "abc123") {
+		t.Fatalf("err=%v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("no deja ningún link en el log: %s", out.String())
+	}
+}
+
+// muelle settings reset-panel-ips fuera del contenedor de muelle (sin su
+// entorno) termina con 1, sin tocar DataDir, y dice que se corre con docker
+// exec (contrato §5.4).
+func TestRunSettingsOutsideContainer(t *testing.T) {
+	dataDir := serveEnv(t, "127.0.0.1:0", "")
+	t.Setenv("MUELLE_PANEL_ORIGIN", "")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "reset-panel-ips"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("código %d, esperaba 1\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "MUELLE_PANEL_ORIGIN") || !strings.Contains(stderr.String(), "docker exec") {
+		t.Errorf("stderr=%q", stderr.String())
+	}
+	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+		t.Errorf("no se debió crear DataDir: %v", err)
+	}
+}
+
+// muelle install muestra su propio uso: a stdout con -h, y a stderr (código
+// 2) con un flag que no existe o sin los obligatorios. Ninguno toca Docker.
+func TestRunInstallUsage(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "sin-docker.sock"))
+	for _, tc := range []struct {
+		args []string
+		code int
+		want string // además del uso
+	}{
+		{[]string{"install", "--nope"}, 2, "muelle install: "},
+		{[]string{"install"}, 2, "--panel-domain"},
+		{[]string{"install", "--panel-domain", "panel.example.com", "--email", "x"}, 2, "--email"},
+		{[]string{"install", "-h"}, 0, ""},
+		{[]string{"install", "--help"}, 0, ""},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(tc.args, &stdout, &stderr); code != tc.code {
+			t.Errorf("%q: código %d, esperaba %d", tc.args, code, tc.code)
+		}
+		out, other := &stderr, &stdout
+		if tc.code == 0 {
+			out, other = &stdout, &stderr
+		}
+		if !strings.Contains(out.String(), install.Usage) || !strings.Contains(out.String(), tc.want) {
+			t.Errorf("%q: salida=%q", tc.args, out.String())
+		}
+		if other.Len() != 0 {
+			t.Errorf("%q: salida inesperada: %q", tc.args, other.String())
+		}
+	}
+}
+
+// La línea de "muelle escuchando" lleva event=listening: install la espera
+// después del setup_url (contrato §5.4). Lleva también el origen del panel
+// (panel), con el que install dice dónde entrar si ya hay usuarios; sin
+// origen, no va.
+func TestLogListening(t *testing.T) {
+	var out bytes.Buffer
+	logListening(slog.New(slog.NewJSONHandler(&out, nil)), "[::]:8080", "https://panel.example.com:9443")
+	m := lastLogLine(t, out.String())
+	if m["level"] != "INFO" || m["event"] != "listening" || m["addr"] != "[::]:8080" || m["panel"] != "https://panel.example.com:9443" {
+		t.Fatalf("log=%v", m)
+	}
+	out.Reset()
+	logListening(slog.New(slog.NewJSONHandler(&out, nil)), "[::]:8080", "")
+	if m := lastLogLine(t, out.String()); m["event"] != "listening" || m["panel"] != nil {
+		t.Fatalf("sin origen: log=%v", m)
 	}
 }

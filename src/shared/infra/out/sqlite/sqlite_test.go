@@ -50,6 +50,8 @@ func TestMigrateCreatesTables(t *testing.T) {
 	ctx := context.Background()
 	for _, table := range []string{
 		"projects", "stages", "apps", "env_vars", "users", "invites", "sessions", "api_tokens", "audit_events", "settings",
+		"deploys", "registries", // 0002, Fase 2
+		"domains", // 0003, Fase 3
 	} {
 		var name string
 		err := d.Conn(ctx).QueryRowContext(ctx,
@@ -70,8 +72,12 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := d.Conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Fatalf("schema_migrations tiene %d filas, esperaba 1", n)
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(entries) || n < 3 {
+		t.Fatalf("schema_migrations tiene %d filas, esperaba una por migración (%d)", n, len(entries))
 	}
 }
 

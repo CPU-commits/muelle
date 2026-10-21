@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -41,15 +42,26 @@ func (h *handler) resetUserTOTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// errNoPanelOrigin es un origen del panel vacío al armar el link de una
+// invitación: los ajustes no se pudieron leer (admin deja el error en el
+// log). Un link relativo no abre nada, así que es un 500.
+var errNoPanelOrigin = errors.New("identity: sin origen del panel para el link de la invitación")
+
+// createInvite pregunta el origen del panel antes de crear la invitación:
+// sin él responde 500 internal, sin crearla ni auditarla.
 func (h *handler) createInvite(w http.ResponseWriter, r *http.Request) {
+	origin := h.panelOrigin(r.Context())
+	if origin == "" {
+		h.k.Fail(w, r, errNoPanelOrigin)
+		return
+	}
 	p := principal(r)
 	inv, err := h.uc.CreateInvite.Execute(r.Context(), dto.CreateInviteInput{CreatedBy: p.UserID, CreatorUsername: p.Username})
 	if err != nil {
 		h.k.Fail(w, r, err)
 		return
 	}
-	url := h.panelOrigin + "/invite/" + inv.Token
-	utils.WriteJSON(w, http.StatusCreated, inviteRes{URL: url, ExpiresAt: inv.ExpiresAt})
+	utils.WriteJSON(w, http.StatusCreated, inviteRes{URL: origin + "/invite/" + inv.Token, ExpiresAt: inv.ExpiresAt})
 }
 
 func (h *handler) listTokens(w http.ResponseWriter, r *http.Request) {

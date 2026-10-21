@@ -1,0 +1,62 @@
+name: muelle deploy
+description: "Sincroniza las variables de una app de muelle, la despliega y sigue el log hasta el resultado."
+author: CPU-commits
+inputs:
+  url:
+    description: "Origen del panel de muelle, sin ruta (https://panel.tudominio.cl). http:// solo con localhost o 127.0.0.1"
+    required: true
+  token:
+    description: "Token de API de muelle (mk_…), con alcance a la app"
+    required: true
+  app:
+    description: "La app: proyecto/stage/app"
+    required: true
+  image:
+    description: "La imagen de una app de formulario (ghcr.io/org/app:tag). Sin image ni images-json, redespliega las imágenes actuales"
+    required: false
+    default: ""
+  images-json:
+    description: "Las imágenes de una app compose, un objeto JSON servicio → imagen; solo los servicios que cambian. No va junto con image"
+    required: false
+    default: ""
+  env-json:
+    description: "Las variables de la app, un objeto JSON de strings (toJson(secrets)). Reemplaza todas las de la app"
+    required: false
+    default: ""
+  env-exclude:
+    description: "Claves de env-json que no se mandan, separadas por coma (siempre se excluyen GITHUB_TOKEN, MUELLE_URL y MUELLE_TOKEN)"
+    required: false
+    default: ""
+  env-secret:
+    description: "Guardar las variables como secretas (true o false)"
+    required: false
+    default: "true"
+  timeout:
+    description: "Segundos de espera, desde que se creó el deploy"
+    required: false
+    default: "600"
+outputs:
+  deploy-id:
+    description: "Id del deploy"
+    value: ${{ steps.deploy.outputs.deploy-id }}
+  status:
+    description: "Estado final, o el último que vio si se pasó el timeout"
+    value: ${{ steps.deploy.outputs.status }}
+runs:
+  using: composite
+  steps:
+    - id: deploy
+      shell: bash
+      # Las entradas van solo por env: dentro de run: una entrada podría inyectar
+      # comandos (diseño §14).
+      env:
+        INPUT_URL: ${{ inputs.url }}
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_APP: ${{ inputs.app }}
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_IMAGES_JSON: ${{ inputs.images-json }}
+        INPUT_ENV_JSON: ${{ inputs.env-json }}
+        INPUT_ENV_EXCLUDE: ${{ inputs.env-exclude }}
+        INPUT_ENV_SECRET: ${{ inputs.env-secret }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+      run: bash "$GITHUB_ACTION_PATH/deploy.sh"

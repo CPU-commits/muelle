@@ -18,6 +18,7 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/admin"
 	"github.com/CPU-commits/muelle/src/settings"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
+	"github.com/CPU-commits/muelle/src/shared/infra/out/docker/dockertest"
 )
 
 // testSettings devuelve la configuración de un muelle de prueba: la base en
@@ -46,10 +47,11 @@ func testLogger(t *testing.T) *slog.Logger {
 	return slog.New(slog.NewTextHandler(t.Output(), nil))
 }
 
-// newTestContainer arma el contenedor completo y lo cierra al terminar el test.
+// newTestContainer arma el contenedor completo, con un Docker en memoria
+// (dockertest: los tests nunca tocan el Docker real), y lo cierra al terminar el test.
 func newTestContainer(t *testing.T) *Container {
 	t.Helper()
-	c, err := New(context.Background(), testSettings(t), testLogger(t))
+	c, err := New(context.Background(), testSettings(t), testLogger(t), WithDocker(dockertest.New()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,24 +61,25 @@ func newTestContainer(t *testing.T) *Container {
 
 func TestNew(t *testing.T) {
 	s := testSettings(t)
-	c, err := New(context.Background(), s, testLogger(t))
+	c, err := New(context.Background(), s, testLogger(t), WithDocker(dockertest.New()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
 
-	if c.DB == nil || c.Identity == nil || c.Catalog == nil || c.Secrets == nil || c.Admin == nil || c.Server == nil {
+	if c.DB == nil || c.Identity == nil || c.Catalog == nil || c.Secrets == nil || c.Admin == nil || c.Server == nil ||
+		c.Deploy == nil || c.Ingress == nil || c.Docker == nil {
 		t.Fatalf("faltan piezas: %+v", c)
 	}
 	if _, err := os.Stat(filepath.Join(s.DataDir, "muelle.db")); err != nil {
 		t.Fatalf("la base no está en <DataDir>/muelle.db: %v", err)
 	}
-	// identity (sesiones vencidas) + admin (retención de auditoría y backup diario).
+	// identity (sesiones vencidas) + admin (retención de auditoría y backup diario) + ingress (proxy y certificados).
 	names := make([]string, 0, len(c.Jobs))
 	for _, j := range c.Jobs {
 		names = append(names, j.Name)
 	}
-	if got := strings.Join(names, ", "); got != "sesiones vencidas, retención de auditoría, backup diario" {
+	if got := strings.Join(names, ", "); got != "sesiones vencidas, retención de auditoría, backup diario, proxy, certificados" {
 		t.Fatalf("jobs=%s", got)
 	}
 
@@ -102,7 +105,7 @@ func TestAdminRoutesWired(t *testing.T) {
 // identity recibe PanelOrigin: el link de una invitación empieza con él.
 func TestInviteURLUsesPanelOrigin(t *testing.T) {
 	s := testSettings(t)
-	c, err := New(context.Background(), s, testLogger(t))
+	c, err := New(context.Background(), s, testLogger(t), WithDocker(dockertest.New()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +123,7 @@ func TestInviteURLUsesPanelOrigin(t *testing.T) {
 // admin recibe DataDir: el job "backup diario" deja la copia en <DataDir>/backups.
 func TestBackupJobWritesUnderDataDir(t *testing.T) {
 	s := testSettings(t)
-	c, err := New(context.Background(), s, testLogger(t))
+	c, err := New(context.Background(), s, testLogger(t), WithDocker(dockertest.New()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +145,7 @@ func TestBackupJobWritesUnderDataDir(t *testing.T) {
 // Con otra clave maestra sobre la misma base, muelle no arranca (§12 del spec).
 func TestNewWrongMasterKey(t *testing.T) {
 	s := testSettings(t)
-	c, err := New(context.Background(), s, testLogger(t))
+	c, err := New(context.Background(), s, testLogger(t), WithDocker(dockertest.New()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +155,7 @@ func TestNewWrongMasterKey(t *testing.T) {
 
 	other := s
 	other.MasterKeyFile = writeKey(t, t.TempDir(), "otra")
-	c, err = New(context.Background(), other, testLogger(t))
+	c, err = New(context.Background(), other, testLogger(t), WithDocker(dockertest.New()))
 	if err == nil {
 		c.Close()
 		t.Fatal("con otra clave maestra New no debió armar el contenedor")
@@ -162,7 +165,7 @@ func TestNewWrongMasterKey(t *testing.T) {
 	}
 
 	// El intento fallido no cambia nada: la clave original sigue sirviendo.
-	c, err = New(context.Background(), s, testLogger(t))
+	c, err = New(context.Background(), s, testLogger(t), WithDocker(dockertest.New()))
 	if err != nil {
 		t.Fatalf("con la clave original: %v", err)
 	}
@@ -184,7 +187,7 @@ func TestNewRequiresPanelOriginAndDataDir(t *testing.T) {
 			s := testSettings(t)
 			dataDir := s.DataDir
 			tc.edit(&s)
-			c, err := New(context.Background(), s, testLogger(t))
+			c, err := New(context.Background(), s, testLogger(t), WithDocker(dockertest.New()))
 			if err == nil {
 				c.Close()
 				t.Fatal("New debió fallar")
@@ -216,7 +219,7 @@ func TestNewBadMasterKey(t *testing.T) {
 			} else if err := os.WriteFile(s.MasterKeyFile, []byte(tc.content+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			c, err := New(context.Background(), s, testLogger(t))
+			c, err := New(context.Background(), s, testLogger(t), WithDocker(dockertest.New()))
 			if err == nil {
 				c.Close()
 				t.Fatal("New debió fallar")
