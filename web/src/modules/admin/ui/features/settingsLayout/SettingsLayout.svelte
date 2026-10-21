@@ -11,6 +11,6 @@
 </script>
 
 <PageHeader title={m.nav_settings()} />
-<SubNavLayout label={m.admin_nav_label()} items={vm.items}>
+<SubNavLayout label={m.admin_nav_label()} items={vm.items} spy={vm.sections}>
 	{@render children()}
 </SubNavLayout>
