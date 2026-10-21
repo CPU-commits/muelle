@@ -186,7 +186,7 @@ describe('tokens', () => {
 		expect(lastAudit()).toMatchObject({ action: 'token.delete', target: 'token:2' })
 	})
 
-	it('un backend que todavía no manda created_by funciona igual', async () => {
+	it('un token sin created_by no es del contrato (ContractError)', async () => {
 		server.use(
 			http.get(api('/tokens'), () =>
 				HttpResponse.json([
@@ -202,10 +202,10 @@ describe('tokens', () => {
 			),
 		)
 
-		const [token] = await identityUseCases.listTokens()
-
-		expect(token?.createdBy).toEqual({ kind: 'unknown' })
-		expect(token?.createdAt.toISOString()).toBe('2026-10-10T19:36:53.123Z')
+		// El backend lo manda siempre (null si se borró el usuario que lo creó).
+		await expect(identityUseCases.listTokens()).rejects.toMatchObject({
+			name: 'ContractError',
+		})
 	})
 })
 

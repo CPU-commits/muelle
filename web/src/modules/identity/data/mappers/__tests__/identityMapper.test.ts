@@ -11,17 +11,18 @@ import {
 	userFromDto,
 } from '../identityMapper'
 
-// Sin las dos claves que pueden faltar: `stage` (omitempty) y `created_by` (backend viejo).
+// Sin `stage`, la única clave que puede faltar (omitempty: un token de todo el proyecto).
 const TOKEN_BASE = {
 	id: 7,
 	name: 'github-actions',
 	project: 'auditfy',
+	created_by: 'felipe',
 	created_at: '2026-10-10T19:36:53.770Z',
 	last_used_at: null,
 	expires_at: '2026-12-31T19:36:53.770Z',
 }
 
-const TOKEN_DTO = { ...TOKEN_BASE, stage: 'staging', created_by: 'felipe' }
+const TOKEN_DTO = { ...TOKEN_BASE, stage: 'staging' }
 
 describe('identityMapper', () => {
 	it('traduce un usuario de snake_case al dominio', () => {
@@ -63,10 +64,10 @@ describe('identityMapper', () => {
 		expect(token.createdBy).toEqual({ kind: 'deleted' })
 	})
 
-	it('un backend que no manda created_by deja el creador como desconocido', () => {
-		const parsed = tokenDtoSchema.parse({ ...TOKEN_BASE, stage: 'staging' })
-
-		expect(tokenFromDto(parsed).createdBy).toEqual({ kind: 'unknown' })
+	it('created_by viene siempre (un username o null): sin él no es un token', () => {
+		const { created_by: _creator, ...missing } = TOKEN_DTO
+		expect(_creator).toBe('felipe')
+		expect(tokenDtoSchema.safeParse(missing).success).toBe(false)
 	})
 
 	it('acepta fechas UTC con milisegundos y RFC 3339 con offset', () => {

@@ -27,11 +27,8 @@ export const tokenDtoSchema = z.object({
 	project: z.string().min(1),
 	/** `omitempty`: falta si el token es de todo el proyecto. */
 	stage: z.string().optional(),
-	/**
-	 * El username de quien lo creó, o null si ese usuario se borró (el token sigue). Falta
-	 * en un backend anterior a este campo.
-	 */
-	created_by: z.string().nullable().optional(),
+	/** El username de quien lo creó, o null si ese usuario se borró (el token sigue). */
+	created_by: z.string().nullable(),
 	created_at: timestamp,
 	last_used_at: timestamp.nullable(),
 	expires_at: timestamp.nullable(),
