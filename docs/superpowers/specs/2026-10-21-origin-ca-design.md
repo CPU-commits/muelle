@@ -1058,7 +1058,7 @@ Cada paso es rojo → verde. `pnpm codegen` después de tocar `messages/`.
 8. `domainLabels.ts` y `DomainCard.svelte`, con su test de componente.
 9. `ProxySettings.viewModel.svelte.ts` y `ProxySettings.svelte` (el switch, la confirmación al apagar, los errores, la línea del panel y la nota), con el test del viewModel.
 10. Los E2E (`ajustes.e2e.ts`, `deployIngress.e2e.ts`).
-11. `src/modules/ingress/README.md` y `web/CLAUDE.md`.
+11. `src/modules/ingress/README.md` y `web/CLAUDE.md`. Hasta este paso, los dos dicen algo que ya no vale: la sección "Diferencias con el contrato" del README tiene una nota (del Paso 0a) que dice que §3.7 falta en el panel, y `web/CLAUDE.md` ("Las fases 2, 3 y 5") dice que el README resume el contrato "sin diferencias". Este paso suma los campos y los estados al README, borra esa nota y deja `web/CLAUDE.md` como en §11.2. El Paso 0a no tocó nada más de `web/`.
 12. `pnpm verify`, `pnpm build` y `pnpm test:e2e`.
 
 **El punto de encuentro:**

@@ -273,4 +273,8 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
 
 ## Diferencias con el contrato
 
-Ninguna: lo de arriba es lo que dice el contrato.
+Ninguna en lo de arriba. Falta lo de los certificados de Cloudflare (Origin CA, contrato §3.7):
+`cert_source` y `origin_ca` en el dominio, `panel_certificate` en `GET /proxy` y
+`cloudflare_origin_ca` en `/settings`. El contrato ya los tiene y el panel todavía no: los suma
+la línea 2 del diseño de Origin CA (`docs/superpowers/specs/2026-10-21-origin-ca-design.md`,
+§14), que también borra esta nota.
