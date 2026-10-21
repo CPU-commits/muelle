@@ -180,7 +180,7 @@ func TestSaveZonesCompareAndSet(t *testing.T) {
 	if v := zones(); v != "3" {
 		t.Fatalf("cloudflare_zones = %q", v)
 	}
-	// Otro token (el guardado cambió mientras se listaban las zonas): no se pisa.
+	// Otro token (el guardado cambió al listar las zonas): no se pisa.
 	if saved, err := r.SaveZones(ctx, "t2", 5); err != nil || saved {
 		t.Fatalf("otro token: saved=%v %v", saved, err)
 	}
@@ -190,7 +190,7 @@ func TestSaveZonesCompareAndSet(t *testing.T) {
 	if saved, err := r.SaveZones(ctx, "", 5); err != nil || saved {
 		t.Fatalf("token vacío: saved=%v %v", saved, err)
 	}
-	// Un token guardado que no se puede descifrar es un error, y no se guarda.
+	// Un token guardado que no se descifra es un error, y no se guarda.
 	setRaw(t, db, entity.SettingCloudflareToken, c.Encrypt([]byte("t1"), "settings:otra"), true)
 	if saved, err := r.SaveZones(ctx, "t1", 7); err == nil || saved {
 		t.Fatalf("token con otra AAD: saved=%v %v", saved, err)
@@ -217,7 +217,7 @@ func TestRollbackPortsCompareAndSet(t *testing.T) {
 	}
 	old := service.ProxyPorts{HTTPPort: 8080, HTTPSPort: 8443}
 
-	// Sin las claves (80 y 443, los de por defecto) fallaron: vuelve a 8080/8443.
+	// Sin claves fallaron los de por defecto (80/443): vuelve a 8080/8443.
 	saved, err := r.RollbackPorts(ctx, service.ProxyPorts{HTTPPort: 80, HTTPSPort: 443}, old)
 	if err != nil || !saved || ports() != old {
 		t.Fatalf("desde los de por defecto: %v %v %+v", saved, err, ports())
