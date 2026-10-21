@@ -1,24 +1,18 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import {
-	copyFileSync,
-	createWriteStream,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	writeFileSync,
-} from 'node:fs'
+import { createWriteStream, existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { realCaddy, removeOwned, swarmManager, sweepStale } from './docker'
 import { PREFIX, publishRun, REAL_PORT, REAL_URL } from './env'
+import { cleanUpRun } from './teardown'
 
 // Arranca el `muelle serve` del recorrido (journey.real.ts) con una base nueva y devuelve la
 // limpieza, que Playwright corre al final aunque los tests fallen: para muelle, borra todo
 // lo de Docker del proyecto de la corrida (it7p<id>), guarda el log de muelle en
-// test-results/real-muelle.log y borra la carpeta temporal.
+// test-results/real-muelle.log y borra la carpeta temporal (teardown.ts: el log y la carpeta,
+// aunque falle el CLI de docker).
 //
 // El binario lo compila scripts/e2e-real.mjs (con -tags panel y el build de web/) y llega
 // en MUELLE_E2E_BIN. El entorno de muelle es el de desarrollo por http: MUELLE_PANEL_ORIGIN
@@ -135,16 +129,18 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 	child.stderr.pipe(out, { end: false })
 
 	const teardown = async (): Promise<void> => {
-		await stop(child, childClosed)
-		out.end()
-		await closed
-		const left = await removeOwned(project)
-		mkdirSync(resolve('test-results'), { recursive: true })
-		if (existsSync(logPath)) copyFileSync(logPath, LOG_COPY)
-		rmSync(dir, { recursive: true, force: true })
-		log(`log de muelle: ${LOG_COPY}`)
-		if (left.length > 0)
-			throw new Error(`no se pudo borrar lo de ${project}: ${left.join(', ')}`)
+		try {
+			await stop(child, childClosed)
+			out.end()
+			await closed
+		} finally {
+			log(`log de muelle: ${LOG_COPY}`)
+			await cleanUpRun(
+				{ dir, logPath, logCopy: LOG_COPY },
+				() => removeOwned(project),
+				project,
+			)
+		}
 	}
 
 	try {

@@ -822,8 +822,10 @@ violaciones de CSP y los errores de la consola, como los de `e2e/`.
   limpieza de `globalSetup.ts` corre al final aunque el test falle o se corte con Ctrl-C:
   apaga muelle, borra los stacks, las redes y los volúmenes de `it7p<id>` y deja el log de
   muelle en `test-results/real-muelle.log` (con la traza de Playwright en
-  `test-results/real/`). Al empezar, borra lo `it7p…` de más de 30 min (una corrida que
-  murió con SIGKILL).
+  `test-results/real/`). El log y el borrado de la carpeta temporal (la clave maestra y la
+  base) van aunque falle el CLI de docker (`teardown.ts`, con sus tests en
+  `teardown.test.ts`); lo que quedó de Docker se avisa después. Al empezar, borra lo `it7p…`
+  de más de 30 min (una corrida que murió con SIGKILL).
 - Un test nuevo va en `e2e-real/*.real.ts`, con los mismos selectores que `e2e/` (roles y
   textos en español). Lo que necesite de Docker, por `e2e-real/docker.ts` y solo con nombres
   `it7p<id>`.
