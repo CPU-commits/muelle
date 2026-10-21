@@ -838,8 +838,7 @@ Los campos nuevos son **obligatorios** en los DTOs, como los demás que sumaron 
     - que las claves quedan cifradas en la base y en claro en el autosave de Caddy;
     - que con el panel en Origin CA hay que entrar por Cloudflare;
     - que al apagarlos puede haber un `525` mientras Caddy emite el de Let's Encrypt.
-- **Diseño:** lo de §10.4.
-- **Contrato:** lo de §10.2.
+- **Diseño y contrato:** lo de §10.4 y §10.2, ya hecho (Paso 0a). Si una de las líneas encuentra algo que no se puede cumplir, el cambio se acuerda antes (contrato §1.3) y va a los tres documentos.
 - **`shared/infra/out/crypto/crypto.go`:** la AAD nueva en la lista canónica.
 - **El comentario del paquete `ingress` (`module.go`):** suma "los certificados de Cloudflare (Origin CA)".
 - **`deploy/caddy/Dockerfile`:** sin cambios (`load_pem` es del núcleo). Opcional: una línea en el comentario que diga que la imagen no necesita nada más para Origin CA.
