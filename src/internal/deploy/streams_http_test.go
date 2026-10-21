@@ -135,10 +135,13 @@ func newStreamTestOn(t *testing.T, h *httpTest, cfg dephttp.SSEConfig, configure
 	return &streamTest{httpTest: h, auth: auth, srv: srv}
 }
 
-// get hace un GET al servidor de verdad; el cuerpo se cierra al terminar el test.
+// get hace un GET al servidor de verdad; el cuerpo se cierra al terminar el
+// test. El pedido va con t.Context(), que se cancela antes de las limpiezas:
+// el cliente corta la conexión, y ningún Close del cuerpo (ni el lector de
+// readSSE) se queda esperando a un stream que sigue abierto.
 func (h *streamTest) get(t *testing.T, path string, opts ...httptestutil.Opt) *http.Response {
 	t.Helper()
-	req, err := http.NewRequest("GET", h.srv.URL+path, nil)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", h.srv.URL+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,15 +460,28 @@ func TestSSEMaxDuration(t *testing.T) {
 func TestSSEClosesOnModuleStop(t *testing.T) {
 	h := newStreamTest(t, testSSE())
 	api, _, _ := h.seed(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { h.m.Run(ctx); close(done) }()
-	t.Cleanup(func() { cancel(); <-done })
-	// Un queued que el despachador no conoce (sin Wake): sigue queued.
+	// Un queued que el despachador no conoce, así sigue queued: sin Wake, y
+	// con el despachador ya arrancado sin apps antes de Run. El arranque de
+	// Run lee ActiveApps (que sí lo trae) y llama a Start, que ya no hace
+	// nada; si no, según quién llegue antes, el worker lo reclamaba y el
+	// stream empezaba con running o con su log.
 	d := &entity.Deploy{AppID: api, Trigger: entity.TriggerPanel, ActorType: entity.ActorUser, ActorName: "felipe", CreatedAt: t0}
 	if err := depsqlite.NewDeployRepository(h.db).Create(context.Background(), d); err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	h.m.dispatcher.Start(ctx, nil)
+	done := make(chan struct{})
+	go func() { h.m.Run(ctx); close(done) }()
+	// La limpieza no se queda esperando a Run si el test falló.
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("Run no volvió después de cancelar su ctx")
+		}
+	})
 	r := h.stream(t, logStreamPath(d.ID), sessionOf("s"))
 	r.expect(t, "status", "queued")
 	cancel()

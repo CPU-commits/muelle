@@ -66,7 +66,8 @@ func NewDispatcher(run *RunDeploy, log *slog.Logger) *Dispatcher {
 
 // Start arranca un worker por cada app de apps (las que tienen un deploy
 // queued o running, ActiveApps) y por cada Wake anterior. Los workers corren
-// hasta que ctx se cancela; después hay que llamar a Wait.
+// hasta que ctx se cancela; después hay que llamar a Wait. Una segunda
+// llamada no hace nada.
 func (d *Dispatcher) Start(ctx context.Context, apps []int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
