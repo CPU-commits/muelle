@@ -348,7 +348,7 @@ Por qué se pide el proxy en muelle **y** en Cloudflare:
 
 ### 5.3 Cuándo se emite y cuándo se renueva
 
-En cada pasada (§5.5), para cada candidato con `observed == proxied` cuyo backoff ya venció (`next_attempt_at <= now`):
+En cada pasada (§5.5), para cada candidato con `observed == proxied` cuyo backoff ya venció (`next_attempt_at <= now`, o NULL: sin una falla no espera):
 - **Se emite** si no tiene un certificado `active`, si el que tiene es de otra zona, o si su hostname no coincide;
 - **se renueva** si el `active` vence en menos de 30 días (`OriginCARenewBefore = 30 * 24h`). Cada renovación lleva una clave nueva.
 - Hay un certificado por hostname (`hostnames: [hostname]`). Así el ciclo de vida y la revocación van uno a uno con el dominio.
@@ -409,7 +409,9 @@ CREATE TABLE origin_ca_hosts (
   next_attempt_at INTEGER,
   updated_at      INTEGER NOT NULL,
   CHECK ((last_error_code IS NULL) = (last_error IS NULL)),
-  CHECK ((failures = 0) = (last_error_code IS NULL))
+  CHECK ((failures = 0) = (last_error_code IS NULL)),
+  -- Con una falla, siempre hay un reintento: retry_at nunca es null con error_code.
+  CHECK ((failures = 0) = (next_attempt_at IS NULL))
 );
 ```
 
@@ -642,7 +644,7 @@ Lo reinician:
 - un `PATCH /settings` que enciende la opción o cambia el token;
 - una emisión que sale bien.
 
-Reiniciarlo (`ResetBackoff`, en los dos primeros casos) pone `next_attempt_at` en la hora del pedido y deja `failures`, `last_error_code` y `last_error`: el aviso se sigue viendo hasta que la pasada que se despierta emite o vuelve a fallar. Solo una emisión que sale bien borra la falla. Mientras tanto, `retry_at` es la hora de ese pedido (en el pasado).
+Reiniciarlo (`ResetBackoff`, en los dos primeros casos) pone `next_attempt_at` en la hora del pedido, solo en los hosts con una falla (sin falla queda NULL, por el `CHECK` de §5.4), y deja `failures`, `last_error_code` y `last_error`: el aviso se sigue viendo hasta que la pasada que se despierta emite o vuelve a fallar. Solo una emisión que sale bien borra la falla, con `next_attempt_at`. Mientras tanto, `retry_at` es la hora de ese pedido (en el pasado).
 
 **El panel no tiene `retry`** (no está en `domains`): el suyo lo reinicia solo un `PATCH /settings` que cambia el token (encender la opción, para el panel, es apagarla y encenderla, que revoca los de todos los dominios). Por eso su causa `permission` no nombra Reintentar (§9.3), y Ajustes no tiene un botón para él (§11.1). Mandar otra vez `cloudflare_origin_ca: true`, o el mismo token, no es un cambio (§3.2) y no reinicia nada.
 
@@ -674,7 +676,7 @@ Con 100 dominios con proxy son unas 100 llamadas cada 5 min, contra 1200. Al enc
     - `cloudflare`: `Cloudflare no respondió (<detalle>); se reintenta solo`;
     - `rejected`: `Cloudflare lo rechazó (<mensaje>)`, o `Cloudflare devolvió un certificado que no sirve (<motivo>)`.
   - Las fechas van con `shortDate` ("2 ene 2027"), y los mensajes de Cloudflare se cortan a 300 runas y nunca traen el token.
-- `retry_at` es `next_attempt_at`.
+- `retry_at` es `next_attempt_at`, que con una falla guardada nunca es null (§5.4).
 - `error_code`, `error` y `retry_at` van solo con `failed` y con `active` (una renovación que falló). Con los demás estados son null, aunque `origin_ca_hosts` todavía tenga la falla (un dominio que pasó a DNS only después de fallar).
 - Una emisión que falla queda en el log (Warn) con el hostname y el código.
 
@@ -869,7 +871,7 @@ Los campos nuevos son **obligatorios** en los DTOs, como los demás que sumaron 
   - `String` y `LogValue` no cambian.
 - **La migración:** `migrations_origin_ca_test.go`:
   - las tablas;
-  - los `CHECK` (`retired` sin `retired_at`, `failures > 0` sin código…);
+  - los `CHECK` (`retired` sin `retired_at`, `failures > 0` sin código o sin `next_attempt_at`…);
   - el índice único parcial: dos `active` del mismo host fallan, y un `active` y un `retired` pasan;
   - la migración corre sobre una base con dominios.
 - **`ingress/domain/service/origin_ca_test.go`** (tablas, puras):

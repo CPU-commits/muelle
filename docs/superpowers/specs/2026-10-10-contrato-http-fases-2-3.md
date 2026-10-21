@@ -885,7 +885,7 @@ Opcionales y apagados por defecto (`cloudflare_origin_ca`, §4). Con la opción 
 | `status` | `active` · `issuing` · `failed` · `dns_only` · `not_eligible` | Abajo, en el orden en que se decide |
 | `error_code` | `permission` · `cloudflare` · `rejected`, o null | El motivo de la última falla, solo con `failed` y con `active` (una renovación que falló, y el actual todavía sirve); null con los demás. `permission`: al token le falta Zone → SSL and Certificates → Edit en esa zona, el usuario dueño del token no tiene "API Access", o la zona es de otra cuenta. `cloudflare`: Cloudflare no respondió (sin red, un 5xx, un 429). `rejected`: Cloudflare rechazó el pedido por otro motivo, o devolvió un certificado que no sirve |
 | `error` | string o null | El mensaje, en español (abajo). Null cuando `error_code` es null |
-| `retry_at` | RFC 3339 o null | Cuándo se reintenta la emisión o la renovación. Null cuando `error_code` es null. Después de un `retry` o de un `PATCH /settings` que reintenta enseguida, es la hora de ese pedido, y queda en el pasado hasta que termina la pasada |
+| `retry_at` | RFC 3339 o null | Cuándo se reintenta la emisión o la renovación. Null cuando `error_code` es null, y nunca null cuando no lo es (con `failed`, y con `active` después de una renovación que falló). Después de un `retry` o de un `PATCH /settings` que reintenta enseguida, es la hora de ese pedido, y queda en el pasado hasta que termina la pasada |
 | `expires_at` | RFC 3339 o null | El vencimiento del certificado de Origin CA vigente que muelle tiene guardado para ese hostname, se sirva o no (por ejemplo, uno a menos de 14 días que todavía no se renovó); null si no tiene. Con `active` nunca es null |
 
 **`status`**, el primero que aplica:
