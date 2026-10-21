@@ -482,26 +482,43 @@ secciones en el orden de la nav y de la página), arma cada item con
 `active: id === (this.sections.current ?? primera)` y `onselect: () => this.sections.select(id)`
 (un link a otra página: `select(null)`), y la pantalla pasa `spy={vm.sections}` a `SubNavLayout`.
 
-- Activa: la última sección que cruzó una línea al 30 % del alto de la pantalla (la que ocupa
-  la parte de arriba); al fondo de la página, la última aunque sea corta ("Eliminar app"). Con
-  IntersectionObserver (`watchSections.ts`), sin escuchar el scroll; las secciones que llegan
-  después con su query las encuentra un MutationObserver.
+- Activa: la que ocupa la parte de arriba de la pantalla (una franja del 30 % del alto). Gana
+  la primera que empieza en la franja (su borde de arriba se ve), aunque sea corta y la
+  siguiente ya asome debajo: una tarjeta a la altura de la nav, donde la deja un salto o volver
+  atrás, es la marcada. Si ninguna empieza ahí, la que viene de más arriba y la ocupa. Al fondo
+  de la página gana la última aunque sea corta ("Eliminar app"), también con un alto de página
+  con decimales (el observer del fondo tiene un píxel de holgura). Con IntersectionObserver
+  (`watchSections.ts`: la franja, lo que está por encima de la pantalla y el fondo), sin
+  escuchar el scroll; las secciones que llegan después con su query las encuentra un
+  MutationObserver.
 - Un link la marca en el acto y la deja marcada durante el salto (no parpadea con las que pasa)
-  y hasta que se scrollea a mano: lo que muestra el scroll cambia respecto de donde terminó el
-  salto. Así "Recursos" sigue marcada aunque el salto deje la página al fondo.
+  y hasta que se scrollea a mano. Así "Recursos" sigue marcada aunque el salto deje la página
+  al fondo.
+- Lo que llega a la página después (en Ajustes, Proxy y DNS y Seguridad con los ajustes,
+  arriba de todo, y cada lista con su query) mueve lo que se ve sin que nadie scrollee.
+  `watchSections` avisa por separado lo que movió el scroll (`view`), lo que cambió el
+  contenido (`layout`: un MutationObserver y un ResizeObserver sobre el contenedor) y que quien
+  lee tocó la página (`input`: `wheel`, `touchmove`, `keydown`, `pointerdown`; eventos de
+  entrada, no del scroll). Mientras no la tocó, un cambio del contenido no suelta la marca: su
+  sección vuelve a la vista (`scrollIntoView`). La suelta que lo que se ve cambie sin que cambie
+  el contenido (quien lee scrolleó, o volvió atrás en el historial), que la toque antes de que
+  llegue la sección (no se la trae) o que la sección se vaya de la página. Nada se infiere del
+  `scrollY`: la página de la que viene un link (Tokens) puede seguir scrolleada hasta que
+  SvelteKit la vuelve arriba.
 - El hash lo pone el link y nada más: scrollear no toca la URL ni el historial.
-- `initial` es el ancla con la que se abrió la página (un deep link): la marca desde el
-  principio. SvelteKit busca el ancla antes de que la sección llegue con su query y no la
-  encuentra: cuando llega, `SectionSpy` la trae a la vista (si la página sigue arriba de todo;
-  con un F5 que recuperó el scroll, no).
+- `initial` es el ancla con la que se abrió la página (un deep link, también un F5 o volver a
+  la página desde otra): la marca desde el principio y la trae a la vista. SvelteKit busca el
+  ancla antes de que la sección llegue con su query y no la encuentra (o la encuentra y lo de
+  arriba la empuja): cuando llega o se mueve, `SectionSpy` la vuelve a traer.
 - Sin scroll suave: los saltos son los del navegador (nada que frenar con
   `prefers-reduced-motion`).
 - Los observers usan `root: document`: en la app es la pantalla, y en los tests de componentes
   también (el iframe de vitest está escalado dentro de su página; con la raíz implícita, la
-  línea sería la de la página de afuera).
+  franja sería la de la página de afuera).
 - Para el test de un viewModel, `subNav/__tests__/fakeIntersectionObserver.ts` trae un
-  IntersectionObserver de mentira (`installFakeObserver`, `band().fire(crossing(ids, 'x'))`) y
-  una página con las secciones (`sectionsPage`) para `vm.sections.track(container)`.
+  IntersectionObserver de mentira (`installFakeObserver`, `band().fire(crossing(ids, 'x'))`;
+  `above().fire(passed(ids, …))` para las que ya empezaron más arriba) y una página con las
+  secciones (`sectionsPage`) para `vm.sections.track(container)`.
 
 ### Paginación
 
