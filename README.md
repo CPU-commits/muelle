@@ -373,7 +373,7 @@ docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle
 - `--no-restart` solo cambia la base e imprime el comando para reiniciar a mano. Mientras tanto, Caddy sigue filtrando con la lista anterior, hasta que muelle le reenvíe la configuración (el job `"proxy"`, cada 5 min).
 - Si no puede reiniciar (Docker no responde, o el contenedor no es una tarea de Swarm), lo dice, imprime el comando para reiniciar a mano y termina con código 1: la base ya quedó cambiada. Fuera del contenedor de muelle (sin su entorno o sin `muelle.db` en `MUELLE_DATA_DIR`) no toca nada, termina con 1 y muestra el `docker exec` de arriba. Con argumentos que no sirven, termina con 2.
 
-**Si el problema son los puertos del proxy.** Si cambiaste `proxy_http_port` o `proxy_https_port` a unos que estaban ocupados, muelle-caddy no arranca en los nuevos ni vuelve solo a los anteriores, y sin Caddy no se llega al panel. Vuelve a poner los de antes directo en la base. La imagen de muelle no trae `sqlite3`, así que se usa un contenedor aparte sobre el mismo volumen (SQLite en modo WAL admite la escritura con muelle corriendo). Cambia `80` y `443` por los puertos que tenías:
+**Si el problema son los puertos del proxy.** Si cambiaste `proxy_http_port` o `proxy_https_port` a unos que estaban ocupados, muelle-caddy no arranca en los nuevos ni vuelve solo a los anteriores, y sin Caddy no se llega al panel. Pon los anteriores u otros libres directo en la base. La imagen de muelle no trae `sqlite3`, así que se usa un contenedor aparte sobre el mismo volumen (SQLite en modo WAL admite la escritura con muelle corriendo). Cambia `80` y `443` por los anteriores u otros libres:
 
 ```bash
 docker run --rm -v muelle_data:/data alpine sh -c \

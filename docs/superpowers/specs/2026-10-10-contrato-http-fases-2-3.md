@@ -885,11 +885,11 @@ Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `public_ip
 docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle | head -n1)" muelle settings reset-panel-ips
 ```
 
-**Si muelle-caddy quedó sin arrancar por los puertos** y muelle no volvió solo a los anteriores (§3.5: no había un muelle-caddy sirviendo, o los anteriores también estaban tomados), sin Caddy no se llega al panel. Se ponen otros que estén libres directo en la base. La imagen de muelle no trae `sqlite3`, así que se usa un contenedor aparte sobre el mismo volumen (SQLite en modo WAL admite la escritura con muelle corriendo):
+**Si muelle-caddy quedó sin arrancar por los puertos** y muelle no volvió solo a los anteriores (§3.5: no había un muelle-caddy sirviendo, o los anteriores también estaban tomados), sin Caddy no se llega al panel. Se ponen los anteriores u otros libres directo en la base. La imagen de muelle no trae `sqlite3`, así que se usa un contenedor aparte sobre el mismo volumen (SQLite en modo WAL admite la escritura con muelle corriendo). En el ejemplo, `80` y `443` se cambian por los anteriores u otros libres:
 
 ```bash
 docker run --rm -v muelle_data:/data alpine sh -c \
-  "apk add -q sqlite && sqlite3 /data/muelle.db \"UPDATE settings SET value='8080' WHERE key='proxy_http_port'; UPDATE settings SET value='8443' WHERE key='proxy_https_port'\""
+  "apk add -q sqlite && sqlite3 /data/muelle.db \"UPDATE settings SET value='80' WHERE key='proxy_http_port'; UPDATE settings SET value='443' WHERE key='proxy_https_port'\""
 ```
 
 Después se reinicia muelle (`docker service update --force muelle_muelle`), o se espera al job `"proxy"` (a lo más 5 min), que recrea el contenedor con esos puertos.
