@@ -179,5 +179,5 @@
 	"deploy_dialog_rollback_pin_services_title": "Services pinned by rollback #{id}: {services}.",
 	"deploy_dialog_digest_pin_title": "The image is pinned to a digest.",
 	"deploy_dialog_digest_pin_services_title": "Services pinned to a digest: {services}.",
-	"deploy_dialog_rollback_pin_body": "Without a new image, that version is repeated with its digest. To follow a tag again (like :staging), type it here or change it in the configuration."
+	"deploy_dialog_pinned_body": "Without a new image, that digest is deployed once more. To use another image or a tag (like :staging), type it here or change it in the configuration."
 }

@@ -194,6 +194,32 @@ describe('DeployDialogViewModel', () => {
 		)
 	})
 
+	it('el texto bajo el aviso sirve para cualquier digest fijo: un rollback, un override o la configuración', async () => {
+		const normal = await mountViewModel(() => new DeployDialogViewModel(() => props()))
+		expect(normal.vm.pinnedBody).toBeNull()
+
+		// Un digest fijado a propósito en la configuración: nada de "volver a seguir un tag".
+		const config = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({ pinned: { rollback: null, services: ['api'] } }),
+				),
+		)
+		expect(config.vm.pinnedBody).toBe(m.deploy_dialog_pinned_body())
+		const rollback = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({ pinned: { rollback: asDeployId(144), services: ['api'] } }),
+				),
+		)
+		expect(rollback.vm.pinnedBody).toBe(m.deploy_dialog_pinned_body())
+		for (const locale of ['es', 'en'] as const) {
+			expect(m.deploy_dialog_pinned_body({}, { locale })).not.toMatch(
+				/volver a seguir|again|rollback/i,
+			)
+		}
+	})
+
 	it('otro error va al banner del diálogo', async () => {
 		mocks.createDeploy.mockRejectedValue(
 			new UnavailableError('Llega con la Fase 2', { phase: 2 }),

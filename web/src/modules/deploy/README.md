@@ -185,8 +185,10 @@ Al encolar, los deploys `queued` de la misma app pasan a `superseded` con `super
 cual. Un tag se vuelve a resolver y un digest queda fijo, así que **un rollback no se
 deshace con el próximo deploy sin cuerpo**: repite sus refs con digest, y el que sigue
 también. Por eso el diálogo de "Desplegar" avisa qué deja fijo en un digest el deploy actual
-(`pinnedImages` de `domain/entities/deploy.ts`) y que para volver a seguir un tag hay que
-escribir la imagen (o cambiarla en la configuración). Sale de `requested_images` del deploy
+(`pinnedImages` de `domain/entities/deploy.ts`) y que para usar otra imagen o un tag hay
+que escribirla (o cambiarla en la configuración), con el mismo texto
+(`deploy_dialog_pinned_body`) para un digest de un rollback, de un override o puesto a
+propósito en la configuración. Sale de `requested_images` del deploy
 actual: un servicio está fijo si su ref pedida trae `@sha256:`. Nombra el rollback ("fijada
 por el rollback #144") solo si sigue en el historial y su imagen es la fijada; si salió del
 historial, o lo fijó un override o la configuración, dice que está fijada en un digest. Con

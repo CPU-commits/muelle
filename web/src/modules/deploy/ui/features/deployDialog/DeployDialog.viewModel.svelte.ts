@@ -89,6 +89,15 @@ export class DeployDialogViewModel {
 			: m.deploy_dialog_rollback_pin_title({ id })
 	}
 
+	/**
+	 * Qué pasa sin una imagen nueva y cómo cambiarla. Sirve para cualquier digest fijo (un
+	 * rollback, un override con digest o uno puesto a propósito en la configuración). null si
+	 * no hay nada fijo.
+	 */
+	get pinnedBody(): string | null {
+		return this.#props().pinned ? m.deploy_dialog_pinned_body() : null
+	}
+
 	placeholder(service: string): string {
 		return this.#props().currentImages[service] ?? ''
 	}
