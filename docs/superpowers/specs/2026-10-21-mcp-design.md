@@ -335,7 +335,7 @@ Recomendación de uso (README, §10.1): para depurar con Claude Code, un token *
 Lo copió el paso 0 (MCP-0) y no se repite acá, para que no haya dos versiones:
 - §0.1: los niveles "token de solo lectura" y "mcp" (`utils.AccessBearer`), y la regla del `Origin` en `/api/v1/mcp`;
 - §0.2: `read_only_token` en la fila del `403`;
-- §1: el dueño de `POST /api/v1/mcp`; §1.3: `src/cmd/mcp/tools`, `cmd/http/utils` y `shared/domain/entity` en los lugares compartidos;
+- §1: el dueño de `POST /api/v1/mcp`; §1.3: las filas "MCP" de los lugares compartidos, con qué puede hacer en cada uno: `cmd/http/utils`, `cmd/http/server.go`, `shared/domain/entity`, `shared/infra/out/sqlite`, `src/cmd/mcp/tools` y lo que toca de identity, catalog (`ListProjects`), secrets (`PatchEnv`), deploy (el movimiento de `StreamSlots`, §8.3) e ingress (`GET {app}/domains`);
 - §3: `GET {app}/domains` con token;
 - §6: la 0007 (y la 0006, reservada para Origin CA);
 - §7: las filas de tokens, `read_only_token` y dominios;

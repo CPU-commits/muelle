@@ -157,7 +157,7 @@ Un error de Docker al arrancar nunca detiene a muelle.
 
 ### 1.3 Lo que comparten las ramas
 
-Las tres fases corren en paralelo y se integran después. Cada una toca **solo** lo suyo en los lugares compartidos, y ahí solo agrega: no renombra, no cambia firmas, no borra.
+Las tres fases corren en paralelo y se integran después. Cada una toca **solo** lo suyo en los lugares compartidos, y ahí solo agrega: no renombra, no cambia firmas, no borra. Las ramas que vienen después (MCP, Origin CA) siguen la misma regla, y las filas "MCP" dicen qué toca la del servidor MCP.
 
 | Lugar | Quién lo toca | Qué puede hacer |
 |---|---|---|
@@ -171,6 +171,13 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
 | `cmd/http/utils` | MCP | Agregar `AccessBearer`, `Classify` y `read_only_token` (§8.1, §8.2) |
 | `shared/domain/entity` | MCP | Agregar `TokenScope.ReadOnly` y `AllProjects`, `Principal.ReadOnly` y `WithVia`/`ViaFrom` (§8.1, §8.6) |
 | `src/cmd/mcp/tools` | Cada módulo, en su `infra/in/mcp` | Registrar sus herramientas (`Module.RegisterTools`). No cambia el kit |
+| `cmd/http/server.go` (`originAllowed`) | MCP | Agregar la regla del `Origin` en `/api/v1/mcp` (§0.1, §8.2). El resto de `/api` no cambia |
+| `shared/infra/out/sqlite` | MCP | Agregar `via` en `AuditRecorder.Record` (§8.6) y la migración `0007_api_tokens_scopes.sql` (§6). Origin CA agrega su 0006 en el mismo directorio |
+| `src/internal/identity` (los tokens) | MCP | Lo de §8.1: `APIToken`, su repositorio, `CreateToken` y las respuestas de `/tokens`. Las sesiones, el 2FA y los usuarios no cambian |
+| `src/internal/catalog` | MCP | Agregar el filtro por `Principal.Allows` en `ListProjects` (§8.3 #1) y su `infra/in/mcp`. Para una sesión no cambia nada |
+| `src/internal/secrets` | MCP | Agregar `KeepSecrets` a `PatchEnv` (§8.3 #14) y su `infra/in/mcp`. Sin `KeepSecrets`, `PatchEnv` hace lo mismo que hoy |
+| `src/internal/deploy` | MCP | Agregar su `infra/in/mcp` y el caso de uso `TailLog`, y **mover** `streamLimit` y `ErrTooManyStreams` de `deploy/infra/in/http` a `deploy/app/usecases` (`StreamSlots`, §8.5), sin cambiar el SSE ni su `429`. Es la única excepción a "solo agrega": un movimiento dentro del módulo, para compartir el contador con MCP (diseño del MCP, §8.3) |
+| `src/internal/ingress` | MCP | `GET {app}/domains` pasa a `· token` (§3.2, §8.1), y su `infra/in/mcp` (`list_domains`). Origin CA cambia ingress en paralelo: se tocan líneas vecinas, no las mismas (diseño del MCP, §14) |
 | `shared/infra/container/container.go` | La fase cuyos `Deps` cambian | Solo las líneas de su módulo |
 | `main.go` | Fase 5 | El subcomando `install` |
 | `go.mod` / `go.sum` | Fase 2 (compose-go) y la que necesite otra | Agregar dependencias; al integrar, el conflicto se resuelve con `go mod tidy` |
