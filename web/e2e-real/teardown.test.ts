@@ -68,6 +68,19 @@ describe('cleanUpRun', () => {
 		expect(readFileSync(files.logCopy, 'utf8')).toContain(internal)
 	})
 
+	it('también falla con un error interno del despachador de deploys (no es un 500)', async () => {
+		// dispatcher.go registra "deploy: error interno" con app y deploy, sin el texto.
+		const internal = '{"level":"ERROR","msg":"deploy: error interno","app":3,"deploy":7}'
+		writeFileSync(
+			files.logPath,
+			['{"level":"INFO","msg":"deploy cerrado","app":3,"deploy":7}', internal].join('\n'),
+		)
+		await expect(cleanUpRun(files, () => Promise.resolve([]), 'it7pabcd')).rejects.toThrow(
+			internal,
+		)
+		expect(existsSync(files.dir)).toBe(false)
+	})
+
 	it('con restos de Docker y errores internos, un solo error que nombra los dos', async () => {
 		const internal = '{"level":"ERROR","msg":"error interno","path":"/api/v1/projects"}'
 		writeFileSync(files.logPath, `${internal}\n`)

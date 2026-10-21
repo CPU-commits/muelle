@@ -57,12 +57,19 @@ export async function cleanUpRun(
 	}
 }
 
-/** Las líneas del log JSON de muelle con un error interno (Kit.Fail, un 500). */
+/**
+ * Los `msg` de un error interno en el log de muelle: el de `Kit.Fail` (`cmd/http/utils`, un
+ * 500) y el del despachador de deploys (`deploy/app/usecases/dispatcher.go`, que no responde
+ * nada: el deploy queda `running` y se reintenta).
+ */
+const INTERNAL_ERROR_MESSAGES: readonly unknown[] = ['error interno', 'deploy: error interno']
+
+/** Las líneas del log JSON de muelle con un error interno. */
 function internalErrors(log: string): string[] {
 	return log.split('\n').filter((line) => {
 		try {
 			const entry = JSON.parse(line) as { level?: unknown; msg?: unknown }
-			return entry.level === 'ERROR' && entry.msg === 'error interno'
+			return entry.level === 'ERROR' && INTERNAL_ERROR_MESSAGES.includes(entry.msg)
 		} catch {
 			return false
 		}
