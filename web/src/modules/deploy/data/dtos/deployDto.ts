@@ -61,12 +61,11 @@ export const deployDtoSchema = z.object({
 	// El deploy más nuevo que dejó a este `superseded`.
 	superseded_by: z.number().int().positive().nullish(),
 	// `servicio → ref pedida` (§2.1): con digest solo si alguien lo fijó (un rollback, un
-	// override o la configuración). `{}` hasta que se resolvieron las imágenes. Opcional por
-	// un backend de antes del cambio: sin él, el panel deduce lo fijado del historial.
-	requested_images: z.record(z.string(), z.string()).nullish(),
+	// override o la configuración). `{}` hasta que se resolvieron las imágenes; nunca null.
+	requested_images: z.record(z.string(), z.string()),
 	// El paso 7 no pudo actualizar las rutas de Caddy y escribió la advertencia (§2.11).
-	// Opcional por la misma razón: sin él, el panel no avisa.
-	routes_warning: z.boolean().nullish(),
+	// Nunca null.
+	routes_warning: z.boolean(),
 })
 
 /** `GET …/apps/{a}/deploys`: del más nuevo al más viejo. */

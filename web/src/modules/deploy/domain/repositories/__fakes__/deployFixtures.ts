@@ -10,8 +10,7 @@ export const APP: AppRef = { project: 'auditfy', stage: 'staging', app: 'api' }
 
 /**
  * Un deploy terminado. Por defecto sigue un tag: la ref pedida de cada servicio es la de
- * `images` sin el digest (pasá `requestedImages` para uno fijado, o null para un backend
- * que no la manda).
+ * `images` sin el digest (pasá `requestedImages` para uno fijado).
  */
 export function makeDeploy(id: number, overrides: Partial<Omit<Deploy, 'id'>> = {}): Deploy {
 	const images = overrides.images ?? [

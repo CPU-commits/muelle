@@ -71,7 +71,7 @@ export function deployFromDto(dto: DeployDto): Deploy {
 		id: asDeployId(dto.id),
 		status: dto.status,
 		images: serviceImages(dto.images),
-		requestedImages: dto.requested_images ? serviceImages(dto.requested_images) : null,
+		requestedImages: serviceImages(dto.requested_images),
 		trigger: dto.trigger,
 		actor: { type: dto.actor_type, name: dto.actor_name || null },
 		error: dto.error || null,
@@ -79,7 +79,7 @@ export function deployFromDto(dto: DeployDto): Deploy {
 		startedAt: dateOrNull(dto.started_at),
 		finishedAt: dateOrNull(dto.finished_at),
 		supersededBy: dto.superseded_by ? asDeployId(dto.superseded_by) : null,
-		routesWarning: dto.routes_warning ?? false,
+		routesWarning: dto.routes_warning,
 	}
 }
 

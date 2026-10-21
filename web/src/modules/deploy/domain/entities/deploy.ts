@@ -26,10 +26,9 @@ export interface Deploy {
 	/**
 	 * La ref pedida de cada servicio, la que se resolvió (contrato §2.1, `requested_images`).
 	 * Tiene digest solo si alguien lo fijó: un rollback, un override con digest o una ref de
-	 * la configuración con digest. Vacía hasta que se resolvieron las imágenes. null si el
-	 * backend no la manda (uno de antes del cambio).
+	 * la configuración con digest. Vacía hasta que se resolvieron las imágenes.
 	 */
-	readonly requestedImages: readonly ServiceImage[] | null
+	readonly requestedImages: readonly ServiceImage[]
 	readonly trigger: DeployTrigger
 	readonly actor: DeployActor
 	/** Por qué falló (`failed`), en una línea. */
@@ -114,7 +113,6 @@ function lastRollback(deploys: readonly Deploy[]): Deploy | null {
 export function pinnedImages(deploys: readonly Deploy[]): PinnedImages | null {
 	const current = currentDeploy(deploys)
 	if (!current) return null
-	if (current.requestedImages === null) return guessedPins(current, deploys)
 	const pinned = current.requestedImages.filter((image) => image.digest !== null)
 	if (pinned.length === 0) return null
 	const rollback = lastRollback(deploys)
@@ -128,25 +126,6 @@ export function pinnedImages(deploys: readonly Deploy[]): PinnedImages | null {
 		rollback: byRollback ? rollback.id : null,
 		services: pinned.map((image) => image.service),
 	}
-}
-
-/**
- * Con un backend que no manda la ref pedida (uno de antes de `requested_images`), se deduce
- * de las resueltas: un servicio sigue fijado si en el deploy actual tiene la misma imagen
- * (ref y digest) que en el último rollback `succeeded`. Se equivoca si un override pide el
- * mismo tag y resuelve al mismo digest (avisa de más), o si el rollback ya salió del
- * historial (no avisa).
- */
-function guessedPins(current: Deploy, deploys: readonly Deploy[]): PinnedImages | null {
-	const rollback = lastRollback(deploys)
-	if (!rollback) return null
-	const services = current.images
-		.filter((image) => {
-			const pinned = imageOf(rollback, image.service)
-			return pinned !== null && sameImage(pinned, image)
-		})
-		.map((image) => image.service)
-	return services.length > 0 ? { rollback: rollback.id, services } : null
 }
 
 export function hasActiveDeploy(deploys: readonly Deploy[]): boolean {

@@ -119,65 +119,6 @@ describe('pinnedImages: lo que el deploy actual deja fijo en un digest (contrato
 		).toBeNull()
 		expect(pinnedImages([])).toBeNull()
 	})
-
-	describe('con un backend sin requested_images (de antes del cambio), lo deduce del historial', () => {
-		// Sin la ref pedida, un servicio sigue fijado si en el deploy actual tiene la misma
-		// imagen (ref y digest) que en el último rollback que salió bien.
-		const legacy = (id: number, overrides: Parameters<typeof makeDeploy>[1] = {}) =>
-			makeDeploy(id, { requestedImages: null, ...overrides })
-		const old = [
-			legacy(145, { trigger: 'rollback', images: pinned }),
-			legacy(144, {
-				images: [image('api', 'x/api:sha-2', 'c'), image('web', 'x/web:sha-2', 'd')],
-			}),
-			legacy(143, { images: pinned }),
-		]
-
-		it('el deploy actual es el rollback: todos sus servicios', () => {
-			expect(pinnedImages(old)).toEqual({ rollback: 145, services: ['api', 'web'] })
-		})
-
-		it('un deploy sin cuerpo después del rollback repite sus refs: sigue fijado', () => {
-			const history = [
-				legacy(147, { images: pinned }),
-				legacy(146, { images: pinned }),
-				...old,
-			]
-			expect(pinnedImages(history)).toEqual({ rollback: 145, services: ['api', 'web'] })
-		})
-
-		it('un override de un servicio lo suelta; el otro sigue fijado', () => {
-			const history = [
-				legacy(146, { images: [image('api', 'x/api:sha-3', 'e'), pinned[1]!] }),
-				...old,
-			]
-			expect(pinnedImages(history)).toEqual({ rollback: 145, services: ['web'] })
-		})
-
-		it('con imágenes nuevas en todos, o la misma ref con otro digest, ya no hay nada fijado', () => {
-			const fresh = [image('api', 'x/api:sha-3', 'e'), image('web', 'x/web:sha-3', 'f')]
-			expect(pinnedImages([legacy(146, { images: fresh }), ...old])).toBeNull()
-			const moved = [image('api', 'x/api:sha-1', 'z'), image('web', 'x/web:sha-1', 'y')]
-			expect(pinnedImages([legacy(146, { images: moved }), ...old])).toBeNull()
-		})
-
-		it('un rollback que falló, o en curso, no fija nada', () => {
-			for (const status of ['failed', 'running'] as const) {
-				expect(
-					pinnedImages([
-						legacy(146, { trigger: 'rollback', status, images: pinned }),
-						legacy(145, { images: pinned }),
-					]),
-				).toBeNull()
-			}
-		})
-
-		it('sin rollback en el historial no hay nada fijado', () => {
-			expect(
-				pinnedImages(history.map((deploy) => ({ ...deploy, requestedImages: null }))),
-			).toBeNull()
-		})
-	})
 })
 
 describe('deployDurationMs', () => {

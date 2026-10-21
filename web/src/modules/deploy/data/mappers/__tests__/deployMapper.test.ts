@@ -75,18 +75,26 @@ describe('deployFromDto', () => {
 		expect(deployFromDto(dto)).toMatchObject({ requestedImages: [], routesWarning: false })
 	})
 
-	it('un backend sin requested_images ni routes_warning (de antes del cambio): null y false', () => {
-		const dto = deployDtoSchema.parse({
+	it('requested_images y routes_warning vienen siempre (contrato §2.1): sin ellos no es un deploy', () => {
+		const deploy = {
 			id: 143,
 			status: 'succeeded',
 			images: { api: `ghcr.io/x/api:sha-3f9c2e1@${DIGEST}` },
+			requested_images: { api: 'ghcr.io/x/api:sha-3f9c2e1' },
+			routes_warning: false,
 			trigger: 'api',
 			actor_type: 'token',
 			actor_name: 'github-actions',
 			created_at: '2026-10-10T14:19:49Z',
-		})
-		// null: el panel no sabe la ref pedida y deduce lo fijado del historial (`pinnedImages`).
-		expect(deployFromDto(dto)).toMatchObject({ requestedImages: null, routesWarning: false })
+		}
+		expect(deployDtoSchema.safeParse(deploy).success).toBe(true)
+		for (const field of ['requested_images', 'routes_warning'] as const) {
+			const without: Partial<typeof deploy> = { ...deploy }
+			delete without[field]
+			expect(deployDtoSchema.safeParse(without).success).toBe(false)
+		}
+		expect(deployDtoSchema.safeParse({ ...deploy, requested_images: null }).success).toBe(false)
+		expect(deployDtoSchema.safeParse({ ...deploy, routes_warning: null }).success).toBe(false)
 	})
 
 	it('los campos opcionales que faltan son null, y un actor_name vacío también', () => {
@@ -94,6 +102,8 @@ describe('deployFromDto', () => {
 			id: 145,
 			status: 'queued',
 			images: {},
+			requested_images: {},
+			routes_warning: false,
 			trigger: 'panel',
 			actor_type: 'user',
 			actor_name: '',

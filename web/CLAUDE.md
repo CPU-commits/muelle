@@ -588,9 +588,8 @@ opcionales y que falten quiere decir "fase pendiente". Así están los campos de
 de `GET /settings` (en el contrato, §4, vienen siempre; opcionales solo por un backend de
 la Fase 1 sola, que tiene nada más que `require_2fa`) y los `services` de una app de catalog
 (§2.12, Fase 2: sin ellos, Dominios sugiere solo los destinos que ya usan sus dominios).
-Lo mismo con `requested_images` y `routes_warning` de un deploy (§2.1, revisión del
-2026-10-17): sin `requested_images` (`requestedImages: null`), lo fijado en un digest se
-deduce del historial como antes (`pinnedImages`); sin `routes_warning`, es `false`.
+`requested_images` y `routes_warning` de un deploy (§2.1) ya son obligatorios: lo fijado en
+un digest sale solo de `requested_images` (`pinnedImages`), sin deducirlo del historial.
 También el `actor_name` de cada evento de `GET /audit` (§4.2): la Auditoría muestra el
 nombre que trae el evento (el username, el del token; `system` es "sistema"), copiado al
 escribirlo, así sigue aunque se borre el usuario o el token. Sin nombre (`""`: un evento de
