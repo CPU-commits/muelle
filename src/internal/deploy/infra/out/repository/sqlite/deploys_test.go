@@ -192,8 +192,8 @@ func TestDeploySetRoutesWarning(t *testing.T) {
 	if got := mustGet(t, r, d.ID); got.RoutesWarning {
 		t.Fatalf("con false sigue la marca: %+v", got)
 	}
-	// Ya en false, false no es un ErrNotFound (SQLite cuenta la fila aunque no
-	// cambie).
+	// Ya en false, false no es un ErrNotFound (SQLite cuenta la fila
+	// aunque no cambie).
 	if err := r.SetRoutesWarning(ctx, d.ID, false); err != nil {
 		t.Fatal(err)
 	}

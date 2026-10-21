@@ -164,8 +164,8 @@ func applyProxy(p shared.ProxySettings, in dto.PatchSettingsInput) (shared.Proxy
 			if err := validate.Email("acme_email", *in.ACMEEmail); err != nil {
 				return p, err
 			}
-			// Con { o }, ingress no le mandaría la configuración a Caddy
-			// (contrato §3.4).
+			// Con { o }, ingress no le mandaría la configuración a
+			// Caddy (contrato §3.4).
 			if err := validate.NoPlaceholders("acme_email", *in.ACMEEmail); err != nil {
 				return p, err
 			}
