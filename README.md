@@ -286,7 +286,7 @@ Las cuatro que escriben solo están con un token que no es de solo lectura.
 - **Los secretos** no se muestran ni se escriben por MCP. Los logs salen enmascarados, con los límites de la API: un valor de menos de 8 bytes, o uno que la app imprime transformado (en base64, por partes), no se tapa.
 - **Lo que devuelven las herramientas queda en la transcripción** de Claude Code, en tu máquina, y pasa por la API de Anthropic.
 - **La auditoría** marca lo que se hizo por MCP con `"via": "mcp"` y el nombre del token. Para revocarlo, Ajustes → Tokens.
-- **Límites:** cada respuesta, hasta 40 KiB (no hace falta subir `MAX_MCP_OUTPUT_TOKENS`); hasta 8 llamadas a la vez por token, y los logs y la espera de un deploy cuentan en los 8 streams del token.
+- **Límites:** cada respuesta, hasta 40 KiB (no hace falta subir `MAX_MCP_OUTPUT_TOKENS`). Si no entra todo, la herramienta recorta lo más viejo (las líneas, los deploys, las tareas históricas) y dice cuánto faltó, en vez de fallar. Hasta 8 llamadas a la vez por token, y los logs y la espera de un deploy cuentan en los 8 streams del token.
 
 **Si no conecta:**
 - `401`: el token no existe, se revocó o venció, o `MUELLE_TOKEN` no está exportada en la shell en que abriste Claude Code;
