@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { UsersSection } from '@/modules/identity'
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
-	import { ComingSoon, ErrorState, LoadingState } from '@/shared/ui'
+	import { ErrorState, LoadingState } from '@/shared/ui'
 	import { AuditLog } from '../../features/auditLog'
 	import { ProxySettings } from '../../features/proxySettings'
 	import { Registries } from '../../features/registries'
@@ -27,13 +27,7 @@
 			onRetry={vm.retry}
 		/>
 	{:else}
-		{#if vm.settings.proxy}
-			<ProxySettings id={SETTINGS_SECTIONS.proxy} proxy={vm.settings.proxy} />
-		{:else}
-			<div id={SETTINGS_SECTIONS.proxy}>
-				<ComingSoon phase={vm.proxyPhase} feature={m.admin_proxy_feature()} />
-			</div>
-		{/if}
+		<ProxySettings id={SETTINGS_SECTIONS.proxy} proxy={vm.settings.proxy} />
 		<SecuritySettings id={SETTINGS_SECTIONS.security} settings={vm.settings} />
 	{/if}
 

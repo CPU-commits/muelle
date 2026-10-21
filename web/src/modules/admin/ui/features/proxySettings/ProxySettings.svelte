@@ -27,8 +27,7 @@
 		warning,
 	} from './styles.css'
 
-	// Las tarjetas de "Proxy y DNS" (`Ajustes.dc.html`). Solo se montan si el backend ya
-	// tiene la Fase 3; si no, la pantalla muestra <ComingSoon>.
+	// Las tarjetas de "Proxy y DNS" (`Ajustes.dc.html`).
 	let { proxy, id }: { proxy: ProxySettings; id?: string } = $props()
 
 	const vm = new ProxySettingsViewModel(() => proxy)

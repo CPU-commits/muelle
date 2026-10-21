@@ -25,15 +25,21 @@ const PHASE_3 = {
 }
 
 describe('adminMapper', () => {
-	it('la Fase 1 solo trae require_2fa: lo demás queda pendiente (null)', () => {
-		expect(settingsFromDto(settingsDtoSchema.parse({ require_2fa: false }))).toEqual({
-			require2fa: false,
-			proxy: null,
-			panelAccess: null,
-		})
+	it('GET /settings trae siempre todas las claves (contrato §4): sin una, no es del contrato', () => {
+		expect(settingsDtoSchema.safeParse(PHASE_3).success).toBe(true)
+		expect(settingsDtoSchema.safeParse({ require_2fa: false }).success).toBe(false)
+		for (const key of Object.keys(PHASE_3) as (keyof typeof PHASE_3)[]) {
+			const missing: Partial<typeof PHASE_3> = { ...PHASE_3 }
+			delete missing[key]
+			expect(settingsDtoSchema.safeParse(missing).success, key).toBe(false)
+		}
+		// cloudflare_zones sí puede ser null (no se pudo consultar).
+		expect(settingsDtoSchema.safeParse({ ...PHASE_3, cloudflare_zones: null }).success).toBe(
+			true,
+		)
 	})
 
-	it('con la Fase 3, arma cada sección', () => {
+	it('arma cada sección', () => {
 		expect(settingsFromDto(settingsDtoSchema.parse(PHASE_3))).toEqual({
 			require2fa: true,
 			proxy: {

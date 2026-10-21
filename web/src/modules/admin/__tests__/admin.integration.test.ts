@@ -20,9 +20,8 @@ import {
 	WouldLockOut,
 } from '../domain'
 
-// Recorre el módulo entero contra el backend simulado (src/mocks/handlers/admin.ts). Los
-// mocks responden como el backend con las Fases 2 y 3; con `server.use` se simula el de la
-// Fase 1, que todavía no las tiene.
+// Recorre el módulo entero contra el backend simulado (src/mocks/handlers/admin.ts), que
+// responde como el backend.
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 beforeEach(() => {
 	authDb.reset()
@@ -40,11 +39,23 @@ function enableOwnTotp(): void {
 	if (user) user.totpEnabled = true
 }
 
-const phaseOneSettings = () =>
-	http.get(api('/settings'), () => HttpResponse.json({ require_2fa: false }))
+/** Un `GET /settings` completo (contrato §4: todas las claves, siempre). */
+const SETTINGS_DTO = {
+	require_2fa: true,
+	cloudflare_token_set: false,
+	cloudflare_zones: null,
+	public_ip: '',
+	public_ipv6: '',
+	acme_email: '',
+	panel_domain: 'panel.tudominio.cl',
+	proxy_http_port: 80,
+	proxy_https_port: 443,
+	panel_allowed_cidrs: [],
+	client_ip: '198.51.100.17',
+}
 
 describe('settings', () => {
-	it('con la Fase 3, trae proxy, DNS, certificados e IPs permitidas', async () => {
+	it('trae el 2FA, proxy, DNS, certificados e IPs permitidas', async () => {
 		await expect(adminUseCases.getSettings()).resolves.toEqual({
 			require2fa: false,
 			proxy: {
@@ -60,14 +71,10 @@ describe('settings', () => {
 		})
 	})
 
-	it('el backend de la Fase 1 solo tiene require_2fa: lo demás queda pendiente', async () => {
-		server.use(phaseOneSettings())
+	it('un GET /settings sin las claves del proxy no es del contrato (ContractError)', async () => {
+		server.use(http.get(api('/settings'), () => HttpResponse.json({ require_2fa: false })))
 
-		await expect(adminUseCases.getSettings()).resolves.toEqual({
-			require2fa: false,
-			proxy: null,
-			panelAccess: null,
-		})
+		await expect(adminUseCases.getSettings()).rejects.toMatchObject({ name: 'ContractError' })
 	})
 
 	it('exigir 2FA sin tener la propia es TotpRequiredFirst; con ella, se activa', async () => {
@@ -83,13 +90,13 @@ describe('settings', () => {
 		expect(authDb.state.require2fa).toBe(true)
 	})
 
-	it('en la Fase 1 solo se manda require_2fa', async () => {
+	it('exigir 2FA solo manda require_2fa: lo demás no se toca', async () => {
 		enableOwnTotp()
 		let sent: unknown
 		server.use(
 			http.patch(api('/settings'), async ({ request }) => {
 				sent = await request.json()
-				return HttpResponse.json({ require_2fa: true })
+				return HttpResponse.json(SETTINGS_DTO)
 			}),
 		)
 

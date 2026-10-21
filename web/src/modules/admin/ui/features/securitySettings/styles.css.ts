@@ -47,11 +47,6 @@ export const clientIpOut = style({
 	color: theme.colors.status.warnText,
 })
 
-export const pending = style({
-	fontSize: theme.typography.fontSize[13],
-	color: theme.colors.text.tertiary,
-})
-
 // "Recuperar el acceso" en la confirmación de una lista que te deja fuera: el comando que
 // se corre en el servidor (ServerCommand), separado del texto de arriba.
 export const recovery = style({

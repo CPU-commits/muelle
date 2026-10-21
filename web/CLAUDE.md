@@ -584,22 +584,20 @@ Cómo funciona:
 Un `UnavailableError` sin `phase` es un backend caído o sin red: eso sí es un error
 (`ErrorState` con reintento).
 
-Si lo nuevo son **campos** de un endpoint que ya existe, no hay 404: el DTO los declara
-opcionales y que falten quiere decir "fase pendiente". Así están los campos de proxy y DNS
-de `GET /settings` (en el contrato, §4, vienen siempre; opcionales solo por un backend de
-la Fase 1 sola, que tiene nada más que `require_2fa`). Los `services` de una app de catalog
-(§2.12) son obligatorios: `[]` es un compose guardado que no se puede leer, y ahí Dominios
-sugiere solo los destinos que ya usan sus dominios.
-`requested_images` y `routes_warning` de un deploy (§2.1) ya son obligatorios: lo fijado en
-un digest sale solo de `requested_images` (`pinnedImages`), sin deducirlo del historial.
-También el `actor_name` de cada evento de `GET /audit` (§4.2): la Auditoría muestra el
-nombre que trae el evento (el username, el del token; `system` es "sistema"), copiado al
-escribirlo, así sigue aunque se borre el usuario o el token. Sin nombre (`""`: un evento de
-antes de la migración 0004 cuyo autor ya no estaba), el
-tipo y el id ("token #9").
-Mandarlos en un `PATCH` a ese backend responde 400 `invalid_json` (rechaza campos
-desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es un ajuste
-(§4.1: solo lo fija install): Ajustes no lo muestra ni lo manda, y el mock lo rechaza.
+Los **campos** que las Fases 2 y 3 sumaron a endpoints que ya existían son obligatorios en
+los DTO, como en el contrato: una respuesta sin ellos es un `ContractError`. Son los de
+proxy y DNS de `GET /settings` (§4: todas las claves, siempre; `Settings.proxy` y
+`panelAccess` nunca son null), los `services` de una app de catalog (§2.12: `[]` es un
+compose guardado que no se puede leer, y ahí Dominios sugiere solo los destinos que ya usan
+sus dominios), `requested_images` y `routes_warning` de un deploy (§2.1: lo fijado en un
+digest sale solo de `requested_images`, `pinnedImages`), `ports_rollback` de `GET /proxy`
+(§3.3, null si no hubo vuelta atrás), `created_by` de un token (un username, o null si se
+borró el usuario) y el `actor_name` de cada evento de `GET /audit` (§4.2). La Auditoría
+muestra el nombre que trae el evento (el username, el del token; `system` es "sistema"),
+copiado al escribirlo, así sigue aunque se borre el usuario o el token. Sin nombre (`""`: un
+evento de antes de la migración 0004 cuyo autor ya no estaba), el tipo y el id ("token
+#9"). `caddy_image` no es un ajuste (§4.1: solo lo fija install): Ajustes no lo muestra ni
+lo manda, y el mock lo rechaza.
 
 **Lo que un módulo usa de otro** (siempre por el barrel):
 

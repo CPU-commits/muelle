@@ -8,7 +8,6 @@
 	"admin_nav_users": "Usuarios",
 	"admin_nav_audit": "Auditoría",
 	"admin_settings_load_error": "No se pudieron cargar los ajustes.",
-	"admin_proxy_feature": "Proxy y DNS",
 	"admin_save_error": "No se pudo guardar.",
 
 	"admin_cf_title": "Cloudflare",
@@ -100,7 +99,6 @@
 	"admin_security_cidrs_hint": "Un rango CIDR por línea. Vacío permite cualquier IP.",
 	"admin_security_client_ip_in": "Tu IP actual, {ip}, queda incluida.",
 	"admin_security_client_ip_out": "Tu IP actual, {ip}, no queda incluida: al guardar perderías el acceso al panel.",
-	"admin_security_cidrs_feature": "La lista de IPs permitidas",
 	"admin_security_saved": "Seguridad guardada",
 	"admin_security_lockout_title": "Te quedarías fuera del panel",
 	"admin_security_lockout_body": "muelle ve esta sesión desde {ip}, que no está en la lista. Si guardas igual, solo podrás volver a entrar desde una IP de la lista o vaciándola desde el servidor.",

@@ -84,7 +84,11 @@ const PROXY: ProxySettings = {
 }
 
 function saved(proxy: Partial<ProxySettings>): Settings {
-	return { require2fa: false, proxy: { ...PROXY, ...proxy }, panelAccess: null }
+	return {
+		require2fa: false,
+		proxy: { ...PROXY, ...proxy },
+		panelAccess: { allowedCidrs: [], clientIp: '198.51.100.17' },
+	}
 }
 
 let client: QueryClient

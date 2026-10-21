@@ -17,8 +17,8 @@ import {
 } from '../../../domain'
 import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
 
-// La tarjeta "Seguridad": exigir 2FA (Fase 1) y las IPs permitidas para el panel (Fase 3).
-// Un solo "Guardar" manda lo que cambió.
+// La tarjeta "Seguridad": exigir 2FA y las IPs permitidas para el panel. Un solo "Guardar"
+// manda lo que cambió.
 export class SecuritySettingsViewModel {
 	require2fa = $state(false)
 	cidrs = $state('')
@@ -42,8 +42,7 @@ export class SecuritySettingsViewModel {
 		this.#load(settings())
 	}
 
-	/** `null`: el backend todavía no tiene la Fase 3. */
-	get panelAccess(): PanelAccess | null {
+	get panelAccess(): PanelAccess {
 		return this.#settings().panelAccess
 	}
 
@@ -52,8 +51,7 @@ export class SecuritySettingsViewModel {
 	}
 
 	get areCidrsDirty(): boolean {
-		const access = this.panelAccess
-		return access !== null && !sameCidrList(this.cidrs, access.allowedCidrs)
+		return !sameCidrList(this.cidrs, this.panelAccess.allowedCidrs)
 	}
 
 	get isDirty(): boolean {
@@ -64,9 +62,9 @@ export class SecuritySettingsViewModel {
 		return this.#update.isPending
 	}
 
-	/** La IP con que muelle ve esta sesión; `''` si no la informa (Fase 1). */
+	/** La IP con que muelle ve esta sesión; `''` si no la pudo leer. */
 	get clientIp(): string {
-		return this.panelAccess?.clientIp ?? ''
+		return this.panelAccess.clientIp
 	}
 
 	/**
@@ -193,6 +191,6 @@ export class SecuritySettingsViewModel {
 
 	#load(settings: Settings): void {
 		this.require2fa = settings.require2fa
-		if (settings.panelAccess) this.cidrs = cidrListText(settings.panelAccess.allowedCidrs)
+		this.cidrs = cidrListText(settings.panelAccess.allowedCidrs)
 	}
 }

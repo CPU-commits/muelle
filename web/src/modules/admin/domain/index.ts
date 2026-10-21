@@ -13,7 +13,6 @@ export {
 	movedPanelOrigin,
 	panelOrigin,
 	parsePanelOrigin,
-	PROXY_SETTINGS_PHASE,
 	RESET_PANEL_IPS_COMMAND,
 } from './entities/settings'
 export type {
