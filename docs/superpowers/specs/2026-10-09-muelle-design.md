@@ -409,7 +409,7 @@ Un deploy que termina `failed` también aplica la retención. El apagado de muel
 
 Todas las respuestas son JSON. Formato de error: `{"error": {"code": "string", "message": "string"}}`. Los recursos se identifican por slug. Las fechas van en RFC 3339, en UTC y con a lo más milisegundos (`2026-10-10T19:36:53.77Z`), lo mismo en la respuesta de un create que en el GET: el reloj (`package/clock`) ya da la hora así, con la precisión que guarda SQLite.
 
-Un `429` lleva `Retry-After: 60` (fijo por ahora). El log de un error interno (`500`) trae el método y la ruta de la petición.
+Un `429` lleva `Retry-After: 60` (fijo por ahora). El log de un error interno (`500`) trae el método y la ruta de la petición. Un cliente que se fue con la petición en curso (su contexto se canceló y el error es `context.Canceled`, como el panel al cambiar de pestaña) no es un error interno: va al log en Debug.
 
 Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan campos desconocidos, claves duplicadas, UTF-8 inválido y datos después del valor. El cuerpo se limita a 1 MiB.
 

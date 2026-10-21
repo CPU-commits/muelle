@@ -437,6 +437,40 @@ func TestFail(t *testing.T) {
 	}
 }
 
+// Un cliente que se fue (el panel salió de una pestaña con un pedido en curso)
+// cancela el contexto de la petición, y el caso de uso devuelve
+// context.Canceled: no es un error interno de muelle y no va al log como ERROR.
+// Un context.Canceled con la petición viva (un contexto propio que se canceló)
+// sí lo es.
+func TestFailClientGone(t *testing.T) {
+	var logs bytes.Buffer
+	k := NewKit(http.NewServeMux(), fakeAuth{}, true, slog.New(slog.NewTextHandler(&logs, nil)))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	gone := httptest.NewRequest("GET", "/api/v1/projects/p/stages/s/apps/web/status", nil).WithContext(ctx)
+
+	k.Fail(httptest.NewRecorder(), gone, fmt.Errorf("docker service ps: %w", context.Canceled))
+	if strings.Contains(logs.String(), "level=ERROR") {
+		t.Fatalf("un cliente que se fue no es un error interno: %q", logs.String())
+	}
+
+	// Otro error con el cliente ido sigue siendo interno.
+	k.Fail(httptest.NewRecorder(), gone, errors.New("falló la base"))
+	if !strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "falló la base") {
+		t.Fatalf("otro error con el cliente ido va al log: %q", logs.String())
+	}
+
+	logs.Reset()
+	w := httptest.NewRecorder()
+	k.Fail(w, httptest.NewRequest("GET", "/api/v1/projects", nil), fmt.Errorf("x: %w", context.Canceled))
+	if e := decodeError(t, w); w.Code != 500 || e.Error.Code != "internal" {
+		t.Fatalf("context.Canceled con la petición viva: %d %+v", w.Code, e)
+	}
+	if !strings.Contains(logs.String(), "level=ERROR") {
+		t.Fatalf("context.Canceled con la petición viva va al log: %q", logs.String())
+	}
+}
+
 // El link de una invitación lleva el token en la ruta: el log de un error
 // interno no lo muestra.
 func TestFailLogOmitsPathToken(t *testing.T) {

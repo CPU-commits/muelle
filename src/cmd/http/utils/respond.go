@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
@@ -81,6 +82,9 @@ func (k *Kit) RegisterError(target error, status int, code, message string) {
 // Fail responde el error de la petición r: *validate.Error → 422 "invalid"
 // con ve.Error(); un error registrado → su status (un 429, con Retry-After);
 // cualquier otro → 500 "internal" y log.Error con el método y la ruta de r.
+// Un context.Canceled con el contexto de r cancelado es un cliente que se fue
+// (el panel cambió de pestaña con un pedido en curso): responde lo mismo, que
+// nadie lee, pero va al log en Debug, no como error interno.
 func (k *Kit) Fail(w http.ResponseWriter, r *http.Request, err error) {
 	if ve, ok := errors.AsType[*validate.Error](err); ok {
 		k.writeError(w, http.StatusUnprocessableEntity, "invalid", ve.Error())
@@ -90,7 +94,11 @@ func (k *Kit) Fail(w http.ResponseWriter, r *http.Request, err error) {
 		k.writeError(w, e.status, e.code, e.message)
 		return
 	}
-	k.log.Error("error interno", "method", r.Method, "path", logPath(r), "err", err)
+	if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
+		k.log.Debug("el cliente se fue", "method", r.Method, "path", logPath(r))
+	} else {
+		k.log.Error("error interno", "method", r.Method, "path", logPath(r), "err", err)
+	}
 	k.writeError(w, http.StatusInternalServerError, "internal", "error interno")
 }
 
