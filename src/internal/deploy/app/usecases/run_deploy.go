@@ -577,25 +577,29 @@ func failedTask(tasks []service.SwarmTask, appliedAt time.Time, hint string) *se
 // en el log y en deploys.routes_warning (contrato §2.1), así el panel no
 // decide por el texto del log.
 //
+// Guarda el resultado en los dos casos: un Resume vuelve a correr este paso,
+// y si muelle se cortó después de marcar la advertencia, un SyncRoutes que
+// esta vez funciona la quita.
+//
 // La advertencia no lleva el error: el log del deploy lo lee un token del
 // proyecto, y el error de Caddy puede traer los hosts y los upstreams de
 // otros proyectos. El motivo lo guarda ingress en el estado del proxy (GET
 // /api/v1/proxy, solo con sesión) y en el log del servidor.
 func (r *run) routes(ctx context.Context) error {
 	rctx, cancel := context.WithTimeout(ctx, r.u.Timing.RoutesTimeout)
-	err := r.u.Ingress.SyncRoutes(rctx)
+	warn := r.u.Ingress.SyncRoutes(rctx) != nil
 	cancel()
-	if err == nil {
-		r.line("rutas de Caddy actualizadas")
-		return nil
-	}
-	if ctx.Err() != nil {
+	if warn && ctx.Err() != nil {
 		return ctx.Err()
 	}
 	// La marca va antes que la línea: quien ve la advertencia por el stream
 	// ya la encuentra en el deploy. Sin cancelación, como las líneas.
-	if err := r.u.Deploys.SetRoutesWarning(context.WithoutCancel(ctx), r.d.ID); err != nil && r.logErr == nil {
+	if err := r.u.Deploys.SetRoutesWarning(context.WithoutCancel(ctx), r.d.ID, warn); err != nil && r.logErr == nil {
 		r.logErr = err
+	}
+	if !warn {
+		r.line("rutas de Caddy actualizadas")
+		return nil
 	}
 	r.line("advertencia: no se pudo actualizar Caddy; el motivo está en el estado del proxy (GET /api/v1/proxy)")
 	return nil

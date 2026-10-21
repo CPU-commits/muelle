@@ -47,10 +47,10 @@ type DeployRepository interface {
 	// SetImages guarda las refs pedidas, las de la configuración y las
 	// resueltas (§7 paso 2, contrato §2.2). repository.ErrNotFound si no existe.
 	SetImages(ctx context.Context, id int64, requested, config, resolved map[string]string) error
-	// SetRoutesWarning marca que el paso 7 no pudo actualizar Caddy
-	// (deploys.routes_warning, contrato §2.1). repository.ErrNotFound si no
-	// existe.
-	SetRoutesWarning(ctx context.Context, id int64) error
+	// SetRoutesWarning guarda si el paso 7 no pudo actualizar Caddy
+	// (warn) o sí (deploys.routes_warning, contrato §2.1).
+	// repository.ErrNotFound si no existe.
+	SetRoutesWarning(ctx context.Context, id int64, warn bool) error
 	// AppendLog agrega lines (ya formateadas y enmascaradas: FormatLine) con
 	// service.AppendPlan, en una transacción que lee el largo en bytes y
 	// log_truncated y guarda los dos (contrato §2.5). final son las líneas de

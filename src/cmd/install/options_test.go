@@ -95,6 +95,29 @@ func TestParseArgsInvalid(t *testing.T) {
 	}
 }
 
+// { o } en --email o en --cloudflare-token dejarían a Caddy sin
+// configuración (out_of_sync, contrato §3.4), y el panel va por Caddy: install
+// los rechaza antes de tocar Docker, con la regla de PATCH /settings. El
+// error no cita el token.
+func TestParseArgsPlaceholders(t *testing.T) {
+	const token = "cf-token-{1234567890abcdef}"
+	const msg = "no puede tener { ni }: Caddy los toma como placeholders"
+	for _, tc := range []struct {
+		args  []string
+		stdin string
+		flag  string
+	}{
+		{[]string{"--panel-domain", "panel.example.com", "--email", "a{x}@example.com"}, "", "--email"},
+		{args("--cloudflare-token", token), "", "--cloudflare-token"},
+		{args("--cloudflare-token", "-"), token + "\n", "--cloudflare-token"},
+	} {
+		_, err := ParseArgs(tc.args, strings.NewReader(tc.stdin))
+		if err == nil || err.Error() != tc.flag+": "+msg {
+			t.Errorf("%q: %v", tc.args, err)
+		}
+	}
+}
+
 func TestParseArgsTokenFromStdin(t *testing.T) {
 	token := strings.Repeat("a", 40)
 	o, err := ParseArgs(args("--cloudflare-token", "-"), strings.NewReader("  "+token+" \r\nsobra\n"))

@@ -210,7 +210,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
 | `actor_name` | string | El username o el nombre del token **al crear el deploy**: sigue aunque se borren. Nunca es null |
 | `error` | string o null | Por qué falló, en una línea de hasta 500 caracteres, ya enmascarada. Null si no falló |
 | `superseded_by` | int o null | El deploy que lo dejó `superseded` |
-| `routes_warning` | bool | `true` si el paso 7 (§7 del diseño) no pudo actualizar las rutas de Caddy y escribió la advertencia de §2.11. Un error de Caddy no hace fallar el deploy (§13 del diseño): la app corre, pero Caddy puede no tener sus rutas nuevas, y el motivo está en `GET /proxy` (`error`, §3.3, solo con sesión). Se marca en el paso 7, antes de escribir la línea: quien la ve en el log ya la encuentra en el deploy, y puede verse `true` con `status: running` hasta el cierre, que viene enseguida. `false` en los demás: mientras está `queued`, mientras corre antes del paso 7 y en uno que no llegó a él. Nunca null |
+| `routes_warning` | bool | `true` si el paso 7 (§7 del diseño) no pudo actualizar las rutas de Caddy y escribió la advertencia de §2.11. Un error de Caddy no hace fallar el deploy (§13 del diseño): la app corre, pero Caddy puede no tener sus rutas nuevas, y el motivo está en `GET /proxy` (`error`, §3.3, solo con sesión). Se marca en el paso 7, antes de escribir la línea: quien la ve en el log ya la encuentra en el deploy, y puede verse `true` con `status: running` hasta el cierre, que viene enseguida. El paso 7 guarda su resultado también cuando sí actualiza Caddy: un deploy que muelle retoma después de reiniciarse (§1.2) vuelve a correr el paso 7, y si esta vez Caddy se actualizó queda en `false`, aunque su log traiga la advertencia del intento anterior. `false` en los demás: mientras está `queued`, mientras corre antes del paso 7 y en uno que no llegó a él. Nunca null |
 | `created_at` | RFC 3339 | |
 | `started_at`, `finished_at` | RFC 3339 o null | Null mientras no empezó o no terminó. Un `superseded` tiene `finished_at` y no `started_at` |
 
@@ -760,7 +760,8 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - `email` es `acme_email`, y no va si está vacío.
 - **Sin placeholders en los ajustes:** Caddy expande placeholders en el email del emisor `acme` y en `api_token` (`a{x}@b.cl` hace fallar el `POST /load` entero).
   - `PATCH /settings` rechaza un `acme_email` o un `cloudflare_token` con `{` o `}`: `422` en ese campo, y no guarda nada (§4.1).
-  - Si igual llegan a los ajustes por otro lado (la configuración inicial de install, `MUELLE_INIT_*`, o un `UPDATE` a mano), muelle no manda la configuración, y `GET /proxy` dice `out_of_sync` con el motivo.
+  - La configuración inicial también, con la misma regla (`validate.NoPlaceholders`): install, `--email` y `--cloudflare-token` (código 2 y el nombre del flag, antes de tocar Docker), y muelle, `MUELLE_INIT_ACME_EMAIL` y el token de `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE` (no arranca, y el error nombra la variable; §5.2). Con ellos Caddy nunca recibiría la configuración, y el panel, que va por Caddy, no serviría para corregirlos. El error no cita el token.
+  - Si igual llegan a los ajustes (un `UPDATE` a mano), muelle no manda la configuración, y `GET /proxy` dice `out_of_sync` con el motivo.
 - **Errores de Caddy:** el mensaje de un `POST /load` rechazado se guarda (y se registra en el log) con el token de Cloudflare reemplazado por `***`, cortado a 500 caracteres. La configuración misma nunca va al log.
 - **Ruta del panel:** `panel_domain → naming.MuelleService:naming.MuellePort` (`muelle_muelle:8080`), con `X-Real-IP` = `{http.vars.client_ip}` en `headers.request.set` del `reverse_proxy` (el JSON de arriba).
 - **TLS del panel:**
@@ -885,11 +886,11 @@ Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `public_ip
 docker exec "$(docker ps -q -f label=com.docker.swarm.service.name=muelle_muelle | head -n1)" muelle settings reset-panel-ips
 ```
 
-**Si muelle-caddy quedó sin arrancar por los puertos** y muelle no volvió solo a los anteriores (§3.5: no había un muelle-caddy sirviendo, o los anteriores también estaban tomados), sin Caddy no se llega al panel. Se ponen otros que estén libres directo en la base. La imagen de muelle no trae `sqlite3`, así que se usa un contenedor aparte sobre el mismo volumen (SQLite en modo WAL admite la escritura con muelle corriendo):
+**Si muelle-caddy quedó sin arrancar por los puertos** y muelle no volvió solo a los anteriores (§3.5: no había un muelle-caddy sirviendo, o los anteriores también estaban tomados), sin Caddy no se llega al panel. Se ponen los anteriores u otros libres directo en la base. La imagen de muelle no trae `sqlite3`, así que se usa un contenedor aparte sobre el mismo volumen (SQLite en modo WAL admite la escritura con muelle corriendo). En el ejemplo, `80` y `443` se cambian por los anteriores u otros libres:
 
 ```bash
 docker run --rm -v muelle_data:/data alpine sh -c \
-  "apk add -q sqlite && sqlite3 /data/muelle.db \"UPDATE settings SET value='8080' WHERE key='proxy_http_port'; UPDATE settings SET value='8443' WHERE key='proxy_https_port'\""
+  "apk add -q sqlite && sqlite3 /data/muelle.db \"UPDATE settings SET value='80' WHERE key='proxy_http_port'; UPDATE settings SET value='443' WHERE key='proxy_https_port'\""
 ```
 
 Después se reinicia muelle (`docker service update --force muelle_muelle`), o se espera al job `"proxy"` (a lo más 5 min), que recrea el contenedor con esos puertos.
@@ -946,7 +947,7 @@ install acepta tres flags ocultos, solo para los tests de integración (no salen
 
 ### 5.2 La configuración inicial: `MUELLE_INIT_*`
 
-install despliega el servicio con estas variables. `settings.Load` las valida en cada arranque: si una no sirve, muelle no arranca y el error nombra la variable.
+install despliega el servicio con estas variables. `settings.Load` las valida en cada arranque, con las reglas de los flags de abajo (`{` o `}` en `MUELLE_INIT_ACME_EMAIL` o en el token tampoco pasan, §3.4): si una no sirve, muelle no arranca y el error nombra la variable.
 
 **Se aplican una sola vez**, en el primer arranque de la base: `admin.ApplyStartupSettings` guarda en la misma transacción la marca `init_applied`, y en los arranques siguientes no mira `MUELLE_INIT_*`. En ese primer arranque guarda cada valor que no es cero si la clave todavía no está, y deja un evento `settings.init` con las claves, sin valores.
 
@@ -967,7 +968,7 @@ install despliega el servicio con estas variables. `settings.Load` las valida en
 | `--advertise-addr` | — (solo `docker swarm init`; con el Swarm ya activo se ignora, con un aviso) | — |
 | `--reinstall` | — (ver §5.4) | — |
 
-Los flags se validan antes de tocar Docker, con las mismas reglas que `PATCH /settings` (§4.1): `validate.Hostname`, `Email`, `IPv4`, `IPv6`, `Port` e `ImageRef`; los dos puertos distintos; y el token con la forma de un token de Cloudflare (de 20 a 512 caracteres visibles, sin espacios). Uno que no sirve termina con código 2 y el nombre del flag.
+Los flags se validan antes de tocar Docker, con las mismas reglas que `PATCH /settings` (§4.1): `validate.Hostname`, `Email`, `IPv4`, `IPv6`, `Port` e `ImageRef`; los dos puertos distintos; y el token con la forma de un token de Cloudflare (de 20 a 512 caracteres visibles, sin espacios). `--email` y el token, además, sin `{` ni `}` (§3.4). Uno que no sirve termina con código 2 y el nombre del flag.
 
 **El origen del panel no va en la configuración de muelle:** install escribe el dominio (`MUELLE_PANEL_DOMAIN`) y el puerto HTTPS inicial (`MUELLE_INIT_PROXY_HTTPS_PORT`). El origen sale de los ajustes, `https://<panel_domain>[:<proxy_https_port>]`: si después se cambia `proxy_https_port` en el panel (la migración de §16 del diseño pasa de 8443 a 443), el `Origin` permitido y los links pasan al puerto nuevo, sin reiniciar muelle (§0.1).
 
@@ -1146,7 +1147,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
   - `cf_record_id_aaaa`, `last_error_code`, `created_at` y `updated_at`;
   - `app_id` con `ON DELETE RESTRICT`: catalog no borra una app con dominios, `409 not_empty`.
 - **0004** (Fase 1, un pendiente de su revisión final): `audit_events.actor_name` (§4.2), con los eventos que ya había llenados con lo que se sabe de su autor. Es una migración nueva, y no un cambio a `0001_init.sql` (que no se edita, §1.3), para que corra también sobre una base de la Fase 1.
-- **0005** (lo pidió el panel): `deploys.routes_warning` (§2.1), 0 o 1. Los deploys que ya había quedan con 1 si son `succeeded` y su log trae la advertencia del paso 7 (§2.11). Es nueva, y no un cambio a `0002_deploy.sql`, por lo mismo que la 0004: para que corra también sobre una base que ya tiene deploys. La próxima migración nueva es la 0006.
+- **0005** (lo pidió el panel): `deploys.routes_warning` (§2.1), 0 o 1. Los deploys que ya había quedan con 1 si son `succeeded` y su log trae la advertencia del paso 7 (§2.11). Uno anterior a la 0005 cuya advertencia no entró en el log (el tope de 256 KB, §2.5) queda con 0: la migración solo tiene el texto. Es nueva, y no un cambio a `0002_deploy.sql`, por lo mismo que la 0004: para que corra también sobre una base que ya tiene deploys. La próxima migración nueva es la 0006.
 
 ## 7. Diferencias con lo que supuso el panel
 

@@ -191,7 +191,7 @@ func loadInit() (Init, error) {
 	}{
 		{"MUELLE_INIT_PUBLIC_IP", &in.PublicIP, validate.IPv4},
 		{"MUELLE_INIT_PUBLIC_IPV6", &in.PublicIPv6, validate.IPv6},
-		{"MUELLE_INIT_ACME_EMAIL", &in.ACMEEmail, validate.Email},
+		{"MUELLE_INIT_ACME_EMAIL", &in.ACMEEmail, acmeEmail},
 		{"MUELLE_INIT_CADDY_IMAGE", &in.CaddyImage, validate.ImageRef},
 	}
 	for _, v := range text {
@@ -237,6 +237,9 @@ func loadInit() (Init, error) {
 		if token == "" || strings.ContainsAny(token, " \t\r\n") {
 			return Init{}, fmt.Errorf("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE: %s no tiene un token (una sola línea, sin espacios)", path)
 		}
+		if err := validate.NoPlaceholders("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE", token); err != nil {
+			return Init{}, err
+		}
 		in.CloudflareToken = token
 	}
 	if path := os.Getenv("MUELLE_INIT_REGISTRY_FILE"); path != "" {
@@ -247,6 +250,16 @@ func loadInit() (Init, error) {
 		in.Registry = r
 	}
 	return in, nil
+}
+
+// acmeEmail es MUELLE_INIT_ACME_EMAIL: un email, y sin { ni }, como en PATCH
+// /settings. Con ellos Caddy nunca recibiría la configuración (contrato
+// §3.4), y el panel va por Caddy: no se podría corregir desde Ajustes.
+func acmeEmail(field, s string) error {
+	if err := validate.Email(field, s); err != nil {
+		return err
+	}
+	return validate.NoPlaceholders(field, s)
 }
 
 // loadInitRegistry lee y valida el registry inicial (contrato §2.10): JSON

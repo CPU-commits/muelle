@@ -231,8 +231,9 @@ func TestRecreateRollbackPullFails(t *testing.T) {
 	}
 }
 
-// Sin cambio de puertos (otra imagen, o un muelle-caddy que no servía) no hay
-// a qué volver; Docker caído tampoco vuelve atrás: no es culpa de los puertos.
+// Sin cambio de puertos (por ejemplo, la imagen de una versión nueva que no
+// baja, o un muelle-caddy que no servía) no hay a qué volver; Docker caído
+// tampoco vuelve atrás: no es culpa de los puertos.
 func TestRecreateWithoutRollback(t *testing.T) {
 	t.Run("sin cambio de puertos", func(t *testing.T) {
 		f, _ := servingFixture(t)

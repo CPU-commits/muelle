@@ -13,6 +13,7 @@ import (
 
 	"github.com/CPU-commits/muelle/src/internal/deploy/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/entity"
+	"github.com/CPU-commits/muelle/src/internal/deploy/domain/service"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/domain/naming"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
@@ -106,6 +107,48 @@ func TestRunDeployCaddyWarningIsGeneric(t *testing.T) {
 	// por el texto del log.
 	if !d.RoutesWarning {
 		t.Fatalf("routes_warning false con la advertencia en el log: %+v", d)
+	}
+}
+
+// Una advertencia del paso 7 que ya no entra en el log (el tope de 256 KB,
+// contrato §2.5) igual deja routes_warning (§2.11): la marca no depende de la
+// línea.
+func TestRunDeployCaddyWarningPastLogCap(t *testing.T) {
+	w := newWorld(t)
+	w.ingress.syncErr = errors.New("ingress: Caddy no responde")
+	id := w.deploy(t, apiRef, nil, nil)
+	// Cuando llega al paso 7, el log ya está en el tope de las líneas
+	// normales: la advertencia no entra.
+	w.ingress.onSync = func() { fillLog(t, w, id) }
+	d := w.runOK(t, w.apiID)
+	log := w.log(t, id)
+	if d.Status != entity.StatusSucceeded || !d.RoutesWarning {
+		t.Fatalf("deploy: %+v", d)
+	}
+	if strings.Contains(log, caddyWarning) || !strings.Contains(log, service.TruncatedMarker) ||
+		!strings.Contains(log, "succeeded en ") || len(log) > service.LogCap {
+		t.Fatalf("log de %d bytes, con la advertencia %v, la marca %v y el cierre %v", len(log),
+			strings.Contains(log, caddyWarning), strings.Contains(log, service.TruncatedMarker), strings.Contains(log, "succeeded en "))
+	}
+}
+
+// fillLog llena el log del deploy, con líneas con hora, hasta el tope de las
+// normales (LogCap−LogReserve): la próxima normal ya no entra.
+func fillLog(t *testing.T, w *world, id int64) {
+	t.Helper()
+	need := service.LogCap - service.LogReserve - len(w.log(t, id))
+	var b strings.Builder
+	for need > 0 {
+		n := min(need, 1000)
+		if need-n > 0 && need-n < 100 {
+			n = need - 100
+		}
+		b.WriteString(service.FormatLine(service.Masker{}, time.Now(), strings.Repeat("x", n-len("2006-01-02T15:04:05.000Z \n"))))
+		need -= n
+	}
+	exec(t, w.db, `UPDATE deploys SET log = log || ? WHERE id = ?`, b.String(), id)
+	if got := len(w.log(t, id)); got != service.LogCap-service.LogReserve {
+		t.Fatalf("el log quedó de %d bytes", got)
 	}
 }
 

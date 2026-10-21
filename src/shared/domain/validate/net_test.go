@@ -94,6 +94,31 @@ func TestEmail(t *testing.T) {
 	}
 }
 
+// Caddy expande placeholders en el email ACME y en el token de Cloudflare
+// (contrato §3.4): { o } no pasan, en PATCH /settings, en install y en
+// MUELLE_INIT_*. El error no cita el valor (puede ser un token).
+func TestNoPlaceholders(t *testing.T) {
+	for _, s := range []string{"", "tu@correo.cl", "cf-token-1234567890abcdef"} {
+		if err := NoPlaceholders("acme_email", s); err != nil {
+			t.Errorf("%q: %v", s, err)
+		}
+	}
+	for _, s := range []string{"a{x}@correo.cl", "a}@correo.cl", "{env.TOKEN}", "cf-token-1234{567890abcdef"} {
+		err := NoPlaceholders("cloudflare_token", s)
+		if err == nil || fieldOf(t, err) != "cloudflare_token" {
+			t.Errorf("NoPlaceholders(%q) = %v", s, err)
+			continue
+		}
+		if want := "cloudflare_token: no puede tener { ni }: Caddy los toma como placeholders"; err.Error() != want {
+			t.Errorf("NoPlaceholders(%q) = %q, esperaba %q", s, err, want)
+		}
+	}
+	// Email solo no los rechaza (RFC 5322 los admite): van las dos reglas.
+	if err := Email("acme_email", "a{x}@correo.cl"); err != nil {
+		t.Fatalf("Email con llaves: %v", err)
+	}
+}
+
 func TestPort(t *testing.T) {
 	for _, n := range []int{1, 80, 443, 8443, 65535} {
 		if err := Port("proxy_http_port", n); err != nil {

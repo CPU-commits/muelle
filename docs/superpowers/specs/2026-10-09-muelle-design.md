@@ -359,7 +359,7 @@ Disparador: `POST /api/v1/projects/{p}/stages/{s}/apps/{a}/deploys`.
    - Servicio que ya existía y sin `UpdateStatus` de este deploy: su plantilla no cambió (solo `muelle.deploy`, §6.2) y Swarm no lo actualiza. OK cuando pasaron 5 s desde que se aplicó (lo que tarda Swarm en empezar una actualización) y las tareas corriendo llegan a las deseadas.
    - Se pasa el timeout → `failed` con "timeout esperando convergencia", y el estado de cada servicio que no llegó. Swarm sigue actuando por su cuenta; el estado real se ve en el panel.
    - Si Docker deja de responder mientras se espera, se reintenta hasta el timeout.
-7. **Rutas.** Se regenera y envía la configuración de Caddy (§8), por si el deploy agregó o quitó servicios que son destino de un dominio. Un error es solo una advertencia en el log (§13).
+7. **Rutas.** Se regenera y envía la configuración de Caddy (§8), por si el deploy agregó o quitó servicios que son destino de un dominio. Un error no hace fallar el deploy (§13): es una advertencia en el log, y el deploy queda con `routes_warning` (contrato de las fases 2 y 3, §2.1).
 8. **Cerrar.** El deploy pasa a `succeeded` (las imágenes con digest ya quedaron en el paso 2), `last_deployed_at` avanza hasta el `started_at` del deploy (el momento en que leyó la configuración: un cambio guardado mientras corría sigue pendiente) y se aplica la retención (§5.2 regla 7).
 
 Un deploy que termina `failed` también aplica la retención. El apagado de muelle nunca cierra un deploy: lo deja `running` para la reconciliación.

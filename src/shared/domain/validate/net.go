@@ -96,6 +96,18 @@ func Email(field, s string) error {
 	return nil
 }
 
+// NoPlaceholders rechaza { y } en un valor que va tal cual a la
+// configuración de Caddy (el email ACME y el token de Cloudflare): Caddy los
+// expande como placeholders, y con uno el POST /load entero falla (contrato
+// §3.4). Lo usan PATCH /settings, install y MUELLE_INIT_*. El error no cita
+// el valor, que puede ser un token.
+func NoPlaceholders(field, s string) error {
+	if strings.ContainsAny(s, "{}") {
+		return Errorf(field, "no puede tener { ni }: Caddy los toma como placeholders")
+	}
+	return nil
+}
+
 // Port valida un puerto TCP o UDP (1-65535).
 func Port(field string, n int) error {
 	if n < 1 || n > 65535 {

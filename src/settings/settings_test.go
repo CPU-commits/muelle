@@ -236,6 +236,29 @@ func TestLoadRejectsBadInit(t *testing.T) {
 	}
 }
 
+// { o } en el email ACME o en el token de Cloudflare dejarían a Caddy sin
+// configuración (out_of_sync, contrato §3.4), y el panel va por Caddy: muelle
+// no arranca con ellos, y el error nombra la variable sin citar el token.
+func TestLoadRejectsInitPlaceholders(t *testing.T) {
+	const token = "cf-token-{1234567890abcdef}"
+	for key, value := range map[string]string{
+		"MUELLE_INIT_ACME_EMAIL":            "a{x}@correo.cl",
+		"MUELLE_INIT_CLOUDFLARE_TOKEN_FILE": writeFile(t, "token", token+"\n"),
+	} {
+		clearEnv(t)
+		t.Setenv("MUELLE_PANEL_ORIGIN", "https://panel.tudominio.cl")
+		t.Setenv(key, value)
+		_, err := Load()
+		if err == nil || !strings.HasPrefix(err.Error(), key+": ") || !strings.Contains(err.Error(), "Caddy los toma como placeholders") {
+			t.Errorf("%s: %v", key, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "1234567890abcdef") {
+			t.Errorf("%s: el error cita el token: %v", key, err)
+		}
+	}
+}
+
 // writeFile escribe content en un archivo nuevo del test y devuelve su ruta.
 func writeFile(t *testing.T, name, content string) string {
 	t.Helper()

@@ -53,14 +53,14 @@ type setupResult struct {
 	HasUsers   bool
 }
 
-// waitSetup sigue el log de la tarea actual del servicio (la running más
-// nueva) hasta "event":"listening". Devuelve el último setup_url de esa
-// tarea, o HasUsers si no hubo ninguno, y el origen del panel. Si la tarea actual cambia, cierra el
-// stream y lee la nueva desde el principio; si el stream se corta antes de
-// listening, vuelve a leer la misma desde el principio. Mientras no hay una tarea
-// corriendo, muestra en stderr por qué: el estado y el Err de la tarea más
-// nueva, y las líneas ERROR de su log si ya terminó. Las líneas de nivel
-// ERROR de cualquier tarea van a stderr, una vez cada una (contrato §5.4,
+// waitSetup sigue el log de la tarea actual del servicio (la running más nueva)
+// hasta "event":"listening". Devuelve el último setup_url de esa tarea, o
+// HasUsers si no hubo ninguno, y el origen del panel. Si la tarea actual
+// cambia, cierra el stream y lee la nueva desde el principio; si el stream se
+// corta antes de listening, vuelve a leer la misma desde el principio. Mientras
+// no hay una tarea corriendo, muestra en stderr por qué: el estado y el Err de
+// la tarea más nueva, y las líneas ERROR de su log si ya terminó. Las líneas de
+// nivel ERROR de cualquier tarea van a stderr, una vez cada una (contrato §5.4,
 // "El link de setup").
 func waitSetup(ctx context.Context, e docker.Services, service string, timeout, poll time.Duration, stderr io.Writer) (setupResult, error) {
 	parent := ctx
