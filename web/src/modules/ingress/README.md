@@ -1,8 +1,8 @@
 # Módulo `ingress` (Fase 3): el contrato que usa el panel
 
 La fuente es el contrato HTTP de las Fases 2 y 3:
-`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md` en `fase-23-base` (§0 y §3),
-con la Fase 3 terminada.
+`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md` (§0 y §3), en este
+mismo árbol, con la Fase 3 terminada.
 Este archivo resume lo que la pantalla Dominios lee y manda, y cómo se comporta con cada
 respuesta. Si el contrato cambia, se cambian este README, `data/dtos/domainDto.ts` y los
 mocks (`src/mocks/{db,handlers}/ingress.ts`).

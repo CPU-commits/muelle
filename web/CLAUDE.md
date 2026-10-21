@@ -533,18 +533,18 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
 
 **El estado real.** Las Fases 2 (deploys, status, logs, rollback, registries y los
 `services` de una app), 3 (dominios, `GET /proxy` y, en Ajustes, Cloudflare, IP pública,
-email ACME, puertos e IPs permitidas) y 5 (install y el panel embebido) están mergeadas en
-`fase-23-base`, y `deploy` e `ingress` registran todas sus rutas (contrato §1): ahí un
-`404 no_route` es solo una ruta que no existe. La única fuente para §0–§5 es el contrato de
-`fase-23-base`, `docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md`, resumido en
-`src/modules/{deploy,ingress}/README.md`, sin diferencias.
+email ACME, puertos e IPs permitidas) y 5 (install y el panel embebido) están en este mismo
+árbol que el panel (`integracion-final`, que pasa a `main`), y `deploy` e `ingress` registran
+todas sus rutas (contrato §1): ahí un `404 no_route` es solo una ruta que no existe. La única
+fuente para §0–§5 es el contrato, `docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md`,
+resumido en `src/modules/{deploy,ingress}/README.md`, sin diferencias.
 
 En producción el panel va embebido en el binario que lo sirve (contrato §5.5): las rutas del
 panel y las del backend llegan juntas, y `<ComingSoon>` no aparece. **El fallback se queda**
 por una sola razón, y cuesta poco (un `phase` en el `DomainErrorMap` y un `<ComingSoon>`):
-`pnpm dev` contra un `muelle serve` de `main`, que todavía tiene solo la Fase 1. Sin el
-fallback, Resumen, Deploys, Logs, Dominios y Registries mostrarían un error de verdad, con
-reintentos.
+`pnpm dev` contra un `muelle serve` de una rama con solo la Fase 1 (el `main` de antes de
+`integracion-final`). Sin el fallback, Resumen, Deploys, Logs, Dominios y Registries
+mostrarían un error de verdad, con reintentos.
 
 **Lo que cuesta:** con el panel embebido, un 404 `no_route` en una de esas rutas solo puede
 ser un bug del panel (una ruta mal armada), y `<ComingSoon>` lo esconde detrás de "todavía

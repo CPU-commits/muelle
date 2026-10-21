@@ -1,8 +1,8 @@
 # Módulo `deploy` (Fase 2): el contrato que usa el panel
 
 La fuente es el contrato HTTP de las Fases 2 y 3:
-`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md` (§0 y §2), en `fase-23-base`,
-donde la Fase 2 ya está mergeada con las Fases 3 y 5.
+`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md` (§0 y §2), en este
+mismo árbol, donde la Fase 2 está mergeada con las Fases 3 y 5.
 Este archivo resume lo que el panel lee y manda, y cómo se comporta con cada respuesta. Si
 el contrato cambia, se cambian este README, `data/dtos/deployDto.ts` y los mocks
 (`src/mocks/{db,handlers}/deploy.ts`). Lo que el panel usa y el contrato todavía no tiene
