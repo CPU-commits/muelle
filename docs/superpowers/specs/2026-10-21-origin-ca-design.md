@@ -202,12 +202,12 @@ Entre 58f7236 y a1238d9 entraron los menores de la integración. Para este dise�
 | # | Regla | Respuesta |
 |---|---|---|
 | 1 | Se enciende en este `PATCH` (de `false` a `true`) y, con los valores resultantes, no hay token. Va al final de `applyProxy`, después de la forma del token | `422`: `cloudflare_origin_ca: necesita el token de Cloudflare: configúralo antes de activarla`. No se guarda nada |
-| 1b | Se quita el token en este `PATCH` (`cloudflare_token: ""`) y la opción queda encendida (no viene `cloudflare_origin_ca: false`). Va junto con la regla 1 | `422`: `cloudflare_origin_ca: sin token no se pueden usar los certificados de Cloudflare: mándala en false en el mismo cambio para quitar el token`. No se guarda nada |
+| 1b | Se quita en este `PATCH` un token guardado (`cloudflare_token: ""` con un token guardado; sin uno, `""` no quita nada) y la opción queda encendida (no viene `cloudflare_origin_ca: false`). Va junto con la regla 1 | `422`: `cloudflare_origin_ca: sin token no se pueden usar los certificados de Cloudflare: mándala en false en el mismo cambio para quitar el token`. No se guarda nada |
 | 2 | Token nuevo: `CheckCloudflareToken`, igual que hoy (después del `409 would_lock_out`) | `422 cloudflare_token` / `502` |
 | 3 | Con los valores resultantes la opción queda encendida, y o se enciende ahora o cambió el token: `hook.CheckCloudflareOriginCA(ctx, token, field)` (§3.3). `field` es `cloudflare_origin_ca` si se encendió en este `PATCH`, y si no `cloudflare_token` (el token reemplazado con la opción ya encendida) | `422` en `field`: `el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona auditfy.cl (lo necesitan los certificados de Cloudflare): agrégalo al token en Cloudflare, o deja la opción apagada` (en `cloudflare_token`, el final es `…, o apaga antes los certificados de Cloudflare`). `502 cloudflare_unavailable` si Cloudflare no responde (red, 5xx, 429) |
 | 4 | `CheckProxyPorts`, igual que hoy, y después `409 totp_required_first`, dentro de la transacción | — |
 
-- Las reglas 1 y 1b miran solo lo que cambia en este `PATCH`, no el estado guardado: un estado "encendida sin token" que llegó por un `UPDATE` a mano no frena un `PATCH` de otra cosa (y el reconciliador, sin token, no tiene candidatos, §5.5).
+- Las reglas 1 y 1b miran solo lo que cambia en este `PATCH`, no el estado guardado: un estado "encendida sin token" que llegó por un `UPDATE` a mano no frena un `PATCH` de otra cosa, ni uno con `cloudflare_token: ""`, que ahí no quita nada (y el reconciliador, sin token, no tiene candidatos, §5.5).
 - Los tres chequeos van fuera de la transacción, como hoy. Si alguno falla, no se guarda nada del `PATCH`.
 - `cloudflare_origin_ca: false` nunca llama a Cloudflare.
 - Mandar el mismo valor que ya tiene no es un cambio.
@@ -827,7 +827,7 @@ Los campos nuevos son **obligatorios** en los DTOs, como los demás que sumaron 
 - `db/admin.ts` guarda `cloudflare_origin_ca` (por defecto `false`).
 - `handlers/admin.ts`:
   - encenderla sin token es `422`;
-  - un `cloudflare_token: ""` con la opción encendida y sin `false` es `422`;
+  - un `cloudflare_token: ""` que quita el token guardado, con la opción encendida y sin `false`, es `422`;
   - un token que contiene `sin-ssl` es `422` con el mensaje del permiso (en `cloudflare_origin_ca`, o en `cloudflare_token` si cambió el token);
   - un token que contiene `ssl-lento` es `502` al comprobar el permiso (el `caido` de hoy ya es `502` al guardar el token, así que no serviría para un token guardado);
   - los mensajes son los del contrato (§4.1), letra por letra, como los demás del mock.
@@ -952,7 +952,7 @@ Los campos nuevos son **obligatorios** en los DTOs, como los demás que sumaron 
   - cada paso de §10.1 en su orden, `cert_source` igual a `cloudflare_origin_ca` solo con `active`, y `error_code`/`error`/`retry_at` en null fuera de `failed` y `active`;
   - en `ingress/infra/in/http`, los JSON exactos.
 - **admin:**
-  - `proxy_settings_test.go` (el `fakeHook` suma `CheckCloudflareOriginCA`), con la matriz de §3.2: sin token, quitar el token sin apagarla, encenderla y quitar el token a la vez (el mensaje de la regla 1), un estado "encendida sin token" guardado a mano que no frena un `PATCH` de otra cosa, encenderla (el hook con `field` igual a `cloudflare_origin_ca`), cambiar el token con la opción encendida (`cloudflare_token`), un `false` que no llama al hook, un `502` que no guarda nada, y la auditoría con el bool;
+  - `proxy_settings_test.go` (el `fakeHook` suma `CheckCloudflareOriginCA`), con la matriz de §3.2: sin token, quitar el token sin apagarla, encenderla y quitar el token a la vez (el mensaje de la regla 1), un estado "encendida sin token" guardado a mano que no frena un `PATCH` de otra cosa ni un `cloudflare_token: ""`, encenderla (el hook con `field` igual a `cloudflare_origin_ca`), cambiar el token con la opción encendida (`cloudflare_token`), un `false` que no llama al hook, un `502` que no guarda nada, y la auditoría con el bool;
   - `dto_test.go`: la clave siempre presente.
 - **El contenedor** (`shared/infra/container`): `PATCH /settings` de punta a punta con `cftest`, para el `422`, el `200` y `GET /settings`.
 

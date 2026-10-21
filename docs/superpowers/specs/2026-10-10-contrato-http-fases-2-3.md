@@ -1019,7 +1019,7 @@ Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `cloudflar
 | Cloudflare no responde al verificar el token | `502 cloudflare_unavailable` |
 | `cloudflare_token: ""` | Borra el token y `cloudflare_zones` |
 | `cloudflare_origin_ca: true` en un `PATCH` que la enciende, sin token con los valores resultantes (no hay uno guardado, o el mismo `PATCH` lo quita) | `422`: `cloudflare_origin_ca: necesita el token de Cloudflare: configúralo antes de activarla`; no se guarda nada |
-| `cloudflare_token: ""` con la opción encendida, sin `"cloudflare_origin_ca": false` en el mismo `PATCH` | `422`: `cloudflare_origin_ca: sin token no se pueden usar los certificados de Cloudflare: mándala en false en el mismo cambio para quitar el token`; no se guarda nada |
+| `cloudflare_token: ""` que quita un token guardado, con la opción encendida y sin `"cloudflare_origin_ca": false` en el mismo `PATCH`. Sin un token guardado (la opción encendida sin token, por un `UPDATE` a mano), `""` no quita nada y esta regla no aplica | `422`: `cloudflare_origin_ca: sin token no se pueden usar los certificados de Cloudflare: mándala en false en el mismo cambio para quitar el token`; no se guarda nada |
 | La opción queda encendida, y se enciende en este `PATCH` o cambia el token, y al token le falta Zone → SSL and Certificates → Edit en alguna de sus zonas activas (`CheckCloudflareOriginCA`, §3.5) | `422` en `cloudflare_origin_ca` si se enciende en este `PATCH`, y si no en `cloudflare_token`; no se guarda nada. Los mensajes, abajo |
 | Cloudflare no responde al comprobar ese permiso | `502 cloudflare_unavailable`; no se guarda nada |
 | `require_2fa: true` sin el 2FA propio | `409 totp_required_first` |
