@@ -1,0 +1,26 @@
+{
+	"extends": "./.svelte-kit/tsconfig.json",
+	"compilerOptions": {
+		"rewriteRelativeImportExtensions": true,
+		"allowJs": true,
+		"checkJs": true,
+		"moduleResolution": "bundler",
+
+		"strict": true,
+		"noImplicitOverride": true,
+		"noUncheckedIndexedAccess": true,
+		"noFallthroughCasesInSwitch": true,
+		"exactOptionalPropertyTypes": true,
+		"useUnknownInCatchVariables": true,
+
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"skipLibCheck": true,
+		"sourceMap": true,
+		"types": ["vite/client"]
+	}
+	// Los alias (`@`, `@lib`) viven en svelte.config.js -> kit.alias.
+	// Para tocar include/exclude, extender el tsconfig generado:
+	// https://svelte.dev/docs/kit/configuration#typescript
+}

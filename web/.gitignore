@@ -1,0 +1,30 @@
+node_modules
+
+# Output
+/build/*
+# Los builds de `pnpm test:e2e` (con y sin MSW), para no pisar ./build
+/build-e2e
+/.svelte-kit
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Tests
+test-results
+playwright-report
+coverage
+
+# Paraglide (lo genera `pnpm codegen`)
+src/shared/ui/i18n/paraglide
+project.inlang/cache/

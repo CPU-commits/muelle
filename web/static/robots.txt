@@ -1,0 +1,3 @@
+# El panel de muelle no es un sitio público: nada para indexar.
+User-agent: *
+Disallow: /

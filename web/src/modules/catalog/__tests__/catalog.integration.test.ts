@@ -1,0 +1,328 @@
+import { http, HttpResponse } from 'msw'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { api, apiError, invalid } from '@/mocks/api'
+import { authDb, MOCK_PASSWORD, MOCK_USERNAME } from '@/mocks/db/auth'
+import { catalogDb } from '@/mocks/db/catalog'
+import { ingressDb } from '@/mocks/db/ingress'
+import { server } from '@/mocks/server'
+import { ValidationError } from '@/shared/domain'
+import { authUseCases } from '@/modules/auth'
+import { catalogUseCases } from '../container'
+import {
+	AppDeployStopping,
+	AppHasDomains,
+	AppNotFound,
+	appRefFrom,
+	countApps,
+	KindMismatch,
+	newServiceSpec,
+	ProjectNotEmpty,
+	type ProjectSlug,
+	type ServiceApp,
+	serviceTargets,
+	SlugTaken,
+	StageNetworkConflict,
+	StageNotEmpty,
+	type StageSlug,
+} from '../domain'
+
+// Recorre el módulo entero —caso de uso, repositorio, datasource, cliente HTTP, schema
+// Zod y mapper— contra el backend simulado por MSW (src/mocks/handlers/catalog.ts).
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeEach(async () => {
+	authDb.reset()
+	catalogDb.reset()
+	// Una app con dominios no se borra: el mock de catalog mira los de ingress.
+	ingressDb.reset()
+	await authUseCases.login({ username: MOCK_USERNAME, password: MOCK_PASSWORD })
+})
+afterEach(() => server.resetHandlers())
+afterAll(() => server.close())
+
+const auditfy = 'auditfy' as ProjectSlug
+const staging = 'staging' as StageSlug
+const stagingApi = appRefFrom('auditfy', 'staging', 'api')
+
+async function serviceApp(): Promise<ServiceApp> {
+	const app = await catalogUseCases.getApp(stagingApi)
+	if (app.kind !== 'service') throw new Error('la api de auditfy es de formulario')
+	return app
+}
+
+describe('catálogo contra el backend simulado', () => {
+	it('arma el árbol del diseño: 3 proyectos, 6 stages y 10 apps', async () => {
+		const tree = await catalogUseCases.listCatalog()
+
+		expect(tree.map((node) => node.project.slug)).toEqual([
+			'auditfy',
+			'extractor',
+			'aumi-agents',
+		])
+		expect(tree.flatMap((node) => node.stages)).toHaveLength(6)
+		expect(countApps(tree)).toBe(10)
+		const api = tree[0]?.stages[0]?.apps[0]
+		expect(api).toMatchObject({ slug: 'api', kind: 'service', pendingChanges: true })
+		const agents = tree[2]?.stages[0]?.apps[0]
+		expect(agents).toMatchObject({
+			kind: 'compose',
+			lastDeployedAt: null,
+			pendingChanges: false,
+		})
+	})
+
+	it('crea, renombra y borra un proyecto; el slug repetido es SlugTaken', async () => {
+		await catalogUseCases.createProject({ slug: 'nuevo', name: 'Nuevo' })
+		await expect(
+			catalogUseCases.createProject({ slug: 'nuevo', name: 'Otro' }),
+		).rejects.toBeInstanceOf(SlugTaken)
+
+		await expect(
+			catalogUseCases.renameProject({ project: 'nuevo' as ProjectSlug, name: 'Renombrado' }),
+		).resolves.toMatchObject({ slug: 'nuevo', name: 'Renombrado' })
+
+		await catalogUseCases.deleteProject('nuevo' as ProjectSlug)
+		const tree = await catalogUseCases.listCatalog()
+		expect(tree.map((node) => node.project.slug)).not.toContain('nuevo')
+	})
+
+	it('no borra un proyecto con stages ni un stage con apps', async () => {
+		await expect(catalogUseCases.deleteProject(auditfy)).rejects.toBeInstanceOf(ProjectNotEmpty)
+		await expect(
+			catalogUseCases.deleteStage({ project: auditfy, stage: staging }),
+		).rejects.toBeInstanceOf(StageNotEmpty)
+
+		await catalogUseCases.createStage({ project: auditfy, slug: 'qa' })
+		await catalogUseCases.deleteStage({ project: auditfy, stage: 'qa' as StageSlug })
+	})
+
+	it('crea apps de los dos tipos y la repetida es SlugTaken', async () => {
+		await expect(
+			catalogUseCases.createApp({
+				project: auditfy,
+				stage: staging,
+				slug: 'web',
+				kind: 'service',
+				spec: newServiceSpec('nginx:1.27-alpine', 80),
+			}),
+		).resolves.toMatchObject({ slug: 'web', kind: 'service', deployTimeoutSeconds: 300 })
+		await expect(
+			catalogUseCases.createApp({
+				project: auditfy,
+				stage: staging,
+				slug: 'jobs',
+				kind: 'compose',
+				composeYaml: 'services:\n  worker:\n    image: busybox\n',
+				deployTimeoutSeconds: 120,
+			}),
+		).resolves.toMatchObject({ kind: 'compose', deployTimeoutSeconds: 120 })
+		await expect(
+			catalogUseCases.createApp({
+				project: auditfy,
+				stage: staging,
+				slug: 'api',
+				kind: 'service',
+				spec: newServiceSpec('nginx', 80),
+			}),
+		).rejects.toMatchObject({ name: 'SlugTaken', entity: 'app' })
+	})
+
+	it('guarda el spec y el backend lo devuelve normalizado', async () => {
+		const app = await serviceApp()
+		const spec = { ...app.spec, replicas: 3, command: ['node', 'dist/main.js'] }
+
+		const saved = await catalogUseCases.updateApp({ ref: stagingApi, changes: { spec } })
+
+		expect(saved).toMatchObject({ kind: 'service', spec, pendingChanges: true })
+		expect(await catalogUseCases.getApp(stagingApi)).toEqual(saved)
+	})
+
+	it('un 422 llega como ValidationError con el campo en nombres del dominio', async () => {
+		server.use(
+			http.patch(api('/projects/:p/stages/:s/apps/:a'), () =>
+				invalid('healthcheck.interval_s', 'debe estar entre 1 y 3600'),
+			),
+		)
+		const app = await serviceApp()
+
+		const error = await catalogUseCases
+			.updateApp({ ref: stagingApi, changes: { spec: app.spec } })
+			.catch((reason: unknown) => reason)
+
+		expect(error).toBeInstanceOf(ValidationError)
+		expect(error).toMatchObject({
+			field: 'healthcheck.intervalSeconds',
+			message: 'debe estar entre 1 y 3600',
+		})
+	})
+
+	it('los volúmenes y el timeout también llegan a su campo', async () => {
+		const app = await serviceApp()
+		// El dominio dejaría pasar este mount: lo rechaza el mock, como el backend real.
+		server.use(
+			http.patch(api('/projects/:p/stages/:s/apps/:a'), () =>
+				invalid('volumes[0].mount', 'debe ser una ruta absoluta'),
+			),
+		)
+		await expect(
+			catalogUseCases.updateApp({ ref: stagingApi, changes: { spec: app.spec } }),
+		).rejects.toMatchObject({ field: 'volumes[0].mount' })
+
+		server.resetHandlers()
+		server.use(
+			http.patch(api('/projects/:p/stages/:s/apps/:a'), () =>
+				invalid('deploy_timeout_s', 'debe estar entre 30 y 3600'),
+			),
+		)
+		await expect(
+			catalogUseCases.updateApp({ ref: stagingApi, changes: { deployTimeoutSeconds: 60 } }),
+		).rejects.toMatchObject({ field: 'deployTimeoutSeconds' })
+	})
+
+	it('el mock valida el compose al guardar, como el backend (§6.3 del diseño)', async () => {
+		const agents = appRefFrom('aumi-agents', 'staging', 'agents')
+		const ports = 'services:\n  gateway:\n    image: nginx\n    ports: ["80:80"]\n'
+		await expect(
+			catalogUseCases.updateApp({ ref: agents, changes: { composeYaml: ports } }),
+		).rejects.toMatchObject({
+			field: 'composeYaml',
+			message: expect.stringMatching(/^services\.gateway\.ports: publicar puertos/),
+		})
+
+		// Un servicio que se llama como otro del stage (la app de formulario api).
+		await expect(
+			catalogUseCases.createApp({
+				project: auditfy,
+				stage: staging,
+				slug: 'front',
+				kind: 'compose',
+				composeYaml: 'services:\n  api:\n    image: nginx\n',
+			}),
+		).rejects.toMatchObject({
+			field: 'composeYaml',
+			message: expect.stringMatching(
+				/^el servicio "api" ya existe en la app "api" del stage/,
+			),
+		})
+
+		// Una app de formulario con el nombre de un servicio de la compose del stage.
+		await expect(
+			catalogUseCases.createApp({
+				project: 'aumi-agents' as ProjectSlug,
+				stage: staging,
+				slug: 'gateway',
+				kind: 'service',
+				spec: newServiceSpec('nginx', 80),
+			}),
+		).rejects.toMatchObject({
+			field: 'slug',
+			message: '"gateway" ya es un servicio de la app compose "agents" del stage',
+		})
+	})
+
+	it('el compose se guarda con PATCH compose_yaml; en una de formulario es KindMismatch', async () => {
+		const agents = appRefFrom('aumi-agents', 'staging', 'agents')
+		const yaml = 'services:\n  gateway:\n    image: ghcr.io/aumi-app/agents-gateway:v2\n'
+
+		await expect(
+			catalogUseCases.updateApp({ ref: agents, changes: { composeYaml: yaml } }),
+		).resolves.toMatchObject({ kind: 'compose', composeYaml: yaml })
+		await expect(
+			catalogUseCases.updateApp({ ref: stagingApi, changes: { composeYaml: yaml } }),
+		).rejects.toBeInstanceOf(KindMismatch)
+	})
+
+	it('cada app trae sus servicios y sus puertos (contrato §2.12)', async () => {
+		const api = await catalogUseCases.getApp(stagingApi)
+		expect(api.services).toEqual([{ name: 'api', ports: [3000] }])
+		expect(serviceTargets(api)).toEqual(['api:3000'])
+
+		// En una compose, los de `expose` (gateway expone el 8080; los otros, nada).
+		const agents = await catalogUseCases.getApp(appRefFrom('aumi-agents', 'staging', 'agents'))
+		expect(agents.services).toEqual([
+			{ name: 'gateway', ports: [8080] },
+			{ name: 'runner', ports: [] },
+			{ name: 'scheduler', ports: [] },
+		])
+	})
+
+	it('una app con dominios no se borra: 409 not_empty es AppHasDomains', async () => {
+		server.use(
+			http.delete(api('/projects/:p/stages/:s/apps/:a'), () =>
+				apiError(409, 'not_empty', 'primero hay que borrar lo que contiene'),
+			),
+		)
+		await expect(catalogUseCases.deleteApp(stagingApi)).rejects.toBeInstanceOf(AppHasDomains)
+	})
+
+	it('un deploy que no se detiene a tiempo: 409 conflict al borrar es AppDeployStopping', async () => {
+		server.use(
+			http.delete(api('/projects/:p/stages/:s/apps/:a'), () =>
+				apiError(
+					409,
+					'conflict',
+					'un deploy de la app todavía no se detiene; vuelve a intentar en unos segundos',
+				),
+			),
+		)
+		await expect(catalogUseCases.deleteApp(stagingApi)).rejects.toBeInstanceOf(
+			AppDeployStopping,
+		)
+	})
+
+	it('una red de Docker ajena con el nombre del stage: 409 network_conflict, con la red', async () => {
+		server.use(
+			http.post(api('/projects/:p/stages'), () =>
+				apiError(
+					409,
+					'network_conflict',
+					'ya existe una red de Docker con el nombre del stage que no es overlay attachable; bórrala o renómbrala',
+				),
+			),
+		)
+		const error = await catalogUseCases
+			.createStage({ project: auditfy, slug: 'qa' })
+			.catch((caught: unknown) => caught)
+		expect(error).toBeInstanceOf(StageNetworkConflict)
+		expect((error as StageNetworkConflict).network).toBe('auditfy_qa')
+	})
+
+	it('el mock: un stage con "ajena" choca con una red del servidor y no se guarda (§3.4)', async () => {
+		await expect(
+			catalogUseCases.createStage({ project: auditfy, slug: 'red-ajena' }),
+		).rejects.toBeInstanceOf(StageNetworkConflict)
+		expect(catalogDb.findStage('auditfy', 'red-ajena')).toBeUndefined()
+	})
+
+	it('el mock no borra una app que tiene dominios, como el backend, aunque nadie los haya listado', async () => {
+		// Los dominios del diseño se siembran al pedirlos: el DELETE también los ve.
+		await expect(catalogUseCases.deleteApp(stagingApi)).rejects.toBeInstanceOf(AppHasDomains)
+
+		for (const domain of ingressDb.list('auditfy', 'staging', 'api')) {
+			ingressDb.remove(domain.app, domain.hostname)
+		}
+		await catalogUseCases.deleteApp(stagingApi)
+		await expect(catalogUseCases.getApp(stagingApi)).rejects.toBeInstanceOf(AppNotFound)
+	})
+
+	it('una app nueva no tiene dominios: se borra y después es AppNotFound', async () => {
+		const web = appRefFrom('auditfy', 'staging', 'web')
+		await catalogUseCases.createApp({
+			project: auditfy,
+			stage: staging,
+			slug: 'web',
+			kind: 'service',
+			spec: newServiceSpec('nginx:1.27-alpine', 80),
+		})
+		expect(ingressDb.list('auditfy', 'staging', 'web')).toEqual([])
+
+		await catalogUseCases.deleteApp(web)
+
+		await expect(catalogUseCases.getApp(web)).rejects.toBeInstanceOf(AppNotFound)
+	})
+
+	it('una respuesta con otra forma es un error de contrato, no un undefined en la UI', async () => {
+		server.use(http.get(api('/projects'), () => HttpResponse.json([{ slug: 1 }])))
+
+		await expect(catalogUseCases.listCatalog()).rejects.toMatchObject({ name: 'ContractError' })
+	})
+})

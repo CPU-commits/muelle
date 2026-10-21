@@ -7,4 +7,15 @@
 .env
 *.key
 muelle_master_key
+# El build del panel copiado para compilar con -tags panel (README, "Con el panel").
 /src/cmd/http/panel/build/
+
+# Panel web (web/). Lo que genera pnpm: el build (copiado a mano o por la
+# imagen en src/cmd/http/panel/build/), los de los e2e y el codegen.
+web/node_modules/
+web/.svelte-kit/
+web/build/*
+web/build-e2e/
+web/test-results/
+web/playwright-report/
+web/src/shared/ui/i18n/paraglide/
