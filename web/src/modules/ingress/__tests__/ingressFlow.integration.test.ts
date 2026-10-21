@@ -5,7 +5,7 @@ import { adminDb } from '@/mocks/db/admin'
 import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { ingressDb } from '@/mocks/db/ingress'
 import { server } from '@/mocks/server'
-import { pendingPhase, UnavailableError, ValidationError } from '@/shared/domain'
+import { UnexpectedError, ValidationError } from '@/shared/domain'
 import { ingressUseCases } from '../container'
 import {
 	type AppRef,
@@ -179,7 +179,7 @@ describe('dominios de una app', () => {
 		).rejects.toMatchObject({ name: 'ValidationError', field: 'proxied' })
 	})
 
-	it('borrar lo saca de la lista; uno que no existe es DomainNotFound (no la fase)', async () => {
+	it('borrar lo saca de la lista; uno que no existe es DomainNotFound', async () => {
 		await ingressUseCases.listDomains(APP)
 		const hostname = asHostname('api-staging.tudominio.cl')
 
@@ -187,18 +187,16 @@ describe('dominios de una app', () => {
 		const domains = await ingressUseCases.listDomains(APP)
 		expect(domains.some((domain) => domain.hostname === hostname)).toBe(false)
 
-		const missing = ingressUseCases.removeDomain({ app: APP, hostname })
-		await expect(missing).rejects.toBeInstanceOf(DomainNotFound)
-		await expect(missing).rejects.toSatisfy((error) => pendingPhase(error) === null)
+		await expect(ingressUseCases.removeDomain({ app: APP, hostname })).rejects.toBeInstanceOf(
+			DomainNotFound,
+		)
 	})
 })
 
-describe('contra un backend sin la Fase 3', () => {
-	it('una ruta que no existe (no_route) es UnavailableError con phase 3', async () => {
+describe('una ruta que no existe', () => {
+	it('no_route es un error inesperado, no un dominio que falta', async () => {
 		server.use(http.get(api(DOMAINS), () => apiError(404, 'no_route', 'no existe la ruta')))
-		const result = ingressUseCases.listDomains(APP)
-		await expect(result).rejects.toBeInstanceOf(UnavailableError)
-		await expect(result).rejects.toSatisfy((error) => pendingPhase(error) === 3)
+		await expect(ingressUseCases.listDomains(APP)).rejects.toBeInstanceOf(UnexpectedError)
 	})
 
 	it('un método que no existe (405) también, en cualquier operación', async () => {
@@ -217,10 +215,10 @@ describe('contra un backend sin la Fase 3', () => {
 				target: 'api:3000',
 				proxied: false,
 			}),
-		).rejects.toSatisfy((error) => pendingPhase(error) === 3)
+		).rejects.toBeInstanceOf(UnexpectedError)
 		await expect(
 			ingressUseCases.adoptRecord({ app: APP, hostname: asHostname('x.tudominio.cl') }),
-		).rejects.toSatisfy((error) => pendingPhase(error) === 3)
+		).rejects.toBeInstanceOf(UnexpectedError)
 	})
 })
 
@@ -454,10 +452,12 @@ describe('GET /proxy', () => {
 		expect(proxy.error).toMatch(/Caddy rechazó/)
 	})
 
-	it('sin la Fase 3 (no_route) es la fase: la pantalla no muestra nada', async () => {
-		server.use(http.get(api('/proxy'), () => apiError(404, 'no_route', 'no existe')))
-		await expect(ingressUseCases.getProxyStatus()).rejects.toSatisfy(
-			(error) => pendingPhase(error) === 3,
+	it('con Docker caído (503) es DockerUnavailable: la pantalla no muestra nada', async () => {
+		server.use(
+			http.get(api('/proxy'), () =>
+				apiError(503, 'docker_unavailable', 'Docker no responde'),
+			),
 		)
+		await expect(ingressUseCases.getProxyStatus()).rejects.toBeInstanceOf(DockerUnavailable)
 	})
 })

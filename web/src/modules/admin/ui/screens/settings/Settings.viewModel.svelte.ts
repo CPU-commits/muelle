@@ -4,7 +4,7 @@ import { createQuery } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { UnavailableError } from '@/shared/domain'
 import { settingsQuery } from '../../../data'
-import { PROXY_SETTINGS_PHASE, type Settings } from '../../../domain'
+import type { Settings } from '../../../domain'
 import { savePanelMove } from '../../features/proxySettings'
 
 export interface SettingsProps {
@@ -19,8 +19,6 @@ export interface SettingsProps {
 // "Seguridad". Registries, Usuarios y Auditoría tienen su propia query, y se ven aunque
 // los settings fallen.
 export class SettingsViewModel {
-	readonly proxyPhase = PROXY_SETTINGS_PHASE
-
 	readonly #settings = createQuery(() => settingsQuery())
 
 	constructor(props: () => SettingsProps = () => ({})) {

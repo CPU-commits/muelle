@@ -27,8 +27,7 @@
 		warning,
 	} from './styles.css'
 
-	// Las tarjetas de "Proxy y DNS" (`Ajustes.dc.html`). Solo se montan si el backend ya
-	// tiene la Fase 3; si no, la pantalla muestra <ComingSoon>.
+	// Las tarjetas de "Proxy y DNS" (`Ajustes.dc.html`).
 	let { proxy, id }: { proxy: ProxySettings; id?: string } = $props()
 
 	const vm = new ProxySettingsViewModel(() => proxy)
@@ -221,6 +220,13 @@
 				body={vm.recreation.error
 					? m.admin_ports_recreate_failed_body({ error: vm.recreation.error })
 					: m.admin_ports_recreate_failed_generic()}
+			/>
+		{:else if vm.recreation?.kind === 'unknown'}
+			<!-- Pasaron 2 min sin una respuesta de GET /proxy que diga cómo terminó. -->
+			<Banner
+				tone="warn"
+				title={m.admin_ports_recreate_unknown_title()}
+				body={m.admin_ports_recreate_unknown_body()}
 			/>
 		{/if}
 		<form

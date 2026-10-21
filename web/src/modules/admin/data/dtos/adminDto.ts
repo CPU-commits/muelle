@@ -1,34 +1,32 @@
 import { z } from 'zod'
 
-// Las formas de admin: settings y auditoría de la Fase 1 (src/internal/admin/app/dto), y
-// lo que agregan las Fases 2 y 3 según el contrato (§2.10 los registries, §4 los ajustes del
-// proxy). Ver web/CLAUDE.md, "Endpoints de las fases 2 y 3".
+// Las formas de admin (src/internal/admin/app/dto): settings y auditoría, y lo que suman las
+// Fases 2 y 3 según el contrato (§2.10 los registries, §4 los ajustes del proxy).
 
 // UTC con milisegundos (`2026-10-10T19:36:53.770Z`) o RFC 3339 completo con offset.
 const timestamp = z.iso.datetime({ offset: true })
 
 /**
- * `GET /settings` y la respuesta de `PATCH /settings` (contrato §4): con la Fase 3 trae
- * siempre todas las claves. Son opcionales solo por un backend de solo la Fase 1 (`pnpm dev`
- * contra uno así), que tiene nada más que `require_2fa`. `caddy_image` no es un ajuste: solo
- * lo fija install, y si viniera, Zod lo descarta.
+ * `GET /settings` y la respuesta de `PATCH /settings` (contrato §4): trae siempre todas las
+ * claves, sin `omitempty`. `caddy_image` no es un ajuste: solo lo fija install, y si
+ * viniera, Zod lo descarta.
  */
 export const settingsDtoSchema = z.object({
 	require_2fa: z.boolean(),
 	/** El token de Cloudflare es de solo escritura: el GET solo dice si está. */
-	cloudflare_token_set: z.boolean().optional(),
+	cloudflare_token_set: z.boolean(),
 	/** Cuántas zonas ve el token; null si no se pudo consultar. */
-	cloudflare_zones: z.number().int().nonnegative().nullable().optional(),
+	cloudflare_zones: z.number().int().nonnegative().nullable(),
 	/** `''` si no está configurada. */
-	public_ip: z.string().optional(),
-	public_ipv6: z.string().optional(),
-	acme_email: z.string().optional(),
-	panel_domain: z.string().optional(),
-	proxy_http_port: z.number().int().optional(),
-	proxy_https_port: z.number().int().optional(),
-	panel_allowed_cidrs: z.array(z.string()).optional(),
+	public_ip: z.string(),
+	public_ipv6: z.string(),
+	acme_email: z.string(),
+	panel_domain: z.string(),
+	proxy_http_port: z.number().int(),
+	proxy_https_port: z.number().int(),
+	panel_allowed_cidrs: z.array(z.string()),
 	/** La IP con la que el backend ve la petición: siempre un string (no es un ajuste). */
-	client_ip: z.string().optional(),
+	client_ip: z.string(),
 })
 
 /**
@@ -40,8 +38,8 @@ export const auditEventDtoSchema = z.object({
 	actor_type: z.string(),
 	actor_id: z.number().int().nullable(),
 	// El username, el nombre del token o "system", copiado al escribir el evento (contrato
-	// §4.2): nunca null. Opcional solo por un backend de solo la Fase 1, que no lo tiene.
-	actor_name: z.string().optional(),
+	// §4.2): nunca null; `""` en un evento de antes de la migración 0004 cuyo autor ya no estaba.
+	actor_name: z.string(),
 	action: z.string(),
 	target: z.string(),
 	at: timestamp,

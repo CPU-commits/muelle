@@ -6,6 +6,7 @@ import { UnavailableError } from '@/shared/domain'
 import type { SettingsViewModel } from '..'
 import type { Settings } from '../../../../domain'
 import SettingsHarness from './SettingsHarness.svelte'
+import { fakeSettings } from '../../../../domain/repositories/__fakes__/inMemoryAdminRepository'
 
 const mocks = vi.hoisted(() => ({
 	getSettings: vi.fn(),
@@ -38,7 +39,7 @@ vi.mock('@/modules/admin/container', () => ({
 	},
 }))
 
-const PHASE_1: Settings = { require2fa: true, proxy: null, panelAccess: null }
+const SETTINGS: Settings = fakeSettings({ require2fa: true })
 
 async function mountViewModel(panelMoved = false): Promise<SettingsViewModel> {
 	const client = createQueryClient({ retry: false })
@@ -52,7 +53,7 @@ describe('SettingsViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		localStorage.clear()
-		mocks.getSettings.mockResolvedValue(PHASE_1)
+		mocks.getSettings.mockResolvedValue(SETTINGS)
 	})
 
 	it('llegar con "Ir al panel" (?panel_moved=1) deja el aviso de la dirección nueva acá y saca el parámetro', async () => {
@@ -81,11 +82,10 @@ describe('SettingsViewModel', () => {
 		expect(vm.isLoading).toBe(true)
 		expect(vm.settings).toBeNull()
 
-		resolve(PHASE_1)
+		resolve(SETTINGS)
 		await vi.waitUntil(() => !vm.isLoading)
-		expect(vm.settings).toEqual(PHASE_1)
+		expect(vm.settings).toEqual(SETTINGS)
 		expect(vm.loadError).toBeNull()
-		expect(vm.proxyPhase).toBe(3)
 	})
 
 	it('un error al cargar se muestra, y "Reintentar" vuelve a pedirlos', async () => {
@@ -95,7 +95,7 @@ describe('SettingsViewModel', () => {
 
 		expect(vm.loadError).toBe(m.admin_settings_load_error())
 
-		mocks.getSettings.mockResolvedValueOnce(PHASE_1)
+		mocks.getSettings.mockResolvedValueOnce(SETTINGS)
 		vm.retry()
 		await vi.waitUntil(() => vm.settings !== null)
 		expect(vm.loadError).toBeNull()

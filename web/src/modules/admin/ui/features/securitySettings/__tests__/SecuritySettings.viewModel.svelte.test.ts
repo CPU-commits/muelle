@@ -9,6 +9,7 @@ import type { SecuritySettingsViewModel } from '..'
 import { UnavailableError, ValidationError } from '@/shared/domain'
 import { cidrListAllows, type Settings, TotpRequiredFirst, WouldLockOut } from '../../../../domain'
 import SecuritySettingsHarness from './SecuritySettingsHarness.svelte'
+import { fakeSettings } from '../../../../domain/repositories/__fakes__/inMemoryAdminRepository'
 
 const mocks = vi.hoisted(() => ({ updateSecurity: vi.fn() }))
 
@@ -30,13 +31,9 @@ vi.mock('@/modules/admin/container', () => ({
 	},
 }))
 
-const PHASE_3: Settings = {
-	require2fa: false,
-	proxy: null,
+const SETTINGS: Settings = fakeSettings({
 	panelAccess: { allowedCidrs: ['198.51.100.0/24'], clientIp: '198.51.100.17' },
-}
-
-const PHASE_1: Settings = { require2fa: false, proxy: null, panelAccess: null }
+})
 
 // Como el backend: una lista que deja fuera `clientIp` es `WouldLockOut`, salvo con
 // `confirmLockout`. Vacía, entra cualquier IP.
@@ -51,7 +48,7 @@ async function mountViewModel(initial: Settings): Promise<SecuritySettingsViewMo
 	let current = initial
 	mocks.updateSecurity.mockImplementation(
 		(input: { require2fa?: boolean; allowedCidrs?: string; confirmLockout?: boolean }) => {
-			const ip = current.panelAccess?.clientIp ?? ''
+			const ip = current.panelAccess.clientIp
 			if (
 				input.allowedCidrs !== undefined &&
 				!input.confirmLockout &&
@@ -62,7 +59,7 @@ async function mountViewModel(initial: Settings): Promise<SecuritySettingsViewMo
 			current = {
 				...current,
 				require2fa: input.require2fa ?? current.require2fa,
-				panelAccess: current.panelAccess && {
+				panelAccess: {
 					...current.panelAccess,
 					allowedCidrs:
 						input.allowedCidrs === undefined
@@ -90,7 +87,7 @@ describe('SecuritySettingsViewModel', () => {
 	})
 
 	it('arranca con lo guardado y sin cambios', async () => {
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 
 		expect(vm.require2fa).toBe(false)
 		expect(vm.cidrs).toBe('198.51.100.0/24')
@@ -100,7 +97,7 @@ describe('SecuritySettingsViewModel', () => {
 
 	it('manda solo lo que cambió', async () => {
 		const success = vi.spyOn(toast, 'success')
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 
 		vm.setRequire2fa(true)
 		await vm.save()
@@ -111,7 +108,7 @@ describe('SecuritySettingsViewModel', () => {
 	})
 
 	it('totp_required_first: vuelve el switch y avisa con el link a /2fa', async () => {
-		const vm = await mountViewModel(PHASE_1)
+		const vm = await mountViewModel(SETTINGS)
 		mocks.updateSecurity.mockRejectedValueOnce(new TotpRequiredFirst())
 
 		vm.setRequire2fa(true)
@@ -125,7 +122,7 @@ describe('SecuritySettingsViewModel', () => {
 	})
 
 	it('guardar otra lista de IPs vuelve a pedir el proxy y los dominios (regenera Caddy, §3.5)', async () => {
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 		const invalidate = vi.spyOn(client, 'invalidateQueries')
 		const refreshedIngress = () =>
 			invalidate.mock.calls.filter(([filters]) => filters?.queryKey === ingressKeys.all)
@@ -142,7 +139,7 @@ describe('SecuritySettingsViewModel', () => {
 	})
 
 	it('después de confirmar una lista que deja fuera la sesión, también', async () => {
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 		const invalidate = vi.spyOn(client, 'invalidateQueries')
 		const refreshedIngress = () =>
 			invalidate.mock.calls.filter(([filters]) => filters?.queryKey === ingressKeys.all)
@@ -156,16 +153,8 @@ describe('SecuritySettingsViewModel', () => {
 		expect(refreshedIngress()).toBe(1)
 	})
 
-	it('en la Fase 1 no hay IPs permitidas y no se mandan', async () => {
-		const vm = await mountViewModel(PHASE_1)
-
-		vm.setCidrs('10.0.0.0/8')
-		expect(vm.panelAccess).toBeNull()
-		expect(vm.isDirty).toBe(false)
-	})
-
 	it('una línea inválida no se manda y queda en el campo', async () => {
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 
 		vm.setCidrs('198.51.100.0/24\n10.0.0/8')
 		await vm.save()
@@ -177,7 +166,7 @@ describe('SecuritySettingsViewModel', () => {
 	})
 
 	it('el hint dice si la IP de la sesión queda en la lista', async () => {
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 
 		vm.setCidrs('10.0.0.0/8')
 		expect(vm.clientIpAllowed).toBe(false)
@@ -188,7 +177,7 @@ describe('SecuritySettingsViewModel', () => {
 
 	it('si el backend dice would_lock_out, pide confirmar y reenvía con confirmLockout', async () => {
 		const success = vi.spyOn(toast, 'success')
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 
 		vm.setCidrs('10.0.0.0/8')
 		await vm.save()
@@ -215,7 +204,7 @@ describe('SecuritySettingsViewModel', () => {
 	})
 
 	it('confirmar reenvía todo lo que cambió, también el 2FA (el 409 no guardó nada)', async () => {
-		const vm = await mountViewModel({ ...PHASE_3, require2fa: true })
+		const vm = await mountViewModel({ ...SETTINGS, require2fa: true })
 
 		vm.setRequire2fa(false)
 		vm.setCidrs('10.0.0.0/8')
@@ -230,7 +219,7 @@ describe('SecuritySettingsViewModel', () => {
 	})
 
 	it('si la lista incluye la IP de la sesión, se guarda sin confirmar', async () => {
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 
 		vm.setCidrs('198.51.100.0/24\n10.0.0.0/8')
 		await vm.save()
@@ -241,7 +230,7 @@ describe('SecuritySettingsViewModel', () => {
 
 	it('sin la IP de la sesión, el aviso no la nombra', async () => {
 		const vm = await mountViewModel({
-			...PHASE_3,
+			...SETTINGS,
 			panelAccess: { allowedCidrs: [], clientIp: '' },
 		})
 		mocks.updateSecurity.mockRejectedValueOnce(new WouldLockOut())
@@ -255,7 +244,7 @@ describe('SecuritySettingsViewModel', () => {
 	})
 
 	it('cancelar la confirmación no guarda nada y deja lo escrito', async () => {
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 		vm.setCidrs('10.0.0.0/8')
 		await vm.save()
 
@@ -267,7 +256,7 @@ describe('SecuritySettingsViewModel', () => {
 	})
 
 	it('si guardar falla desde la confirmación, el error queda adentro y sigue abierta', async () => {
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 		vm.setCidrs('10.0.0.0/8')
 		await vm.save()
 		mocks.updateSecurity.mockRejectedValueOnce(new UnavailableError('caído'))
@@ -281,7 +270,7 @@ describe('SecuritySettingsViewModel', () => {
 	})
 
 	it('un 422 del backend en las IPs va al campo', async () => {
-		const vm = await mountViewModel(PHASE_3)
+		const vm = await mountViewModel(SETTINGS)
 		mocks.updateSecurity.mockRejectedValueOnce(
 			new ValidationError('demasiados rangos', 'panelAllowedCidrs'),
 		)

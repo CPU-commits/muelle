@@ -11,14 +11,13 @@
 		Switch,
 		Textarea,
 	} from '@/shared/ui'
-	import { PROXY_SETTINGS_PHASE, type Settings } from '../../../domain'
+	import type { Settings } from '../../../domain'
 	import { ServerCommand } from '../../components/serverCommand'
 	import { SecuritySettingsViewModel } from './SecuritySettings.viewModel.svelte.ts'
 	import {
 		cidrs,
 		clientIp,
 		clientIpOut,
-		pending,
 		recovery,
 		switchControl,
 		switchHint,
@@ -65,41 +64,29 @@
 		/>
 	</label>
 
-	{#if vm.panelAccess}
-		<div class={cidrs}>
-			<Field
-				label={m.admin_security_cidrs()}
-				hint={m.admin_security_cidrs_hint()}
-				error={vm.cidrsError}
-			>
-				{#snippet children(a11y)}
-					<Textarea
-						{...a11y}
-						mono
-						rows={3}
-						spellcheck={false}
-						value={vm.cidrs}
-						oninput={(event) => vm.setCidrs(event.currentTarget.value)}
-					/>
-				{/snippet}
-			</Field>
-			{#if vm.clientIpHint}
-				<p
-					class={[clientIp, vm.clientIpAllowed === false && clientIpOut]}
-					aria-live="polite"
-				>
-					{vm.clientIpHint}
-				</p>
-			{/if}
-		</div>
-	{:else}
-		<p class={pending}>
-			{m.common_coming_feature_title({
-				feature: m.admin_security_cidrs_feature(),
-				phase: PROXY_SETTINGS_PHASE,
-			})}
-		</p>
-	{/if}
+	<div class={cidrs}>
+		<Field
+			label={m.admin_security_cidrs()}
+			hint={m.admin_security_cidrs_hint()}
+			error={vm.cidrsError}
+		>
+			{#snippet children(a11y)}
+				<Textarea
+					{...a11y}
+					mono
+					rows={3}
+					spellcheck={false}
+					value={vm.cidrs}
+					oninput={(event) => vm.setCidrs(event.currentTarget.value)}
+				/>
+			{/snippet}
+		</Field>
+		{#if vm.clientIpHint}
+			<p class={[clientIp, vm.clientIpAllowed === false && clientIpOut]} aria-live="polite">
+				{vm.clientIpHint}
+			</p>
+		{/if}
+	</div>
 
 	{#snippet footer()}
 		<Button size="sm" loading={vm.isSaving} disabled={!vm.isDirty} onclick={vm.save}>

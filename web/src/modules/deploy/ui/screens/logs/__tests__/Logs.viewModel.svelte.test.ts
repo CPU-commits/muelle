@@ -401,13 +401,11 @@ describe('LogsViewModel', () => {
 		expect(vm.isFiltering).toBe(true)
 	})
 
-	it('contra un backend sin la Fase 2 muestra la fase y no abre el stream', async () => {
-		mocks.getAppStatus.mockRejectedValue(
-			new UnavailableError('Llega con la Fase 2', { phase: 2 }),
-		)
+	it('si el estado falla, es un error y no abre el stream', async () => {
+		mocks.getAppStatus.mockRejectedValue(new UnavailableError('caído', { reason: 'server' }))
 		const { vm } = await mountViewModel(() => new LogsViewModel(() => PROPS))
 
-		await vi.waitFor(() => expect(vm.pendingPhase).toBe(2))
+		await vi.waitFor(() => expect(vm.loadError).toBeInstanceOf(UnavailableError))
 		expect(mocks.streamAppLogs).not.toHaveBeenCalled()
 	})
 

@@ -3,7 +3,6 @@ import {
 	BadOriginError,
 	ForbiddenError,
 	PanelMovedError,
-	pendingPhase,
 	RateLimitedError,
 	UnavailableError,
 } from '@/shared/domain'
@@ -15,8 +14,6 @@ export function describeError(error: unknown): string {
 	if (error instanceof PanelMovedError) return m.common_panel_moved({ origin: error.origin })
 	if (error instanceof BadOriginError) return m.common_bad_origin()
 	if (error instanceof AmbiguousSessionError) return m.common_ambiguous_session()
-	const phase = pendingPhase(error)
-	if (phase !== null) return m.common_coming_title({ phase })
 	if (error instanceof UnavailableError) {
 		// "Revisa la conexión" solo si de verdad no hubo respuesta.
 		if (error.reason === 'server') return m.common_server_error()

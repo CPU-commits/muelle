@@ -10,13 +10,11 @@ export interface TokenScope {
 
 /**
  * Quién creó el token. Un token no se revoca cuando se borra su creador (es del proyecto,
- * y el CI depende de él): entonces queda `deleted`. `unknown` es un backend que todavía no
- * informa el creador.
+ * y el CI depende de él): entonces queda `deleted`.
  */
 export type TokenCreator =
 	| { readonly kind: 'user'; readonly username: string }
 	| { readonly kind: 'deleted' }
-	| { readonly kind: 'unknown' }
 
 /** Un token de API (`GET /tokens`). El valor en claro no vuelve nunca: solo su hash. */
 export interface ApiToken {

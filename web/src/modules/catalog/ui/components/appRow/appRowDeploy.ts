@@ -9,7 +9,7 @@ import type { App } from '../../../domain'
  */
 export interface AppRowDeploy {
 	readonly tone: StatusTone
-	/** "—" si no se sabe (la Fase 2 no está, Docker no responde, todavía no se pidió). */
+	/** "—" si no se sabe (Docker no responde, muelle falló, todavía no se pidió). */
 	readonly statusText: string
 	/** Null si no se sabe: la fila muestra la imagen del spec o los servicios del compose. */
 	readonly image: string | null

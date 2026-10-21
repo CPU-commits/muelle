@@ -38,10 +38,18 @@ describe('describeError', () => {
 		expect(describeError(error)).toContain('https://panel.tudominio.cl:8443')
 	})
 
-	it('distingue una fase pendiente de un backend caído', () => {
-		expect(describeError(new UnavailableError('x', { phase: 2 }))).toBe(
-			m.common_coming_title({ phase: 2 }),
-		)
+	it('si el panel se mudó, también dice qué hacer si la nueva no responde: recargar esta', () => {
+		// Solo Ajustes ve que muelle volvió a los puertos anteriores y suelta el freno: desde
+		// otra pantalla, cada escritura seguiría diciendo "sigue allá" aunque allá no responda.
+		// Recargar suelta el freno (es de la página), y esta dirección vuelve a aceptar cambios.
+		for (const locale of ['es', 'en'] as const) {
+			const text = m.common_panel_moved({ origin: 'https://x:8443' }, { locale })
+			expect(text).toMatch(/recarga esta página|reload this page/)
+			expect(text).toMatch(/puertos anteriores|previous ports/)
+		}
+	})
+
+	it('un backend caído o sin red pide revisar la conexión', () => {
 		expect(describeError(new UnavailableError('caído'))).toBe(m.common_unavailable())
 	})
 

@@ -21,7 +21,7 @@ mocks (`src/mocks/{db,handlers}/ingress.ts`).
 
 | Respuesta                                | Qué ve el panel                                                                                                                                                               |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `404 no_route`, `405 method_not_allowed` | La Fase 3 todavía no está: `<ComingSoon phase={3}>`                                                                                                                           |
+| `404 no_route`, `405 method_not_allowed` | Una ruta mal armada del panel: `UnexpectedError` (el panel va con el backend entero)                                                                                          |
 | `404 not_found` (un dominio)             | `DomainNotFound`. Al borrar: otra persona ya lo borró, se cierra el diálogo y se pide la lista                                                                                |
 | `409 conflict` (crear)                   | `HostnameTaken`: "Ese hostname ya está en uso en muelle", en el campo                                                                                                         |
 | `409 nothing_to_adopt`                   | `NothingToAdopt`: "No hay un registro que adoptar"                                                                                                                            |
@@ -178,18 +178,20 @@ Dominios, arriba del formulario.
 - `ports_rollback` (`portsRollback`): la última vez que muelle volvió a los puertos
   anteriores porque muelle-caddy no arrancó con los nuevos (§3.5), o null:
   `{attempted: {http_port, https_port}, restored: {…}, error, at}`. Vive en la memoria de
-  muelle (se pierde al reiniciarlo) y el próximo cambio de puertos la limpia. Opcional en el
-  DTO solo por un backend de antes de esa vuelta. Dominios no la usa; Ajustes sí.
+  muelle (se pierde al reiniciarlo) y el próximo cambio de puertos la limpia. Viene siempre
+  (null si no hubo). Dominios no la usa; Ajustes sí.
 - Mientras dice `out_of_sync` o `recreating` se pregunta de nuevo cada 10 s (con la
   pestaña visible). Cada cambio de un dominio (crear, editar, borrar, adoptar,
   reintentar) lo vuelve a pedir: una ruta nueva puede dejarlo desincronizado.
-- Sin la Fase 3 (`no_route`), con Docker caído (`503 docker_unavailable`) o mientras carga,
-  no se muestra nada: ni `<ComingSoon>` ni un error (los dominios tienen sus propios avisos).
+- Si falla (Docker caído, `503 docker_unavailable`, o muelle sin responder) o mientras carga,
+  no se muestra nada: ni un error (los dominios tienen sus propios avisos).
 - Ajustes no es de este módulo, pero usa `proxyFollowQuery` y `proxyNotice` del barrel: lo
   pide al abrirse (muestra `ports_rollback`) y, después de cambiar los puertos, sigue
-  `GET /proxy` mientras dice `recreating` (aunque falle), y muestra si muelle-caddy quedó
-  escuchando, el `error` si no arrancó o, si muelle volvió a los puertos anteriores, por qué
-  y la dirección anterior del panel (contrato §3.5).
+  `GET /proxy` mientras dice `recreating` (aunque falle, 2 min como mucho: pasado el plazo
+  con el último pedido fallado, `proxyFollowQuery` deja de preguntar), y muestra si muelle-caddy quedó
+  escuchando, el `error` si no arrancó, que no se pudo confirmar (pasado el plazo sin una
+  respuesta que lo diga) o, si muelle volvió a los puertos anteriores, por qué y la
+  dirección anterior del panel (contrato §3.5).
 
 ## Refresco y avisos
 
@@ -199,6 +201,27 @@ Dominios, arriba del formulario.
   de `error` + `cloudflare`: Ajustes invalida estas queries (`ingressKeys.all`).
 - Los dominios con error se anuncian a un lector de pantalla en **una** región para toda la
   pantalla ("2 dominios tienen errores: …"), que cambia solo si cambia cuáles fallan.
+
+## Lo de ingress que se ve en otras pantallas
+
+Dos reglas de ingress (contrato §7, revisión del 2026-10-17) que el panel muestra fuera de
+Dominios:
+
+- **Crear un stage** (catalog) con una red de Docker ajena del mismo nombre:
+  `409 network_conflict` (§0.2, §1.1 y §3.4; `ErrNotStageNetwork`). Ya hay una red con el
+  nombre de la del stage (`<proyecto>_<stage>`) que no es overlay attachable: muelle no la
+  usa ni la borra, y el stage no se guarda. Una overlay attachable con ese nombre sí se usa,
+  aunque no la haya creado muelle. catalog lo muestra como `StageNetworkConflict`, nombrando
+  la red que hay que borrar o renombrar en el servidor. En el mock, un stage con `ajena` en
+  el slug.
+- **Ajustes**: un email ACME o un token de Cloudflare con `{` o `}` (Caddy los toma como
+  placeholders, §3.4): `PATCH /settings` responde `422` en `acme_email` o `cloudflare_token`
+  y no guarda nada (§4.1; el del token, después del de su forma, y sin el token en el
+  mensaje). Ajustes los frena antes de mandarlos, con su texto
+  (`InvalidAcmeEmail('placeholder')`, `InvalidCloudflareToken('placeholder')`); si igual
+  vuelve el `422`, su motivo va al campo, como cualquier `422` de Ajustes. El mock responde
+  lo mismo. Si llegan a los ajustes por otro lado (install, un `UPDATE` a mano),
+  `GET /proxy` dice `out_of_sync` con el motivo.
 
 ## Superficie pública (barrel)
 
@@ -250,20 +273,4 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
 
 ## Diferencias con el contrato
 
-Ninguna en estos endpoints: lo de arriba es lo que dice el contrato. Dos cosas de ingress
-que el panel seguía del código, propuestas como cambios y ya en el contrato (revisión del
-2026-10-17, §7):
-
-- `409 network_conflict` al crear un stage (§0.2, §1.1 y §3.4; `ErrNotStageNetwork`): ya
-  hay una red de Docker con el nombre de la del stage (`<proyecto>_<stage>`) que no es
-  overlay attachable. muelle no la usa ni la borra, y el stage no se guarda. Una overlay
-  attachable con ese nombre sí se usa, aunque no la haya creado muelle. catalog lo muestra
-  como `StageNetworkConflict`, nombrando la red que hay que borrar o renombrar en el
-  servidor. En el mock, un stage con `ajena` en el slug.
-- Un email ACME o un token de Cloudflare con `{` o `}` (Caddy los toma como placeholders,
-  §3.4): `PATCH /settings` responde `422` en `acme_email` o `cloudflare_token` y no guarda
-  nada (§4.1; el del token, después del de su forma, y sin el token en el mensaje). Ajustes
-  los frena antes de mandarlos, con su texto (`InvalidAcmeEmail('placeholder')`,
-  `InvalidCloudflareToken('placeholder')`); si igual vuelve el `422`, su motivo va al campo,
-  como cualquier `422` de Ajustes. El mock responde lo mismo. Si llegan a los ajustes por otro
-  lado (install, un `UPDATE` a mano), `GET /proxy` dice `out_of_sync` con el motivo.
+Ninguna: lo de arriba es lo que dice el contrato.

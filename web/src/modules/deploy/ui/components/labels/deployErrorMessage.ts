@@ -1,12 +1,10 @@
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { describeError } from '@/shared/ui'
-import { pendingPhase, ValidationError } from '@/shared/domain'
+import { ValidationError } from '@/shared/domain'
 import { AppRemoving, DeployNotFound, DockerUnavailable, NoPreviousDeploy } from '../../../domain'
 
 /** El mensaje de un error del módulo para un banner o un toast. */
 export function deployErrorMessage(error: unknown): string {
-	const phase = pendingPhase(error)
-	if (phase !== null) return m.common_coming_title({ phase })
 	if (error instanceof NoPreviousDeploy) return m.deploy_rollback_none_body()
 	if (error instanceof AppRemoving) return m.deploy_error_app_removing()
 	if (error instanceof DeployNotFound) return m.deploy_not_found()

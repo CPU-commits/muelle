@@ -52,7 +52,7 @@ const TOKENS: ApiToken[] = [
 	token({
 		id: 3 as TokenId,
 		name: 'viejo',
-		createdBy: { kind: 'unknown' },
+		createdBy: { kind: 'user', username: 'soporte' },
 		expiresAt: new Date('2026-01-01T00:00:00Z'),
 	}),
 ]
@@ -94,8 +94,10 @@ describe('TokensViewModel', () => {
 		expect(second?.scope).toBe('extractor/staging')
 		expect(second?.creator).toBe(m.identity_tokens_created_by_deleted())
 		expect(second?.lastUsed).toMatch(/12/)
-		// Un backend que no informa el creador no muestra la columna.
-		expect(vm.expiredRows[0]?.creator).toBeNull()
+		// Los vencidos también dicen quién los creó.
+		expect(vm.expiredRows[0]?.creator).toBe(
+			m.identity_tokens_created_by({ username: 'soporte' }),
+		)
 	})
 
 	it('el token creado se muestra una vez, marcado como nuevo, con su ejemplo', async () => {

@@ -103,10 +103,10 @@ describe('AppDeployState (las columnas de Proyectos)', () => {
 		expect(vm.image).toBeNull()
 	})
 
-	it('sin la Fase 2 (o con un error) todo es "—"', async () => {
-		const phase = new UnavailableError('Llega con la Fase 2', { phase: 2 })
-		mocks.getAppStatus.mockRejectedValue(phase)
-		mocks.listDeploys.mockRejectedValue(phase)
+	it('con un error todo es "—"', async () => {
+		const down = new UnavailableError('caído', { reason: 'server' })
+		mocks.getAppStatus.mockRejectedValue(down)
+		mocks.listDeploys.mockRejectedValue(down)
 		const { vm } = await mountViewModel(() => new AppDeployState(() => APP))
 
 		await vi.waitFor(() => expect(vm.statusUnavailable).toBe(true))

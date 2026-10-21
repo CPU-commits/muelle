@@ -4,7 +4,6 @@ import type { AuditRepository, RegistryRepository, SettingsRepository } from '..
 import {
 	CloudflareUnavailable,
 	PortsDockerUnavailable,
-	REGISTRIES_PHASE,
 	RegistryExists,
 	RegistryNotFound,
 	TotpRequiredFirst,
@@ -43,10 +42,8 @@ const SETTINGS_ERRORS: DomainErrorMap = {
 	},
 }
 
-// Fase 2: que la ruta no exista (404 `no_route` o 405 `method_not_allowed`) es
-// `UnavailableError` con la fase; un 404 `not_found` es el registry que ya no está.
+// `/registries` (contrato §2.10): un 404 `not_found` es el registry que ya no está.
 const REGISTRY_ERRORS: DomainErrorMap = {
-	phase: REGISTRIES_PHASE,
 	codes: { conflict: (error) => new RegistryExists(cause(error)) },
 	notFound: (error) => new RegistryNotFound(cause(error)),
 	fields: { host: 'host', username: 'username', password: 'password' },

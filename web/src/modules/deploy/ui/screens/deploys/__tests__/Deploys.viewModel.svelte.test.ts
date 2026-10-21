@@ -275,14 +275,11 @@ describe('DeploysViewModel', () => {
 		expect(vm.logError).toBeNull()
 	})
 
-	it('contra un backend sin la Fase 2 muestra la fase y no abre ningún log', async () => {
-		mocks.listDeploys.mockRejectedValue(
-			new UnavailableError('Llega con la Fase 2', { phase: 2 }),
-		)
+	it('si la lista falla, es un error y no abre ningún log', async () => {
+		mocks.listDeploys.mockRejectedValue(new UnavailableError('caído', { reason: 'server' }))
 		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
 
-		await vi.waitFor(() => expect(vm.pendingPhase).toBe(2))
-		expect(vm.loadError).toBeNull()
+		await vi.waitFor(() => expect(vm.loadError).toBeInstanceOf(UnavailableError))
 		expect(mocks.followDeployLog).not.toHaveBeenCalled()
 	})
 
@@ -311,7 +308,10 @@ describe('DeploysViewModel', () => {
 		])
 		const rolledBack = await mountViewModel(() => new DeploysViewModel(() => PROPS))
 		await vi.waitFor(() => expect(rolledBack.vm.selected?.id).toBe(147))
-		expect(rolledBack.vm.pinned).toEqual({ rollback: 144, services: ['api'] })
+		expect(rolledBack.vm.pinned).toEqual({
+			rollback: { id: 144, services: ['api'] },
+			others: [],
+		})
 	})
 
 	it('al encolar uno nuevo desde el diálogo, lo abre', async () => {

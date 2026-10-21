@@ -19,6 +19,9 @@ import { adminKeys } from '../../../../data'
 import ProxySettingsHarness from './ProxySettingsHarness.svelte'
 import { cacheHolds } from '../../../__tests__/cacheHolds'
 
+/** Cada cuánto vuelve a pedir `GET /proxy` mientras sigue una recreación (ingress). */
+const PROXY_REFRESH_MS = 10_000
+
 const mocks = vi.hoisted(() => ({
 	updatePublicIp: vi.fn(),
 	updateAcmeEmail: vi.fn(),
@@ -81,7 +84,11 @@ const PROXY: ProxySettings = {
 }
 
 function saved(proxy: Partial<ProxySettings>): Settings {
-	return { require2fa: false, proxy: { ...PROXY, ...proxy }, panelAccess: null }
+	return {
+		require2fa: false,
+		proxy: { ...PROXY, ...proxy },
+		panelAccess: { allowedCidrs: [], clientIp: '198.51.100.17' },
+	}
 }
 
 let client: QueryClient
@@ -497,7 +504,23 @@ describe('ProxySettingsViewModel', () => {
 		expect((await mountViewModel()).movedTo).toBeNull()
 	})
 
+	it('entrando por otra dirección (otro proxy, una IP), el aviso no nombra la de Caddy como la anterior', async () => {
+		// Este panel no está en https://panel.tudominio.cl (vitest): esa dirección nunca la usó.
+		const vm = await mountViewModel()
+		vm.setField('httpsPort', '8443')
+		mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpsPort: 8443 }))
+		vm.askSavePorts()
+		await vm.savePorts()
+
+		expect(vm.movedTo).toBe('https://panel.tudominio.cl:8443')
+		expect(vm.movedFrom).toBeNull()
+		expect(vm.movedBody).toBe(m.admin_ports_moved_body())
+		// Tampoco al recargar.
+		expect((await mountViewModel({ ...PROXY, httpsPort: 8443 })).movedFrom).toBeNull()
+	})
+
 	it('el aviso de la dirección nueva nombra la anterior: a dónde volver si la nueva no responde', async () => {
+		page.origin = 'https://panel.tudominio.cl'
 		const vm = await mountViewModel()
 		expect(vm.movedBody).toBe(m.admin_ports_moved_body())
 		vm.setField('httpsPort', '8443')
@@ -660,7 +683,7 @@ describe('ProxySettingsViewModel', () => {
 		expect(vm.recreation).toEqual({ kind: 'recreating' })
 	})
 
-	it('pasado el plazo sin una respuesta que diga cómo terminó, deja de decir que se recrea', async () => {
+	it('pasado el plazo sin una respuesta que diga cómo terminó, dice que no se pudo confirmar', async () => {
 		ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
 		const vm = await mountViewModel()
 		vi.useFakeTimers({
@@ -676,7 +699,47 @@ describe('ProxySettingsViewModel', () => {
 			expect(vm.recreation).toEqual({ kind: 'recreating' })
 
 			await vi.advanceTimersByTimeAsync(PORTS_WATCH_TIMEOUT_MS)
-			await vi.waitFor(() => expect(vm.recreation).toBeNull())
+			// El aviso no se va sin decir nada: no se sabe si quedó escuchando.
+			await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'unknown' }))
+
+			// Una respuesta más tarde (recargar, volver a la pestaña) dice cómo terminó.
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus())
+			await client.refetchQueries({ queryKey: ingressKeys.proxy })
+			await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'done' }))
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it('pasado el plazo, si GET /proxy sigue fallando deja de preguntar, aunque lo último que dijo fuera "recreando"', async () => {
+		const vm = await mountViewModel()
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+		vi.useFakeTimers({
+			toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+			shouldAdvanceTime: true,
+		})
+		try {
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ status: 'recreating' }))
+			vm.setField('httpPort', '8080')
+			mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+			vm.askSavePorts()
+			await vm.savePorts()
+			// Una respuesta de después del cambio: se está recreando.
+			await vi.waitFor(() =>
+				expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success'),
+			)
+			// Después el panel deja de llegar a muelle: TanStack guarda esa respuesta.
+			ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
+			await vi.advanceTimersByTimeAsync(PORTS_WATCH_TIMEOUT_MS + 2 * PROXY_REFRESH_MS)
+			expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('error')
+
+			// Lo último que dijo es "recreando", pero ya no se sabe.
+			expect(vm.recreation).toEqual({ kind: 'unknown' })
+
+			// Los 2 min ya pasaron (web/CLAUDE.md): no pregunta más.
+			const asked = ingress.getProxyStatus.mock.calls.length
+			await vi.advanceTimersByTimeAsync(5 * PROXY_REFRESH_MS)
+			expect(ingress.getProxyStatus.mock.calls.length).toBe(asked)
 		} finally {
 			vi.useRealTimers()
 		}
@@ -767,7 +830,8 @@ describe('ProxySettingsViewModel', () => {
 			await vm.savePorts()
 		}
 
-		it('al abrir Ajustes dice que volvió, por qué, y ofrece la dirección anterior', async () => {
+		it('al abrir Ajustes por la dirección de Caddy dice que volvió, por qué, y que el panel sigue ahí', async () => {
+			page.origin = 'https://panel.tudominio.cl'
 			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
 			const vm = await mountViewModel()
 
@@ -783,8 +847,30 @@ describe('ProxySettingsViewModel', () => {
 			expect(vm.rollbackBody).toBe(
 				`${m.admin_ports_rollback_reason({ http: 80, https: 8443, error: ROLLBACK.error })} ${m.admin_ports_rollback_origin({ origin: 'https://panel.tudominio.cl' })}`,
 			)
-			// Este panel no está en esa dirección (vitest): ofrece ir.
+			// Ya está en esa dirección: no hay a dónde ir.
+			expect(vm.rollbackHref).toBeNull()
+		})
+
+		it('en la dirección que falló, ofrece volver a la anterior', async () => {
+			page.origin = 'https://panel.tudominio.cl:8443'
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			const vm = await mountViewModel({ ...PROXY, httpsPort: 8443 })
+
+			await vi.waitFor(() => expect(vm.rollback?.origin).toBe('https://panel.tudominio.cl'))
 			expect(vm.rollbackHref).toBe('https://panel.tudominio.cl/ajustes')
+		})
+
+		it('entrando por otra dirección (otro proxy, una IP), no nombra ni ofrece la de Caddy', async () => {
+			// vitest no es https://panel.tudominio.cl: esa dirección este panel nunca la usó.
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
+			const vm = await mountViewModel()
+
+			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
+			expect(vm.rollback?.origin).toBeNull()
+			expect(vm.rollbackBody).toBe(
+				m.admin_ports_rollback_reason({ http: 80, https: 8443, error: ROLLBACK.error }),
+			)
+			expect(vm.rollbackHref).toBeNull()
 		})
 
 		it('dice cuándo volvió: GET /proxy lo trae hasta el próximo cambio de puertos, quizás días', async () => {
@@ -844,7 +930,7 @@ describe('ProxySettingsViewModel', () => {
 			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ portsRollback: ROLLBACK }))
 			await client.refetchQueries({ queryKey: ingressKeys.proxy })
 
-			await vi.waitFor(() => expect(vm.rollback?.origin).toBe('https://panel.tudominio.cl'))
+			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
 			expect(vm.movedTo).toBeNull()
 			expect(localStorage.getItem('muelle:admin:panel-moved')).toBeNull()
 			expect(vm.recreation).toBeNull()

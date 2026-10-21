@@ -148,7 +148,7 @@ describe('DeployDialogViewModel', () => {
 		const normal = await mountViewModel(() => new DeployDialogViewModel(() => props()))
 		expect(normal.vm.pinnedTitle).toBeNull()
 
-		const pin = { rollback: asDeployId(144), services: ['api'] }
+		const pin = { rollback: { id: asDeployId(144), services: ['api'] }, others: [] }
 		const single = await mountViewModel(
 			() => new DeployDialogViewModel(() => props({ pinned: pin })),
 		)
@@ -161,7 +161,10 @@ describe('DeployDialogViewModel', () => {
 					props({
 						kind: 'compose',
 						services: ['api', 'web', 'worker'],
-						pinned: { rollback: asDeployId(144), services: ['web', 'worker'] },
+						pinned: {
+							rollback: { id: asDeployId(144), services: ['web', 'worker'] },
+							others: [],
+						},
 					}),
 				),
 		)
@@ -170,11 +173,36 @@ describe('DeployDialogViewModel', () => {
 		)
 	})
 
+	it('unos fijados por el rollback y otros por otra cosa: nombra el rollback y los otros aparte', async () => {
+		const { vm } = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({
+						kind: 'compose',
+						services: ['api', 'web', 'worker'],
+						pinned: {
+							rollback: { id: asDeployId(144), services: ['web'] },
+							others: ['api', 'worker'],
+						},
+					}),
+				),
+		)
+		expect(vm.pinnedTitle).toBe(
+			m.deploy_dialog_mixed_pin_services_title({
+				id: 144,
+				rollback: 'web',
+				services: 'api, worker',
+			}),
+		)
+		expect(vm.pinnedTitle).toContain('#144')
+		expect(vm.pinnedTitle).toContain('api, worker')
+	})
+
 	it('fijado en un digest sin un rollback a la vista (salió del historial, o un override): lo dice igual', async () => {
 		const single = await mountViewModel(
 			() =>
 				new DeployDialogViewModel(() =>
-					props({ pinned: { rollback: null, services: ['api'] } }),
+					props({ pinned: { rollback: null, others: ['api'] } }),
 				),
 		)
 		expect(single.vm.pinnedTitle).toBe(m.deploy_dialog_digest_pin_title())
@@ -185,7 +213,7 @@ describe('DeployDialogViewModel', () => {
 					props({
 						kind: 'compose',
 						services: ['api', 'web', 'worker'],
-						pinned: { rollback: null, services: ['web'] },
+						pinned: { rollback: null, others: ['web'] },
 					}),
 				),
 		)
@@ -194,16 +222,45 @@ describe('DeployDialogViewModel', () => {
 		)
 	})
 
-	it('otro error va al banner del diálogo', async () => {
-		mocks.createDeploy.mockRejectedValue(
-			new UnavailableError('Llega con la Fase 2', { phase: 2 }),
+	it('el texto bajo el aviso sirve para cualquier digest fijo: un rollback, un override o la configuración', async () => {
+		const normal = await mountViewModel(() => new DeployDialogViewModel(() => props()))
+		expect(normal.vm.pinnedBody).toBeNull()
+
+		// Un digest fijado a propósito en la configuración: nada de "volver a seguir un tag".
+		const config = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({ pinned: { rollback: null, others: ['api'] } }),
+				),
 		)
+		expect(config.vm.pinnedBody).toBe(m.deploy_dialog_pinned_body())
+		const rollback = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({
+						pinned: {
+							rollback: { id: asDeployId(144), services: ['api'] },
+							others: [],
+						},
+					}),
+				),
+		)
+		expect(rollback.vm.pinnedBody).toBe(m.deploy_dialog_pinned_body())
+		for (const locale of ['es', 'en'] as const) {
+			expect(m.deploy_dialog_pinned_body({}, { locale })).not.toMatch(
+				/volver a seguir|again|rollback/i,
+			)
+		}
+	})
+
+	it('otro error va al banner del diálogo', async () => {
+		mocks.createDeploy.mockRejectedValue(new UnavailableError('caído', { reason: 'server' }))
 		const input = props()
 		const { vm } = await mountViewModel(() => new DeployDialogViewModel(() => input))
 
 		await vm.submit()
 
-		expect(vm.formError).toBe(m.common_coming_title({ phase: 2 }))
+		expect(vm.formError).toBe(m.common_server_error())
 		expect(input.onDeployed).not.toHaveBeenCalled()
 
 		vm.close()

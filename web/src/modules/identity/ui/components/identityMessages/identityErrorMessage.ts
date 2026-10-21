@@ -19,7 +19,7 @@ export function identityErrorMessage(error: unknown): string {
 	if (error instanceof UserNotFound) return m.identity_error_user_not_found()
 	if (error instanceof TokenNotFound) return m.identity_tokens_already_revoked()
 	if (error instanceof TokenScopeNotFound) return m.identity_error_scope_not_found()
-	// Lo común (sin red, fase pendiente, una dirección que no es la del panel, demasiados
+	// Lo común (sin red, un 5xx, una dirección que no es la del panel, demasiados
 	// intentos…).
 	return describeError(error)
 }

@@ -42,7 +42,7 @@ const rowText = (slug: string) =>
 	(document.querySelector(`a[href="#${slug}"]`)?.textContent ?? '').replace(/\s+/g, ' ')
 
 describe('AppRow', () => {
-	it('sin la Fase 2 muestra lo del catálogo: el tipo, la imagen del spec y cuándo se desplegó', async () => {
+	it('sin el estado de deploy (la ruta no lo pasa) muestra lo del catálogo: el tipo, la imagen del spec y cuándo se desplegó', async () => {
 		const never = fakeServiceApp('auditfy', 'staging', 'nueva')
 		const screen = await render(AppRowHarness, { apps: [api, never] })
 

@@ -2,7 +2,7 @@ import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-qu
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { formatDateTime, formatRelative, type MenuEntry } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
-import { pendingPhase, type RoadmapPhase, UnavailableError } from '@/shared/domain'
+import { UnavailableError } from '@/shared/domain'
 import {
 	addRegistryMutation,
 	registriesQuery,
@@ -29,9 +29,7 @@ type FieldErrors = Partial<Record<RegistryField, string>>
 
 const REGISTRY_FIELDS: readonly string[] = ['host', 'username', 'password']
 
-// Registries de Ajustes (Fase 2): listar, agregar, cambiar credenciales y eliminar. Contra
-// un backend sin la Fase 2 la query falla con `UnavailableError` y la sección muestra
-// "Llega con la Fase 2".
+// Registries de Ajustes (Fase 2): listar, agregar, cambiar credenciales y eliminar.
 export class RegistriesViewModel {
 	dialog = $state.raw<RegistryDialog | null>(null)
 	host = $state('')
@@ -52,13 +50,8 @@ export class RegistriesViewModel {
 		return this.#registries.isPending
 	}
 
-	/** La fase que falta si el backend todavía no tiene `/registries`. */
-	get pendingPhase(): RoadmapPhase | null {
-		return pendingPhase(this.#registries.error)
-	}
-
 	get loadError(): string | null {
-		if (!this.#registries.isError || this.pendingPhase !== null) return null
+		if (!this.#registries.isError) return null
 		return this.#registries.error instanceof UnavailableError
 			? m.common_unavailable()
 			: m.admin_registries_load_error()

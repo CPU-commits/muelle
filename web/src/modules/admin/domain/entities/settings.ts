@@ -1,12 +1,5 @@
-import type { RoadmapPhase } from '@/shared/domain'
-
-// Los ajustes de `GET /settings`. En la Fase 1 el backend solo tiene `require_2fa`; el
-// resto (proxy, DNS, certificados e IPs permitidas, contrato §4) llega con la Fase 3
-// como campos nuevos del mismo endpoint. Mientras falten, la sección es `null` y la
-// pantalla muestra "Llega con la Fase 3".
-
-/** La fase en la que llegan `proxy` y `panelAccess`. */
-export const PROXY_SETTINGS_PHASE: RoadmapPhase = 3
+// Los ajustes de `GET /settings` (contrato §4): el 2FA, el proxy, el DNS, los certificados
+// y las IPs permitidas para el panel.
 
 /** El token de Cloudflare es de solo escritura: solo se sabe si está y qué ve. */
 export interface CloudflareStatus {
@@ -31,21 +24,18 @@ export interface ProxySettings {
 export interface PanelAccess {
 	/** Vacía: el panel se abre desde cualquier IP. */
 	readonly allowedCidrs: readonly string[]
-	/** La IP con la que el backend ve esta sesión (`''` si no la informó). */
+	/** La IP con la que el backend ve esta sesión (`''` si no la pudo leer). */
 	readonly clientIp: string
 }
 
 export interface Settings {
 	readonly require2fa: boolean
-	/** `null`: el backend todavía no tiene la Fase 3. */
-	readonly proxy: ProxySettings | null
-	/** `null`: el backend todavía no tiene la Fase 3. */
-	readonly panelAccess: PanelAccess | null
+	readonly proxy: ProxySettings
+	readonly panelAccess: PanelAccess
 }
 
 /**
- * Un `PATCH /settings`: solo van los campos presentes. Uno que el backend no tiene
- * todavía responde 400, así que la pantalla no los manda mientras su sección es `null`.
+ * Un `PATCH /settings`: solo van los campos presentes (lo que falta no se toca).
  */
 export interface SettingsPatch {
 	readonly require2fa?: boolean

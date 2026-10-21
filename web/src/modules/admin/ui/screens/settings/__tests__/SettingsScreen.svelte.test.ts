@@ -4,7 +4,6 @@ import { render } from 'vitest-browser-svelte'
 import { createQueryClient } from '@/shared/data/query'
 import { formatDateTime } from '@/shared/ui'
 import { authKeys } from '@/modules/auth'
-import { UnavailableError } from '@/shared/domain'
 import type { Settings } from '../../../../domain'
 import SettingsView from './SettingsView.svelte'
 
@@ -53,9 +52,7 @@ vi.mock('@/modules/identity/container', () => ({
 	},
 }))
 
-const PHASE_1: Settings = { require2fa: false, proxy: null, panelAccess: null }
-
-const PHASE_3: Settings = {
+const SETTINGS: Settings = {
 	require2fa: false,
 	proxy: {
 		cloudflare: { tokenSet: true, zones: 4 },
@@ -97,32 +94,8 @@ describe('SettingsScreen', () => {
 		mocks.listTokens.mockResolvedValue([])
 	})
 
-	it('contra el backend de la Fase 1, las secciones de las Fases 2 y 3 dicen cuándo llegan', async () => {
-		mocks.getSettings.mockResolvedValue(PHASE_1)
-		mocks.listRegistries.mockRejectedValue(new UnavailableError('no_route', { phase: 2 }))
-
-		const screen = await render(SettingsView, { client: client() })
-
-		await expect.element(screen.getByText('Proxy y DNS llega con la Fase 3')).toBeVisible()
-		await expect
-			.element(screen.getByText('La lista de IPs permitidas llega con la Fase 3'))
-			.toBeVisible()
-		await expect
-			.element(screen.getByText('La sección de registries llega con la Fase 2'))
-			.toBeVisible()
-		// Lo de la Fase 1 sí está, y los registries no ofrecen "Agregar".
-		await expect.element(screen.getByRole('switch', { name: /Exigir 2FA/ })).toBeVisible()
-		await expect.element(screen.getByRole('heading', { name: 'Usuarios' })).toBeVisible()
-		await expect
-			.element(screen.getByRole('button', { name: 'Agregar' }))
-			.not.toBeInTheDocument()
-		await expect
-			.element(screen.getByRole('heading', { name: 'Cloudflare' }))
-			.not.toBeInTheDocument()
-	})
-
-	it('con las Fases 2 y 3, las secciones se muestran en vez del aviso', async () => {
-		mocks.getSettings.mockResolvedValue(PHASE_3)
+	it('muestra todas las secciones', async () => {
+		mocks.getSettings.mockResolvedValue(SETTINGS)
 		const at = new Date('2026-10-09T15:30:00.000Z')
 		mocks.listRegistries.mockResolvedValue([
 			{ host: 'ghcr.io', username: 'cpu-commits', createdAt: at, updatedAt: at },
@@ -136,7 +109,6 @@ describe('SettingsScreen', () => {
 		await expect.element(screen.getByText(/^Actualizado /)).toBeVisible()
 		await expect.element(screen.getByLabelText('IPs permitidas para el panel')).toBeVisible()
 		await expect.element(screen.getByText('ghcr.io')).toBeVisible()
-		await expect.element(screen.getByText(/llega con la Fase/)).not.toBeInTheDocument()
 	})
 
 	it('el aviso de la dirección nueva del panel no pide tocar la configuración de muelle', async () => {
@@ -144,8 +116,8 @@ describe('SettingsScreen', () => {
 		// que actualizar MUELLE_PANEL_ORIGIN en el servidor.
 		localStorage.setItem('muelle:admin:panel-moved', 'https://panel.tudominio.cl:8443')
 		mocks.getSettings.mockResolvedValue({
-			...PHASE_3,
-			proxy: PHASE_3.proxy && { ...PHASE_3.proxy, httpsPort: 8443 },
+			...SETTINGS,
+			proxy: { ...SETTINGS.proxy, httpsPort: 8443 },
 		})
 		mocks.listRegistries.mockResolvedValue([])
 
@@ -165,8 +137,8 @@ describe('SettingsScreen', () => {
 			.toBeVisible()
 	})
 
-	it('si muelle volvió a los puertos anteriores, lo dice en Puertos y ofrece la dirección anterior', async () => {
-		mocks.getSettings.mockResolvedValue(PHASE_3)
+	it('si muelle volvió a los puertos anteriores, lo dice en Puertos, sin la dirección de Caddy si no se entró por ella', async () => {
+		mocks.getSettings.mockResolvedValue(SETTINGS)
 		mocks.listRegistries.mockResolvedValue([])
 		ingress.getProxyStatus.mockResolvedValue({
 			status: 'synced',
@@ -193,19 +165,18 @@ describe('SettingsScreen', () => {
 			)
 			.toBeVisible()
 		await expect
-			.element(
-				ports.getByText(
-					/La dirección del panel sigue siendo https:\/\/panel\.tudominio\.cl\./,
-				),
-			)
+			.element(ports.getByText(/HTTPS 9443: los puertos 80 o 9443 del host ya están en uso/))
 			.toBeVisible()
+		// Este panel está en otra dirección (vitest), no en la de Caddy: no la nombra ni la
+		// ofrece, nunca la usó.
+		expect(document.body.textContent).not.toContain('https://panel.tudominio.cl')
 		await expect
 			.element(ports.getByRole('link', { name: 'Volver a la dirección anterior' }))
-			.toHaveAttribute('href', 'https://panel.tudominio.cl/ajustes')
+			.not.toBeInTheDocument()
 	})
 
 	it('cuándo se actualizó un registry es un <time> con la fecha, y la fecha exacta se lee', async () => {
-		mocks.getSettings.mockResolvedValue(PHASE_3)
+		mocks.getSettings.mockResolvedValue(SETTINGS)
 		const at = new Date('2026-10-09T15:30:00.000Z')
 		mocks.listRegistries.mockResolvedValue([
 			{ host: 'ghcr.io', username: 'cpu-commits', createdAt: at, updatedAt: at },

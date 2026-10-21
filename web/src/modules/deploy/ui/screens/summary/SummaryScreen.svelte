@@ -5,7 +5,6 @@
 		Badge,
 		Button,
 		Card,
-		ComingSoon,
 		CopyButton,
 		EmptyState,
 		ErrorState,
@@ -115,9 +114,7 @@
 		{/snippet}
 	</PageHeader>
 
-	{#if vm.pendingPhase !== null}
-		<ComingSoon phase={vm.pendingPhase} feature={m.deploy_summary_coming()} />
-	{:else if vm.isLoading}
+	{#if vm.isLoading}
 		<LoadingState label={m.deploy_summary_loading()} />
 	{:else if vm.loadError}
 		<ErrorState

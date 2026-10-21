@@ -174,10 +174,14 @@ test('cambiar el HTTPS avisa a dónde se muda el panel, y el aviso sobrevive a r
 
 	const notice = 'La dirección del panel ahora es https://panel.tudominio.cl:8443'
 	await expect(ports.getByText(notice)).toBeVisible()
-	// Nombra la anterior: a dónde volver si la nueva no responde (contrato §3.5).
+	// Dice qué hacer si la nueva no responde (contrato §3.5). Este panel está en localhost, no
+	// en la dirección de Caddy: no la nombra como la anterior, nunca la usó.
 	await expect(
-		ports.getByText(/vuelve a la anterior, https:\/\/panel\.tudominio\.cl: si muelle-caddy/),
+		ports.getByText(
+			/Si la nueva no responde en un minuto, vuelve a la anterior: si muelle-caddy/,
+		),
 	).toBeVisible()
+	await expect(ports.getByText(/vuelve a la anterior, https:/)).toHaveCount(0)
 	// El origen permitido sigue al puerto HTTPS (contrato §0.1): no hay nada que tocar en el
 	// servidor.
 	await expect(ports.getByText(/MUELLE_PANEL_ORIGIN/)).toHaveCount(0)
@@ -230,7 +234,7 @@ test('un puerto ocupado en el host (422) queda en su campo y no se guarda nada',
 	expect(errors).toEqual([])
 })
 
-test('si muelle-caddy no arranca con el HTTPS nuevo, muelle vuelve al anterior y Ajustes ofrece esa dirección', async ({
+test('si muelle-caddy no arranca con el HTTPS nuevo, muelle vuelve al anterior y Ajustes lo dice', async ({
 	page,
 }) => {
 	const errors = watchErrors(page)
@@ -255,12 +259,10 @@ test('si muelle-caddy no arranca con el HTTPS nuevo, muelle vuelve al anterior y
 	await expect(
 		ports.getByText(/HTTPS 9443: los puertos 80 o 9443 del host ya están en uso/),
 	).toBeVisible()
-	await expect(
-		ports.getByText(/La dirección del panel sigue siendo https:\/\/panel\.tudominio\.cl\./),
-	).toBeVisible()
-	await expect(
-		ports.getByRole('link', { name: 'Volver a la dirección anterior' }),
-	).toHaveAttribute('href', 'https://panel.tudominio.cl/ajustes')
+	// Este panel está en localhost, no en la dirección de Caddy: no la nombra ni la ofrece (los
+	// tests del viewModel prueban la dirección de Caddy).
+	await expect(ports.getByText(/La dirección del panel sigue siendo/)).toHaveCount(0)
+	await expect(ports.getByRole('link', { name: 'Volver a la dirección anterior' })).toHaveCount(0)
 	await expect(ports.getByText(notice)).toHaveCount(0)
 	await expect(ports.getByLabel('HTTPS', { exact: true })).toHaveValue('443')
 

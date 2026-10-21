@@ -2,7 +2,6 @@ import { goto } from '$app/navigation'
 import { resolve } from '$app/paths'
 import { createQuery, type CreateQueryResult } from '@tanstack/svelte-query'
 import { untrack } from 'svelte'
-import { pendingPhase, type RoadmapPhase } from '@/shared/domain'
 import { withQuery } from '@/shared/ui'
 import { type App as CatalogApp, appQuery, appRefFrom } from '@/modules/catalog'
 import { appStatusQuery, deploysQuery, STATUS_REFRESH_MS } from '../../../data'
@@ -178,18 +177,12 @@ export class SummaryViewModel {
 		return stageNetwork(this.ref)
 	}
 
-	/** La fase que falta si el backend todavía no tiene estos endpoints. */
-	get pendingPhase(): RoadmapPhase | null {
-		return pendingPhase(this.status.error) ?? pendingPhase(this.deploys.error)
-	}
-
 	get isLoading(): boolean {
 		return this.status.isPending
 	}
 
-	/** Un error de verdad (no "llega con la Fase 2"). */
 	get loadError(): unknown {
-		return this.pendingPhase === null ? this.status.error : null
+		return this.status.error
 	}
 
 	get health(): AppHealth | null {
@@ -203,7 +196,7 @@ export class SummaryViewModel {
 	/** Los servicios del diálogo de deploy: los de la configuración o, sin ella, los de Swarm. */
 	get deployServices(): readonly string[] {
 		return deployableServices(
-			this.#catalogApp.data?.services?.map((service) => service.name),
+			this.#catalogApp.data?.services.map((service) => service.name),
 			this.services.map((service) => service.name),
 		)
 	}

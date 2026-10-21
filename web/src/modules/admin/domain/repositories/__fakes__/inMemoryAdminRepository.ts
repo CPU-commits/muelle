@@ -73,7 +73,6 @@ export class InMemorySettingsRepository implements SettingsRepository {
 		const nextCidrs = patch.panelAllowedCidrs
 		if (
 			nextCidrs !== undefined &&
-			panelAccess &&
 			!patch.confirmLockout &&
 			!cidrListAllows(nextCidrs.join('\n'), panelAccess.clientIp)
 		) {
@@ -82,7 +81,7 @@ export class InMemorySettingsRepository implements SettingsRepository {
 		const removingToken = patch.cloudflareToken === ''
 		this.settings = {
 			require2fa: patch.require2fa ?? this.settings.require2fa,
-			proxy: proxy && {
+			proxy: {
 				...proxy,
 				publicIpv4: patch.publicIpv4 ?? proxy.publicIpv4,
 				publicIpv6: patch.publicIpv6 ?? proxy.publicIpv6,
@@ -95,7 +94,7 @@ export class InMemorySettingsRepository implements SettingsRepository {
 						? { tokenSet: true, zones: 3 }
 						: proxy.cloudflare,
 			},
-			panelAccess: panelAccess && {
+			panelAccess: {
 				...panelAccess,
 				allowedCidrs: patch.panelAllowedCidrs ?? panelAccess.allowedCidrs,
 			},

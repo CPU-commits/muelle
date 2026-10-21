@@ -15,44 +15,61 @@ export interface RunFiles {
 /**
  * Borra lo de Docker de la corrida con `removeDocker` (devuelve lo que no pudo borrar) y,
  * pase lo que pase con Docker (también si el CLI falla), copia el log y borra `dir`: no queda
- * en /tmp una clave maestra ni una base. Después falla si `removeDocker` falló o dejó algo, o
- * si muelle registró un error interno (un 500: un bug, aunque el panel no lo haya mostrado).
+ * en /tmp una clave maestra ni una base. Después falla, con un solo error que dice todo lo
+ * que pasó, si `removeDocker` falló o dejó algo, o si muelle registró un error interno (un
+ * bug, aunque el panel no lo haya mostrado).
  */
 export async function cleanUpRun(
 	files: RunFiles,
 	removeDocker: () => Promise<string[]>,
 	label: string,
 ): Promise<void> {
-	let left: string[]
-	let internal: string[] = []
+	const problems: string[] = []
+	let dockerFailure: unknown
 	try {
-		left = await removeDocker()
+		const left = await removeDocker()
+		if (left.length > 0) problems.push(`no se pudo borrar lo de ${label}: ${left.join(', ')}`)
+	} catch (error) {
+		dockerFailure = error
+		problems.push(error instanceof Error ? error.message : String(error))
 	} finally {
 		try {
 			if (existsSync(files.logPath)) {
 				const log = readFileSync(files.logPath, 'utf8')
 				mkdirSync(dirname(files.logCopy), { recursive: true })
 				writeFileSync(files.logCopy, log)
-				internal = internalErrors(log)
+				const internal = internalErrors(log)
+				if (internal.length > 0) {
+					problems.push(
+						`muelle registró errores internos (${files.logCopy}):\n${internal.join('\n')}`,
+					)
+				}
 			}
 		} finally {
 			rmSync(files.dir, { recursive: true, force: true })
 		}
 	}
-	if (left.length > 0) throw new Error(`no se pudo borrar lo de ${label}: ${left.join(', ')}`)
-	if (internal.length > 0) {
+	if (problems.length > 0) {
 		throw new Error(
-			`muelle registró errores internos (${files.logCopy}):\n${internal.join('\n')}`,
+			problems.join('\n'),
+			dockerFailure === undefined ? {} : { cause: dockerFailure },
 		)
 	}
 }
 
-/** Las líneas del log JSON de muelle con un error interno (Kit.Fail, un 500). */
+/**
+ * Los `msg` de un error interno en el log de muelle: el de `Kit.Fail` (`cmd/http/utils`, un
+ * 500) y el del despachador de deploys (`deploy/app/usecases/dispatcher.go`, que no responde
+ * nada: el deploy queda `running` y se reintenta).
+ */
+const INTERNAL_ERROR_MESSAGES: readonly unknown[] = ['error interno', 'deploy: error interno']
+
+/** Las líneas del log JSON de muelle con un error interno. */
 function internalErrors(log: string): string[] {
 	return log.split('\n').filter((line) => {
 		try {
 			const entry = JSON.parse(line) as { level?: unknown; msg?: unknown }
-			return entry.level === 'ERROR' && entry.msg === 'error interno'
+			return entry.level === 'ERROR' && INTERNAL_ERROR_MESSAGES.includes(entry.msg)
 		} catch {
 			return false
 		}

@@ -69,13 +69,15 @@ export interface PortsMove {
 
 /**
  * Cómo va muelle-caddy después de cambiar los puertos sin mudarse de origen (contrato §3.5):
- * se recrea con los puertos nuevos, quedó escuchando, o no pudo (un puerto ocupado: el
- * `error` de `GET /proxy`, y muelle reintenta con los mismos puertos).
+ * se recrea con los puertos nuevos, quedó escuchando, no pudo (un puerto ocupado: el
+ * `error` de `GET /proxy`, y muelle reintenta con los mismos puertos), o pasó el plazo sin
+ * una respuesta que lo diga (`unknown`: `GET /proxy` falló o seguía diciendo `recreating`).
  */
 export type PortsRecreation =
 	| { readonly kind: 'recreating' }
 	| { readonly kind: 'done' }
 	| { readonly kind: 'failed'; readonly error: string | null }
+	| { readonly kind: 'unknown' }
 
 /**
  * muelle volvió a los puertos anteriores porque muelle-caddy no arrancó con los nuevos
@@ -89,8 +91,8 @@ export interface PortsRollbackView {
 	/** Cuándo volvió: el aviso puede verse días después (hasta el próximo cambio de puertos). */
 	readonly at: Date
 	/**
-	 * La dirección del panel con los puertos de antes, si la vuelta cambió el HTTPS y Caddy
-	 * sirve el panel; si no, null.
+	 * La dirección del panel con los puertos de antes, si la vuelta cambió el HTTPS, Caddy
+	 * sirve el panel y este panel está en una dirección de Caddy; si no, null.
 	 */
 	readonly origin: string | null
 }
@@ -104,7 +106,8 @@ export interface CloudflareNotice {
 /**
  * Cuánto se espera, después de cambiar los puertos, una respuesta de `GET /proxy` que diga
  * cómo terminó la recreación (el `PATCH` ya volvió; recrear tarda unos segundos más, y si no
- * arranca, volver a los puertos anteriores, otros tantos). Pasado eso, el aviso se va.
+ * arranca, volver a los puertos anteriores, otros tantos). Pasado eso, el aviso dice que no
+ * se pudo confirmar (`unknown`), hasta que una respuesta lo diga.
  */
 export const PORTS_WATCH_TIMEOUT_MS = 2 * 60_000
 
@@ -163,11 +166,15 @@ export class ProxySettingsViewModel {
 	#watchingSince = 0
 	// `GET /proxy` (ingress): se pide al abrir Ajustes (por si muelle volvió a los puertos
 	// anteriores: `ports_rollback`) y, después de cambiar los puertos, se vuelve a pedir
-	// mientras no diga cómo terminó, aunque falle. `waiting` lo llama TanStack adentro del
-	// efecto que suscribe la query: leído con `untrack`, o cada respuesta haría que se vuelva
-	// a suscribir, y eso cancela el pedido en curso (y descarta su respuesta).
+	// mientras no diga cómo terminó, aunque falle (2 min como mucho). `waiting` y `expired` los
+	// llama TanStack adentro del efecto que suscribe la query: leídos con `untrack`, o cada
+	// respuesta haría que se vuelva a suscribir, y eso cancela el pedido en curso (y descarta
+	// su respuesta).
 	readonly #proxyStatus = createQuery(() =>
-		proxyFollowQuery({ waiting: () => untrack(() => this.#awaitingProxy) }),
+		proxyFollowQuery({
+			waiting: () => untrack(() => this.#awaitingProxy),
+			expired: () => untrack(() => this.#watchingProxy && this.#watchExpired),
+		}),
 	)
 
 	constructor(proxy: () => ProxySettings) {
@@ -277,7 +284,7 @@ export class ProxySettingsViewModel {
 	 * (este origen deja de responder) o sin el proxy de muelle (`disabled`): los puertos ya se
 	 * guardaron, esto es solo el seguimiento. Mientras `GET /proxy` no diga cómo terminó
 	 * (también si falla: el panel puede pasar por el mismo muelle-caddy que se recrea), dice
-	 * `recreating`, hasta `PORTS_WATCH_TIMEOUT_MS`.
+	 * `recreating`, hasta `PORTS_WATCH_TIMEOUT_MS`; después, `unknown`.
 	 */
 	get recreation(): PortsRecreation | null {
 		// Si se fue de esta dirección, el aviso de la nueva dice a dónde ir; si volvió atrás,
@@ -285,10 +292,12 @@ export class ProxySettingsViewModel {
 		if (!this.#watchingProxy || this.#leaving || this.#rollbackStatus) return null
 		const fresh = this.#freshProxy
 		if (this.#awaitingProxy) return { kind: 'recreating' }
-		if (fresh === undefined) return null
+		// Pasó el plazo sin una respuesta de después del cambio, o la última seguía recreando.
+		if (fresh === undefined) return { kind: 'unknown' }
 		const notice = proxyNotice(fresh)
 		if (notice === null) return { kind: 'done' }
-		if (notice === 'disabled' || notice === 'recreating') return null
+		if (notice === 'recreating') return { kind: 'unknown' }
+		if (notice === 'disabled') return null
 		return { kind: 'failed', error: fresh.error }
 	}
 
@@ -299,19 +308,28 @@ export class ProxySettingsViewModel {
 	get rollback(): PortsRollbackView | null {
 		const rollback = this.#rollbackStatus
 		if (!rollback || rollback.at.getTime() === this.#dismissedRollback) return null
-		const httpsChanged = rollback.attempted.httpsPort !== rollback.restored.httpsPort
 		return {
 			attempted: rollback.attempted,
 			restored: rollback.restored,
 			error: rollback.error,
 			at: rollback.at,
-			origin: httpsChanged
-				? panelOrigin({
-						panelDomain: this.proxy.panelDomain,
-						httpsPort: rollback.restored.httpsPort,
-					})
-				: null,
+			origin: this.#rollbackOrigin(rollback),
 		}
+	}
+
+	/**
+	 * La dirección de Caddy con los puertos a los que volvió, si cambió el HTTPS y este panel
+	 * está en una dirección de Caddy (la anterior o la que falló). Entrando por otro proxy,
+	 * una IP o `MUELLE_PANEL_ORIGIN`, null: esa dirección nunca se usó, y la de este panel no
+	 * cambió.
+	 */
+	#rollbackOrigin(rollback: PortsRollback): string | null {
+		if (rollback.attempted.httpsPort === rollback.restored.httpsPort) return null
+		const { panelDomain } = this.proxy
+		const restored = panelOrigin({ panelDomain, httpsPort: rollback.restored.httpsPort })
+		const attempted = panelOrigin({ panelDomain, httpsPort: rollback.attempted.httpsPort })
+		const here = currentOrigin()
+		return here === restored || here === attempted ? restored : null
 	}
 
 	/** A qué puertos volvió y cuándo ("hace 3 días"). */
@@ -340,8 +358,8 @@ export class ProxySettingsViewModel {
 	}
 
 	/**
-	 * Ajustes en la dirección a la que volvió el panel, si este panel no está ahí (se entró
-	 * por otra: otro proxy, o una pestaña que sigue abierta). null si no hay a dónde ir.
+	 * Ajustes en la dirección a la que volvió el panel, si este panel está en la que falló (una
+	 * pestaña que sigue abierta). null si no hay a dónde ir.
 	 */
 	get rollbackHref(): string | null {
 		const origin = this.rollback?.origin ?? null
@@ -459,31 +477,31 @@ export class ProxySettingsViewModel {
 			this.#watchingProxy = false
 			this.#watchExpired = false
 			this.#leaving = false
-			if (settings.proxy) {
-				this.#loadPorts(settings.proxy)
-				const moved = this.#movedTo(settings.proxy, before)
-				// Se entró por la dirección que sirve Caddy y cambió el HTTPS: esta dirección ya
-				// no pasa el chequeo de Origin (contrato §0.1 y §3.5), y en unos segundos deja
-				// de responder. No sale ninguna escritura más desde acá.
-				const leaving = moved !== null && currentOrigin() === panelOrigin(before)
-				if (moved !== null) {
-					// La de antes del `PATCH`: a dónde volver si la nueva no responde (§3.5).
-					const previous = panelOrigin(before)
-					this.movedTo = moved
-					this.movedFrom = previous
-					savePanelMove(moved, previous)
-					if (leaving) holdWrites(moved)
-				}
-				// Se sigue `GET /proxy`: cómo termina la recreación y, si muelle-caddy no
-				// arranca, si muelle vuelve a los puertos anteriores (si se fue de esta
-				// dirección, es lo único que puede verse desde acá: vuelve a responder).
-				this.#watchingSince = Date.now()
-				this.#leaving = leaving
-				this.#watchingProxy = true
-				// Lo que se sabía del proxy es de antes del cambio (el PATCH limpió
-				// `ports_rollback`): afuera, aunque sea del mismo milisegundo.
-				void this.#client.resetQueries({ queryKey: ingressKeys.proxy })
+			this.#loadPorts(settings.proxy)
+			const moved = this.#movedTo(settings.proxy, before)
+			// Se entró por la dirección que sirve Caddy y cambió el HTTPS: esta dirección ya
+			// no pasa el chequeo de Origin (contrato §0.1 y §3.5), y en unos segundos deja
+			// de responder. No sale ninguna escritura más desde acá.
+			const leaving = moved !== null && currentOrigin() === panelOrigin(before)
+			if (moved !== null) {
+				// La de antes del `PATCH`: a dónde volver si la nueva no responde (§3.5). Solo
+				// si se entró por ahí: por otro proxy, una IP o `MUELLE_PANEL_ORIGIN`, esa
+				// dirección nunca se usó, y la de este panel no cambia.
+				const previous = leaving ? panelOrigin(before) : null
+				this.movedTo = moved
+				this.movedFrom = previous
+				savePanelMove(moved, previous)
+				if (leaving) holdWrites(moved)
 			}
+			// Se sigue `GET /proxy`: cómo termina la recreación y, si muelle-caddy no
+			// arranca, si muelle vuelve a los puertos anteriores (si se fue de esta
+			// dirección, es lo único que puede verse desde acá: vuelve a responder).
+			this.#watchingSince = Date.now()
+			this.#leaving = leaving
+			this.#watchingProxy = true
+			// Lo que se sabía del proxy es de antes del cambio (el PATCH limpió
+			// `ports_rollback`): afuera, aunque sea del mismo milisegundo.
+			void this.#client.resetQueries({ queryKey: ingressKeys.proxy })
 			this.#refreshIngress()
 			toast.success(m.admin_ports_saved())
 			this.confirmingPorts = false
@@ -584,7 +602,7 @@ export class ProxySettingsViewModel {
 	): Promise<void> {
 		try {
 			const settings = await run()
-			if (settings.proxy) apply(settings.proxy)
+			apply(settings.proxy)
 			this.#refreshIngress()
 			toast.success(success)
 		} catch (error) {

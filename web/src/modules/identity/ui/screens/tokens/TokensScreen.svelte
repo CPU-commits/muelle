@@ -66,9 +66,7 @@
 					</span>
 				{/if}
 			</span>
-			{#if row.creator}
-				<span class={creator}>{row.creator}</span>
-			{/if}
+			<span class={creator}>{row.creator}</span>
 		</span>
 		<span class={scopeCell}><Mono size={13} tone="secondary">{row.scope}</Mono></span>
 		<span class={metaCell}>{row.lastUsed}</span>

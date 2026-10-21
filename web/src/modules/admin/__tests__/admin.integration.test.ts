@@ -6,7 +6,7 @@ import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { identityDb } from '@/mocks/db/identity'
 import { ingressDb } from '@/mocks/db/ingress'
 import { server } from '@/mocks/server'
-import { pendingPhase, UnavailableError, ValidationError } from '@/shared/domain'
+import { UnavailableError, UnexpectedError, ValidationError } from '@/shared/domain'
 import { ingressUseCases } from '@/modules/ingress'
 import { adminUseCases } from '../container'
 import {
@@ -20,9 +20,8 @@ import {
 	WouldLockOut,
 } from '../domain'
 
-// Recorre el módulo entero contra el backend simulado (src/mocks/handlers/admin.ts). Los
-// mocks responden como el backend con las Fases 2 y 3; con `server.use` se simula el de la
-// Fase 1, que todavía no las tiene.
+// Recorre el módulo entero contra el backend simulado (src/mocks/handlers/admin.ts), que
+// responde como el backend.
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 beforeEach(() => {
 	authDb.reset()
@@ -40,11 +39,23 @@ function enableOwnTotp(): void {
 	if (user) user.totpEnabled = true
 }
 
-const phaseOneSettings = () =>
-	http.get(api('/settings'), () => HttpResponse.json({ require_2fa: false }))
+/** Un `GET /settings` completo (contrato §4: todas las claves, siempre). */
+const SETTINGS_DTO = {
+	require_2fa: true,
+	cloudflare_token_set: false,
+	cloudflare_zones: null,
+	public_ip: '',
+	public_ipv6: '',
+	acme_email: '',
+	panel_domain: 'panel.tudominio.cl',
+	proxy_http_port: 80,
+	proxy_https_port: 443,
+	panel_allowed_cidrs: [],
+	client_ip: '198.51.100.17',
+}
 
 describe('settings', () => {
-	it('con la Fase 3, trae proxy, DNS, certificados e IPs permitidas', async () => {
+	it('trae el 2FA, proxy, DNS, certificados e IPs permitidas', async () => {
 		await expect(adminUseCases.getSettings()).resolves.toEqual({
 			require2fa: false,
 			proxy: {
@@ -60,14 +71,10 @@ describe('settings', () => {
 		})
 	})
 
-	it('el backend de la Fase 1 solo tiene require_2fa: lo demás queda pendiente', async () => {
-		server.use(phaseOneSettings())
+	it('un GET /settings sin las claves del proxy no es del contrato (ContractError)', async () => {
+		server.use(http.get(api('/settings'), () => HttpResponse.json({ require_2fa: false })))
 
-		await expect(adminUseCases.getSettings()).resolves.toEqual({
-			require2fa: false,
-			proxy: null,
-			panelAccess: null,
-		})
+		await expect(adminUseCases.getSettings()).rejects.toMatchObject({ name: 'ContractError' })
 	})
 
 	it('exigir 2FA sin tener la propia es TotpRequiredFirst; con ella, se activa', async () => {
@@ -83,13 +90,13 @@ describe('settings', () => {
 		expect(authDb.state.require2fa).toBe(true)
 	})
 
-	it('en la Fase 1 solo se manda require_2fa', async () => {
+	it('exigir 2FA solo manda require_2fa: lo demás no se toca', async () => {
 		enableOwnTotp()
 		let sent: unknown
 		server.use(
 			http.patch(api('/settings'), async ({ request }) => {
 				sent = await request.json()
-				return HttpResponse.json({ require_2fa: true })
+				return HttpResponse.json(SETTINGS_DTO)
 			}),
 		)
 
@@ -163,6 +170,22 @@ describe('settings', () => {
 		expect((error as ValidationError).message).toBe('no es pública')
 	})
 
+	it('el mismo puerto para HTTP y HTTPS es 422 en proxy_https_port, con el texto del backend', async () => {
+		const response = await fetch(api('/settings'), {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ proxy_http_port: 8443, proxy_https_port: 8443 }),
+		})
+		expect(response.status).toBe(422)
+		// src/internal/admin/app/usecases/settings.go
+		expect(await response.json()).toMatchObject({
+			error: {
+				code: 'invalid',
+				message: 'proxy_https_port: no puede ser el mismo que proxy_http_port (8443)',
+			},
+		})
+	})
+
 	it('el backend rechaza { y } en el email ACME y en el token (422 en ese campo) y no guarda nada', async () => {
 		// Directo contra el endpoint, sin el chequeo del panel: el 422 lo tiene que dar el mock.
 		const patch = (body: Record<string, unknown>) =>
@@ -199,8 +222,12 @@ describe('settings', () => {
 		})
 		expect(body).not.toContain(token)
 		const short = await patch({ cloudflare_token: 'a{b}' })
+		// El mismo texto que el backend (src/internal/admin/app/usecases/settings.go).
 		expect(await short.json()).toMatchObject({
-			error: { message: expect.stringMatching(/^cloudflare_token: debe tener entre 20/) },
+			error: {
+				message:
+					'cloudflare_token: no parece un token de API de Cloudflare (de 20 a 512 caracteres visibles, sin espacios)',
+			},
 		})
 
 		expect(adminDb.state.acmeEmail).toBe(before.email)
@@ -431,7 +458,6 @@ describe('settings', () => {
 
 		expect(error).toBeInstanceOf(CloudflareUnavailable)
 		expect(error).toBeInstanceOf(UnavailableError)
-		expect(pendingPhase(error)).toBeNull()
 	})
 })
 
@@ -624,9 +650,9 @@ describe('registries (Fase 2)', () => {
 		).rejects.toBeInstanceOf(RegistryExists)
 	})
 
-	it('contra el backend de la Fase 1, la ruta no existe: UnavailableError con fase 2', async () => {
+	it('una ruta que no existe (no_route, method_not_allowed) es un error inesperado, no un registry que falta', async () => {
 		server.use(
-			http.get(api('/registries'), () => apiError(404, 'no_route', 'no existe')),
+			http.get(api('/registries'), () => noRoute()),
 			http.post(api('/registries'), () =>
 				apiError(405, 'method_not_allowed', 'método no permitido'),
 			),
@@ -637,34 +663,23 @@ describe('registries (Fase 2)', () => {
 			.addRegistry({ host: 'ghcr.io', username: 'a', password: 'b' })
 			.catch((caught: unknown) => caught)
 
-		expect(listError).toBeInstanceOf(UnavailableError)
-		expect(pendingPhase(listError)).toBe(2)
-		expect(pendingPhase(addError)).toBe(2)
+		expect(listError).toBeInstanceOf(UnexpectedError)
+		expect(addError).toBeInstanceOf(UnexpectedError)
 	})
 
-	it('un not_found no es la Fase 2: es el registry que ya no está', async () => {
+	it('un not_found es el registry que ya no está', async () => {
 		const error = await adminUseCases
 			.removeRegistry('quay.io')
 			.catch((caught: unknown) => caught)
 
 		expect(error).toBeInstanceOf(RegistryNotFound)
-		expect(pendingPhase(error)).toBeNull()
 	})
 
-	it('una ruta sin handler en los mocks contesta no_route, como el backend', async () => {
-		server.use(http.get(api('/registries'), () => noRoute()))
-
-		const error = await adminUseCases.listRegistries().catch((caught: unknown) => caught)
-
-		expect(pendingPhase(error)).toBe(2)
-	})
-
-	it('un backend caído es UnavailableError sin fase (se reintenta)', async () => {
+	it('un backend caído es UnavailableError (se reintenta)', async () => {
 		server.use(http.get(api('/registries'), () => HttpResponse.error()))
 
 		const error = await adminUseCases.listRegistries().catch((caught: unknown) => caught)
 
 		expect(error).toBeInstanceOf(UnavailableError)
-		expect(pendingPhase(error)).toBeNull()
 	})
 })

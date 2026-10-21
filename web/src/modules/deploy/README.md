@@ -21,7 +21,7 @@ está en [Diferencias con el contrato](#diferencias-con-el-contrato).
 
 | Respuesta                                   | Qué ve el panel                                                                      |
 | ------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `404 no_route`, `405 method_not_allowed`    | La Fase 2 todavía no está: `<ComingSoon phase={2}>` (`UnavailableError` con `phase`) |
+| `404 no_route`, `405 method_not_allowed`    | Una ruta mal armada del panel: `UnexpectedError` (el panel va con el backend entero) |
 | `404 not_found`                             | El recurso no existe. En un deploy, `DeployNotFound`: "Ese deploy ya no existe"      |
 | `503 docker_unavailable`                    | `DockerUnavailable`: "Docker no responde en el servidor de muelle…", con reintento   |
 | `409 no_previous_deploy` (rollback)         | `NoPreviousDeploy`: "No hay un deploy exitoso anterior al actual", en el diálogo     |
@@ -185,15 +185,16 @@ Al encolar, los deploys `queued` de la misma app pasan a `superseded` con `super
 cual. Un tag se vuelve a resolver y un digest queda fijo, así que **un rollback no se
 deshace con el próximo deploy sin cuerpo**: repite sus refs con digest, y el que sigue
 también. Por eso el diálogo de "Desplegar" avisa qué deja fijo en un digest el deploy actual
-(`pinnedImages` de `domain/entities/deploy.ts`) y que para volver a seguir un tag hay que
-escribir la imagen (o cambiarla en la configuración). Sale de `requested_images` del deploy
+(`pinnedImages` de `domain/entities/deploy.ts`) y que para usar otra imagen o un tag hay
+que escribirla (o cambiarla en la configuración), con el mismo texto
+(`deploy_dialog_pinned_body`) para un digest de un rollback, de un override o puesto a
+propósito en la configuración. Sale de `requested_images` del deploy
 actual: un servicio está fijo si su ref pedida trae `@sha256:`. Nombra el rollback ("fijada
 por el rollback #144") solo si sigue en el historial y su imagen es la fijada; si salió del
-historial, o lo fijó un override o la configuración, dice que está fijada en un digest. Con
-un backend sin `requested_images` (uno de antes del cambio) lo deduce como antes: un
-servicio sigue fijado si en el deploy actual tiene la misma imagen (ref y digest) que en el
-último rollback `succeeded`, lo que avisa de más si un override vuelve al mismo digest y no
-avisa si el rollback ya salió del historial.
+historial, o lo fijó un override o la configuración, dice que está fijada en un digest. Se
+mira por servicio (`PinnedImages`: `rollback` con los que fijó él, `others` con el resto):
+en una compose con servicios de los dos, el título nombra el rollback y los demás aparte ("Servicios
+fijados por el rollback #144: web. Otros servicios fijados en un digest: api.").
 
 `409 conflict`: la app se está borrando (el `DELETE` de la app frena sus deploys hasta 2
 min). El diálogo lo dice en su banner. El orden de los errores es `404` (la app), `400` (el
@@ -244,7 +245,7 @@ El polling: lo usa el panel para un deploy terminado y como respaldo cuando el S
   él pide `GET /proxy` (`proxyQuery` del barrel de `ingress`, solo con sesión) y muestra
   arriba del log el `error` y un link a Dominios, o que el proxy ya se sincronizó. Uno que se
   sigue en vivo lo muestra al terminar, cuando se refresca el historial. La línea se pinta
-  en ámbar como cualquier `advertencia`. Sin el campo (un backend de antes), no avisa.
+  en ámbar como cualquier `advertencia`.
 
 ## `GET {app}/deploys/{id}/log/stream` → `text/event-stream`
 
@@ -348,7 +349,7 @@ logfmt o `level`/`severity` de un JSON).
 - Para Proyectos: `AppDeployState`, una clase que se crea en la fila:
   `new AppDeployState(() => ref, () => enabled)` (`enabled` opcional: false no pide nada
   y todo dice "—"). Da `tone`, `statusText`, `lastDeployText`, `lastDeployFailed`,
-  `image` e `imageShort`; "—" si la Fase 2 no está o falla, sin reintentos. La ruta
+  `image` e `imageShort`; "—" si falla, sin reintentos. La ruta
   `(app)/+page.svelte` se la pasa a `ProjectsScreen` de `catalog` como `appDeploy` (un
   `AppRowDeployFactory`), y cada fila la crea con `enabled` en false hasta que se ve.
 - Queries: `appStatusQuery(ref, options)`, `deploysQuery(ref, options)` y
@@ -400,6 +401,5 @@ que pasa `queued → running → succeeded` en ~10 s.
 
 Ninguna: lo de arriba es lo que dice el contrato (`since` ya está en §2.9;
 `requested_images` y `routes_warning` en §2.1, desde la revisión del 2026-10-17, §7). Los
-dos son opcionales en el DTO solo por un backend de antes del cambio: sin
-`requested_images`, `pinnedImages` deduce lo fijado del historial; sin `routes_warning`,
-Deploys no avisa de la advertencia del paso 7.
+dos son obligatorios en el DTO: el panel va embebido en el mismo binario que el backend
+(contrato §5.5), y un deploy sin ellos es un `ContractError`.

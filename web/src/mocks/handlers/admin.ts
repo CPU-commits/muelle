@@ -127,7 +127,12 @@ function validateSettings(body: SettingsBody) {
 	}
 	const http = body.proxy_http_port ?? adminDb.state.proxyHttpPort
 	const https = body.proxy_https_port ?? adminDb.state.proxyHttpsPort
-	if (http === https) return invalid('proxy_https_port', 'no puede ser el mismo que HTTP')
+	if (http === https) {
+		return invalid(
+			'proxy_https_port',
+			`no puede ser el mismo que proxy_http_port (${String(http)})`,
+		)
+	}
 	if (body.panel_allowed_cidrs !== undefined) {
 		const list = body.panel_allowed_cidrs
 		if (!Array.isArray(list)) return apiError(400, 'invalid_json', 'debe ser una lista')
@@ -140,9 +145,10 @@ function validateSettings(body: SettingsBody) {
 		body.cloudflare_token !== undefined &&
 		!clearsOrMatches(body.cloudflare_token, CLOUDFLARE_TOKEN)
 	) {
+		// El texto del backend (`admin/app/usecases/settings.go`).
 		return invalid(
 			'cloudflare_token',
-			'debe tener entre 20 y 512 caracteres visibles, sin espacios',
+			'no parece un token de API de Cloudflare (de 20 a 512 caracteres visibles, sin espacios)',
 		)
 	}
 	// Después de la forma, como el backend; el mensaje nunca trae el token.

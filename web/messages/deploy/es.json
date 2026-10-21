@@ -26,7 +26,6 @@
 	"deploy_action_rollback": "Rollback",
 	"deploy_summary_loading": "Cargando el estado de la app…",
 	"deploy_summary_error_title": "No se pudo leer el estado de la app",
-	"deploy_summary_coming": "El estado de la app",
 	"deploy_summary_not_deployed_title": "Esta app todavía no tiene un deploy",
 	"deploy_summary_not_deployed_body": "Cuando la despliegues, aquí verás sus réplicas, CPU, memoria y tareas.",
 	"deploy_service_title": "Servicio {name}",
@@ -89,7 +88,6 @@
 	"deploy_deploys_subtitle": "Un deploy a la vez por app; si llega otro, el que está en cola se reemplaza.",
 	"deploy_deploys_loading": "Cargando el historial…",
 	"deploy_deploys_error_title": "No se pudo leer el historial de deploys",
-	"deploy_deploys_coming": "El historial de deploys",
 	"deploy_deploys_empty_title": "Todavía no hay deploys",
 	"deploy_deploys_empty_body": "El primero aparece aquí apenas lo encoles.",
 	"deploy_history": "Historial",
@@ -109,7 +107,6 @@
 	"deploy_logs_subtitle": "En vivo desde Docker. muelle no guarda nada.",
 	"deploy_logs_loading": "Cargando los servicios…",
 	"deploy_logs_error_title": "No se pudieron leer los servicios de la app",
-	"deploy_logs_coming": "El visor de logs en vivo",
 	"deploy_logs_no_services_title": "Esta app no tiene servicios en Swarm",
 	"deploy_logs_no_services_body": "Despliégala para ver sus logs.",
 	"deploy_logs_filter": "Filtrar logs",
@@ -179,5 +176,6 @@
 	"deploy_dialog_rollback_pin_services_title": "Servicios fijados por el rollback #{id}: {services}.",
 	"deploy_dialog_digest_pin_title": "La imagen está fijada en un digest.",
 	"deploy_dialog_digest_pin_services_title": "Servicios fijados en un digest: {services}.",
-	"deploy_dialog_rollback_pin_body": "Sin una imagen nueva se repite esa versión, con su digest. Para volver a seguir un tag (como :staging), escríbelo aquí o cámbialo en la configuración."
+	"deploy_dialog_mixed_pin_services_title": "Servicios fijados por el rollback #{id}: {rollback}. Otros servicios fijados en un digest: {services}.",
+	"deploy_dialog_pinned_body": "Sin una imagen nueva se despliega ese digest de nuevo. Para usar otra imagen o un tag (como :staging), escríbelo aquí o cámbialo en la configuración."
 }

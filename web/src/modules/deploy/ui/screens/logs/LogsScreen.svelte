@@ -4,7 +4,6 @@
 	import {
 		Banner,
 		Button,
-		ComingSoon,
 		EmptyState,
 		ErrorState,
 		LoadingState,
@@ -43,9 +42,7 @@
 <div class={page}>
 	<PageHeader title={m.nav_app_logs()} subtitle={m.deploy_logs_subtitle()} />
 
-	{#if vm.pendingPhase !== null}
-		<ComingSoon phase={vm.pendingPhase} feature={m.deploy_logs_coming()} />
-	{:else if vm.isLoading}
+	{#if vm.isLoading}
 		<LoadingState label={m.deploy_logs_loading()} />
 	{:else if vm.loadError}
 		<ErrorState

@@ -63,8 +63,8 @@ describe('app', () => {
 			],
 		}
 		expect(serviceTargets(app)).toEqual(['api:3000', 'worker:80', 'worker:8080'])
-		// Sin la Fase 2 el backend no los manda: no hay sugerencias del catálogo.
-		expect(serviceTargets({ ...app, services: null })).toEqual([])
+		// Un compose que no se puede leer no tiene servicios: no hay sugerencias del catálogo.
+		expect(serviceTargets({ ...app, services: [] })).toEqual([])
 	})
 
 	it('el resumen junta todo lo del encabezado', () => {

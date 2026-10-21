@@ -4,7 +4,6 @@
 	import {
 		Banner,
 		Button,
-		ComingSoon,
 		ConfirmDialog,
 		EmptyState,
 		ErrorState,
@@ -45,9 +44,7 @@
 	<p class={srOnly} role="alert">{vm.failingAnnouncement}</p>
 	<PageHeader title={m.nav_app_domains()} subtitle={m.ingress_subtitle()} />
 
-	{#if vm.pendingPhase !== null}
-		<ComingSoon phase={vm.pendingPhase} feature={m.ingress_coming()} />
-	{:else if vm.isLoading}
+	{#if vm.isLoading}
 		<LoadingState label={m.ingress_loading()} />
 	{:else if vm.loadError}
 		<ErrorState

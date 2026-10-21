@@ -1,7 +1,7 @@
 // Superficie pública del módulo. Otros módulos y las rutas importan SOLO de acá.
 //
 // Para Proyectos: `AppDeployState` (estado, imagen y último deploy de una fila, con "—" si
-// la Fase 2 no está). La ruta `(app)/+page.svelte` se lo pasa a `ProjectsScreen` de catalog.
+// no se pudo saber). La ruta `(app)/+page.svelte` se lo pasa a `ProjectsScreen` de catalog.
 export { deployUseCases } from './container'
 export { appStatusQuery, deployKeys, deploysQuery, lastDeployQuery } from './data'
 export type {

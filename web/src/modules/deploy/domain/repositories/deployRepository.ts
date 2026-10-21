@@ -8,7 +8,6 @@ import type { DeployId } from '../value-objects/deployId'
 
 // El PUERTO del módulo: estado, deploys y logs de una app (Fase 2, spec §7 y §10). Lo
 // implementa `data/repositories/httpDeployRepository`; los tests usan el fake en memoria.
-// Contra un backend sin la Fase 2, todo rechaza con `UnavailableError` (`phase: 2`).
 export interface DeployRepository {
 	status(app: AppRef, signal?: AbortSignal): Promise<AppStatus>
 	/** El historial, del más nuevo al más viejo (hasta 22, con la retención del contrato §2.3). */

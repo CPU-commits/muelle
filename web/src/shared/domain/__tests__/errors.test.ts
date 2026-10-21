@@ -1,27 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { hasCode, NotFoundError, pendingPhase, RateLimitedError, UnavailableError } from '../errors'
+import { hasCode, RateLimitedError, UnavailableError } from '../errors'
 
 describe('UnavailableError', () => {
-	it('sin fase es un servicio caído', () => {
-		const error = new UnavailableError('caído')
+	it('es un servicio caído o sin red, con su motivo y su causa', () => {
+		const cause = new Error('500')
+		const error = new UnavailableError('caído', { reason: 'server', cause })
 
 		expect(error.code).toBe('unavailable')
-		expect(error.phase).toBeNull()
-		expect(pendingPhase(error)).toBeNull()
-	})
-
-	it('con fase es un endpoint que todavía no existe, y conserva la causa', () => {
-		const cause = new Error('404')
-		const error = new UnavailableError('Llega con la Fase 2', { phase: 2, cause })
-
-		expect(error.phase).toBe(2)
+		expect(error.reason).toBe('server')
 		expect(error.cause).toBe(cause)
-		expect(pendingPhase(error)).toBe(2)
-	})
-
-	it('pendingPhase es null para cualquier otro error', () => {
-		expect(pendingPhase(new NotFoundError('no'))).toBeNull()
-		expect(pendingPhase('texto')).toBeNull()
+		expect(new UnavailableError('caído').reason).toBeNull()
+		// Ya no hay "fase pendiente": el panel va con el backend entero (contrato §5.5).
+		expect(error).not.toHaveProperty('phase')
 	})
 })
 

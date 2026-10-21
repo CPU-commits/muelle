@@ -66,8 +66,8 @@ const appBaseDtoSchema = z.object({
 	last_deployed_at: z.string().nullable(),
 	pending_changes: z.boolean(),
 	created_at: z.string(),
-	// Siempre está desde la Fase 2, ordenado por nombre. Un backend sin ella no lo manda.
-	services: z.array(appServiceDtoSchema).optional(),
+	// Siempre está, ordenado por nombre (contrato §2.12).
+	services: z.array(appServiceDtoSchema),
 })
 
 /**

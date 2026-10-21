@@ -9,13 +9,7 @@ import { server } from '@/mocks/server'
 import { appRefFrom, catalogUseCases } from '@/modules/catalog'
 import { http as client } from '@/shared/data/http/client'
 import { ApiError } from '@/shared/data/http/errors'
-import {
-	ConflictError,
-	pendingPhase,
-	UnauthorizedError,
-	UnavailableError,
-	ValidationError,
-} from '@/shared/domain'
+import { ConflictError, UnauthorizedError, UnexpectedError, ValidationError } from '@/shared/domain'
 import { deployUseCases } from '../container'
 import { httpDeployRepository } from '../data/repositories/httpDeployRepository'
 import {
@@ -129,10 +123,10 @@ describe('estado e historial', () => {
 		expect(list.every((deploy) => !deploy.routesWarning)).toBe(true)
 	})
 
-	it('un deploy que no existe es DeployNotFound, no la fase', async () => {
-		const result = deployUseCases.getDeploy(APP, asDeployId(9999))
-		await expect(result).rejects.toBeInstanceOf(DeployNotFound)
-		await expect(result).rejects.toSatisfy((error) => pendingPhase(error) === null)
+	it('un deploy que no existe es DeployNotFound', async () => {
+		await expect(deployUseCases.getDeploy(APP, asDeployId(9999))).rejects.toBeInstanceOf(
+			DeployNotFound,
+		)
 	})
 })
 
@@ -543,8 +537,8 @@ describe('requested_images: la ref pedida y lo que queda fijo (contrato §2.1 y 
 		const rollback = await finish((await deployUseCases.rollback(APP)).id)
 		expect(rollback.requestedImages).toEqual(target?.images)
 		expect(pinnedImages(await deployUseCases.listDeploys(APP))).toEqual({
-			rollback: rollback.id,
-			services: ['api'],
+			rollback: { id: rollback.id, services: ['api'] },
+			others: [],
 		})
 
 		const again = await finish(
@@ -552,7 +546,9 @@ describe('requested_images: la ref pedida y lo que queda fijo (contrato §2.1 y 
 		)
 		expect(again.requestedImages).toEqual(target?.images)
 		expect(again.images).toEqual(target?.images)
-		expect(pinnedImages(await deployUseCases.listDeploys(APP))?.services).toEqual(['api'])
+		expect(pinnedImages(await deployUseCases.listDeploys(APP))?.rollback?.services).toEqual([
+			'api',
+		])
 
 		const released = await finish(
 			(
@@ -587,7 +583,7 @@ describe('requested_images: la ref pedida y lo que queda fijo (contrato §2.1 y 
 		expect(deploy.images).toEqual([pinned])
 		expect(pinnedImages(await deployUseCases.listDeploys(APP))).toEqual({
 			rollback: null,
-			services: ['api'],
+			others: ['api'],
 		})
 	})
 })
@@ -669,51 +665,29 @@ describe('logs en vivo', () => {
 	})
 })
 
-describe('contra un backend sin la Fase 2', () => {
-	it('una ruta que no existe (no_route) es UnavailableError con phase 2', async () => {
+describe('una ruta que no existe', () => {
+	it('no_route y method_not_allowed son un error inesperado, no un recurso que falta', async () => {
 		server.use(
 			http.get(api(`${APP_PATH}/status`), () =>
 				apiError(404, 'no_route', 'no existe la ruta'),
 			),
-		)
-		const result = deployUseCases.getAppStatus(APP)
-		await expect(result).rejects.toBeInstanceOf(UnavailableError)
-		await expect(result).rejects.toSatisfy((error) => pendingPhase(error) === 2)
-	})
-
-	it('un método que no existe (405) también', async () => {
-		server.use(
 			http.post(api(`${APP_PATH}/deploys`), () =>
 				apiError(405, 'method_not_allowed', 'método no permitido'),
 			),
 		)
+		await expect(deployUseCases.getAppStatus(APP)).rejects.toBeInstanceOf(UnexpectedError)
 		await expect(
 			deployUseCases.createDeploy({ app: APP, services: ['api'], overrides: {} }),
-		).rejects.toSatisfy((error) => pendingPhase(error) === 2)
+		).rejects.toBeInstanceOf(UnexpectedError)
 	})
 
-	it('el rollback y el historial, igual', async () => {
-		server.use(
-			http.post(api(`${APP_PATH}/rollback`), () => apiError(404, 'no_route', 'no existe')),
-			http.get(api(`${APP_PATH}/deploys`), () => apiError(404, 'no_route', 'no existe')),
-		)
-		await expect(deployUseCases.rollback(APP)).rejects.toSatisfy(
-			(error) => pendingPhase(error) === 2,
-		)
-		await expect(deployUseCases.listDeploys(APP)).rejects.toSatisfy(
-			(error) => pendingPhase(error) === 2,
-		)
-	})
-
-	it('un 503 (Docker no responde) es UnavailableError sin fase: un error de verdad', async () => {
+	it('un 503 (Docker no responde) es DockerUnavailable', async () => {
 		server.use(
 			http.get(api(`${APP_PATH}/status`), () =>
 				apiError(503, 'docker_unavailable', 'Docker no responde'),
 			),
 		)
-		const result = deployUseCases.getAppStatus(APP)
-		await expect(result).rejects.toBeInstanceOf(UnavailableError)
-		await expect(result).rejects.toSatisfy((error) => pendingPhase(error) === null)
+		await expect(deployUseCases.getAppStatus(APP)).rejects.toBeInstanceOf(DockerUnavailable)
 	})
 })
 

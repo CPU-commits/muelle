@@ -1,6 +1,7 @@
 import { QueryClient } from '@tanstack/svelte-query'
 import { describe, expect, it, vi } from 'vitest'
 import type { Settings } from '../../../domain'
+import { fakeSettings } from '../../../domain/repositories/__fakes__/inMemoryAdminRepository'
 import {
 	addRegistryMutation,
 	adminKeys,
@@ -10,7 +11,7 @@ import {
 	updateSecurityMutation,
 } from '../adminQueries'
 
-const SETTINGS: Settings = { require2fa: true, proxy: null, panelAccess: null }
+const SETTINGS: Settings = fakeSettings({ require2fa: true })
 
 describe('adminQueries', () => {
 	it('las mutaciones con un secreto no se pausan sin red y no quedan en el cache', () => {

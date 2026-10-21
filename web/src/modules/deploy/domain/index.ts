@@ -52,6 +52,7 @@ export type {
 	DeployAccepted,
 	DeployActor,
 	PinnedImages,
+	RollbackPins,
 	ServiceImage,
 } from './entities/deploy'
 export {

@@ -20,8 +20,8 @@ export interface TokenRow {
 	readonly scope: string
 	readonly lastUsed: string
 	readonly expiry: string
-	/** null: el backend no informa quién lo creó. */
-	readonly creator: string | null
+	/** Quién lo creó ("Creado por felipe"), o que ese usuario se borró. */
+	readonly creator: string
 	readonly isNew: boolean
 }
 
@@ -44,15 +44,10 @@ function expiryText(token: ApiToken, now: Date): string {
 		: m.identity_tokens_expires({ date })
 }
 
-function creatorText(token: ApiToken): string | null {
-	switch (token.createdBy.kind) {
-		case 'user':
-			return m.identity_tokens_created_by({ username: token.createdBy.username })
-		case 'deleted':
-			return m.identity_tokens_created_by_deleted()
-		case 'unknown':
-			return null
-	}
+function creatorText(token: ApiToken): string {
+	return token.createdBy.kind === 'user'
+		? m.identity_tokens_created_by({ username: token.createdBy.username })
+		: m.identity_tokens_created_by_deleted()
 }
 
 // Ajustes · Tokens de API (`Ajustes-Tokens.dc.html`): la lista, crear en un modal (el

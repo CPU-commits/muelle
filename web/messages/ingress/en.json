@@ -3,7 +3,6 @@
 	"ingress_subtitle": "Applied instantly, no deploy: muelle creates the Cloudflare record and the Caddy route.",
 	"ingress_loading": "Loading the domains…",
 	"ingress_error_title": "Couldn't read the domains",
-	"ingress_coming": "Domain management",
 	"ingress_empty_title": "This app has no domains yet",
 	"ingress_empty_body": "Add one above: muelle creates the Cloudflare record and the Caddy route.",
 	"ingress_footnote": "If the service doesn't exist yet, the route is created anyway and answers 502 until the first deploy.",

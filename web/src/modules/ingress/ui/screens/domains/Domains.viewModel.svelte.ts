@@ -6,7 +6,7 @@ import {
 } from '@tanstack/svelte-query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { toast } from '@/shared/ui/stores'
-import { pendingPhase, type RoadmapPhase, ValidationError } from '@/shared/domain'
+import { ValidationError } from '@/shared/domain'
 import { appRefFrom, appTargetsQuery } from '@/modules/catalog'
 import {
 	addDomainMutation,
@@ -108,16 +108,12 @@ export class DomainsViewModel {
 		return { project, stage, app }
 	}
 
-	get pendingPhase(): RoadmapPhase | null {
-		return pendingPhase(this.domains.error)
-	}
-
 	get isLoading(): boolean {
 		return this.domains.isPending
 	}
 
 	get loadError(): unknown {
-		return this.pendingPhase === null ? this.domains.error : null
+		return this.domains.error
 	}
 
 	get list(): readonly AppDomain[] {

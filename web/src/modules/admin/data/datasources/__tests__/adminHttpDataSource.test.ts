@@ -2,7 +2,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { http } from '@/shared/data/http/client'
 import { adminHttpDataSource, SETTINGS_PATCH_TIMEOUT_MS } from '../adminHttpDataSource'
 
-const SETTINGS = { require_2fa: false }
+// Un `GET /settings` completo (contrato §4: todas las claves, siempre).
+const SETTINGS = {
+	require_2fa: false,
+	cloudflare_token_set: false,
+	cloudflare_zones: null,
+	public_ip: '',
+	public_ipv6: '',
+	acme_email: '',
+	panel_domain: '',
+	proxy_http_port: 80,
+	proxy_https_port: 443,
+	panel_allowed_cidrs: [],
+	client_ip: '127.0.0.1',
+}
 
 describe('adminHttpDataSource', () => {
 	afterEach(() => vi.restoreAllMocks())

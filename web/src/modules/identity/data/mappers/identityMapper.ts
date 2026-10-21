@@ -32,7 +32,6 @@ export function inviteFromDto(dto: InviteDto): Invite {
 }
 
 function creatorFromDto(createdBy: TokenDto['created_by']): TokenCreator {
-	if (createdBy === undefined) return { kind: 'unknown' }
 	if (createdBy === null) return { kind: 'deleted' }
 	return { kind: 'user', username: createdBy }
 }

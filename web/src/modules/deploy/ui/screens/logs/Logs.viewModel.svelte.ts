@@ -1,7 +1,7 @@
 import { createQuery, type CreateQueryResult } from '@tanstack/svelte-query'
 import { untrack } from 'svelte'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { pendingPhase, type RoadmapPhase, UnauthorizedError } from '@/shared/domain'
+import { UnauthorizedError } from '@/shared/domain'
 import { appStatusQuery, streamAppLogs } from '../../../data'
 import {
 	appendCapped,
@@ -175,16 +175,12 @@ export class LogsViewModel {
 		return { project, stage, app }
 	}
 
-	get pendingPhase(): RoadmapPhase | null {
-		return pendingPhase(this.status.error)
-	}
-
 	get isLoading(): boolean {
 		return this.status.isPending
 	}
 
 	get loadError(): unknown {
-		return this.pendingPhase === null ? this.status.error : null
+		return this.status.error
 	}
 
 	get noServices(): boolean {

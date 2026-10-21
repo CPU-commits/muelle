@@ -19,30 +19,20 @@ import type {
 	SettingsPatchPayload,
 } from '../dtos/adminDto'
 
-const DEFAULT_HTTP_PORT = 80
-const DEFAULT_HTTPS_PORT = 443
-
-// Los campos de la Fase 3 llegan juntos. `public_ip` marca si el backend ya la tiene: sin
-// él la sección es `null` y la pantalla muestra "Llega con la Fase 3".
-function proxyFromDto(dto: SettingsDto): ProxySettings | null {
-	if (dto.public_ip === undefined) return null
+function proxyFromDto(dto: SettingsDto): ProxySettings {
 	return {
-		cloudflare: {
-			tokenSet: dto.cloudflare_token_set ?? false,
-			zones: dto.cloudflare_zones ?? null,
-		},
+		cloudflare: { tokenSet: dto.cloudflare_token_set, zones: dto.cloudflare_zones },
 		publicIpv4: dto.public_ip,
-		publicIpv6: dto.public_ipv6 ?? '',
-		acmeEmail: dto.acme_email ?? '',
-		panelDomain: dto.panel_domain ?? '',
-		httpPort: dto.proxy_http_port ?? DEFAULT_HTTP_PORT,
-		httpsPort: dto.proxy_https_port ?? DEFAULT_HTTPS_PORT,
+		publicIpv6: dto.public_ipv6,
+		acmeEmail: dto.acme_email,
+		panelDomain: dto.panel_domain,
+		httpPort: dto.proxy_http_port,
+		httpsPort: dto.proxy_https_port,
 	}
 }
 
-function panelAccessFromDto(dto: SettingsDto): PanelAccess | null {
-	if (dto.panel_allowed_cidrs === undefined) return null
-	return { allowedCidrs: dto.panel_allowed_cidrs, clientIp: dto.client_ip ?? '' }
+function panelAccessFromDto(dto: SettingsDto): PanelAccess {
+	return { allowedCidrs: dto.panel_allowed_cidrs, clientIp: dto.client_ip }
 }
 
 export function settingsFromDto(dto: SettingsDto): Settings {
@@ -71,7 +61,7 @@ export function settingsPatchPayload(patch: SettingsPatch): SettingsPatchPayload
 }
 
 function actorFromDto(dto: AuditEventDto): AuditActor {
-	const name = dto.actor_name ?? ''
+	const name = dto.actor_name
 	switch (dto.actor_type) {
 		case 'user':
 			return { kind: 'user', id: dto.actor_id, name }

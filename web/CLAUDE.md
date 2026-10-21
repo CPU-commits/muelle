@@ -114,7 +114,8 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
 - E2E contra el backend de verdad: `e2e-real/*.real.ts`, el panel embebido en un
   `muelle serve` con el Swarm local (`pnpm test:e2e:real`, ver
   [E2E contra muelle](#e2e-contra-muelle)). Lo de node puro que usa (los códigos TOTP de
-  `totp.ts`) se prueba en `e2e-real/*.test.ts`, que corre en el proyecto server de vitest
+  `totp.ts`, la carpeta de `runDir.ts` y la limpieza de `teardown.ts`) se prueba en
+  `e2e-real/*.test.ts`, que corre en el proyecto server de vitest
   con `pnpm test`, sin muelle ni Swarm.
 - Componentes: `__tests__/X.svelte.test.ts` junto al componente, en Chromium, con un
   harness cuando hace falta un contexto (ver `molecules/menu/__tests__/`). Un harness que
@@ -287,10 +288,9 @@ Lo nuevo y aditivo (props, helpers, componentes) está en las tablas de abajo.
 - `Modal onClose` también se llama cuando el navegador cierra el `<dialog>` por su cuenta
   (un segundo Escape): el dueño tiene que aceptar cerrarlo ahí también, o usar
   `dismissible={false}` (modales de un solo uso).
-- MSW: una ruta de Fase 2/3 sin mock contesta `noRoute()` (404 `no_route`), que es lo que
-  da `UnavailableError` con `phase`; `notFound()` (404 `not_found`) es un recurso que no
-  existe y ya no da `ComingSoon`. Un handler que simulaba "todavía no existe" con
-  `notFound()` pasa a `noRoute()`.
+- MSW: una ruta sin mock contesta `noRoute()` (404 `no_route`), como el backend, y el
+  repositorio la lee como `UnexpectedError` (una ruta mal armada); `notFound()` (404
+  `not_found`) es un recurso que no existe.
 - Tema: nuevo `text.faint` (texto atenuado legible; lo usa `Mono tone="disabled"`) y
   `dangerHover` es `red-700`; el color `red-550` de la paleta ya no existe.
 - Tests de viewModels: el `QueryClient` del harness sale de
@@ -375,9 +375,8 @@ cambiar `shared/`, `package.json` o una ruta ajena, se detiene y lo reporta.
 - Claves útiles de F0: `common_save`, `common_cancel`, `common_delete`, `common_edit`,
   `common_create`, `common_back`, `common_close`, `common_retry`, `common_loading`,
   `common_search`, `common_options`, `common_optional`, `common_copy`, `common_copied`,
-  `common_required`, `common_error_generic`, `common_unavailable`,
-  `common_coming_title({ phase })`, `common_load_more`, `common_no_more`, `common_forbidden`
-  y `common_rate_limited`. Para el texto de un error cualquiera, mejor `describeError(error)`.
+  `common_required`, `common_error_generic`, `common_unavailable`, `common_load_more`,
+  `common_no_more`, `common_forbidden` y `common_rate_limited`. Para el texto de un error cualquiera, mejor `describeError(error)`.
 
 ### Tema
 
@@ -451,7 +450,6 @@ un `href` lo esperan **ya resuelto** con `resolve()`.
 | `SegmentedControl` | `label` o `labelledBy` · `name` · `options: ChoiceOption<T>[]` (`{ value, label, disabled? }`) · `value` · `disabled` · `onChange`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `RadioGroup`       | lo mismo que `SegmentedControl` + `direction` `row`·`column`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `EmptyState`       | `title` · `body` · `icon` · `action` (snippet)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `ComingSoon`       | `phase` 2·3 · `feature` ("El historial de deploys"). Ver [Fase 2/3](#endpoints-de-las-fases-2-y-3-unavailableerror)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `ErrorState`       | `title` · `body` · `retryLabel` · `onRetry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `LoadingState`     | `label` (se anuncia una sola vez)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `PageHeader`       | `title` (el h1) · `subtitle` · `meta` ("10 apps") · `titleSize` `md` 24·`lg` 28 · `badges` · `details` · `actions` (snippets)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -472,7 +470,7 @@ Clases y helpers: `srOnly`, `textLink` (link dentro de un texto), `truncate`, `f
 `formatDate`, `formatDateTime`, `formatNumber`, `formatRelative`, `withQuery(href, query)` (ver
 [Convenciones](#convenciones)) y `describeError(error)`
 (el texto para el usuario de cualquier error de `@/shared/domain`: "muelle no acepta cambios
-desde esta dirección", "Llega con la Fase 2", "No se pudo contactar a muelle", …; los errores
+desde esta dirección", "No se pudo contactar a muelle", …; los errores
 propios de un módulo los traduce el módulo y caen acá para el resto).
 
 ### Paginación
@@ -506,7 +504,6 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
     - `fields`: nombre de dominio de los campos de un 422 (`{ deploy_timeout_s: 'deployTimeoutSeconds' }`).
       El 422 `invalid` trae `"<campo>: <motivo>"`; sale como `ValidationError` con `field` y
       `message` = el motivo. El viewModel lo pone en el campo del formulario.
-    - `phase`: ver abajo.
     - Siempre, en cualquier endpoint: 403 `bad_origin` → `BadOriginError` y 400
       `ambiguous_session` → `AmbiguousSessionError` (dos cookies de sesión). `describeError`
       les da el texto que dice qué hacer. `bad_origin` es una escritura desde una dirección
@@ -518,17 +515,21 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
       panel, el backend ya no acepta escrituras con ese `Origin` (§0.1 y §3.5). Ajustes llama
       `holdWrites(<origen nuevo>)` del cliente: desde esa página ningún `POST`, `PUT`,
       `PATCH` ni `DELETE` sale, y tira `PanelMovedError` (un `BadOriginError` con `origin`;
-      `describeError` dice a dónde seguir). Las lecturas siguen. `releaseWrites()` las deja
-      salir otra vez (muelle volvió a los puertos anteriores). El freno es de la página, no
-      del viewModel que lo puso: `heldWritesOrigin()` dice a dónde se mudó, y Ajustes lo
-      suelta al ver la vuelta atrás de esa dirección aunque sea otra visita a la pantalla.
+      `describeError` dice a dónde seguir y, si allá no responde, que recargue esta página).
+      Las lecturas siguen. `releaseWrites()` las deja salir otra vez (muelle volvió a los
+      puertos anteriores). El freno es de la página, no del viewModel que lo puso:
+      `heldWritesOrigin()` dice a dónde se mudó, y Ajustes lo suelta al ver la vuelta atrás
+      de esa dirección aunque sea otra visita a la pantalla. Fuera de Ajustes nadie lo
+      suelta: las otras pantallas no siguen `GET /proxy` (Dominios y Deploys lo piden, pero
+      `GET /proxy` no trae el dominio del panel para armar la dirección que falló), y por eso
+      el texto pide recargar, que suelta el freno.
     - Sin mapa: 401 `UnauthorizedError`, 403 `ForbiddenError`, 404 `NotFoundError`,
       409 `ConflictError`, 423/429 `RateLimitedError`, 5xx, red y timeout `UnavailableError`,
       el resto `UnexpectedError`. Una respuesta con otra forma es `ContractError`
       (`parseOrThrow`).
 - `shouldRetry` (el `retry` de las queries) reintenta dos veces solo lo que puede andar
-  la próxima: red y 5xx. Un 4xx, un `ContractError`, una fase pendiente o un timeout (ya
-  esperó 30 s), no.
+  la próxima: red y 5xx. Un 4xx, un `ContractError`, una ruta que no existe o un timeout
+  (ya esperó 30 s), no.
 - `UnavailableError.reason` dice por qué: `network` (no hubo respuesta), `server` (un 5xx)
   o `timeout`. `describeError` solo pide "revisa la conexión" con `network`; un 5xx dice
   "muelle respondió con un error".
@@ -536,65 +537,38 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
   `createQueryClient`). Con el modo por defecto de TanStack solo avisan lo que ya se leyó, y
   un viewModel que mira `data` antes que `error` se quedaba cargando para siempre.
 
-### Endpoints de las fases 2 y 3: `UnavailableError`
+### Las fases 2, 3 y 5: el backend entero
 
-**El estado real.** Las Fases 2 (deploys, status, logs, rollback, registries y los
-`services` de una app), 3 (dominios, `GET /proxy` y, en Ajustes, Cloudflare, IP pública,
-email ACME, puertos e IPs permitidas) y 5 (install y el panel embebido) están en este mismo
-árbol que el panel, y `deploy` e `ingress` registran todas sus rutas (contrato §1): ahí un
-`404 no_route` es solo una ruta que no existe. La única fuente para §0–§5 es el contrato,
-`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md`,
-resumido en `src/modules/{deploy,ingress}/README.md`, sin diferencias. `pnpm test:e2e:real`
-recorre el panel contra ese backend (ver [E2E contra muelle](#e2e-contra-muelle)).
+Las Fases 2 (deploys, status, logs, rollback, registries y los `services` de una app), 3
+(dominios, `GET /proxy` y, en Ajustes, Cloudflare, IP pública, email ACME, puertos e IPs
+permitidas) y 5 (install y el panel embebido) están en este mismo árbol que el panel. La
+única fuente para §0–§5 es el contrato,
+`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md`, resumido en
+`src/modules/{deploy,ingress}/README.md`, sin diferencias. `pnpm test:e2e:real` recorre el
+panel contra ese backend (ver [E2E contra muelle](#e2e-contra-muelle)).
 
-En producción el panel va embebido en el binario que lo sirve (contrato §5.5): las rutas del
-panel y las del backend llegan juntas, y `<ComingSoon>` no aparece. **El fallback se queda**
-por una sola razón, y cuesta poco (un `phase` en el `DomainErrorMap` y un `<ComingSoon>`):
-`pnpm dev` contra un `muelle serve` de un backend con solo la Fase 1 (como el de 8a12ee5).
-Sin el fallback, Resumen, Deploys, Logs, Dominios y Registries mostrarían un error de
-verdad, con reintentos.
+El panel va embebido en el binario que lo sirve (contrato §5.5): las rutas del panel y las
+del backend llegan juntas, y el panel no tiene caminos para un backend más viejo (ni
+`<ComingSoon>`, ni campos opcionales "por si falta la fase"). Un 404 `no_route` o un 405
+`method_not_allowed` es una ruta mal armada del panel: `toDomainError` lo convierte en
+`UnexpectedError` (no en el `notFound` del módulo, que diría que el recurso no existe), y la
+pantalla muestra un error. `shouldRetry` no lo reintenta. Con `pnpm dev:mock`, una ruta de
+`/api/v1` sin handler contesta lo mismo (el `http.all` del final de `handlers/index.ts`).
 
-**Lo que cuesta:** con el panel embebido, un 404 `no_route` en una de esas rutas solo puede
-ser un bug del panel (una ruta mal armada), y `<ComingSoon>` lo esconde detrás de "todavía
-no está". Cuando ya no haga falta correr el panel contra un backend de solo la Fase 1, el
-fallback se saca (el `phase` de los mapas, `pendingPhase` y `<ComingSoon>`) y ese 404 vuelve
-a ser un error.
-
-Cómo funciona:
-
-1. El repositorio de esas rutas pasa `{ phase: 2 }` (o `3`) en su `DomainErrorMap`. Se
-   decide por el `code`, no por el status:
-    - 404 `no_route` (la ruta no existe) y 405 `method_not_allowed` (existe con otro
-      método) → `UnavailableError` con `phase`;
-    - 404 `not_found` es un recurso que no existe (un deploy borrado): sigue siendo
-      `notFound` / `NotFoundError`, con o sin `phase`.
-2. El viewModel lo detecta con `pendingPhase(error)` de `@/shared/domain` (`2 | 3 | null`).
-3. La pantalla muestra `<ComingSoon phase={vm.pendingPhase} feature={…} />` en vez de un
-   error. `shouldRetry` no reintenta estos errores.
-4. Con `pnpm dev:mock`, los handlers de MSW responden con datos y no aparece. Una ruta de
-   `/api/v1` sin handler contesta 404 `no_route`, como el backend (el `http.all` del final
-   de `handlers/index.ts`). Para ver el `<ComingSoon>` con mocks, o probarlo en un test,
-   alcanza con no registrar el handler o con `server.use(http.get(api('/…'), () => noRoute()))`.
-
-Un `UnavailableError` sin `phase` es un backend caído o sin red: eso sí es un error
-(`ErrorState` con reintento).
-
-Si lo nuevo son **campos** de un endpoint que ya existe, no hay 404: el DTO los declara
-opcionales y que falten quiere decir "fase pendiente". Así están los campos de proxy y DNS
-de `GET /settings` (en el contrato, §4, vienen siempre; opcionales solo por un backend de
-la Fase 1 sola, que tiene nada más que `require_2fa`) y los `services` de una app de catalog
-(§2.12, Fase 2: sin ellos, Dominios sugiere solo los destinos que ya usan sus dominios).
-Lo mismo con `requested_images` y `routes_warning` de un deploy (§2.1, revisión del
-2026-10-17): sin `requested_images` (`requestedImages: null`), lo fijado en un digest se
-deduce del historial como antes (`pinnedImages`); sin `routes_warning`, es `false`.
-También el `actor_name` de cada evento de `GET /audit` (§4.2): la Auditoría muestra el
-nombre que trae el evento (el username, el del token; `system` es "sistema"), copiado al
-escribirlo, así sigue aunque se borre el usuario o el token. Sin nombre (`""`: un evento de
-antes de la migración 0004 cuyo autor ya no estaba, o un backend de la Fase 1 sola), el
-tipo y el id ("token #9").
-Mandarlos en un `PATCH` a ese backend responde 400 `invalid_json` (rechaza campos
-desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es un ajuste
-(§4.1: solo lo fija install): Ajustes no lo muestra ni lo manda, y el mock lo rechaza.
+Los **campos** que las Fases 2 y 3 sumaron a endpoints que ya existían son obligatorios en
+los DTO, como en el contrato: una respuesta sin ellos es un `ContractError`. Son los de
+proxy y DNS de `GET /settings` (§4: todas las claves, siempre; `Settings.proxy` y
+`panelAccess` nunca son null), los `services` de una app de catalog (§2.12: `[]` es un
+compose guardado que no se puede leer, y ahí Dominios sugiere solo los destinos que ya usan
+sus dominios), `requested_images` y `routes_warning` de un deploy (§2.1: lo fijado en un
+digest sale solo de `requested_images`, `pinnedImages`), `ports_rollback` de `GET /proxy`
+(§3.3, null si no hubo vuelta atrás), `created_by` de un token (un username, o null si se
+borró el usuario) y el `actor_name` de cada evento de `GET /audit` (§4.2). La Auditoría
+muestra el nombre que trae el evento (el username, el del token; `system` es "sistema"),
+copiado al escribirlo, así sigue aunque se borre el usuario o el token. Sin nombre (`""`: un
+evento de antes de la migración 0004 cuyo autor ya no estaba), el tipo y el id ("token
+#9"). `caddy_image` no es un ajuste (§4.1: solo lo fija install): Ajustes no lo muestra ni
+lo manda, y el mock lo rechaza.
 
 **Lo que un módulo usa de otro** (siempre por el barrel):
 
@@ -604,7 +578,7 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   la fila entra en la pantalla (`IntersectionObserver`, `whenVisible`): el estado se pide una
   vez por fila (contrato §2.8) y las filas que no se ven no piden nada. Usa el cache de
   `appStatusQuery` (5 s) y `deploysQuery` (10 s), el mismo del Resumen y Deploys, sin
-  refrescos ni reintentos. Si la Fase 2 no está o falla, la fila dice "—" y la imagen es la
+  refrescos ni reintentos. Si falla, la fila dice "—" y la imagen es la
   del spec (o los servicios del compose).
 - **Pendiente:** el "Variables · N" de cada stage en Proyectos (el slot `stageVariablesCount`
   de `ProjectsScreen` y la clave `catalog_stage_variables_count`) no está conectado. No hay
@@ -641,12 +615,14 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   que el estado del proxy puede cambiar (contrato §3.5). Guardar solo el 2FA no la toca.
   Ajustes pide `GET /proxy` al abrirse (`proxyFollowQuery`, `proxyNotice` y el tipo
   `PortsRollback` del barrel de `ingress`) y, después de cambiar los puertos, lo sigue hasta
-  que dice cómo terminó, aunque falle (2 min como mucho). Antes, `resetQueries` saca lo que
+  que dice cómo terminó, aunque falle (2 min como mucho: pasado el plazo, un pedido que
+  falla corta, aunque la última respuesta guardada diga `recreating`). Antes, `resetQueries` saca lo que
   había en el cache: el `PATCH` limpió `ports_rollback`. Un cambio que falla (un `422`,
   `PanelMovedError`) no guardó nada: el seguimiento del anterior sigue.
     - Si el panel sigue en el mismo origen (solo cambió el HTTP, o se entró por otra
       dirección que la de Caddy), dice "Recreando muelle-caddy…" y después si quedó
-      escuchando o el error.
+      escuchando o el error; pasados los 2 min sin una respuesta que lo diga, que no se pudo
+      confirmar y que recargue en un momento (`recreation.kind === 'unknown'`).
     - Si cambió el HTTPS y se entró por la dirección de Caddy, esa dirección deja de
       responder: el aviso lleva a la nueva, no salen más escrituras (`holdWrites`) y se
       sigue preguntando solo por si muelle vuelve atrás (la dirección vuelve a responder).
@@ -657,8 +633,10 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
       dirección que falló (también uno guardado, al recargar), deja salir las escrituras
       frenadas por la mudanza a esa dirección (también si se salió de Ajustes y se volvió),
       pone los puertos de antes en los campos (si el cambio fue desde acá, o si los ajustes
-      del cache todavía son los que fallaron) y, si el panel no está en la dirección
-      anterior (`https://<panel_domain>[:<puerto anterior>]`), ofrece volver. El panel no
+      del cache todavía son los que fallaron) y, si el panel está en una dirección de Caddy,
+      dice que sigue en la anterior (`https://<panel_domain>[:<puerto anterior>]`); desde la
+      que falló, ofrece volver. Entrando por otro proxy, una IP o `MUELLE_PANEL_ORIGIN`, no
+      nombra ni ofrece la de Caddy: esa dirección nunca se usó. El panel no
       puede saber si la dirección nueva responde (la CSP no deja pedir a otro origen): lo
       sabe por `ports_rollback`, en una dirección que sí responde. Por eso el aviso de la
       dirección nueva dice qué hacer si no responde: volver a la anterior.
@@ -691,7 +669,9 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   (`proxySettings/panelMoveNotice.ts`, hasta que se cierra; "Ir al panel" lo lleva al origen
   nuevo con `?panel_moved=1`, porque allá el localStorage es otro). El aviso nombra la
   dirección anterior (`panelOrigin` de antes del `PATCH`, contrato §3.5): a dónde volver si
-  la nueva no responde. Allá no se sabe cuál era, y no la nombra. Los dos orígenes pasan por
+  la nueva no responde, si se entró por ella (por otro proxy, una IP o
+  `MUELLE_PANEL_ORIGIN` no se usó nunca, y no la nombra). Allá no se sabe cuál era, y
+  tampoco la nombra. Los dos orígenes pasan por
   `parsePanelOrigin` al leerlos. También va ahí el `at` de la vuelta a los puertos anteriores
   cuyo aviso se cerró (`proxySettings/rollbackNotice.ts`); los dos usan `noticeStorage.ts`.
 - Para saber quién es el usuario: `createQuery(() => meQuery())` con `meQuery` del barrel
@@ -744,7 +724,7 @@ http.post(api('/projects'), async ({ request }) => {
   en `beforeEach`, junto con `authDb.reset()`, y hacen
   `server.listen({ onUnhandledRequest: 'error' })`. Ojo: por el `http.all` del final, una
   ruta de `/api/v1` que el test no mockeó no dispara `onUnhandledRequest`, contesta
-  `no_route`; el test lo ve como el `notFound` del mapa (o `UnavailableError` con `phase`).
+  `no_route`; el test lo ve como `UnexpectedError` (no como el `notFound` del mapa).
 - Los usuarios y las invitaciones viven en `db/auth.ts` (`authDb.state.users`,
   `authDb.addInvite(token)`): el mock de `identity` los usa en vez de tener otra lista.
 - `server.use(…)` dentro de un test para un caso puntual (un 422, un 404, `HttpResponse.error()`).
@@ -816,7 +796,9 @@ violaciones de CSP y los errores de la consola, como los de `e2e/`.
 - `e2e-real/globalSetup.ts` arranca muelle con una base nueva en una carpeta temporal:
   `MUELLE_LISTEN=127.0.0.1:24080` (otro con `E2E_REAL_PORT`, del 24000 al 24999),
   `MUELLE_PANEL_ORIGIN` en esa dirección, `MUELLE_SECURE_COOKIES=false` y su clave maestra
-  (0600); ninguna otra `MUELLE_*` del entorno pasa. Sin dominio del panel el proxy queda
+  (0600); ninguna otra `MUELLE_*` del entorno pasa. La carpeta y la clave las prepara
+  `runDir.ts` (con `runDir.test.ts`): si `muelle genkey` falla, borra la carpeta, porque la
+  limpieza de abajo todavía no está armada. Sin dominio del panel el proxy queda
   deshabilitado: no hay muelle-caddy ni rutas. El link de setup sale del log
   (`event: setup_url`) y llega a los tests por el entorno (`realRun()` de `env.ts`).
 - Todo lo de Docker se llama `it7p<id>…` (el slug del proyecto; `id`, 4 hex al azar). La
@@ -825,8 +807,10 @@ violaciones de CSP y los errores de la consola, como los de `e2e/`.
   muelle en `test-results/real-muelle.log` (con la traza de Playwright en
   `test-results/real/`). El log y el borrado de la carpeta temporal (la clave maestra y la
   base) van aunque falle el CLI de docker (`teardown.ts`, con sus tests en
-  `teardown.test.ts`); lo que quedó de Docker se avisa después. La corrida también falla si
-  el log de muelle trae un `error interno` (un 500, aunque el panel no lo mostrara); un
+  `teardown.test.ts`); lo que quedó de Docker (o el fallo del CLI) se avisa después. La
+  corrida también falla si el log de muelle trae un error interno: un 500 (`error interno`,
+  aunque el panel no lo mostrara) o uno del despachador de deploys (`deploy: error
+interno`, que no es una respuesta), con un solo error que nombra eso y lo de Docker; un
   pedido que el panel cortó al cambiar de pantalla no cuenta (el backend no lo registra
   como error). Al empezar, borra lo `it7p…` de más de 30 min (una corrida que murió con
   SIGKILL).

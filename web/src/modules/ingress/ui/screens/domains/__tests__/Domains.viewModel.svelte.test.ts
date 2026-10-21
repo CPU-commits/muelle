@@ -57,8 +57,9 @@ describe('DomainsViewModel', () => {
 		vi.clearAllMocks()
 		mocks.listDomains.mockResolvedValue([ACTIVE, MANUAL, EXISTING])
 		mocks.getProxyStatus.mockResolvedValue(makeProxyStatus())
-		// Un backend sin la Fase 2 no manda los servicios: sin sugerencias del catálogo.
-		catalog.getApp.mockResolvedValue({ services: null })
+		// Una app sin servicios en el catálogo (un compose que no se puede leer): sin
+		// sugerencias del catálogo.
+		catalog.getApp.mockResolvedValue({ services: [] })
 	})
 
 	it('lista los dominios y sugiere destinos (los del catálogo primero)', async () => {
@@ -319,16 +320,6 @@ describe('DomainsViewModel', () => {
 		expect(vm.suggestions).toEqual([])
 	})
 
-	it('contra un backend sin la Fase 3 muestra la fase', async () => {
-		mocks.listDomains.mockRejectedValue(
-			new UnavailableError('Llega con la Fase 3', { phase: 3 }),
-		)
-		const { vm } = await mountViewModel(() => new DomainsViewModel(() => APP))
-
-		await vi.waitFor(() => expect(vm.pendingPhase).toBe(3))
-		expect(vm.loadError).toBeNull()
-	})
-
 	it('un backend caído es un error con reintento', async () => {
 		mocks.listDomains.mockRejectedValue(new UnavailableError('caído'))
 		const { vm } = await mountViewModel(() => new DomainsViewModel(() => APP))
@@ -349,18 +340,16 @@ describe('DomainsViewModel', () => {
 		expect(vm.proxyError).toBe('Caddy rechazó la configuración')
 	})
 
-	it('sincronizado, o sin la Fase 3 en /proxy, no avisa nada (y la pantalla no es ComingSoon)', async () => {
+	it('sincronizado, o con GET /proxy fallando, no avisa nada (los dominios se ven igual)', async () => {
 		const vm = await mounted()
 		await vi.waitFor(() => expect(vm.proxy.isSuccess).toBe(true))
 		expect(vm.proxyNotice).toBeNull()
 
-		mocks.getProxyStatus.mockRejectedValue(
-			new UnavailableError('Llega con la Fase 3', { phase: 3 }),
-		)
+		mocks.getProxyStatus.mockRejectedValue(new UnavailableError('caído', { reason: 'server' }))
 		const other = await mounted()
 		await vi.waitFor(() => expect(other.proxy.isError).toBe(true))
 		expect(other.proxyNotice).toBeNull()
-		expect(other.pendingPhase).toBeNull()
+		expect(other.loadError).toBeNull()
 	})
 
 	it('agregar un dominio vuelve a mirar el proxy (Caddy puede no aceptar la ruta nueva)', async () => {
