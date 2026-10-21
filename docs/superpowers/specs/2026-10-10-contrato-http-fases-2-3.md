@@ -1698,11 +1698,16 @@ No hay herramientas de proyectos, stages o apps (escritura), dominios (escritura
 | `app?` | string | slug | sin `app`: las del stage, que afectan a todas sus apps |
 | `vars` | object, clave → valor | de 1 a 50 claves; cada valor, hasta 4 096 bytes | |
 
-- **Qué hace:** el `PATCH …/env` de §10 del diseño con `{"set": vars, "secret": false}`, y una regla más: **no pisa una variable que ya es secreta**. Si alguna clave de `vars` está guardada como secreta, no se escribe nada.
+- **Qué hace:** el `PATCH …/env` de §10 del diseño con `{"set": vars, "secret": false}`, y una regla más: **nunca cambia el valor que recibe una app de una variable secreta**. No se escribe nada si alguna clave de `vars`:
+  - ya está guardada como secreta en el mismo dueño (el stage, o la app con `app`);
+  - con `app`, es secreta en el stage, aunque la app no la tenga: la de la app la taparía en el próximo deploy.
+
+  Al revés sí se puede: una variable del stage con la clave de una secreta de una app no cambia lo que recibe esa app, porque la de la app gana.
 - **Salida:** `{"set":["LOG_LEVEL"],"note":"Se aplican en el próximo deploy; get_app y list_apps dicen si quedaron cambios pendientes."}`, con las claves ordenadas. Si los valores ya eran esos, no se escribe ni se audita nada, y la salida es la misma.
 - **Errores** (`invalid`):
   - `vars: …` para los límites de la herramienta (de 1 a 50 claves, 4 096 bytes por valor);
   - `set: "<CLAVE>" es secreta: cámbiala desde el panel o la GitHub Action`;
+  - `set: "<CLAVE>" es secreta en el stage, y la de la app la taparía: cámbiala desde el panel o la GitHub Action`;
   - `set: …` para las reglas del `PATCH` (una clave inválida, el prefijo `COMPOSE_`, los totales del dueño).
 
 #### 15. `unset_env` (escritura)

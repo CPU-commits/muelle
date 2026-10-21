@@ -492,7 +492,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
   - El texto que viene de las apps (logs, logs de deploy, errores de tareas, valores no secretos, spec y compose, errores de dominios) no es confiable: puede traer instrucciones plantadas (prompt injection). La salida lo marca con `warning`, y las instrucciones del servidor lo repiten.
   - Las herramientas que escriben (`deploy`, `rollback`, `set_env`, `unset_env`) piden aprobación humana en **cada** llamada (`_meta["anthropic/requiresUserInteraction"]`), en cualquier modo de permisos de Claude Code. Un token de solo lectura no las ve.
   - No hay un token de escritura de todos los proyectos (§10.1): el texto de una app no puede inducir un cambio en otro proyecto.
-  - No se escriben secretos por MCP: `set_env` guarda solo variables no secretas y no pisa una secreta. Los valores secretos nunca salen, y los logs salen enmascarados, con los límites de siempre (contrato §2.5).
+  - No se escriben secretos por MCP: `set_env` guarda solo variables no secretas, y no pisa una secreta ni la tapa con una de la app. Los valores secretos nunca salen, y los logs salen enmascarados, con los límites de siempre (contrato §2.5).
   - Lo que devuelve una herramienta queda en la transcripción de Claude Code y pasa por la API de Anthropic. Es aceptado: es lo mismo que ya lee un token por REST.
   - `/api/v1/mcp` exige el Bearer (la cookie no sirve) y, si viene `Origin`, que sea el del panel. Las IPs permitidas del panel también lo cubren.
 

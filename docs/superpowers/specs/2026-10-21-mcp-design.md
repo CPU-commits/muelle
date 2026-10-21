@@ -14,7 +14,7 @@
 | D5 | Dos marcas nuevas en los tokens: **`read_only`** y **`all_projects`**. `all_projects` existe **solo con `read_only`**, y la base lo exige con un `CHECK`. | Un token de escritura sobre todo muelle sumaría prompt injection desde cualquier log a un alcance total (§4.5). |
 | D6 | Migración **`0007_api_tokens_scopes.sql`**. Reconstruye `api_tokens` y conserva `sqlite_sequence`. La 0006 es de los certificados de Cloudflare (Origin CA), en su rama. | `project_id` deja de ser `NOT NULL`, y SQLite no puede quitarle el `NOT NULL` a una columna (§4.2). |
 | D7 | 15 herramientas: 11 de lectura y 4 de escritura. **Un token de solo lectura recibe un servidor sin las de escritura.** Las de escritura llevan `_meta["anthropic/requiresUserInteraction"]: true`. Las 4 se quedan, con esa aprobación obligatoria (decisión del dueño, §15). | Claude Code pide confirmación en cada llamada, también en `auto` y `bypassPermissions`, y una regla `allow` no la salta (§5). |
-| D8 | **No se escriben secretos por MCP.** `set_env` solo guarda variables no secretas y no pisa una que ya es secreta. `unset_env` sí borra cualquiera. | Un valor que manda el modelo ya quedó en la transcripción y en la API: marcarlo `secret` daría una seguridad falsa (§5.4). |
+| D8 | **No se escriben secretos por MCP.** `set_env` solo guarda variables no secretas, no pisa una que ya es secreta y, con `app`, no tapa una secreta del stage. `unset_env` sí borra cualquiera. | Un valor que manda el modelo ya quedó en la transcripción y en la API: marcarlo `secret` daría una seguridad falsa (§5.4). |
 | D9 | La salida es **un solo bloque de texto con JSON compacto**. No hay `outputSchema` ni `structuredContent`. Cada resultado tiene un tope de 40 KiB. Los tamaños que se piden se miden en el JSON que sale (ya escapado) y llegan a 32 KiB, con defaults de 12 a 32 KiB según la herramienta; lo que no entra se recorta y se cuenta, y no da error. | Claude Code avisa a los 10 000 tokens, corta a los 25 000 y guarda en un archivo lo que pasa de 50 000 caracteres. No está verificado qué ve el modelo si van `content` y `structuredContent` juntos (§5.1). |
 | D10 | La auditoría suma **`"via": "mcp"`** en `details`. El nombre del token ya queda en `actor_name` del evento y del deploy. | El precedente es `"via": "cli"` de `reset-panel-ips`. No cambia el esquema y no toca el panel (§7). |
 | D11 | Límites: los logs y la espera de un deploy toman un lugar de los **8 streams por principal** (el mismo contador que el SSE). Además, a lo más **8 llamadas MCP en curso por token**. | Hoy el único límite por principal es el de los streams. El resto son límites de login por IP (§8.3). |
@@ -581,7 +581,10 @@ Cada fila dice qué módulo la registra (en su `infra/in/mcp`), qué caso de uso
   - `app?`: sin `app`, son las del stage (afectan a todas sus apps);
   - `vars: {CLAVE: valor}`, de 1 a 50 claves, cada valor de hasta 4 KiB.
 - Alcance: `(project, stage)`, escritura.
-- Caso de uso: `secrets.PatchEnv` con `Secret: false` y el campo nuevo **`KeepSecrets: true`**. Dentro de la transacción, una clave de `Set` que ya está guardada como secreta da `validate.Errorf("set", "%q es secreta: cámbiala desde el panel o la GitHub Action")`, y no se escribe nada.
+- Caso de uso: `secrets.PatchEnv` con `Secret: false` y el campo nuevo **`KeepSecrets: true`**. Dentro de la transacción, y antes de escribir nada:
+  - una clave de `Set` que ya está guardada como secreta en el dueño da `validate.Errorf("set", "%q es secreta: cámbiala desde el panel o la GitHub Action")`;
+  - con una app como dueño, también lee las variables del stage (`OwnerResolver.StageOfApp` y `EnvRepository.List`, en la misma transacción). Una clave de `Set` que es secreta ahí da `validate.Errorf("set", "%q es secreta en el stage, y la de la app la taparía: cámbiala desde el panel o la GitHub Action")`. Sin esta regla, `set_env` con `app` cambiaría el valor efectivo de un secreto del stage en el próximo deploy, aunque nunca lo pisara.
+  - Al revés no hace falta: una variable del stage no tapa una secreta de una app, porque la de la app gana.
 - Salida: `{"set":["LOG_LEVEL"],"note":"Se aplican en el próximo deploy; get_app y list_apps dicen si quedaron cambios pendientes."}`. No dice `pending_changes`: `PatchEnv` no escribe nada si los valores no cambian, y con las del stage los cambios pendientes son de cada app.
 - Anotaciones: `destructiveHint: true` (pisa valores), `idempotentHint: true`.
 
@@ -605,7 +608,7 @@ No hay `PUT` de variables por MCP: reemplazar todo el set borraría las que no v
     - los valores secretos nunca salen (`null`);
     - los logs y los logs de deploy salen enmascarados, igual que en REST: los valores secretos de la app y del stage, también por línea, de 8 bytes o más (contrato §2.5);
     - el `error` de una tarea, también enmascarado;
-  - **escritura:** solo variables no secretas, y nunca encima de una secreta. Para un secreto, el panel o la GitHub Action (`env-json` desde los secretos de GitHub).
+  - **escritura:** solo variables no secretas, nunca encima de una secreta y nunca una de la app que tape una secreta del stage. Para un secreto, el panel o la GitHub Action (`env-json` desde los secretos de GitHub).
 - Límite aceptado: un secreto que la app imprime transformado (base64, por partes) o de menos de 8 bytes no se enmascara. Es la misma limitación de la API (contrato §2.5), y el README la repite en la sección MCP.
 
 ### 5.5 Matriz de alcance (herramienta × tipo de token)
@@ -1017,6 +1020,7 @@ Todos con TDD, en el estilo del repo:
   - `get_env`: el valor secreto **no aparece en el texto**; el corte de un valor a 256; la paginación `after` con 500 variables y páginas de 32 KiB de JSON o menos, también con las del stage y las de la app mezcladas; el stage y la app juntos;
   - peor caso de `get_env`: valores llenos de `"`, `\` y ESC, y claves de 128: cada página entra en 32 KiB de JSON y avanza;
   - `set_env`: crea una variable no secreta, pisa una no secreta, rechaza pisar una secreta (`invalid` en `set`) sin escribir nada, y respeta los límites (50 claves, 4 KiB);
+  - `set_env` con `app` y una clave que es secreta en el stage: `invalid` en `set`, sin escribir nada, aunque la app no la tenga; `set_env` del stage con la clave de una secreta de una app: se guarda;
   - `unset_env`, también de una clave que no existe;
   - la auditoría `env.patch` con `via: "mcp"` y el nombre del token;
   - el caso de uso `PatchEnv` con `KeepSecrets` tiene su propio test.

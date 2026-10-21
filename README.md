@@ -272,7 +272,7 @@ Cada persona exporta el suyo antes de abrir Claude Code (`export MUELLE_TOKEN=mk
 | `list_domains` | Los dominios de la app, con el estado de su DNS y de su certificado |
 | `deploy` (escribe) | Despliega, con `image` o `images` opcionales, como la API |
 | `rollback` (escribe) | Vuelve al deploy anterior |
-| `set_env` (escribe) | Guarda variables **no secretas**, y no pisa una secreta. Se aplican en el próximo deploy |
+| `set_env` (escribe) | Guarda variables **no secretas**: no pisa una secreta, ni la tapa con una de la app. Se aplican en el próximo deploy |
 | `unset_env` (escribe) | Borra variables |
 
 Las cuatro que escriben solo están con un token que no es de solo lectura.
