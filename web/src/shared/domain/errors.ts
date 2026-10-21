@@ -76,7 +76,8 @@ export class BadOriginError extends ForbiddenError {
  * El panel se mudó: después de cambiar el puerto HTTPS desde la dirección en que lo servía
  * muelle-caddy, esa dirección ya no pasa el chequeo de `Origin` (contrato §0.1 y §3.5), y el
  * panel no manda escrituras desde ahí (`holdWrites` del cliente HTTP). Es un `bad_origin`
- * que no llegó a salir. `origin` es la dirección nueva.
+ * que no llegó a salir. `origin` es la dirección nueva. Su texto (`describeError`) también
+ * dice qué hacer si la nueva no responde: recargar, si muelle volvió a los puertos anteriores.
  */
 export class PanelMovedError extends BadOriginError {
 	readonly origin: string
