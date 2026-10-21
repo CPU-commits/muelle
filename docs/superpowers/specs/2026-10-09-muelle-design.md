@@ -1,7 +1,7 @@
 # muelle — Diseño
 
 > Deploy manager ultraligero sobre Docker Swarm: panel web + API, secretos, stages y proxy con certificados automáticos.
-> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1), 2026-10-13 (etapa de contratos de las Fases 2, 3 y 5) y 2026-10-14 (su revisión: §6.3, Caddy en JSON, el cambio de puertos) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
+> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1), 2026-10-13 (etapa de contratos de las Fases 2, 3 y 5), 2026-10-14 (su revisión: §6.3, Caddy en JSON, el cambio de puertos) y 2026-10-21 (tokens de solo lectura o de todos los proyectos, y el servidor MCP para Claude Code: [`2026-10-21-mcp-design.md`](2026-10-21-mcp-design.md)) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
 > La API, los puertos entre módulos y la configuración de install de las Fases 2, 3 y 5 están en detalle en [`2026-10-10-contrato-http-fases-2-3.md`](2026-10-10-contrato-http-fases-2-3.md).
 > "muelle" es un nombre provisional.
 
@@ -227,11 +227,11 @@ proyecto (auditfy)
 | `users` | `id`, `username` (único), `password_hash`, `totp_secret` (cifrado, nulo si no tiene 2FA), `totp_pending` (cifrado, generado pero sin confirmar), `created_by`, `created_at` |
 | `invites` | `id`, `token_hash`, `created_by`, `expires_at`, `used_at` |
 | `sessions` | `id_hash`, `user_id`, `mfa_pending` (contraseña correcta, falta el código TOTP), `created_at`, `last_seen_at`, `expires_at`, `user_agent`, `ip` |
-| `api_tokens` | `id`, `name`, `token_hash`, `project_id`, `stage_id` (nulo = todo el proyecto), `created_by`, `last_used_at`, `expires_at` (opcional) |
+| `api_tokens` | `id`, `name`, `token_hash`, `project_id` (nulo = todos los proyectos), `stage_id` (nulo = todo el proyecto), `read_only` (bool), `all_projects` (bool; solo con `read_only`, sin proyecto ni stage), `created_by`, `last_used_at`, `expires_at` (opcional) |
 | `audit_events` | `id`, `actor_type` (`user`\|`token`\|`system`), `actor_id`, `actor_name` (el username, el nombre del token o `system`, copiado al escribir), `action`, `target`, `details` (JSON, sin valores secretos), `at` |
 | `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `cloudflare_zones`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain` (`MUELLE_PANEL_DOMAIN`, o el host de `MUELLE_PANEL_ORIGIN`; de solo lectura), `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` (vacío: la imagen de Caddy de la misma versión de muelle) y las del registro DNS del panel (`panel_cf_*`, de ingress) |
 
-La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con la migración `0002_deploy.sql`, y `domains` con `0003_ingress.sql`. Las dos las reservó la etapa de contratos; cada fase edita la suya, en vez de agregar otra, mientras no haya una versión publicada. `0004_audit_actor_name.sql`, un pendiente de la Fase 1, suma `audit_events.actor_name` y lo llena en los eventos que ya había, y `0005_deploy_routes_warning.sql` suma `deploys.routes_warning` (contrato §6).
+La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con la migración `0002_deploy.sql`, y `domains` con `0003_ingress.sql`. Las dos las reservó la etapa de contratos; cada fase edita la suya, en vez de agregar otra, mientras no haya una versión publicada. `0004_audit_actor_name.sql`, un pendiente de la Fase 1, suma `audit_events.actor_name` y lo llena en los eventos que ya había, y `0005_deploy_routes_warning.sql` suma `deploys.routes_warning` (contrato §6). `0007_api_tokens_scopes.sql` reconstruye `api_tokens` con `project_id` opcional, `read_only` y `all_projects`, con los `CHECK` que impiden un token de escritura de todos los proyectos (contrato §6 y §8.1; la 0006 es de los certificados de Cloudflare).
 
 ### 5.2 Reglas
 
@@ -430,7 +430,11 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 
 - **Sesión del panel:** cookie `muelle_session` (`HttpOnly`, `Secure`, `SameSite=Strict`). Se cierra tras 12 h sin uso y dura 7 días como máximo. Las peticiones que modifican algo exigen que el `Origin` coincida exactamente con el origen en que muelle-caddy sirve el panel según los ajustes de ese momento (`https://<panel_domain>`, con `:<proxy_https_port>` si no es 443), o con `MUELLE_PANEL_ORIGIN`, una variable de entorno opcional para un origen más (detrás de otro proxy, o en desarrollo). install no la escribe: escribe `MUELLE_PANEL_DOMAIN`, el dominio sin puerto. El origen lleva el esquema y el puerto: así el panel funciona en `https://panel…:8443` durante la migración (§16), y en `https://panel…` en cuanto los puertos del proxy pasan a 80/443, sin tocar la configuración de muelle; desde ese momento `:8443` ya no pasa (contrato §0.1). Los links de setup y de las invitaciones usan el mismo origen (`MUELLE_PANEL_ORIGIN` si está). Como la comparación es literal, el origen configurado tiene que estar en forma canónica: esquema y host en minúsculas, sin puerto por defecto y con las IP en su forma estándar. Si no lo está, muelle no arranca y sugiere el valor correcto. Una sesión puede hacer todo.
   - `MUELLE_SECURE_COOKIES=false` (la cookie sin `Secure`) existe solo para desarrollo por http: con un `MUELLE_PANEL_ORIGIN` https, o con `MUELLE_PANEL_DOMAIN`, muelle no arranca.
-- **Token de API:** `Authorization: Bearer mk_<43 caracteres base64url>` (32 bytes aleatorios). Se guarda su SHA-256 y se muestra una sola vez. Su alcance es un proyecto, o un proyecto + stage. **Solo permite:** leer proyecto/stage/app/estado/deploys/logs dentro del alcance, `GET/PUT/PATCH` de variables, crear deploys y hacer rollback. Cualquier otra operación responde `403`.
+- **Token de API:** `Authorization: Bearer mk_<43 caracteres base64url>` (32 bytes aleatorios). Se guarda su SHA-256 y se muestra una sola vez. Su alcance es un proyecto, un proyecto + stage o todos los proyectos (contrato §8.1).
+  - **Solo permite:** leer proyecto/stage/app/estado/deploys/logs/dominios dentro del alcance, `GET` de variables y, si no es de solo lectura, `PUT/PATCH` de variables, crear deploys y hacer rollback. Cualquier otra operación responde `403`. Los dominios se leen con `GET …/apps/{a}/domains`; el resto de los dominios sigue siendo de la sesión.
+  - **De solo lectura** (`read_only`): solo `GET`. Un método que escribe responde `403 read_only_token`, antes de revisar el alcance. Es el recomendado para Claude Code.
+  - **De todos los proyectos** (`all_projects`): lee cualquier proyecto y es siempre de solo lectura. No existe un token que escriba en todo muelle: la base lo impide. Listar los proyectos (`GET /projects`) sigue siendo de la sesión. El panel le propone un vencimiento de 90 días.
+  - Por MCP (contrato §8), las mismas reglas: un token de solo lectura no ve las herramientas que escriben.
   - `GET /tokens` dice quién creó cada token (`created_by`: el username, o `null` si ese usuario se borró), para encontrar los tokens de una persona que se va.
   - **Borrar un usuario no revoca sus tokens:** un token es del proyecto, no de quien lo creó, y el CI depende de él. Al dar de baja a alguien, se revisan sus tokens en `GET /tokens` y se revocan a mano (`DELETE /tokens/{id}`) los que haga falta.
 - **Login:**
@@ -461,6 +465,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
   - **Deploys:** historial y log en vivo.
   - **Logs:** en vivo por servicio.
 - **Ajustes:** Cloudflare (token, IP pública), email ACME, registries, usuarios e invitaciones, tokens, exigir 2FA, IPs permitidas para el panel y auditoría.
+  - **Tokens:** de un proyecto, de un stage o de todos los proyectos, y de solo lectura o no ("Todos los proyectos (solo lectura)" siempre lo es, y viene con un vencimiento de 90 días que se puede cambiar o quitar). Al crear uno, además del ejemplo de GitHub Actions (solo si puede desplegar), la caja "Conectar con Claude Code", con el `claude mcp add` y un `.mcp.json` con `${MUELLE_TOKEN}`.
 
 ## 12. Seguridad
 
@@ -568,7 +573,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - `proxy`: rutas → JSON golden de Caddy (incluye `admin.listen`, políticas TLS y `trusted_proxies`, y ningún atajo del Caddyfile como `{client_ip}`).
 - `crypto`: ida y vuelta; un valor alterado o una AAD distinta fallan.
 - `auth`:
-  - matriz de alcance de tokens (operación × alcance → permitido o 403)
+  - matriz de alcance de tokens (operación × alcance → permitido o 403), con los de solo lectura y los de todos los proyectos (`403 read_only_token` en una escritura, antes que `out_of_scope`) y la lectura de dominios (contrato §8.1)
   - bloqueo progresivo
   - vencimiento de sesiones e invitaciones
   - flujo de TOTP
