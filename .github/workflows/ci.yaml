@@ -28,6 +28,8 @@ jobs:
         run: go test -race ./...
       - name: build
         run: CGO_ENABLED=0 go build -o muelle .
+      # Un build de prueba de dos archivos: este job no espera al de web. El panel de
+      # verdad lo embebe el job "panel".
       - name: panel embebido (-tags panel, con un build de prueba)
         run: |
           mkdir -p src/cmd/http/panel/build/_app/immutable
@@ -38,3 +40,77 @@ jobs:
       # Los tests de la action (action/) ya corren en go test; shellcheck viene en ubuntu-latest.
       - name: shellcheck
         run: shellcheck action/deploy.sh
+
+  # El panel (web/): lo mismo que `pnpm verify` y `pnpm build` en local, y los e2e contra
+  # el build con MSW. El build sale como artefacto para el job "panel".
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Sin version: la de packageManager en web/package.json.
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+          cache: true
+          cache_dependency_path: web/pnpm-lock.yaml
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+      # Los tests de vitest en Chromium (pnpm test) y los e2e lo necesitan.
+      - name: Chromium de Playwright
+        run: pnpm exec playwright install --with-deps chromium
+      # pnpm test y pnpm test:e2e corren en un network namespace propio (unshare -rn,
+      # scripts/isolated-net.mjs). Ubuntu restringe los user namespaces sin privilegios con
+      # AppArmor; si no se puede, el script avisa y corre con la red del host.
+      - name: user namespaces sin privilegios
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: verify (lint, check y test)
+        run: pnpm verify
+      # Lo mismo que verifica el Dockerfile: el build sin MSW y con lo que lee Go al arrancar.
+      - name: build
+        env:
+          VITE_USE_MOCKS: '0'
+        run: |
+          pnpm build
+          test -f build/200.html
+          test -s build/csp-header.txt
+          test ! -e build/mockServiceWorker.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: panel-build
+          path: web/build/
+          if-no-files-found: error
+          retention-days: 1
+      - name: e2e (contra el build con MSW, bajo la CSP)
+        run: pnpm test:e2e
+
+  # Go con el panel de verdad: el build del job "web" copiado en src/cmd/http/panel/build,
+  # como lo hace el Dockerfile, y los tests de -tags panel contra él.
+  panel:
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: panel-build
+          path: src/cmd/http/panel/build
+      - name: el build trae lo que lee Go al arrancar
+        run: |
+          test -f src/cmd/http/panel/build/200.html
+          test -s src/cmd/http/panel/build/csp-header.txt
+          test -d src/cmd/http/panel/build/_app/immutable
+      - name: vet y test con -tags panel
+        run: |
+          go vet -tags panel ./...
+          go test -race -tags panel ./src/cmd/http/... ./src/shared/infra/container/
+      - name: build con el panel
+        run: CGO_ENABLED=0 go build -tags panel -o muelle .

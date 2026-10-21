@@ -16,7 +16,8 @@ permissions:
 
 jobs:
   test:
-    # El job de ci.yaml tal cual (gofmt, go mod tidy, vet, test -race, -tags panel).
+    # Los jobs de ci.yaml tal cual: Go (gofmt, go mod tidy, vet, test -race, -tags panel),
+    # el panel (verify, build y e2e) y Go con el build de verdad del panel.
     uses: ./.github/workflows/ci.yaml
 
   images:
