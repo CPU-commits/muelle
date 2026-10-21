@@ -1,5 +1,5 @@
 import { page } from '$app/state'
-import type { NavItem } from '@/shared/ui'
+import { SectionSpy, type SubNavItem } from '@/shared/ui'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import {
 	type AppRef,
@@ -46,6 +46,10 @@ export class ServiceConfigViewModel {
 	readonly health
 	readonly volumes
 	readonly resources
+	/** La tarjeta que se está leyendo, para la subnav (`<SubNavLayout spy>`). */
+	readonly sections = new SectionSpy(Object.values(SECTION_IDS), {
+		initial: page.url.hash.slice(1),
+	})
 
 	readonly #app: () => ServiceApp
 	readonly #healthValues
@@ -86,8 +90,10 @@ export class ServiceConfigViewModel {
 		return appRefOf(this.#app())
 	}
 
-	get navItems(): NavItem[] {
-		const hash = page.url.hash
+	// La activa es la tarjeta que se está leyendo, la del link que se acaba de seguir o la del
+	// ancla con la que se abrió la página; arriba de todo, Imagen.
+	get navItems(): SubNavItem[] {
+		const active = this.sections.current ?? SECTION_IDS.image
 		const items: [string, string][] = [
 			[SECTION_IDS.image, m.catalog_config_image()],
 			[SECTION_IDS.run, m.catalog_config_run()],
@@ -96,10 +102,11 @@ export class ServiceConfigViewModel {
 			[SECTION_IDS.resources, m.catalog_config_resources()],
 			[SECTION_IDS.delete, m.catalog_delete_app_title()],
 		]
-		return items.map(([id, label], index) => ({
+		return items.map(([id, label]) => ({
 			href: `#${id}`,
 			label,
-			active: hash ? hash === `#${id}` : index === 0,
+			active: id === active,
+			onselect: () => this.sections.select(id),
 		}))
 	}
 
