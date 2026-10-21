@@ -999,7 +999,7 @@ Va en `src/internal/ingress/integration_origin_ca_test.go`, con las ranuras 4 y 
 - **E2E (Playwright contra el build con MSW, bajo la CSP):**
   - `e2e/ajustes.e2e.ts`: encender, ver el toast y la línea del panel; apagar con confirmación; un token `sin-ssl` muestra el error.
   - `e2e/deployIngress.e2e.ts`: con la opción encendida, Dominios muestra "Cloudflare Origin CA · vence …" en el que tiene proxy y la pista en el DNS only.
-- **`e2e-real`:** no se toca. El recorrido no usa Cloudflare, y no hay un Cloudflare falso del lado del binario. La integración de §13.2 cubre el backend.
+- **`e2e-real`:** no se toca. El recorrido no usa Cloudflare, y no hay un Cloudflare falso del lado del binario. La integración de §13.2 cubre el backend. En la rama de la línea 2, hasta que entra la línea 1, falla (§14, "El punto de encuentro").
 
 ---
 
@@ -1059,6 +1059,8 @@ Cada paso es rojo → verde. `pnpm codegen` después de tocar `messages/`.
 **El punto de encuentro:**
 - La línea 2 depende solo del texto del contrato (0a). Con el binario de la línea 1 y `pnpm dev`, se revisa a mano: el toggle, los dominios y la línea del panel.
 - Los campos nuevos son obligatorios en los DTOs del panel (§11.1). Hasta que llega la línea 1, el panel se prueba contra MSW, que sigue el contrato letra por letra (§11.3).
+- **La línea 2 entra a `main` después de la línea 1, o junto con ella; nunca antes.** Sin la línea 1, `GET /settings` no trae `cloudflare_origin_ca` y Ajustes da un `ContractError`. Al revés no pasa nada: zod descarta las claves que no conoce, así que la línea 1 sola no rompe el panel de hoy.
+- Por lo mismo, el job `e2e-real` falla en la rama de la línea 2 hasta que la línea 1 está en su base: el recorrido abre `/ajustes#auditoria`, que lee `GET /settings` del backend de esa rama. No es un error de la línea 2.
 
 ---
 
