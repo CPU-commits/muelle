@@ -3,7 +3,9 @@ import { expect, type Locator, type Page, test } from '@playwright/test'
 // La nav de secciones de la izquierda (SubNavLayout) en App·Configuración y en Ajustes: con
 // la nav al lado del contenido, acompaña el scroll (sticky) y sus links se pueden usar desde
 // cualquier altura; en un teléfono, con la nav arriba del contenido, se va con la página y
-// no tapa nada.
+// no tapa nada. El item marcado (aria-current) es la sección que se está leyendo: la que
+// cruzó una línea en la parte de arriba de la pantalla, la última al fondo, la de un link
+// recién seguido o la de un deep link.
 const USERNAME = 'felipe'
 const PASSWORD = 'una-contraseña-larga'
 
@@ -36,6 +38,13 @@ interface Screen {
 	last: (page: Page) => Locator
 	/** Un link de la nav que lleva a una sección del medio, y el hash que deja. */
 	jump: { name: string; hash: string }
+	/** Las secciones (id y link), en orden, para scrollear a mano hasta cada una. */
+	sections: { id: string; name: string }[]
+	/**
+	 * Una sección corta del final: después de saltar a ella, la línea de arriba queda en la
+	 * siguiente (o la página llega al fondo), y aun así queda marcada la del link.
+	 */
+	short: { id: string; name: string }
 }
 
 const CONFIG_SCREEN: Screen = {
@@ -44,6 +53,15 @@ const CONFIG_SCREEN: Screen = {
 	first: 'c-imagen',
 	last: (page) => page.getByRole('heading', { name: 'Eliminar app', level: 2 }),
 	jump: { name: 'Volúmenes', hash: '#c-vol' },
+	sections: [
+		{ id: 'c-imagen', name: 'Imagen' },
+		{ id: 'c-ejecucion', name: 'Ejecución' },
+		{ id: 'c-health', name: 'Healthcheck' },
+		{ id: 'c-vol', name: 'Volúmenes' },
+		{ id: 'c-res', name: 'Recursos' },
+		{ id: 'c-del', name: 'Eliminar app' },
+	],
+	short: { id: 'c-res', name: 'Recursos' },
 }
 
 const SETTINGS_SCREEN: Screen = {
@@ -52,6 +70,14 @@ const SETTINGS_SCREEN: Screen = {
 	first: 'proxy',
 	last: (page) => page.getByRole('heading', { name: 'Auditoría', level: 2 }),
 	jump: { name: 'Seguridad', hash: '#seguridad' },
+	sections: [
+		{ id: 'proxy', name: 'Proxy y DNS' },
+		{ id: 'seguridad', name: 'Seguridad' },
+		{ id: 'registries', name: 'Registries' },
+		{ id: 'usuarios', name: 'Usuarios' },
+		{ id: 'auditoria', name: 'Auditoría' },
+	],
+	short: { id: 'usuarios', name: 'Usuarios' },
 }
 
 const SCREENS = [CONFIG_SCREEN, SETTINGS_SCREEN]
@@ -106,6 +132,90 @@ async function horizontalOverflow(page: Page): Promise<number> {
 	return page.evaluate(
 		() => document.documentElement.scrollWidth - document.documentElement.clientWidth,
 	)
+}
+
+/** El link marcado de la nav (aria-current). */
+const current = (nav: Locator) => nav.locator('[aria-current="page"]')
+
+/** Scrollea con la rueda (a mano, con el puntero sobre el contenido) hasta `y`. */
+async function wheelTo(page: Page, y: number): Promise<void> {
+	const { from, to, x, at } = await page.evaluate(
+		(y) => ({
+			from: window.scrollY,
+			to: Math.max(
+				0,
+				Math.min(y, document.documentElement.scrollHeight - window.innerHeight),
+			),
+			x: window.innerWidth * 0.7,
+			at: window.innerHeight / 2,
+		}),
+		y,
+	)
+	await page.mouse.move(x, at)
+	await page.mouse.wheel(0, to - from)
+	// Con un alto de página fraccionario, el fondo puede estar un píxel más allá.
+	await expect
+		.poll(() => page.evaluate((to) => Math.abs(window.scrollY - to) <= 1, to))
+		.toBe(true)
+}
+
+/** Scrollea a mano hasta que el borde de arriba de la sección `id` quede a `top` px. */
+async function wheelSectionTo(page: Page, id: string, top: number): Promise<void> {
+	const y = await page
+		.locator(`#${id}`)
+		.evaluate((element, top) => window.scrollY + element.getBoundingClientRect().top - top, top)
+	await wheelTo(page, y)
+}
+
+async function atTheBottom(page: Page): Promise<boolean> {
+	return page.evaluate(
+		() =>
+			Math.ceil(window.scrollY + window.innerHeight) >= document.documentElement.scrollHeight,
+	)
+}
+
+/**
+ * Cuánto le falta a la sección del salto para quedar a la altura del primer link de la nav
+ * (pegada arriba): 0 cuando la tarjeta quedó alineada.
+ */
+async function alignment(page: Page, screen: Screen): Promise<number> {
+	const section = await boxOf(page.locator(screen.jump.hash))
+	const link = await boxOf(subNav(page, screen.nav).getByRole('link').first())
+	return section.top - link.top
+}
+
+/** Anota cada cambio del link marcado de la nav, para ver si pasó por otros. */
+async function recordCurrent(nav: Locator): Promise<() => Promise<(string | null)[]>> {
+	await nav.evaluate((element) => {
+		const marks: (string | null)[] = []
+		Object.assign(window, { __marks: marks })
+		new MutationObserver(() => {
+			const mark = element.querySelector('[aria-current="page"]')?.textContent?.trim() ?? null
+			if (marks.at(-1) !== mark) marks.push(mark)
+		}).observe(element, { subtree: true, attributeFilter: ['aria-current'] })
+	})
+	return () => nav.page().evaluate(() => (window as unknown as { __marks: string[] }).__marks)
+}
+
+/** Cuenta lo que toca el historial: pushState, replaceState y hashchange. */
+async function watchHistory(page: Page): Promise<() => Promise<Record<string, number>>> {
+	await page.evaluate(() => {
+		const counts = { pushState: 0, replaceState: 0, hashchange: 0, length: history.length }
+		Object.assign(window, { __history: counts })
+		for (const method of ['pushState', 'replaceState'] as const) {
+			const original = history[method].bind(history)
+			history[method] = (...args: Parameters<History['pushState']>) => {
+				counts[method] += 1
+				return original(...args)
+			}
+		}
+		addEventListener('hashchange', () => (counts.hashchange += 1))
+	})
+	return () =>
+		page.evaluate(() => {
+			const counts = (window as unknown as { __history: Record<string, number> }).__history
+			return { ...counts, length: history.length - (counts.length ?? 0) }
+		})
 }
 
 test('con la nav al lado del contenido, acompaña el scroll y sus links se pueden usar', async ({
@@ -205,3 +315,172 @@ for (const width of [360, 390]) {
 		expect(errors).toEqual([])
 	})
 }
+
+test('al scrollear a mano, la nav marca la sección que se está leyendo y, al fondo, la última', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await page.setViewportSize({ width: 1280, height: 600 })
+	await login(page)
+
+	for (const screen of SCREENS) {
+		await open(page, screen)
+		const nav = subNav(page, screen.nav)
+		const [first] = screen.sections
+		await expect(current(nav), `${screen.path}: arriba de todo`).toHaveText(first!.name)
+
+		// Cada sección, con su borde de arriba en la parte de arriba de la pantalla (a un
+		// cuarto del alto), mientras la página no llegó al fondo.
+		for (const section of screen.sections.slice(0, -1)) {
+			await wheelSectionTo(page, section.id, 150)
+			if (await atTheBottom(page)) break
+			await expect(current(nav), `${screen.path}: ${section.name}`).toHaveText(section.name)
+		}
+
+		// Al fondo gana la última, aunque no llegue arriba.
+		await scrollToBottom(page)
+		await expect(current(nav), `${screen.path}: al fondo`).toHaveText(
+			screen.sections.at(-1)!.name,
+		)
+
+		await wheelTo(page, 0)
+		await expect(current(nav), `${screen.path}: de vuelta arriba`).toHaveText(first!.name)
+	}
+
+	expect(errors).toEqual([])
+})
+
+test('Volúmenes y Recursos se marcan al scrollear hasta ellas, antes del fondo', async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 1280, height: 600 })
+	await login(page)
+	await open(page, CONFIG_SCREEN)
+	const nav = subNav(page, CONFIG_SCREEN.nav)
+
+	await wheelSectionTo(page, 'c-vol', 150)
+	await expect(current(nav)).toHaveText('Volúmenes')
+	await wheelSectionTo(page, 'c-res', 150)
+	// Si la página ya estuviera al fondo, ganaría "Eliminar app" y el test no probaría nada.
+	expect(await atTheBottom(page)).toBe(false)
+	await expect(current(nav)).toHaveText('Recursos')
+})
+
+test('un link de la nav marca su sección en el acto, sin pasar por otras, y scrollear no reescribe el hash', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await page.setViewportSize({ width: 1280, height: 600 })
+	await login(page)
+
+	for (const screen of SCREENS) {
+		await open(page, screen)
+		const nav = subNav(page, screen.nav)
+		const marks = await recordCurrent(nav)
+
+		// El salto pasa por las secciones de en medio: la marca va derecho a la del link.
+		const jump = nav.getByRole('link', { name: screen.jump.name })
+		await jump.click()
+		await expect(page).toHaveURL(new RegExp(`${screen.jump.hash}$`))
+		await expect(current(nav)).toHaveText(screen.jump.name)
+		// La tarjeta queda a la altura de los links de la nav pegada arriba.
+		await expect
+			.poll(() => alignment(page, screen), `${screen.path}: la sección alineada`)
+			.toBeCloseTo(0, 0)
+		await page.waitForTimeout(300)
+		expect(await marks(), `${screen.path}: sin parpadeos`).toEqual([screen.jump.name])
+
+		// Una corta del final: la línea queda en la siguiente (o la página llega al fondo), y
+		// la marca sigue en la del link hasta que se scrollea a mano.
+		const short = nav.getByRole('link', { name: screen.short.name })
+		await short.click()
+		await expect(current(nav)).toHaveText(screen.short.name)
+		await page.waitForTimeout(300)
+		await expect(current(nav), `${screen.path}: ${screen.short.name} sigue`).toHaveText(
+			screen.short.name,
+		)
+		expect(await marks(), `${screen.path}: sin parpadeos`).toEqual([
+			screen.jump.name,
+			screen.short.name,
+		])
+
+		// Scrollear a mano: la marca sigue al scroll y el hash no se toca (ni el historial).
+		const history = await watchHistory(page)
+		await wheelSectionTo(page, screen.jump.hash.slice(1), 150)
+		await expect(current(nav)).toHaveText(screen.jump.name)
+		await scrollToBottom(page)
+		await expect(current(nav)).toHaveText(screen.sections.at(-1)!.name)
+		await wheelTo(page, 0)
+		await expect(current(nav)).toHaveText(screen.sections[0]!.name)
+		await expect(page).toHaveURL(new RegExp(`#${screen.short.id}$`))
+		expect(await history(), `${screen.path}: el historial`).toEqual({
+			pushState: 0,
+			replaceState: 0,
+			hashchange: 0,
+			length: 0,
+		})
+	}
+
+	expect(errors).toEqual([])
+})
+
+test('un deep link abre en su sección, marcada, aunque llegue después que la página', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await page.setViewportSize({ width: 1280, height: 600 })
+	await login(page)
+
+	for (const screen of SCREENS) {
+		const nav = subNav(page, screen.nav)
+		await page.goto(`${screen.path}${screen.jump.hash}`)
+		await expect(current(nav)).toHaveText(screen.jump.name)
+		await expect
+			.poll(() => alignment(page, screen), `${screen.path}: abre en la sección`)
+			.toBeCloseTo(0, 0)
+		expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+		await expect(screen.last(page)).toBeVisible()
+		await expect(current(nav)).toHaveText(screen.jump.name)
+	}
+
+	// Una que no llega arriba: la página va al fondo y la marcada es la del ancla.
+	const nav = subNav(page, CONFIG_SCREEN.nav)
+	await page.goto(`${CONFIG_SCREEN.path}#${CONFIG_SCREEN.short.id}`)
+	await expect(current(nav)).toHaveText(CONFIG_SCREEN.short.name)
+	await expect.poll(() => atTheBottom(page)).toBe(true)
+	await page.waitForTimeout(300)
+	await expect(current(nav)).toHaveText(CONFIG_SCREEN.short.name)
+
+	expect(errors).toEqual([])
+})
+
+test('en un teléfono la marca también sigue al scroll, sin mover la página ni el layout', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await page.setViewportSize({ width: 390, height: 740 })
+	await login(page)
+
+	for (const screen of SCREENS) {
+		await open(page, screen)
+		const nav = subNav(page, screen.nav)
+
+		await wheelSectionTo(page, screen.jump.hash.slice(1), 185)
+		const scrollY = await page.evaluate(() => window.scrollY)
+		const height = await page.evaluate(() => document.documentElement.scrollHeight)
+		await expect(current(nav)).toHaveText(screen.jump.name)
+		// Marcar otra no mueve nada: ni el scroll ni el alto de la página.
+		await page.waitForTimeout(300)
+		expect(await page.evaluate(() => window.scrollY)).toBe(scrollY)
+		expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(height)
+		expect(await horizontalOverflow(page), `${screen.path}: scroll horizontal`).toBe(0)
+
+		// Un link (la nav está arriba del contenido) salta y marca su sección.
+		await wheelTo(page, 0)
+		await nav.getByRole('link', { name: screen.short.name }).click()
+		await expect(page).toHaveURL(new RegExp(`#${screen.short.id}$`))
+		await expect(current(nav)).toHaveText(screen.short.name)
+	}
+
+	expect(errors).toEqual([])
+})
