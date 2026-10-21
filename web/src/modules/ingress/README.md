@@ -202,6 +202,27 @@ Dominios, arriba del formulario.
 - Los dominios con error se anuncian a un lector de pantalla en **una** región para toda la
   pantalla ("2 dominios tienen errores: …"), que cambia solo si cambia cuáles fallan.
 
+## Lo de ingress que se ve en otras pantallas
+
+Dos reglas de ingress (contrato §7, revisión del 2026-10-17) que el panel muestra fuera de
+Dominios:
+
+- **Crear un stage** (catalog) con una red de Docker ajena del mismo nombre:
+  `409 network_conflict` (§0.2, §1.1 y §3.4; `ErrNotStageNetwork`). Ya hay una red con el
+  nombre de la del stage (`<proyecto>_<stage>`) que no es overlay attachable: muelle no la
+  usa ni la borra, y el stage no se guarda. Una overlay attachable con ese nombre sí se usa,
+  aunque no la haya creado muelle. catalog lo muestra como `StageNetworkConflict`, nombrando
+  la red que hay que borrar o renombrar en el servidor. En el mock, un stage con `ajena` en
+  el slug.
+- **Ajustes**: un email ACME o un token de Cloudflare con `{` o `}` (Caddy los toma como
+  placeholders, §3.4): `PATCH /settings` responde `422` en `acme_email` o `cloudflare_token`
+  y no guarda nada (§4.1; el del token, después del de su forma, y sin el token en el
+  mensaje). Ajustes los frena antes de mandarlos, con su texto
+  (`InvalidAcmeEmail('placeholder')`, `InvalidCloudflareToken('placeholder')`); si igual
+  vuelve el `422`, su motivo va al campo, como cualquier `422` de Ajustes. El mock responde
+  lo mismo. Si llegan a los ajustes por otro lado (install, un `UPDATE` a mano),
+  `GET /proxy` dice `out_of_sync` con el motivo.
+
 ## Superficie pública (barrel)
 
 - `DomainsScreen` (props `project`, `stage`, `app` y, opcional, `targets`: los destinos
@@ -252,20 +273,4 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
 
 ## Diferencias con el contrato
 
-Ninguna en estos endpoints: lo de arriba es lo que dice el contrato. Dos cosas de ingress
-que el panel seguía del código, propuestas como cambios y ya en el contrato (revisión del
-2026-10-17, §7):
-
-- `409 network_conflict` al crear un stage (§0.2, §1.1 y §3.4; `ErrNotStageNetwork`): ya
-  hay una red de Docker con el nombre de la del stage (`<proyecto>_<stage>`) que no es
-  overlay attachable. muelle no la usa ni la borra, y el stage no se guarda. Una overlay
-  attachable con ese nombre sí se usa, aunque no la haya creado muelle. catalog lo muestra
-  como `StageNetworkConflict`, nombrando la red que hay que borrar o renombrar en el
-  servidor. En el mock, un stage con `ajena` en el slug.
-- Un email ACME o un token de Cloudflare con `{` o `}` (Caddy los toma como placeholders,
-  §3.4): `PATCH /settings` responde `422` en `acme_email` o `cloudflare_token` y no guarda
-  nada (§4.1; el del token, después del de su forma, y sin el token en el mensaje). Ajustes
-  los frena antes de mandarlos, con su texto (`InvalidAcmeEmail('placeholder')`,
-  `InvalidCloudflareToken('placeholder')`); si igual vuelve el `422`, su motivo va al campo,
-  como cualquier `422` de Ajustes. El mock responde lo mismo. Si llegan a los ajustes por otro
-  lado (install, un `UPDATE` a mano), `GET /proxy` dice `out_of_sync` con el motivo.
+Ninguna: lo de arriba es lo que dice el contrato.
