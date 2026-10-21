@@ -40,6 +40,7 @@ Construir imágenes desde git (se construyen en CI), backups de bases de datos, 
 | Proxy | Caddy, como contenedor **separado** de muelle | Caddy embebido (reiniciar el panel tumbaría todos los sitios), nginx (su ACME nativo no soporta DNS-01), HAProxy (DNS-01 solo vía el proceso Data Plane API), Traefik (más pesado) |
 | Usuarios | Varias cuentas con los mismos permisos | Roles por proyecto |
 | DNS | Automático con Cloudflare + certificado por DNS-01 | DNS manual |
+| Integración con agentes | MCP remoto en muelle (streamable HTTP sin estado, `POST /api/v1/mcp`, solo con token; contrato §8) | Un `muelle mcp` stdio: muelle no publica binarios, y sus imágenes son privadas |
 
 ## 3. Arquitectura
 
@@ -140,7 +141,7 @@ DDD con arquitectura hexagonal, con la misma estructura que Extractor (plantilla
 - `app/`
   - `dto`.
   - `usecases`: un struct por caso de uso, con sus dependencias y `Execute(ctx, dto)`.
-- `infra/in/`: adaptadores de entrada (`http`, `form`, `cron`).
+- `infra/in/`: adaptadores de entrada (`http`, `form`, `cron`, `mcp`).
 - `infra/out/`: adaptadores de salida (`repository/sqlite`, `service`).
 
 ```
@@ -148,6 +149,7 @@ main.go                 subcomandos serve y genkey (install en la Fase 5)
 src/
 ├── cmd/http/           ServeMux, middleware, errores → HTTP; utils/ con el kit HTTP que usan los módulos
 ├── cmd/cron/           ticker que ejecuta las tareas periódicas que registran los módulos
+├── cmd/mcp/            servidor MCP y el kit con que los módulos registran sus herramientas (contrato §8)
 ├── internal/
 │   ├── identity/       usuarios, sesiones, 2FA, invitaciones, tokens de API, límites de login
 │   ├── catalog/        proyectos, stages y apps (el spec de formulario es un value object)
@@ -193,6 +195,7 @@ web/                    (Fase 4) SvelteKit con adapter-static, embebido con go:e
 | Proxy | `ingress/infra/out/service/caddy` (Fase 3) | Ciclo de vida de muelle-caddy (crear o recrear según imagen y puertos, conectar y desconectar redes de stage) y configuración: rutas → JSON de Caddy, `POST /load` por el socket unix, mutex global |
 | DNS | `ingress/infra/out/service/cloudflare` (Fase 3) | Cliente mínimo propio de la API de Cloudflare (zonas y registros) |
 | API | `cmd/http` + `infra/in/http` de cada módulo | REST `/api/v1`, autenticación por sesión o token, SSE para logs; sirve el SPA embebido |
+| MCP | `cmd/mcp` + `infra/in/mcp` de catalog, secrets, deploy e ingress | Servidor MCP para Claude Code en `POST /api/v1/mcp`, con el SDK oficial (`github.com/modelcontextprotocol/go-sdk`, versión fija) sin estado: 15 herramientas sobre los mismos casos de uso que REST, solo con token (contrato §8) |
 | Panel | `web/` (Fase 4) | SvelteKit con `adapter-static` (SPA con fallback `index.html`), embebido con `go:embed` |
 
 Además, en el mismo repositorio:
@@ -425,6 +428,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 | Logs | `GET …/apps/{a}/logs?service=<s>&tail=200&follow=1`, o `since=<fecha>` en vez de `tail` al reconectar (SSE; no se guarda nada; contrato §2.9) |
 | Administración | `/users` (incluye `DELETE /users/{username}` y `DELETE /users/{username}/totp` para quien perdió su teléfono), `/invites`, `/tokens`, `/registries`, `/settings`, `/audit` |
 | Sesión | `POST /auth/login`, `POST /auth/totp`, `POST /auth/logout`, `POST /auth/setup`, `POST /auth/invite/{token}`, `GET /auth/me`, `POST /auth/totp/setup`, `POST /auth/totp/enable` |
+| MCP | `POST /mcp` (solo token; las herramientas, sus esquemas y sus errores en el contrato, §8) |
 
 ### 10.1 Autenticación y permisos
 
@@ -484,6 +488,13 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 - **Respaldo de muelle:** a diario, `VACUUM INTO /data/backups/muelle-<fecha>.db`, guardando los últimos 7.
 - **Redes:** ver §3.2. Cada stage está aislado en su red; solo Caddy toca varias. La admin API de Caddy solo es accesible por el socket unix.
 - **Apps:** nunca montan `docker.sock`, ni una ruta del host, ni los secretos o los archivos de muelle. El render solo acepta las claves de compose que conoce (§6.3).
+- **MCP (Claude Code, contrato §8):**
+  - El texto que viene de las apps (logs, logs de deploy, errores de tareas, valores no secretos, spec y compose, errores de dominios) no es confiable: puede traer instrucciones plantadas (prompt injection). La salida lo marca con `warning`, y las instrucciones del servidor lo repiten.
+  - Las herramientas que escriben (`deploy`, `rollback`, `set_env`, `unset_env`) piden aprobación humana en **cada** llamada (`_meta["anthropic/requiresUserInteraction"]`), en cualquier modo de permisos de Claude Code. Un token de solo lectura no las ve.
+  - No hay un token de escritura de todos los proyectos (§10.1): el texto de una app no puede inducir un cambio en otro proyecto.
+  - No se escriben secretos por MCP: `set_env` guarda solo variables no secretas y no pisa una secreta. Los valores secretos nunca salen, y los logs salen enmascarados, con los límites de siempre (contrato §2.5).
+  - Lo que devuelve una herramienta queda en la transcripción de Claude Code y pasa por la API de Anthropic. Es aceptado: es lo mismo que ya lee un token por REST.
+  - `/api/v1/mcp` exige el Bearer (la cookie no sirve) y, si viene `Origin`, que sea el del panel. Las IPs permitidas del panel también lo cubren.
 
 ## 13. Manejo de errores
 
@@ -559,7 +570,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - **Dominio:** tests unitarios puros (entidades, value objects, reglas).
 - **Repositorios SQLite:** SQLite real en `t.TempDir()`, con un helper compartido que crea la base y corre las migraciones.
 - **Casos de uso:** con los repositorios SQLite reales y un reloj controlado (`package/clock`), sin mocks.
-- **HTTP:** `httptest` contra el servidor armado de verdad.
+- **HTTP:** `httptest` contra el servidor armado de verdad. Para MCP, además, el cliente del SDK contra el handler real (`StreamableClientTransport`): el acceso, el `Origin`, los errores de transporte y una llamada de punta a punta con su auditoría; y las herramientas de cada módulo con el transporte en memoria del SDK.
 - **Punta a punta:** el panel embebido en un `muelle serve` de verdad (`-tags panel`) contra el Swarm local: `pnpm test:e2e:real` (`web/e2e-real/`, prefijo `it7`, puertos 24000–24999) recorre con Playwright el setup del primer usuario, el 2FA, el catálogo, una variable, los deploys, el rollback, la auditoría y el borrado. Necesita un Swarm en el que el nodo es manager y no lo crea; CI lo corre en el job `e2e-real`, que hace un `docker swarm init` de un nodo en el runner. Los pasos con `curl` del README quedan como la prueba manual de la API.
 - **Contratos entre módulos:** como los módulos no se importan (§4.1), lo que uno lee o escribe de las tablas de otro se prueba con el contenedor completo (`shared/infra/container`).
 
@@ -574,6 +585,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - `crypto`: ida y vuelta; un valor alterado o una AAD distinta fallan.
 - `auth`:
   - matriz de alcance de tokens (operación × alcance → permitido o 403), con los de solo lectura y los de todos los proyectos (`403 read_only_token` en una escritura, antes que `out_of_scope`) y la lectura de dominios (contrato §8.1)
+  - matriz MCP (herramienta × tipo de token → permitida, filtrada, `out_of_scope` o fuera de `tools/list`; contrato §8.3)
   - bloqueo progresivo
   - vencimiento de sesiones e invitaciones
   - flujo de TOTP
@@ -590,6 +602,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - crear un stage nuevo conecta Caddy a su red sin reiniciarlo (el contenedor conserva su id y su uptime)
 - aislamiento: un contenedor de un stage no resuelve ni alcanza servicios de otro stage
 - reconciliación tras matar muelle a mitad de un deploy
+- MCP de punta a punta (`TestIntegrationMCP`, prefijo `it8`, puertos 25500–25999): con un token de escritura de un stage, `deploy` y `get_deploy` con `wait_s` hasta `succeeded`, el estado, los logs con el secreto enmascarado (y `contains` con el secreto da 0 líneas) y `set_env`; con uno de todos los proyectos, `tools/list` sin las de escritura; y la auditoría con `"via": "mcp"`
 
 **Manual antes de migrar:**
 - Cloudflare DNS-01 contra una zona de prueba.
