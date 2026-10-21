@@ -153,7 +153,9 @@ Claude Code ──HTTPS──► muelle-caddy
   - un struct da `"additionalProperties": false`, y los campos sin `omitempty`/`omitzero` van en `required`;
   - la etiqueta `jsonschema:"descripción"` es solo texto: un valor que empieza con `PALABRA=` hace panic en `AddTool`;
   - un slice da `"type": ["null", "array"]`: el handler trata `null` como lista vacía;
-  - el `tools.Kit` completa `pattern` y `maxLength` en `project`, `stage`, `app` y `service` (las regex de §5.2 del spec), y `minimum`/`maximum` en los enteros que declara la herramienta (`Tool.Bounds`).
+  - el `tools.Kit` completa `pattern` y `maxLength` en `project`, `stage`, `app` y `service` (las regex de §5.2 del spec), `minimum` y `maximum` en los enteros que declara la herramienta (`Tool.Bounds`; `id` y `offset` no tienen `maximum`) y `default` (`Tool.Defaults`);
+  - el SDK aplica los `default` antes del handler (`applySchema`, con `ApplyDefaults`) y los valida contra el esquema al registrar (`ValidateDefaults`). Por eso los campos de entrada son valores (`int` o `bool` con `omitzero`), no punteros: un `history` que falta llega en 3 y un `history: 0` llega en 0;
+  - lo que el esquema no expresa (`since`, `stream`, el largo de `contains`, `after`, `image`, `images`, `vars`, `keys`) lo valida el handler, con `validate.Errorf` y el campo: es `invalid`, como en REST (contrato §8.3, "Entrada"). El esquema no lleva `enum` ni más `maxLength`, así el texto del error es siempre el de muelle.
 - La versión va fija (`go get github.com/modelcontextprotocol/go-sdk@v1.8.0`):
   - las versiones menores cambian valores por defecto detrás de `MCPGODEBUG`;
   - una actualización del SDK es un cambio aparte, con los tests de §11.
@@ -442,7 +444,7 @@ Cada fila dice qué módulo la registra (en su `infra/in/mcp`), qué caso de uso
    "spec_omitted":false,"services_omitted":0,"compose_yaml":null,"compose_truncated":false,"warning":"…"}
   ```
 
-  - `spec` va solo en una app de formulario. Uno de más de 16 KiB de JSON (solo con un `command` enorme: el spec no tiene un tope propio fuera del cuerpo de 1 MiB) no sale, con `spec_omitted: true`.
+  - `spec` va solo en una app de formulario; en una compose falta (no es `null`), como en `GET {app}` (`omitzero` en `AppOutput`). Uno de más de 16 KiB de JSON (solo con un `command` enorme: el spec no tiene un tope propio fuera del cuerpo de 1 MiB) no sale, con `spec_omitted: true`.
   - `compose_yaml` va solo con `include_compose` en una app compose, cortado en el último `\n` con el que su JSON mide a lo más 16 KiB (`compose_truncated: true`). Medido en JSON: cada `\n` del YAML cuenta 2.
   - `services`, a lo más 8 KiB de JSON; si no (cientos de puertos en `expose`), se corta al final, con `services_omitted`. Así `get_app` nunca pasa de unos 26 KiB: el spec y el compose no van juntos.
   - Siempre suma `warning`: el spec (`command`, el healthcheck) y el compose los escribe una persona, y un compose puede traer valores escritos a mano.
@@ -489,8 +491,8 @@ Cada fila dice qué módulo la registra (en su `infra/in/mcp`), qué caso de uso
   - `service?`: si falta, el slug de la app, que es el servicio de una app de formulario;
   - `tail?: int` de 1 a 1000, 100 por defecto;
   - `since?: string`: RFC 3339, o una duración de Go (`15m`, `2h`, hasta `168h`), que se vuelve `now − d`. Reemplaza a `tail`, como en el contrato §2.9;
-  - `contains?: string`, hasta 200 caracteres, sin distinguir mayúsculas;
-  - `stream?: "stdout"|"stderr"`;
+  - `contains?: string`, hasta 200 caracteres, sin distinguir mayúsculas (el largo lo valida muelle: `invalid`, `contains: …`);
+  - `stream?: "stdout"|"stderr"` (lo valida muelle: `invalid`, `stream: …`; el esquema no lleva `enum`);
   - `max_bytes?: int` de 4 096 a 32 768, 16 384 por defecto, medido en el JSON de `lines`. El mínimo es más que una línea cortada (2 KiB de JSON): con uno menor, una línea larga nunca entraría y la llamada daría 0 líneas.
 - Alcance: `(project, stage)`.
 - Caso de uso: `deploy.AppLogs.Open` con `Follow: false` (sin follow nunca). Valida y enmascara igual que REST (contrato §2.9).
@@ -987,7 +989,9 @@ Todos con TDD, en el estilo del repo:
 - Herramientas falsas, una de lectura y una de escritura:
   - `tools/list`: el servidor de solo lectura no trae la de escritura;
   - las anotaciones exactas de §5.1, `title`, y `_meta.anthropic/requiresUserInteraction` (el booleano `true`) en la de escritura;
-  - `pattern` en `project`, `stage`, `app` y `service`, los `Bounds` y `additionalProperties: false`;
+  - `pattern` en `project`, `stage`, `app` y `service`, los `Bounds`, los `default` y `additionalProperties: false`;
+  - un entero con default que falta llega al handler con su default, y uno en 0 llega en 0;
+  - un `since`, `stream` o `contains` inválido llega al handler (el esquema no lo rechaza) y da `invalid` con su campo;
   - sin `outputSchema`, y el resultado sin `structuredContent`.
 - Autorización:
   - `out_of_scope` **sin llamar al handler**, con un contador;
@@ -1159,9 +1163,11 @@ type Tool struct {
 	Kind       Kind
 	Idempotent bool               // solo Write; Read siempre lo es
 	Untrusted  bool               // suma "warning"
-	Bounds     map[string][2]int  // minimum/maximum de enteros
+	Bounds     map[string]Range   // minimum y maximum de enteros
+	Defaults   map[string]any     // "default" del esquema; lo aplica el SDK
 	Timeout    time.Duration      // 0: 20 s
 }
+type Range struct{ Min, Max int } // Max 0: sin maximum (id, offset)
 type Scope struct{ Project, Stage string }
 // scope nil: la herramienta filtra por el Principal (solo list_projects).
 func Register[In any](k *Kit, t Tool, scope func(In) *Scope, h func(ctx context.Context, in In) (any, error))
