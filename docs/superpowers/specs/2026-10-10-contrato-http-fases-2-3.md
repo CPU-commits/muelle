@@ -39,7 +39,7 @@ Los links de setup (`<origen>/setup?token=…`) y de las invitaciones (`POST /in
 | 400 | `invalid_json` | El cuerpo no es el esperado (campo desconocido, tipo equivocado, JSON roto) |
 | 401 | `unauthenticated`, `mfa_required` | Sin sesión, o con el 2FA a medias |
 | 403 | `forbidden`, `token_not_allowed`, `out_of_scope`, `bad_origin`, `totp_setup_required` | Ver §10.1 |
-| 404 | `no_route` | **La ruta no existe** (una fase que todavía no llegó). El panel muestra "Llega con la Fase N" |
+| 404 | `no_route` | **La ruta no existe.** El panel va embebido con el backend entero (§5.5), así que para él es una ruta mal armada: un error inesperado, como un `405`, que no reintenta |
 | 404 | `not_found` | La ruta existe, pero el recurso no |
 | 405 | `method_not_allowed` | La ruta existe con otro método (header `Allow`) |
 | 409 | `conflict`, `not_empty` | Ya existe / primero hay que borrar lo que contiene |
@@ -85,7 +85,7 @@ Los streams (`…/log/stream` y `…/logs`) son `text/event-stream`:
 | `GET /proxy` | `ingress` | 3 |
 | `GET/PATCH /settings` (claves del proxy y el DNS) | `admin`, con el aviso a `ingress` | ya está (etapa de contratos) |
 
-> El estado y los logs en vivo eran de la Fase 3 en §17. Pasan a la Fase 2: usan el mismo cliente de Docker que el deploy, y el panel ya los trata como Fase 2 (`ComingSoon phase={2}`).
+> El estado y los logs en vivo eran de la Fase 3 en §17. Pasan a la Fase 2: usan el mismo cliente de Docker que el deploy.
 
 `deploy.Module.RegisterRoutes` e `ingress.Module.RegisterRoutes` registran todas las rutas de §2 y §3. Solo una ruta que no existe responde `404 no_route` (§0.2).
 
@@ -970,7 +970,7 @@ El panel, en `GET /proxy` (§3.3), con su registro en DNS only en Cloudflare:
 
 ## 4. Settings (`GET/PATCH /settings`) · sesión — ya implementado
 
-`GET` (y la respuesta de `PATCH`) trae **siempre** todas las claves, sin `omitempty`. El panel usa su presencia para saber que la fase llegó.
+`GET` (y la respuesta de `PATCH`) trae **siempre** todas las claves, sin `omitempty`. El panel las trata como obligatorias: una respuesta sin alguna es un error de contrato.
 
 ```json
 {
