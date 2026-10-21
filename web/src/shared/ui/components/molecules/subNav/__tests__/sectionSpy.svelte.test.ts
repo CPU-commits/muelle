@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SectionSpy } from '../sectionSpy.svelte.ts'
 import {
+	above,
 	atBottom,
 	band,
 	bottom,
 	crossing,
 	installFakeObserver,
 	mutationsSeen,
+	passed,
 	section,
 	sectionEl,
 	sectionsPage,
@@ -26,7 +28,14 @@ function track(spy: SectionSpy): void {
 	if (typeof stop === 'function') stops.push(stop)
 }
 
-const fire = (...crossed: string[]) => band().fire(crossing(IDS, ...crossed))
+/**
+ * Las secciones que tocan la franja de arriba de la pantalla; todas menos la última ya
+ * empezaron más arriba (como al scrollear hacia abajo): a la vista está la última.
+ */
+const fire = (...touching: string[]) => {
+	above().fire(passed(IDS, ...touching.slice(0, -1)))
+	band().fire(crossing(IDS, ...touching))
+}
 
 /** Espera a que pase el salto de un link (dos frames). */
 const settled = () =>
@@ -69,7 +78,7 @@ describe('SectionSpy', () => {
 		spy.select('c')
 		expect(spy.current).toBe('c')
 
-		// El salto pasa por "b"; al terminar, "c" es corta y la línea queda en "b".
+		// El salto pasa por "b" y termina sin que "c" llegue arriba (la página no da para más).
 		fire('b')
 		expect(spy.current).toBe('c')
 		await settled()

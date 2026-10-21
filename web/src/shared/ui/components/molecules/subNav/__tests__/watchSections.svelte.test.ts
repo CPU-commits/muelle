@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type SectionWatch, watchSections } from '../watchSections'
 import {
+	above,
 	atBottom,
 	band,
 	bottom,
 	crossing,
 	installFakeObserver,
 	mutationsSeen,
+	passed,
 	section,
 	sectionEl,
 	sectionsPage,
@@ -42,7 +44,7 @@ describe('watchSections', () => {
 		vi.unstubAllGlobals()
 	})
 
-	it('sin ninguna sección arriba de la línea, no hay ninguna a la vista', () => {
+	it('sin ninguna sección en la franja de arriba, no hay ninguna a la vista', () => {
 		const sections = start()
 
 		fire()
@@ -51,22 +53,55 @@ describe('watchSections', () => {
 		expect(onChange).toHaveBeenCalled()
 	})
 
-	it('a la vista está la última (en el orden de la nav) que cruzó la línea de arriba', () => {
+	it('a la vista está la que ocupa la parte de arriba de la pantalla', () => {
 		const sections = start()
 
 		fire('a')
 		expect(sections.inView).toBe('a')
 
-		// Las dos tocan la franja (una termina y la otra empieza): gana la de abajo.
+		// Las dos tocan la franja: "a" viene de más arriba y termina, "b" empieza. Gana "b".
+		above().fire(passed(IDS, 'a'))
 		fire('a', 'b')
 		expect(sections.inView).toBe('b')
 
+		above().fire(passed(IDS, 'a', 'b'))
 		fire('b')
 		expect(sections.inView).toBe('b')
 
 		// Se scrolleó para arriba.
+		above().fire(passed(IDS))
 		fire('a')
 		expect(sections.inView).toBe('a')
+	})
+
+	it('una sección corta que empieza arriba de todo gana aunque la siguiente ya asome en la franja', () => {
+		const sections = start()
+
+		// "b" quedó a la altura de la nav (donde la deja un salto) y "c" empieza más abajo,
+		// adentro de la franja: se está leyendo "b".
+		above().fire(passed(IDS, 'a'))
+		fire('b', 'c')
+		expect(sections.inView).toBe('b')
+
+		// Scrolleando un poco más, "b" ya empezó más arriba: ahora es "c".
+		above().fire(passed(IDS, 'a', 'b'))
+		expect(sections.inView).toBe('c')
+	})
+
+	it('lo que el navegador entrega junto se aplica junto (no pasa por una sección intermedia)', () => {
+		const sections = start()
+		above().fire(passed(IDS, 'a'))
+		fire('a', 'b')
+		const seen: (string | null)[] = []
+		onChange.mockImplementation(() => seen.push(sections.inView))
+
+		// El mismo frame: "b" empezó más arriba y "c" llega a la franja. El navegador llama a
+		// cada observer por separado; el primero ya ve lo del otro.
+		above().queue(passed(IDS, 'a', 'b'))
+		fire('b', 'c')
+
+		expect(seen).toEqual(['c'])
+		onChange.mockReset()
 	})
 
 	it('mira una franja en la parte de arriba de la pantalla y el fondo de la página', () => {
@@ -75,6 +110,10 @@ describe('watchSections', () => {
 		expect(band().options.root).toBe(document)
 		expect(band().options.rootMargin).toBe('0px 0px -70% 0px')
 		expect([...band().targets]).toEqual(IDS.map(sectionEl))
+		// Lo que ya empezó más arriba: todo lo que está por encima del borde de arriba.
+		expect(above().options.root).toBe(document)
+		expect(above().options.rootMargin).toMatch(/^\d+px 0px -100% 0px$/)
+		expect([...above().targets]).toEqual(IDS.map(sectionEl))
 		// El fondo: el documento entero adentro de la pantalla estirada hacia arriba, y un píxel
 		// hacia abajo (un alto con decimales termina una fracción por debajo).
 		expect(bottom().options.root).toBe(document)
@@ -82,10 +121,11 @@ describe('watchSections', () => {
 		expect(bottom().options.rootMargin).toMatch(/^\d+px 0px 1px 0px$/)
 	})
 
-	it('al fondo de la página gana la última, aunque no llegue a la línea', () => {
+	it('al fondo de la página gana la última, aunque no llegue arriba', () => {
 		const sections = start()
 		window.scrollTo(0, 500)
 
+		above().fire(passed(IDS, 'a'))
 		fire('a', 'b')
 		expect(sections.inView).toBe('b')
 
@@ -96,7 +136,7 @@ describe('watchSections', () => {
 		expect(sections.inView).toBe('b')
 	})
 
-	it('una página que no scrollea no está "al fondo": manda la línea', () => {
+	it('una página que no scrollea no está "al fondo": manda la franja', () => {
 		const sections = start()
 
 		fire('a')
@@ -119,6 +159,7 @@ describe('watchSections', () => {
 		expect(sections.element('b')).toBe(late)
 		expect(onChange).toHaveBeenCalled()
 
+		above().fire(passed(IDS, 'a'))
 		fire('a', 'b')
 		expect(sections.inView).toBe('b')
 

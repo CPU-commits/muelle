@@ -1,8 +1,8 @@
 import { vi } from 'vitest'
 
 // Un IntersectionObserver de mentira para watchSections y SectionSpy: cada test dice qué
-// sección cruzó la línea de arriba y si la página llegó al fondo, sin depender de las
-// medidas del navegador. Lo de verdad (el de Chromium) lo prueban SubNavLayout.svelte.test.ts
+// secciones tocan la franja de arriba de la pantalla, cuáles ya empezaron más arriba y si la
+// página llegó al fondo, sin depender de las medidas del navegador. Lo de verdad (el de Chromium) lo prueban SubNavLayout.svelte.test.ts
 // y e2e/subNav.e2e.ts.
 
 type FakeEntry = { isIntersecting?: boolean; intersectionRatio?: number }
@@ -63,12 +63,28 @@ export function installFakeObserver(): void {
 	vi.stubGlobal('IntersectionObserver', FakeObserver)
 }
 
+// El observer de lo que está por encima de la pantalla: su raíz termina en el borde de arriba.
+const looksAbove = (observer: FakeObserver) =>
+	observer.options.rootMargin?.endsWith('-100% 0px') ?? false
+
 /** El observer de las secciones (la franja de arriba de la pantalla). */
 export function band(): FakeObserver {
 	const observer = FakeObserver.all.find(
-		(candidate) => !candidate.disconnected && !candidate.targets.has(document.documentElement),
+		(candidate) =>
+			!candidate.disconnected &&
+			!candidate.targets.has(document.documentElement) &&
+			!looksAbove(candidate),
 	)
 	if (observer === undefined) throw new Error('no hay observer de secciones')
+	return observer
+}
+
+/** El observer de las secciones que ya empezaron más arriba (su borde de arriba pasó el de la pantalla). */
+export function above(): FakeObserver {
+	const observer = FakeObserver.all.find(
+		(candidate) => !candidate.disconnected && looksAbove(candidate),
+	)
+	if (observer === undefined) throw new Error('no hay observer de lo que pasó arriba')
 	return observer
 }
 
@@ -81,12 +97,20 @@ export function bottom(): FakeObserver {
 	return observer
 }
 
-/** Una entrada por cada sección de `ids` que está en la página: cruzó la línea o no. */
+/** Una entrada por cada sección de `ids` que está en la página: toca la franja de arriba o no. */
 export function crossing(ids: readonly string[], ...crossed: string[]): [Element, FakeEntry][] {
 	return ids.flatMap((id): [Element, FakeEntry][] => {
 		const element = document.getElementById(id)
 		return element === null ? [] : [[element, { isIntersecting: crossed.includes(id) }]]
 	})
+}
+
+/**
+ * Una entrada por cada sección de `ids` que está en la página: su borde de arriba ya pasó el de
+ * la pantalla (empezó más arriba) o no (empieza a la vista, o más abajo).
+ */
+export function passed(ids: readonly string[], ...above: string[]): [Element, FakeEntry][] {
+	return crossing(ids, ...above)
 }
 
 /** La entrada del fondo: el documento entero a la vista (llegó al fondo) o no. */

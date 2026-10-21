@@ -166,27 +166,47 @@ describe('SubNavLayout', () => {
 		const scrollToSection = (id: string, top: number) =>
 			window.scrollTo(0, window.scrollY + sectionTop(id) - top)
 
-		// Arriba de todo, la primera (con este header corto, ya cruzó la línea: al 30 % de la
-		// pantalla).
+		// Arriba de todo, la primera (con este header corto, ya empieza en la franja de arriba:
+		// el 30 % de la pantalla).
 		expect(activeLabel(links)).toBe('Imagen')
 
 		// Volúmenes arriba, en la parte de arriba de la pantalla.
 		scrollToSection('seccion-3', 100)
 		await expect.poll(() => activeLabel(links)).toBe('Volúmenes')
 
-		// Recursos todavía por debajo de la línea: sigue Volúmenes.
+		// Recursos todavía por debajo de la franja: sigue Volúmenes.
 		scrollToSection('seccion-4', 300)
 		await expect.poll(() => activeLabel(links)).toBe('Volúmenes')
 		scrollToSection('seccion-4', 160)
 		await expect.poll(() => activeLabel(links)).toBe('Recursos')
 
-		// Al fondo, "Eliminar app" (corta, nunca llega a la línea).
+		// Al fondo, "Eliminar app" (corta, nunca llega arriba).
 		window.scrollTo(0, document.documentElement.scrollHeight)
 		await expect.poll(() => activeLabel(links)).toBe('Eliminar app')
 		expect(sectionTop('seccion-5')).toBeGreaterThan(600 * 0.3)
 
 		window.scrollTo(0, 0)
 		await expect.poll(() => activeLabel(links)).toBe('Imagen')
+	})
+
+	it('una tarjeta corta a la altura de la nav (donde la deja un salto) es la marcada, aunque la siguiente asome arriba', async () => {
+		await page.viewport(1400, 600)
+		const spy = new SectionSpy(SECTION_IDS)
+		// Healthcheck corta: alineada arriba, Volúmenes empieza a 144 px, en el 30 % de arriba.
+		const sections = CONFIG_SECTIONS.map((height, index) => (index === 2 ? 100 : height))
+		const { links } = await mount(1000, { sections, spy })
+
+		window.scrollTo(0, window.scrollY + sectionTop('seccion-2') - 24)
+		expect(sectionTop('seccion-3')).toBeLessThan(600 * 0.3)
+		await expect.poll(() => activeLabel(links)).toBe('Healthcheck')
+
+		// Un poco más abajo, Healthcheck ya empezó más arriba de la pantalla: es Volúmenes.
+		window.scrollTo(0, window.scrollY + 40)
+		await expect.poll(() => activeLabel(links)).toBe('Volúmenes')
+
+		// Y de vuelta.
+		window.scrollTo(0, window.scrollY - 40)
+		await expect.poll(() => activeLabel(links)).toBe('Healthcheck')
 	})
 
 	it('con un alto de página con decimales, al fondo también gana la última', async () => {
