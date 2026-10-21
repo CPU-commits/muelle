@@ -659,8 +659,10 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
       dirección que falló (también uno guardado, al recargar), deja salir las escrituras
       frenadas por la mudanza a esa dirección (también si se salió de Ajustes y se volvió),
       pone los puertos de antes en los campos (si el cambio fue desde acá, o si los ajustes
-      del cache todavía son los que fallaron) y, si el panel no está en la dirección
-      anterior (`https://<panel_domain>[:<puerto anterior>]`), ofrece volver. El panel no
+      del cache todavía son los que fallaron) y, si el panel está en una dirección de Caddy,
+      dice que sigue en la anterior (`https://<panel_domain>[:<puerto anterior>]`); desde la
+      que falló, ofrece volver. Entrando por otro proxy, una IP o `MUELLE_PANEL_ORIGIN`, no
+      nombra ni ofrece la de Caddy: esa dirección nunca se usó. El panel no
       puede saber si la dirección nueva responde (la CSP no deja pedir a otro origen): lo
       sabe por `ports_rollback`, en una dirección que sí responde. Por eso el aviso de la
       dirección nueva dice qué hacer si no responde: volver a la anterior.
@@ -693,7 +695,9 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   (`proxySettings/panelMoveNotice.ts`, hasta que se cierra; "Ir al panel" lo lleva al origen
   nuevo con `?panel_moved=1`, porque allá el localStorage es otro). El aviso nombra la
   dirección anterior (`panelOrigin` de antes del `PATCH`, contrato §3.5): a dónde volver si
-  la nueva no responde. Allá no se sabe cuál era, y no la nombra. Los dos orígenes pasan por
+  la nueva no responde, si se entró por ella (por otro proxy, una IP o
+  `MUELLE_PANEL_ORIGIN` no se usó nunca, y no la nombra). Allá no se sabe cuál era, y
+  tampoco la nombra. Los dos orígenes pasan por
   `parsePanelOrigin` al leerlos. También va ahí el `at` de la vuelta a los puertos anteriores
   cuyo aviso se cerró (`proxySettings/rollbackNotice.ts`); los dos usan `noticeStorage.ts`.
 - Para saber quién es el usuario: `createQuery(() => meQuery())` con `meQuery` del barrel

@@ -165,7 +165,7 @@ describe('SettingsScreen', () => {
 			.toBeVisible()
 	})
 
-	it('si muelle volvió a los puertos anteriores, lo dice en Puertos y ofrece la dirección anterior', async () => {
+	it('si muelle volvió a los puertos anteriores, lo dice en Puertos, sin la dirección de Caddy si no se entró por ella', async () => {
 		mocks.getSettings.mockResolvedValue(PHASE_3)
 		mocks.listRegistries.mockResolvedValue([])
 		ingress.getProxyStatus.mockResolvedValue({
@@ -193,15 +193,14 @@ describe('SettingsScreen', () => {
 			)
 			.toBeVisible()
 		await expect
-			.element(
-				ports.getByText(
-					/La dirección del panel sigue siendo https:\/\/panel\.tudominio\.cl\./,
-				),
-			)
+			.element(ports.getByText(/HTTPS 9443: los puertos 80 o 9443 del host ya están en uso/))
 			.toBeVisible()
+		// Este panel está en otra dirección (vitest), no en la de Caddy: no la nombra ni la
+		// ofrece, nunca la usó.
+		expect(document.body.textContent).not.toContain('https://panel.tudominio.cl')
 		await expect
 			.element(ports.getByRole('link', { name: 'Volver a la dirección anterior' }))
-			.toHaveAttribute('href', 'https://panel.tudominio.cl/ajustes')
+			.not.toBeInTheDocument()
 	})
 
 	it('cuándo se actualizó un registry es un <time> con la fecha, y la fecha exacta se lee', async () => {

@@ -91,8 +91,8 @@ export interface PortsRollbackView {
 	/** Cuándo volvió: el aviso puede verse días después (hasta el próximo cambio de puertos). */
 	readonly at: Date
 	/**
-	 * La dirección del panel con los puertos de antes, si la vuelta cambió el HTTPS y Caddy
-	 * sirve el panel; si no, null.
+	 * La dirección del panel con los puertos de antes, si la vuelta cambió el HTTPS, Caddy
+	 * sirve el panel y este panel está en una dirección de Caddy; si no, null.
 	 */
 	readonly origin: string | null
 }
@@ -308,19 +308,28 @@ export class ProxySettingsViewModel {
 	get rollback(): PortsRollbackView | null {
 		const rollback = this.#rollbackStatus
 		if (!rollback || rollback.at.getTime() === this.#dismissedRollback) return null
-		const httpsChanged = rollback.attempted.httpsPort !== rollback.restored.httpsPort
 		return {
 			attempted: rollback.attempted,
 			restored: rollback.restored,
 			error: rollback.error,
 			at: rollback.at,
-			origin: httpsChanged
-				? panelOrigin({
-						panelDomain: this.proxy.panelDomain,
-						httpsPort: rollback.restored.httpsPort,
-					})
-				: null,
+			origin: this.#rollbackOrigin(rollback),
 		}
+	}
+
+	/**
+	 * La dirección de Caddy con los puertos a los que volvió, si cambió el HTTPS y este panel
+	 * está en una dirección de Caddy (la anterior o la que falló). Entrando por otro proxy,
+	 * una IP o `MUELLE_PANEL_ORIGIN`, null: esa dirección nunca se usó, y la de este panel no
+	 * cambió.
+	 */
+	#rollbackOrigin(rollback: PortsRollback): string | null {
+		if (rollback.attempted.httpsPort === rollback.restored.httpsPort) return null
+		const { panelDomain } = this.proxy
+		const restored = panelOrigin({ panelDomain, httpsPort: rollback.restored.httpsPort })
+		const attempted = panelOrigin({ panelDomain, httpsPort: rollback.attempted.httpsPort })
+		const here = currentOrigin()
+		return here === restored || here === attempted ? restored : null
 	}
 
 	/** A qué puertos volvió y cuándo ("hace 3 días"). */
@@ -349,8 +358,8 @@ export class ProxySettingsViewModel {
 	}
 
 	/**
-	 * Ajustes en la dirección a la que volvió el panel, si este panel no está ahí (se entró
-	 * por otra: otro proxy, o una pestaña que sigue abierta). null si no hay a dónde ir.
+	 * Ajustes en la dirección a la que volvió el panel, si este panel está en la que falló (una
+	 * pestaña que sigue abierta). null si no hay a dónde ir.
 	 */
 	get rollbackHref(): string | null {
 		const origin = this.rollback?.origin ?? null
@@ -476,8 +485,10 @@ export class ProxySettingsViewModel {
 				// de responder. No sale ninguna escritura más desde acá.
 				const leaving = moved !== null && currentOrigin() === panelOrigin(before)
 				if (moved !== null) {
-					// La de antes del `PATCH`: a dónde volver si la nueva no responde (§3.5).
-					const previous = panelOrigin(before)
+					// La de antes del `PATCH`: a dónde volver si la nueva no responde (§3.5). Solo
+					// si se entró por ahí: por otro proxy, una IP o `MUELLE_PANEL_ORIGIN`, esa
+					// dirección nunca se usó, y la de este panel no cambia.
+					const previous = leaving ? panelOrigin(before) : null
 					this.movedTo = moved
 					this.movedFrom = previous
 					savePanelMove(moved, previous)
