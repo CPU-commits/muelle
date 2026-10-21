@@ -75,10 +75,11 @@ describe('watchSections', () => {
 		expect(band().options.root).toBe(document)
 		expect(band().options.rootMargin).toBe('0px 0px -70% 0px')
 		expect([...band().targets]).toEqual(IDS.map(sectionEl))
-		// El fondo: el documento entero adentro de la pantalla estirada hacia arriba.
+		// El fondo: el documento entero adentro de la pantalla estirada hacia arriba, y un píxel
+		// hacia abajo (un alto con decimales termina una fracción por debajo).
 		expect(bottom().options.root).toBe(document)
 		expect(bottom().options.threshold).toBe(1)
-		expect(bottom().options.rootMargin).toMatch(/^\d+px 0px 0px 0px$/)
+		expect(bottom().options.rootMargin).toMatch(/^\d+px 0px 1px 0px$/)
 	})
 
 	it('al fondo de la página gana la última, aunque no llegue a la línea', () => {

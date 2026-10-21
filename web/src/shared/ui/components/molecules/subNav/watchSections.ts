@@ -16,8 +16,10 @@
 const BAND = '0px 0px -70% 0px'
 // El fondo de la página: el documento entero adentro de la pantalla estirada hacia arriba
 // (lo que ya pasó cuenta como adentro), con `threshold: 1`. Es lo que avisa justo cuando el
-// borde de abajo del documento llega al de la pantalla.
-const ABOVE_THE_VIEWPORT = '1000000px 0px 0px 0px'
+// borde de abajo del documento llega al de la pantalla. Con un píxel de holgura abajo: con un
+// alto con decimales (1889.4375 px), al fondo el documento termina una fracción de píxel por
+// debajo de la pantalla y nunca entraría entero.
+const ABOVE_THE_VIEWPORT = '1000000px 0px 1px 0px'
 
 export interface SectionWatch {
 	/** La sección a la vista, o null si ninguna cruzó la línea todavía (arriba de todo). */

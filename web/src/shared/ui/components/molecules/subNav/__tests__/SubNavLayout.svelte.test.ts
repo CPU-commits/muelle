@@ -188,4 +188,19 @@ describe('SubNavLayout', () => {
 		window.scrollTo(0, 0)
 		await expect.poll(() => activeLabel(links)).toBe('Imagen')
 	})
+
+	it('con un alto de página con decimales, al fondo también gana la última', async () => {
+		await page.viewport(1400, 600)
+		const spy = new SectionSpy(SECTION_IDS)
+		// Como Configuración sin healthcheck: al fondo, el documento termina una fracción de
+		// píxel por debajo de la pantalla.
+		const sections = CONFIG_SECTIONS.map((height, index) =>
+			index === 2 ? height + 0.4 : height,
+		)
+		const { links } = await mount(1000, { sections, spy })
+		expect(document.documentElement.getBoundingClientRect().height % 1).not.toBe(0)
+
+		window.scrollTo(0, document.documentElement.scrollHeight)
+		await expect.poll(() => activeLabel(links)).toBe('Eliminar app')
+	})
 })
