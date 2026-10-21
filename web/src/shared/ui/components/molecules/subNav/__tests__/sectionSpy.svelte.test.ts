@@ -37,6 +37,9 @@ const fire = (...touching: string[]) => {
 	band().fire(crossing(IDS, ...touching))
 }
 
+/** Quien lee toca la página (la rueda, por ejemplo). */
+const touch = (type = 'wheel') => document.body.dispatchEvent(new Event(type, { bubbles: true }))
+
 /** Espera a que pase el salto de un link (dos frames). */
 const settled = () =>
 	new Promise<void>((resolve) =>
@@ -88,7 +91,8 @@ describe('SectionSpy', () => {
 		fire('b')
 		expect(spy.current).toBe('c')
 
-		// Scrollear a mano sí: la activa vuelve a seguir al scroll.
+		// Que cambie lo que se ve sin que cambie el contenido sí (quien lee scrolleó, o volvió
+		// atrás en el historial): la activa vuelve a seguir al scroll.
 		fire('a')
 		expect(spy.current).toBe('a')
 	})
@@ -146,10 +150,12 @@ describe('SectionSpy', () => {
 		sectionEl('c').remove()
 		const spy = new SectionSpy(IDS)
 		track(spy)
+		// La página de la que viene el link estaba scrolleada (Tokens).
+		window.scrollTo(0, 300)
 
 		spy.select('c')
 		expect(spy.current).toBe('c')
-		// Mientras carga, lo que pasa arriba (con la página sin scrollear) no la suelta.
+		// Mientras llega, lo que se vea (la página de antes, scrolleada) no la suelta.
 		fire('a')
 		expect(spy.current).toBe('c')
 
@@ -191,11 +197,12 @@ describe('SectionSpy', () => {
 		expect(spy.current).toBe('b')
 	})
 
-	it('si se scrolleó antes de que aparezca la sección del deep link, no salta y la suelta', async () => {
+	it('si quien lee toca la página antes de que aparezca la sección del deep link, no salta y la suelta', async () => {
 		sectionEl('b').remove()
 		const spy = new SectionSpy(IDS, { initial: 'b' })
 		track(spy)
 
+		touch()
 		window.scrollTo(0, 300)
 		fire('a')
 		expect(spy.current).toBe('a')
@@ -209,14 +216,78 @@ describe('SectionSpy', () => {
 		expect(spy.current).toBe('a')
 	})
 
-	it('con la página ya scrolleada al montar (un F5 que recuperó la posición), no salta', () => {
+	it('con la página scrolleada al montar (se llegó desde otra página), el deep link igual la trae', () => {
 		window.scrollTo(0, 300)
 		const spy = new SectionSpy(IDS, { initial: 'b' })
 		const scrollIntoView = vi.spyOn(sectionEl('b'), 'scrollIntoView')
 		track(spy)
 
-		expect(scrollIntoView).not.toHaveBeenCalled()
+		expect(scrollIntoView).toHaveBeenCalledOnce()
 		fire('a')
+		expect(spy.current).toBe('b')
+	})
+
+	it('lo que llega después arriba de un deep link no lo suelta: lo vuelve a traer a la vista', async () => {
+		const spy = new SectionSpy(IDS, { initial: 'b' })
+		const scrollIntoView = vi.spyOn(sectionEl('b'), 'scrollIntoView')
+		track(spy)
+		await settled()
+		expect(scrollIntoView).toHaveBeenCalledOnce()
+
+		// Llega una sección de arriba con su query: lo que se ve cambia sin que nadie scrollee.
+		const loaded = document.createElement('div')
+		loaded.style.height = '2000px'
+		page.container.prepend(loaded)
+		await mutationsSeen()
+		fire('a')
+
+		expect(scrollIntoView.mock.calls.length).toBeGreaterThan(1)
+		expect(spy.current).toBe('b')
+		await settled()
+		expect(spy.current).toBe('b')
+
+		// Una que crece (sin elementos nuevos: una imagen, una fuente) tampoco.
+		scrollIntoView.mockClear()
+		loaded.style.height = '2400px'
+		await settled()
+		expect(scrollIntoView).toHaveBeenCalledOnce()
+		await settled()
+		expect(spy.current).toBe('b')
+
+		// Quien lee scrollea: la activa vuelve a seguir al scroll.
+		touch()
+		fire('c')
+		expect(spy.current).toBe('c')
+	})
+
+	it('después de que quien lee toca la página, un cambio del contenido ya no trae la sección ni la sostiene', async () => {
+		const spy = new SectionSpy(IDS)
+		track(spy)
+		fire('a')
+		spy.select('c')
+		await settled()
+
+		const scrollIntoView = vi.spyOn(sectionEl('c'), 'scrollIntoView')
+		touch('pointerdown')
+		// Lo que tocó cambió el contenido (otra opción en Healthcheck): lo que se ve es otra.
+		page.container.prepend(document.createElement('p'))
+		await mutationsSeen()
+		fire('b')
+
+		expect(scrollIntoView).not.toHaveBeenCalled()
+		expect(spy.current).toBe('b')
+	})
+
+	it('si la sección marcada se va de la página (se volvió a otra), suelta la marca', async () => {
+		const spy = new SectionSpy(IDS)
+		track(spy)
+		fire('a')
+		spy.select('c')
+		await settled()
+
+		sectionEl('c').remove()
+		await mutationsSeen()
+
 		expect(spy.current).toBe('a')
 	})
 
@@ -232,7 +303,7 @@ describe('SectionSpy', () => {
 	it('al desmontarse deja de observar y no queda ninguna activa', () => {
 		const spy = new SectionSpy(IDS)
 		track(spy)
-		const observers = [band(), bottom()]
+		const observers = [band(), above(), bottom()]
 		fire('a')
 
 		for (const stop of stops) stop()

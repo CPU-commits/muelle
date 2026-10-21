@@ -6,14 +6,20 @@ import { type SectionWatch, watchSections } from './watchSections'
 // (watchSections, con IntersectionObserver y sin escuchar el scroll), salvo que la haya
 // marcado un link o un deep link:
 // - un link de la nav (`select`) la marca en el acto y la deja marcada mientras dura el salto
-//   (no parpadea con las secciones por las que pasa) y hasta que se scrollea a mano: lo que
-//   muestra el scroll cambia respecto de donde terminó el salto;
-// - un deep link (`initial`) marca su sección desde el principio y, si la página la dibuja
-//   después de que SvelteKit buscó el ancla (llega con su query), la trae a la vista.
+//   (no parpadea con las secciones por las que pasa) y hasta que se scrollea a mano;
+// - un deep link (`initial`) marca su sección desde el principio y la trae a la vista, aunque
+//   la página la dibuje después de que SvelteKit buscó el ancla (llega con su query).
+// Lo que llega a la página después (Proxy y DNS y Seguridad arriba de Registries, las listas
+// con sus queries) mueve lo que se ve sin que nadie scrollee. Mientras quien lee no toque la
+// página (la rueda, el dedo, una tecla, el puntero), eso no suelta la marca: su sección vuelve
+// a la vista. Lo que sí la suelta es que lo que se ve cambie sin que cambie el contenido (quien
+// lee scrolleó, o volvió atrás en el historial) o, después de que tocó la página, con lo que
+// cambie. No se infiere nada del `scrollY`: la página de la que viene un link (Tokens) puede
+// estar scrolleada hasta que SvelteKit la vuelve arriba.
 // El hash de la URL no se toca: lo pone el link al hacer clic y nada más. No hay scroll suave:
 // los saltos son los del navegador, instantáneos (nada que frenar con prefers-reduced-motion).
 
-// Mientras dura el salto de un link no hay contra qué comparar.
+// Mientras dura un salto (del link, o de traer la sección de nuevo) no hay contra qué comparar.
 const SETTLING = Symbol('settling')
 
 export interface SectionSpyOptions {
@@ -25,20 +31,20 @@ export class SectionSpy {
 	readonly #ids: readonly string[]
 	#observed = $state<string | null>(null)
 	#pinned = $state<string | null>(null)
-	// Lo que mostraba el scroll al terminar el salto: mientras siga igual, la marca se queda.
+	// Lo que mostraba el scroll al terminar el último salto: mientras siga igual, la marca se
+	// queda.
 	#baseline: string | null | typeof SETTLING = SETTLING
-	// La sección marcada todavía no está en la página: traerla cuando aparezca.
-	#pending = false
+	// Quien lee tocó la página desde que se marcó: lo que cambie de ahí en más es cosa suya.
+	#touched = false
+	// La sección marcada ya estuvo en la página: si se va, es que se fue a otra.
+	#arrived = false
 	#settleRun = 0
 	#watch: SectionWatch | null = null
 
 	/** `ids`: las secciones de la página (sus `id`), en el orden de la nav y de la página. */
 	constructor(ids: readonly string[], { initial = null }: SectionSpyOptions = {}) {
 		this.#ids = ids
-		if (initial !== null && ids.includes(initial)) {
-			this.#pinned = initial
-			this.#pending = true
-		}
+		if (initial !== null && ids.includes(initial)) this.#pinned = initial
 	}
 
 	/** La sección activa, o null si todavía no se llegó a ninguna (arriba de todo). */
@@ -56,21 +62,24 @@ export class SectionSpy {
 			return
 		}
 		this.#pinned = id
-		this.#pending = this.#watch?.element(id) === undefined
-		if (this.#pending) {
-			this.#settleRun += 1
-			this.#baseline = SETTLING
-		} else {
-			this.#settle()
-		}
+		this.#touched = false
+		this.#arrived = this.#watch?.element(id) !== undefined
+		// En esta página salta el link; si no está (el link viene de otra), la trae al llegar.
+		if (this.#arrived) this.#settle()
+		else this.#hold()
 	}
 
 	/** Para `{@attach}` en el elemento que tiene las secciones adentro. */
 	track: Attachment<HTMLElement> = (container) =>
 		untrack(() => {
-			const watch = watchSections(container, this.#ids, () => this.#update())
+			const watch = watchSections(container, this.#ids, {
+				view: () => this.#view(),
+				layout: () => this.#layout(),
+				input: () => this.#input(),
+			})
 			this.#watch = watch
-			this.#update()
+			if (this.#pinned !== null) this.#hold()
+			this.#layout()
 			return () => {
 				watch.stop()
 				this.#watch = null
@@ -78,58 +87,75 @@ export class SectionSpy {
 			}
 		})
 
-	#update(): void {
-		const watch = this.#watch
-		if (watch === null) return
-		this.#observed = watch.inView
-		this.#arrive(watch)
+	// El scroll movió lo que se ve.
+	#view(): void {
+		if (this.#watch === null) return
+		this.#observed = this.#watch.inView
 		this.#review()
 	}
 
-	// La sección marcada que faltaba ya está: traerla a la vista, salvo que alguien haya movido
-	// la página mientras tanto (quien lee, o SvelteKit al recuperar el scroll de un F5).
-	#arrive(watch: SectionWatch): void {
+	// Cambió el contenido. Si quien lee no tocó la página, no fue él: la sección marcada vuelve
+	// a la vista (la primera vez que aparece, también) y se espera a que termine el salto.
+	#layout(): void {
+		const watch = this.#watch
+		if (watch === null) return
+		this.#observed = watch.inView
 		const id = this.#pinned
-		if (!this.#pending || id === null) return
+		if (id === null) return
 		const element = watch.element(id)
-		if (element === undefined) return
-		this.#pending = false
-		if (window.scrollY > 0) {
-			this.#unpin()
+		if (element === undefined) {
+			if (this.#arrived) this.#unpin()
+			return
+		}
+		this.#arrived = true
+		if (this.#touched) {
+			this.#review()
 			return
 		}
 		element.scrollIntoView()
 		this.#settle()
 	}
 
+	// Quien lee tocó la página: de ahí en más, lo que cambie es suyo. Si la sección todavía no
+	// llegó, ya está en otra cosa: no se la trae.
+	#input(): void {
+		if (this.#pinned === null) return
+		this.#touched = true
+		if (!this.#arrived) this.#unpin()
+	}
+
+	// Su sección todavía no está: hasta que llegue, lo que se vea no la suelta.
+	#hold(): void {
+		this.#settleRun += 1
+		this.#baseline = SETTLING
+	}
+
 	// El salto termina antes del frame siguiente: ahí se anota lo que muestra el scroll, con lo
 	// que el navegador ya calculó aunque todavía no lo haya entregado.
 	#settle(): void {
-		this.#baseline = SETTLING
-		const run = ++this.#settleRun
+		this.#hold()
+		const run = this.#settleRun
 		requestAnimationFrame(() =>
 			requestAnimationFrame(() => {
-				if (run !== this.#settleRun) return
-				this.#watch?.flush()
+				const watch = this.#watch
+				if (run !== this.#settleRun || watch === null) return
+				watch.flush()
+				this.#observed = watch.inView
 				this.#baseline = this.#observed
 			}),
 		)
 	}
 
-	// Después de cada cambio de lo que se ve: ¿sigue la marca del link?
+	// ¿Sigue la marca del link? Mientras dura un salto, o mientras su sección no llegó, sí.
 	#review(): void {
-		if (this.#pinned === null) return
-		if (this.#pending) {
-			// Su sección todavía no llegó: solo la suelta que se haya scrolleado.
-			if (window.scrollY > 0) this.#unpin()
-			return
-		}
-		if (this.#baseline !== SETTLING && this.#observed !== this.#baseline) this.#unpin()
+		if (this.#pinned === null || this.#baseline === SETTLING) return
+		if (this.#observed !== this.#baseline) this.#unpin()
 	}
 
 	#unpin(): void {
 		this.#pinned = null
-		this.#pending = false
+		this.#touched = false
+		this.#arrived = false
 		this.#settleRun += 1
 	}
 }

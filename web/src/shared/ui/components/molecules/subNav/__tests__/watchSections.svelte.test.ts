@@ -15,25 +15,31 @@ import {
 } from './fakeIntersectionObserver'
 
 // Qué sección está a la vista, con un IntersectionObserver de mentira (fakeIntersectionObserver.ts).
-// Corre en Chromium por el DOM y el MutationObserver de verdad.
+// Corre en Chromium por el DOM, el MutationObserver, el ResizeObserver y los eventos de verdad.
 
 const IDS = ['a', 'b', 'c'] as const
 
 let page: ReturnType<typeof sectionsPage>
 let watch: SectionWatch | null = null
-const onChange = vi.fn()
+const events = { view: vi.fn(), layout: vi.fn(), input: vi.fn() }
 
 function start(): SectionWatch {
-	watch = watchSections(page.container, IDS, onChange)
+	watch = watchSections(page.container, IDS, events)
 	return watch
 }
+
+/** Espera dos frames: el ResizeObserver avisa en el frame en que cambió el tamaño. */
+const frames = () =>
+	new Promise<void>((resolve) =>
+		requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+	)
 
 const fire = (...crossed: string[]) => band().fire(crossing(IDS, ...crossed))
 
 describe('watchSections', () => {
 	beforeEach(() => {
 		installFakeObserver()
-		onChange.mockClear()
+		for (const event of Object.values(events)) event.mockReset()
 		page = sectionsPage(IDS)
 	})
 
@@ -50,7 +56,7 @@ describe('watchSections', () => {
 		fire()
 
 		expect(sections.inView).toBeNull()
-		expect(onChange).toHaveBeenCalled()
+		expect(events.view).toHaveBeenCalled()
 	})
 
 	it('a la vista está la que ocupa la parte de arriba de la pantalla', () => {
@@ -93,7 +99,7 @@ describe('watchSections', () => {
 		above().fire(passed(IDS, 'a'))
 		fire('a', 'b')
 		const seen: (string | null)[] = []
-		onChange.mockImplementation(() => seen.push(sections.inView))
+		events.view.mockImplementation(() => seen.push(sections.inView))
 
 		// El mismo frame: "b" empezó más arriba y "c" llega a la franja. El navegador llama a
 		// cada observer por separado; el primero ya ve lo del otro.
@@ -101,7 +107,6 @@ describe('watchSections', () => {
 		fire('b', 'c')
 
 		expect(seen).toEqual(['c'])
-		onChange.mockReset()
 	})
 
 	it('mira una franja en la parte de arriba de la pantalla y el fondo de la página', () => {
@@ -145,7 +150,7 @@ describe('watchSections', () => {
 		expect(sections.inView).toBe('a')
 	})
 
-	it('observa las secciones que aparecen después y suelta las que se van', async () => {
+	it('observa las secciones que aparecen después y suelta las que se van (avisa con layout)', async () => {
 		sectionEl('b').remove()
 		const sections = start()
 		expect(band().targets.size).toBe(2)
@@ -153,11 +158,11 @@ describe('watchSections', () => {
 
 		const late = section('b')
 		sectionEl('a').after(late)
-		onChange.mockClear()
 		await mutationsSeen()
 		expect(band().targets.has(late)).toBe(true)
 		expect(sections.element('b')).toBe(late)
-		expect(onChange).toHaveBeenCalled()
+		expect(events.layout).toHaveBeenCalledOnce()
+		expect(events.view).not.toHaveBeenCalled()
 
 		above().fire(passed(IDS, 'a'))
 		fire('a', 'b')
@@ -180,30 +185,59 @@ describe('watchSections', () => {
 		expect(sections.inView).toBe('b')
 	})
 
-	it('flush aplica lo que el navegador ya calculó y todavía no entregó', () => {
+	it('un cambio de tamaño del contenido también avisa con layout; empezar a mirarlo, no', async () => {
+		start()
+		await frames()
+		expect(events.layout).not.toHaveBeenCalled()
+
+		sectionEl('a').style.height = '300px'
+		await frames()
+
+		expect(events.layout).toHaveBeenCalledOnce()
+	})
+
+	it('avisa con input cuando quien lee toca la página: la rueda, el dedo, una tecla, el puntero', () => {
+		start()
+
+		for (const type of ['wheel', 'touchmove', 'keydown', 'pointerdown']) {
+			events.input.mockClear()
+			document.body.dispatchEvent(new Event(type, { bubbles: true }))
+			expect(events.input, type).toHaveBeenCalledOnce()
+		}
+		// Mover el puntero o soltar una tecla no.
+		events.input.mockClear()
+		for (const type of ['pointermove', 'keyup', 'scroll']) {
+			document.body.dispatchEvent(new Event(type, { bubbles: true }))
+		}
+		expect(events.input).not.toHaveBeenCalled()
+	})
+
+	it('flush aplica lo que el navegador ya calculó y todavía no entregó, sin avisar', () => {
 		const sections = start()
 		fire('a')
 
 		band().queue(crossing(IDS, 'c'))
-		onChange.mockClear()
+		events.view.mockClear()
 		sections.flush()
 
 		expect(sections.inView).toBe('c')
-		expect(onChange).toHaveBeenCalledOnce()
+		expect(events.view).not.toHaveBeenCalled()
 	})
 
 	it('stop deja de observar', async () => {
 		const sections = start()
-		const observers = [band(), bottom()]
+		const observers = [band(), above(), bottom()]
 
 		sections.stop()
 		watch = null
 
 		expect(observers.every((observer) => observer.disconnected)).toBe(true)
 		page.container.append(section('d'))
-		onChange.mockClear()
+		sectionEl('a').style.height = '300px'
+		document.body.dispatchEvent(new Event('wheel', { bubbles: true }))
 		await mutationsSeen()
-		expect(onChange).not.toHaveBeenCalled()
+		await frames()
+		for (const event of Object.values(events)) expect(event).not.toHaveBeenCalled()
 		expect(observers.every((observer) => observer.targets.size === 0)).toBe(true)
 	})
 })

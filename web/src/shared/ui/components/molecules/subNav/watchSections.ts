@@ -9,6 +9,9 @@
 //   ("Eliminar app").
 // - Las secciones pueden aparecer después (cada una con su query) o irse: un
 //   MutationObserver sobre el contenedor las vuelve a buscar.
+// - Avisa por separado lo que movió el scroll (`view`), lo que cambió el contenido (`layout`:
+//   secciones que llegan o se van, un alto que cambia) y que quien lee tocó la página
+//   (`input`): SectionSpy necesita saber quién movió lo que se ve.
 // La raíz de los observers es el documento (`root: document`): su pantalla, la misma que
 // la implícita en la app. Adentro de un iframe (el de los tests de componentes, escalado
 // dentro de la página de vitest), la implícita sería la pantalla de la página de afuera.
@@ -25,25 +28,43 @@ const ABOVE = '1000000px 0px -100% 0px'
 // debajo de la pantalla y nunca entraría entero.
 const STRETCHED_UP = '1000000px 0px 1px 0px'
 
+// Lo que hace quien lee y puede mover la página: la rueda, el dedo, una tecla (las que
+// scrollean, Tab, buscar en la página) y el puntero (también en la barra de scroll). Son
+// eventos de entrada, no del scroll: un scroll que hace la página (un salto, el historial) no
+// los dispara.
+const INPUT_EVENTS = ['wheel', 'touchmove', 'keydown', 'pointerdown'] as const
+
+export interface SectionEvents {
+	/** El scroll movió las secciones respecto de la franja o del fondo: `inView` pudo cambiar. */
+	readonly view: () => void
+	/**
+	 * Cambió el contenido: llegaron o se fueron secciones, o cambió el alto de algo. `inView`
+	 * también pudo cambiar (y lo que el navegador calcule de ahí llega después con `view`).
+	 */
+	readonly layout: () => void
+	/** Quien lee tocó la página: la rueda, el dedo, una tecla o el puntero. */
+	readonly input: () => void
+}
+
 export interface SectionWatch {
 	/** La sección a la vista, o null si ninguna llegó a la franja todavía (arriba de todo). */
 	readonly inView: string | null
 	/** El elemento de la sección `id`, si está en la página. */
 	element(id: string): Element | undefined
-	/** Aplica lo que el navegador ya calculó y todavía no entregó (avisa con `onChange`). */
+	/** Aplica lo que el navegador ya calculó y todavía no entregó, sin avisar: se lee `inView`. */
 	flush(): void
 	stop(): void
 }
 
 /**
- * Busca las secciones `ids` (por su `id`) adentro de `container` y llama a `onChange` cada vez
- * que puede haber cambiado `inView` o las secciones que hay. Al empezar no avisa: el estado
- * inicial se lee de lo que devuelve.
+ * Busca las secciones `ids` (por su `id`) adentro de `container` y avisa con `events` lo que
+ * puede haber cambiado `inView` o las secciones que hay. Al empezar no avisa: el estado inicial
+ * se lee de lo que devuelve.
  */
 export function watchSections(
 	container: HTMLElement,
 	ids: readonly string[],
-	onChange: () => void,
+	events: SectionEvents,
 ): SectionWatch {
 	const elements = new Map<string, Element>()
 	const idOf = new WeakMap<Element, string>()
@@ -86,7 +107,7 @@ export function watchSections(
 	const delivered = () => {
 		takeAll()
 		compute()
-		onChange()
+		events.view()
 	}
 
 	const band = new IntersectionObserver(
@@ -135,22 +156,44 @@ export function watchSections(
 	}
 	const mutations = new MutationObserver(() => {
 		resolve()
-		onChange()
+		events.layout()
 	})
 	mutations.observe(container, { childList: true, subtree: true })
 	resolve()
+
+	// El alto (o el ancho) del contenido cambia también sin elementos nuevos: una imagen o una
+	// fuente que llega, una clase que muestra algo. El primer aviso es el tamaño con el que
+	// empieza, no un cambio.
+	let size: string | null = null
+	const resizes = new ResizeObserver(([entry]) => {
+		if (entry === undefined) return
+		const next = `${entry.contentRect.width}x${entry.contentRect.height}`
+		const changed = size !== null && next !== size
+		size = next
+		if (changed) events.layout()
+	})
+	resizes.observe(container)
+
+	const input = () => events.input()
+	const listening = { capture: true, passive: true } as const
+	for (const type of INPUT_EVENTS) window.addEventListener(type, input, listening)
 
 	return {
 		get inView() {
 			return inView
 		},
 		element: (id) => elements.get(id),
-		flush: delivered,
+		flush: () => {
+			takeAll()
+			compute()
+		},
 		stop: () => {
 			band.disconnect()
 			above.disconnect()
 			bottom.disconnect()
 			mutations.disconnect()
+			resizes.disconnect()
+			for (const type of INPUT_EVENTS) window.removeEventListener(type, input, listening)
 		},
 	}
 }
