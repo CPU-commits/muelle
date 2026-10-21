@@ -224,6 +224,78 @@ Un error de muelle se muestra con su `code` y su `message` (`403 out_of_scope: �
 - **El token** nunca va en la línea de comandos de un proceso del runner: `curl` lo lee de un archivo `0600` que se borra al terminar, y `jq` lee `env-json` del entorno.
 - **La versión:** `@v0` sigue al último release de la serie 0 (se mueve a mano, ver "Publicar una versión"); `@vX.Y.Z` queda fija.
 - **Si el repo de muelle es privado,** los repos que usan la action necesitan acceso: en el repo de muelle, Settings → Actions → General → Access, "Accessible from repositories owned by the user". Solo los repos privados del mismo dueño pueden usarla, y sus colaboradores externos ven los logs de la action.
+- **Un token de solo lectura no sirve para la action:** el `PUT` de las variables y el deploy responden `403 read_only_token`.
+
+## Claude Code (MCP)
+
+> **En construcción:** el servidor MCP llega con la rama `mcp` (contrato §8). Hasta que esté en tu versión de muelle, `/api/v1/mcp` responde `404 no_route` y Claude Code no conecta.
+
+muelle sirve un servidor MCP en `https://panel.tudominio.cl/api/v1/mcp` (el origen del panel, con `:<puerto>` si no es 443). Con él, Claude Code lee el estado de las apps, sus deploys, sus logs, sus variables (sin los secretos) y sus dominios y, con un token que no es de solo lectura, despliega, hace rollback y cambia variables no secretas. No hay nada que instalar: es HTTP, con un token de API.
+
+**El token**, en Ajustes → Tokens de API:
+- para depurar, uno **de solo lectura**: de un proyecto, de un stage, o "Todos los proyectos (solo lectura)", que lee todo muelle (el panel le pone un vencimiento de 90 días, que puedes cambiar);
+- para que Claude Code despliegue, uno de escritura **de un stage** (`auditfy/staging`), nunca de producción. No existe un token de escritura de todos los proyectos.
+
+**Agregarlo.** El panel muestra las dos formas al crear el token, con la URL de tu panel. Con el comando:
+
+```bash
+claude mcp add --transport http --scope user muelle https://panel.tudominio.cl/api/v1/mcp --header "Authorization: Bearer mk_…"
+```
+
+`--scope user` lo deja para todos tus proyectos. Claude Code guarda el token en claro en `~/.claude.json`, y el comando queda en el historial de la shell. Para compartirlo con tu equipo sin el token, un `.mcp.json` en la raíz del repositorio:
+
+```json
+{
+  "mcpServers": {
+    "muelle": {
+      "type": "http",
+      "url": "https://panel.tudominio.cl/api/v1/mcp",
+      "headers": { "Authorization": "Bearer ${MUELLE_TOKEN}" }
+    }
+  }
+}
+```
+
+Cada persona exporta el suyo antes de abrir Claude Code (`export MUELLE_TOKEN=mk_…`), y Claude Code pide aprobar el servidor de un `.mcp.json` la primera vez. Para no tener el token ni en un archivo ni en el entorno, sirve `headersHelper` (un comando que imprime los headers; ver la documentación de MCP de Claude Code). Con `/mcp`, en Claude Code, se ve si conectó y qué herramientas tiene.
+
+**Herramientas:**
+
+| Herramienta | Qué hace |
+|---|---|
+| `list_projects`, `list_stages`, `list_apps` | Lo que puede ver el token |
+| `get_app` | La configuración de una app: el spec, los servicios y, si se pide, el compose |
+| `get_env` | Las variables del stage y de la app. Los valores secretos nunca salen |
+| `get_app_status` | Las réplicas, las tareas de cada servicio con su error, la CPU y la memoria |
+| `get_app_logs` | Los logs de un servicio, sin follow: `tail`, `since` (`15m`, o una fecha), `contains` y `stream` |
+| `list_deploys`, `get_deploy` | El historial, y un deploy con el final de su log. `wait_s` espera a que termine |
+| `read_deploy_log` | El log completo de un deploy, por partes |
+| `list_domains` | Los dominios de la app, con el estado de su DNS y de su certificado |
+| `deploy` (escribe) | Despliega, con `image` o `images` opcionales, como la API |
+| `rollback` (escribe) | Vuelve al deploy anterior |
+| `set_env` (escribe) | Guarda variables **no secretas**, y no pisa una secreta. Se aplican en el próximo deploy |
+| `unset_env` (escribe) | Borra variables |
+
+Las cuatro que escriben solo están con un token que no es de solo lectura.
+
+**Permisos:** para que las lecturas no pregunten, `/permissions` → Allow → `mcp__muelle` (o, en `settings.json`, `"permissions": {"allow": ["mcp__muelle"]}`). Las que escriben piden confirmación **siempre**, en cada llamada y en cualquier modo, aunque haya una regla `allow`: muelle las marca con `anthropic/requiresUserInteraction`.
+
+**Un ejemplo:** "¿por qué falla el deploy de api en staging?". Claude Code sigue lo que le dicen las instrucciones del servidor: `list_deploys` (el último `failed`), `get_deploy` (su error y el final del log), `get_app_status` (las tareas y su error) y `get_app_logs` (los logs del servicio).
+
+**Cuidados:**
+- **Los logs son texto de las apps**, y lo puede escribir cualquiera que les mande pedidos: Claude puede leer instrucciones plantadas ahí. muelle lo marca en cada respuesta, pero revisa lo que apruebas, sobre todo la `image` de un `deploy`.
+- **Los secretos** no se muestran ni se escriben por MCP. Los logs salen enmascarados, con los límites de la API: un valor de menos de 8 bytes, o uno que la app imprime transformado (en base64, por partes), no se tapa.
+- **Lo que devuelven las herramientas queda en la transcripción** de Claude Code, en tu máquina, y pasa por la API de Anthropic.
+- **La auditoría** marca lo que se hizo por MCP con `"via": "mcp"` y el nombre del token. Para revocarlo, Ajustes → Tokens.
+- **Límites:** cada respuesta, hasta 40 KiB (no hace falta subir `MAX_MCP_OUTPUT_TOKENS`); hasta 8 llamadas a la vez por token, y los logs y la espera de un deploy cuentan en los 8 streams del token.
+
+**Si no conecta:**
+- `401`: el token no existe, se revocó o venció, o `MUELLE_TOKEN` no está exportada en la shell en que abriste Claude Code;
+- `403` sin cuerpo: tu IP no está en las IPs permitidas del panel (Ajustes). Suma la de tu oficina o tu VPN;
+- `403 bad_origin`: el cliente manda un `Origin` que no es el del panel (Claude Code no lo manda);
+- `404 no_route`: tu muelle todavía no tiene el servidor MCP;
+- si Claude Code no logra negociar el protocolo: `MCP_PROTOCOL_NEGOTIATION=legacy claude`, que usa el protocolo anterior a 2026-07-28.
+
+Para probarlo sin Claude Code, el `curl` del contrato (§8.2).
 
 ## Desarrollo local
 
