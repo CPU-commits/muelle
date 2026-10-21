@@ -74,6 +74,8 @@
 	"admin_ports_recreate_failed_title": "muelle-caddy didn't start with the new ports.",
 	"admin_ports_recreate_failed_body": "{error}. muelle retries on its own with these ports: if one is in use, pick another.",
 	"admin_ports_recreate_failed_generic": "muelle retries on its own with these ports: if one is in use, pick another.",
+	"admin_ports_recreate_unknown_title": "Couldn't confirm whether muelle-caddy is listening on the new ports.",
+	"admin_ports_recreate_unknown_body": "Reload the page in a moment to see how it ended.",
 	"admin_ports_rollback_title": "muelle went back to the previous ports (HTTP {http}, HTTPS {https}) {when}.",
 	"admin_ports_rollback_reason": "muelle-caddy didn't start with HTTP {http} and HTTPS {https}: {error}.",
 	"admin_ports_rollback_origin": "The panel's address is still {origin}.",

@@ -69,13 +69,15 @@ export interface PortsMove {
 
 /**
  * Cómo va muelle-caddy después de cambiar los puertos sin mudarse de origen (contrato §3.5):
- * se recrea con los puertos nuevos, quedó escuchando, o no pudo (un puerto ocupado: el
- * `error` de `GET /proxy`, y muelle reintenta con los mismos puertos).
+ * se recrea con los puertos nuevos, quedó escuchando, no pudo (un puerto ocupado: el
+ * `error` de `GET /proxy`, y muelle reintenta con los mismos puertos), o pasó el plazo sin
+ * una respuesta que lo diga (`unknown`: `GET /proxy` falló o seguía diciendo `recreating`).
  */
 export type PortsRecreation =
 	| { readonly kind: 'recreating' }
 	| { readonly kind: 'done' }
 	| { readonly kind: 'failed'; readonly error: string | null }
+	| { readonly kind: 'unknown' }
 
 /**
  * muelle volvió a los puertos anteriores porque muelle-caddy no arrancó con los nuevos
@@ -104,7 +106,8 @@ export interface CloudflareNotice {
 /**
  * Cuánto se espera, después de cambiar los puertos, una respuesta de `GET /proxy` que diga
  * cómo terminó la recreación (el `PATCH` ya volvió; recrear tarda unos segundos más, y si no
- * arranca, volver a los puertos anteriores, otros tantos). Pasado eso, el aviso se va.
+ * arranca, volver a los puertos anteriores, otros tantos). Pasado eso, el aviso dice que no
+ * se pudo confirmar (`unknown`), hasta que una respuesta lo diga.
  */
 export const PORTS_WATCH_TIMEOUT_MS = 2 * 60_000
 
@@ -281,7 +284,7 @@ export class ProxySettingsViewModel {
 	 * (este origen deja de responder) o sin el proxy de muelle (`disabled`): los puertos ya se
 	 * guardaron, esto es solo el seguimiento. Mientras `GET /proxy` no diga cómo terminó
 	 * (también si falla: el panel puede pasar por el mismo muelle-caddy que se recrea), dice
-	 * `recreating`, hasta `PORTS_WATCH_TIMEOUT_MS`.
+	 * `recreating`, hasta `PORTS_WATCH_TIMEOUT_MS`; después, `unknown`.
 	 */
 	get recreation(): PortsRecreation | null {
 		// Si se fue de esta dirección, el aviso de la nueva dice a dónde ir; si volvió atrás,
@@ -289,10 +292,12 @@ export class ProxySettingsViewModel {
 		if (!this.#watchingProxy || this.#leaving || this.#rollbackStatus) return null
 		const fresh = this.#freshProxy
 		if (this.#awaitingProxy) return { kind: 'recreating' }
-		if (fresh === undefined) return null
+		// Pasó el plazo sin una respuesta de después del cambio, o la última seguía recreando.
+		if (fresh === undefined) return { kind: 'unknown' }
 		const notice = proxyNotice(fresh)
 		if (notice === null) return { kind: 'done' }
-		if (notice === 'disabled' || notice === 'recreating') return null
+		if (notice === 'recreating') return { kind: 'unknown' }
+		if (notice === 'disabled') return null
 		return { kind: 'failed', error: fresh.error }
 	}
 

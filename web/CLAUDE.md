@@ -647,7 +647,8 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   `PanelMovedError`) no guardó nada: el seguimiento del anterior sigue.
     - Si el panel sigue en el mismo origen (solo cambió el HTTP, o se entró por otra
       dirección que la de Caddy), dice "Recreando muelle-caddy…" y después si quedó
-      escuchando o el error.
+      escuchando o el error; pasados los 2 min sin una respuesta que lo diga, que no se pudo
+      confirmar y que recargue en un momento (`recreation.kind === 'unknown'`).
     - Si cambió el HTTPS y se entró por la dirección de Caddy, esa dirección deja de
       responder: el aviso lleva a la nueva, no salen más escrituras (`holdWrites`) y se
       sigue preguntando solo por si muelle vuelve atrás (la dirección vuelve a responder).

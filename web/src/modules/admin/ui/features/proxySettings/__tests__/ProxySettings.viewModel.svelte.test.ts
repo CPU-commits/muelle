@@ -663,7 +663,7 @@ describe('ProxySettingsViewModel', () => {
 		expect(vm.recreation).toEqual({ kind: 'recreating' })
 	})
 
-	it('pasado el plazo sin una respuesta que diga cómo terminó, deja de decir que se recrea', async () => {
+	it('pasado el plazo sin una respuesta que diga cómo terminó, dice que no se pudo confirmar', async () => {
 		ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
 		const vm = await mountViewModel()
 		vi.useFakeTimers({
@@ -679,7 +679,13 @@ describe('ProxySettingsViewModel', () => {
 			expect(vm.recreation).toEqual({ kind: 'recreating' })
 
 			await vi.advanceTimersByTimeAsync(PORTS_WATCH_TIMEOUT_MS)
-			await vi.waitFor(() => expect(vm.recreation).toBeNull())
+			// El aviso no se va sin decir nada: no se sabe si quedó escuchando.
+			await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'unknown' }))
+
+			// Una respuesta más tarde (recargar, volver a la pestaña) dice cómo terminó.
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus())
+			await client.refetchQueries({ queryKey: ingressKeys.proxy })
+			await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'done' }))
 		} finally {
 			vi.useRealTimers()
 		}
@@ -706,6 +712,9 @@ describe('ProxySettingsViewModel', () => {
 			ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
 			await vi.advanceTimersByTimeAsync(PORTS_WATCH_TIMEOUT_MS + 2 * PROXY_REFRESH_MS)
 			expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('error')
+
+			// Lo último que dijo es "recreando", pero ya no se sabe.
+			expect(vm.recreation).toEqual({ kind: 'unknown' })
 
 			// Los 2 min ya pasaron (web/CLAUDE.md): no pregunta más.
 			const asked = ingress.getProxyStatus.mock.calls.length

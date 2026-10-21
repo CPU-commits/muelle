@@ -222,6 +222,13 @@
 					? m.admin_ports_recreate_failed_body({ error: vm.recreation.error })
 					: m.admin_ports_recreate_failed_generic()}
 			/>
+		{:else if vm.recreation?.kind === 'unknown'}
+			<!-- Pasaron 2 min sin una respuesta de GET /proxy que diga cómo terminó. -->
+			<Banner
+				tone="warn"
+				title={m.admin_ports_recreate_unknown_title()}
+				body={m.admin_ports_recreate_unknown_body()}
+			/>
 		{/if}
 		<form
 			id={portsForm}

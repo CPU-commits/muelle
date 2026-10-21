@@ -189,8 +189,9 @@ Dominios, arriba del formulario.
   pide al abrirse (muestra `ports_rollback`) y, después de cambiar los puertos, sigue
   `GET /proxy` mientras dice `recreating` (aunque falle, 2 min como mucho: pasado el plazo
   con el último pedido fallado, `proxyFollowQuery` deja de preguntar), y muestra si muelle-caddy quedó
-  escuchando, el `error` si no arrancó o, si muelle volvió a los puertos anteriores, por qué
-  y la dirección anterior del panel (contrato §3.5).
+  escuchando, el `error` si no arrancó, que no se pudo confirmar (pasado el plazo sin una
+  respuesta que lo diga) o, si muelle volvió a los puertos anteriores, por qué y la
+  dirección anterior del panel (contrato §3.5).
 
 ## Refresco y avisos
 
