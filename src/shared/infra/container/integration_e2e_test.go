@@ -741,6 +741,11 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	if ref, _ := images1[e2eApp].(string); d1["trigger"] != "api" || d1["actor_type"] != "token" || !strings.HasPrefix(ref, e2eNginx+"@sha256:") {
 		t.Fatalf("el deploy %d: %v", id1, d1)
 	}
+	// La ref pedida, sin digest, y routes_warning false: el paso 7 llegó al
+	// Caddy de verdad (contrato §2.1).
+	if requested1, _ := d1["requested_images"].(map[string]any); requested1[e2eApp] != e2eNginx || d1["routes_warning"] != false {
+		t.Fatalf("el deploy %d: %v", id1, d1)
+	}
 	// catalog ve el deploy (deploy escribe last_deployed_at).
 	if app := e.object("GET", A, nil, tok, http.StatusOK); app["last_deployed_at"] == nil || app["pending_changes"] != false {
 		t.Fatalf("GET %s después del deploy: %v", A, app)
@@ -877,6 +882,10 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	}
 	d3 := e.object("GET", fmt.Sprintf("%s/deploys/%d", A, id3), nil, tok, http.StatusOK)
 	if images3, _ := d3["images"].(map[string]any); d3["trigger"] != "rollback" || images3[e2eApp] != images1[e2eApp] {
+		t.Fatalf("el rollback: %v", d3)
+	}
+	// El rollback pide la ref con digest: el panel ve que fija el servicio.
+	if requested3, _ := d3["requested_images"].(map[string]any); requested3[e2eApp] != images1[e2eApp] || d3["routes_warning"] != false {
 		t.Fatalf("el rollback: %v", d3)
 	}
 	if s, err := e.docker.InspectService(ctx, naming.Service(e.project, e2eStage, e2eApp, e2eApp)); err != nil ||
