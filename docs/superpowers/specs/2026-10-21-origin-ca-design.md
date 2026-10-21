@@ -240,8 +240,8 @@ Qué hace:
        - `permission`: la zona queda en la lista de las que faltan;
        - `cloudflare`: `502`;
        - `rejected`: `422`, `Cloudflare rechazó la prueba del permiso en la zona <z> (<mensaje>)`.
-3. Si faltan zonas: `422` en `field` con el texto de la regla 3.
-4. Ningún mensaje trae el token. El `<mensaje de Cloudflare>` que citan algunos se corta a 300 runas y pasa por el mismo borrado del token que `rejected()` del cliente, también en el camino nuevo de `/certificates`. Las zonas van ordenadas por nombre: "en la zona a.cl", "en las zonas a.cl y b.cl", y con tres o más, las dos primeras y cuántas faltan: "en las zonas a.cl, b.cl y 3 más".
+3. Si faltan zonas: `422` en `field` con el texto de la regla 3. Las zonas van ordenadas por nombre: "en la zona a.cl", "en las zonas a.cl y b.cl", y con tres o más, las dos primeras y cuántas faltan: "en las zonas a.cl, b.cl y 3 más".
+4. Ningún mensaje trae el token. El `<mensaje de Cloudflare>` que citan algunos se corta a 300 runas y pasa por el mismo borrado del token que `rejected()` del cliente, también en el camino nuevo de `/certificates`.
 
 **El Paso 0 del plan (§14) confirma la pista y los códigos.** Lo hace el dueño a mano, con un token que tiene el permiso y otro que no:
 - si `permissions` no refleja el token (el que no tiene el permiso igual muestra `#ssl:edit`), se saca el paso 2a y siempre se hace la prueba 2b;
