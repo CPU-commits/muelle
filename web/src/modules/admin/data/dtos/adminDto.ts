@@ -9,8 +9,8 @@ const timestamp = z.iso.datetime({ offset: true })
 
 /**
  * `GET /settings` y la respuesta de `PATCH /settings` (contrato §4): con la Fase 3 trae
- * siempre todas las claves. Son opcionales solo por un backend de la Fase 1 (`pnpm dev`
- * contra `main`), que tiene nada más que `require_2fa`. `caddy_image` no es un ajuste: solo
+ * siempre todas las claves. Son opcionales solo por un backend de solo la Fase 1 (`pnpm dev`
+ * contra uno así), que tiene nada más que `require_2fa`. `caddy_image` no es un ajuste: solo
  * lo fija install, y si viniera, Zod lo descarta.
  */
 export const settingsDtoSchema = z.object({
