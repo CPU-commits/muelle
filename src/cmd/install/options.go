@@ -103,10 +103,7 @@ const (
 )
 
 var (
-	// cloudflareTokenRe es la forma de un token de Cloudflare, la misma que
-	// acepta PATCH /settings (contrato §4.1).
-	cloudflareTokenRe = regexp.MustCompile(`^[\x21-\x7e]{20,512}$`)
-	prefixRe          = regexp.MustCompile(`^[a-z][a-z0-9]{0,15}$`)
+	prefixRe = regexp.MustCompile(`^[a-z][a-z0-9]{0,15}$`)
 	// ifaceRe es un nombre de interfaz de red (IFNAMSIZ: hasta 15), con el
 	// puerto opcional, como lo acepta docker swarm init --advertise-addr.
 	ifaceRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,14}(:[0-9]{1,5})?$`)
@@ -286,10 +283,11 @@ func (o Options) validate() error {
 }
 
 // checkToken es la regla de cloudflare_token en PATCH /settings: la forma de
-// un token de Cloudflare, y sin { ni }, que Caddy tomaría como placeholders
-// (contrato §3.4). Los errores no citan el token.
+// un token de Cloudflare (validate.IsCloudflareToken), y sin { ni }, que
+// Caddy tomaría como placeholders (contrato §3.4). Los errores no citan el
+// token.
 func checkToken(s string) error {
-	if !cloudflareTokenRe.MatchString(s) {
+	if !validate.IsCloudflareToken(s) {
 		return errTokenFormat
 	}
 	return validate.NoPlaceholders("--cloudflare-token", s)

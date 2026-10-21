@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
-	"regexp"
 	"strconv"
 
 	"github.com/CPU-commits/muelle/src/internal/admin/app/dto"
@@ -137,9 +136,6 @@ func NewPatchSettings(settings repository.SettingsRepository, totp service.TOTPS
 	return &PatchSettings{settings: settings, totp: totp, cipher: c, hook: hook, origin: origin, audit: rec, tx: tx}
 }
 
-// tokenRe es un token de API de Cloudflare: ASCII visible, sin espacios.
-var tokenRe = regexp.MustCompile(`^[\x21-\x7e]{20,512}$`)
-
 // applyProxy valida los campos presentes y los aplica sobre p. Los errores
 // nombran el campo simple del cuerpo (nunca panel_allowed_cidrs[1]).
 func applyProxy(p shared.ProxySettings, in dto.PatchSettingsInput) (shared.ProxySettings, error) {
@@ -196,7 +192,7 @@ func applyProxy(p shared.ProxySettings, in dto.PatchSettingsInput) (shared.Proxy
 	}
 	if in.CloudflareToken != nil {
 		if t := *in.CloudflareToken; t != "" {
-			if !tokenRe.MatchString(t) {
+			if !validate.IsCloudflareToken(t) {
 				return p, validate.Errorf("cloudflare_token", "no parece un token de API de Cloudflare (de 20 a 512 caracteres visibles, sin espacios)")
 			}
 			if err := validate.NoPlaceholders("cloudflare_token", t); err != nil {

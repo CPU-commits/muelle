@@ -119,6 +119,23 @@ func TestNoPlaceholders(t *testing.T) {
 	}
 }
 
+// La forma de un token de API de Cloudflare (contrato §4.1 y §5.2): de 20 a
+// 512 caracteres ASCII visibles, sin espacios ni saltos de línea. La
+// comparten PATCH /settings, install y MUELLE_INIT_CLOUDFLARE_TOKEN_FILE.
+func TestIsCloudflareToken(t *testing.T) {
+	for _, s := range []string{"cf-token-1234567890ab", "cf-token-1234567890abcdef", strings.Repeat("a", 512), "!~" + strings.Repeat("x", 18)} {
+		if !IsCloudflareToken(s) {
+			t.Errorf("IsCloudflareToken(%q) = false", s)
+		}
+	}
+	for _, s := range []string{"", "corto", strings.Repeat("a", 19), strings.Repeat("a", 513),
+		"cf-token 1234567890abcdef", "cf-token-1234567890abcdef\n", "\tcf-token-1234567890abcdef", "cf-token-1234567890abcdeñ"} {
+		if IsCloudflareToken(s) {
+			t.Errorf("IsCloudflareToken(%q) = true", s)
+		}
+	}
+}
+
 func TestPort(t *testing.T) {
 	for _, n := range []int{1, 80, 443, 8443, 65535} {
 		if err := Port("proxy_http_port", n); err != nil {
