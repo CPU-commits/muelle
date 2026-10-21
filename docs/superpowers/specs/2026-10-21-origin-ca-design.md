@@ -174,7 +174,7 @@ Entre 58f7236 y a1238d9 entraron los menores de la integración. Para este dise�
   - El refresco lo decide `hasProvisioning`, en `data/queries/domainQueries.ts`.
 - **Migraciones:**
   - La más alta es `0005_deploy_routes_warning.sql`.
-  - La 0006 es de esta función, y la 0007 la del servidor MCP, que va en otra rama (contrato §6).
+  - La 0006 es de esta función (contrato §6), y la 0007 está reservada para el servidor MCP, que va en otra rama y suma su línea al contrato §6 cuando entra. El orden en que entran importa (§5.4).
   - Los ids que van en una AAD usan `AUTOINCREMENT`, y la fila se inserta primero con un valor vacío (patrón de `deploy/infra/out/repository/sqlite/registries.go`).
 
 ---
@@ -355,7 +355,11 @@ En cada pasada (§5.5), para cada candidato con `observed == proxied` cuyo backo
 
 ### 5.4 Dónde se guarda: migración `0006_origin_ca.sql`
 
-- En `main` @ a1238d9 la más alta sigue siendo `0005_deploy_routes_warning.sql`. La 0006 es de esta función (contrato §6), y la 0007 la del servidor MCP, que va en otra rama. Los números no se cambian: el runner aplica en orden las versiones mayores que `MAX(version)`, y en los tests, sobre una base nueva, un hueco (la 0006 sin la 0007, o al revés) no molesta.
+- En `main` @ a1238d9 la más alta sigue siendo `0005_deploy_routes_warning.sql`. La 0006 es de esta función (contrato §6), y la 0007 está reservada para el servidor MCP, que va en otra rama. Los números no se cambian: el runner aplica en orden las versiones mayores que `MAX(version)`, y en los tests, sobre una base nueva, un hueco (la 0006 sin la 0007, o al revés) no molesta.
+- **El orden en que entran a `main` sí importa.** `sqlite.Migrate` salta toda versión menor o igual que `MAX(version)`. Si la 0007 llega primero a una base que ya existe (por ejemplo, la del servidor de desarrollo del dueño con un binario que ya trae la del MCP), la 0006 no se aplica nunca en esa base, y todo lo que usa `origin_ca_*` falla en ejecución con `no such table`. Por eso:
+  - la línea 1 (con la 0006) entra a `main` antes que la 0007 del MCP;
+  - si el MCP tiene que entrar antes, la salida no se decide en una rama: se acuerda antes (contrato §1.3) renumerar o cambiar el runner para que aplique cada versión que falta, no solo las mayores que `MAX(version)`;
+  - una base de desarrollo que ya corrió la 0007 sin la 0006 se recrea.
 - Es una migración nueva, no un cambio a `0003_ingress.sql`, por lo mismo que la 0004 y la 0005: para que corra sobre una base que ya tiene dominios.
 
 ```sql
