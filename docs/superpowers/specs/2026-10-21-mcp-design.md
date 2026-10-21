@@ -495,7 +495,7 @@ Cada fila dice qué módulo la registra (en su `infra/in/mcp`), qué caso de uso
 - Caso de uso: `deploy.AppLogs.Open` con `Follow: false` (sin follow nunca). Valida y enmascara igual que REST (contrato §2.9).
 - Cómo se arma la respuesta:
   - **toma un lugar de los 8 streams del principal**: si no hay, `rate_limited`;
-  - lee hasta el `EOF` o 20 s; con el plazo vencido, devuelve lo que alcanzó con `"incomplete": true`;
+  - lee hasta el `EOF` o 15 s; con ese plazo vencido, devuelve lo que alcanzó con `"incomplete": true`. Es un `context.WithTimeout` propio (`depmcp.Config.LogReadTimeout`), derivado del ctx de la llamada y más corto que sus 20 s: si fueran iguales, el kit vería el `DeadlineExceeded` de la llamada a la vez y respondería `internal` en vez de las líneas;
   - cada línea, **ya enmascarada**, se filtra por `stream` y `contains` (el filtro **después** del enmascarado, así `contains` no sirve de oráculo para adivinar un secreto);
   - se le pone el prefijo y se corta con `…` para que su JSON mida a lo más 2 KiB (un ESC cuenta 6);
   - va a un buffer circular de `max_bytes` medidos en JSON (cada línea con sus comillas y su coma), donde las más viejas salen primero. Nunca se guarda en memoria más que `max_bytes` y una línea.
@@ -744,7 +744,8 @@ Los códigos de ejecución:
   - Acota las goroutines y el trabajo contra Docker y SQLite de un agente que entra en un bucle.
   - No hay un límite por minuto: el estado tiene caché por app (5 s y 2 s), y cada escritura pide aprobación humana.
 - **Plazos:**
-  - `context.WithTimeout` de 20 s por llamada; con `wait_s`, `wait_s` + 10 s;
+  - `context.WithTimeout` de 20 s por llamada; con `wait_s`, `wait_s` + 10 s. Una llamada que pasa su plazo da `internal`;
+  - las esperas propias de una herramienta terminan antes que la llamada y devuelven lo que hay: la lectura de `get_app_logs`, a los 15 s (`incomplete: true`); la de `get_deploy`, a los `wait_s` (`timed_out: true`);
   - plazos de lectura y de escritura de 60 s, puestos después de autenticar (§3.2, paso 9). Sin el de lectura, el `ReadTimeout` de 30 s del servidor cancelaría el ctx de una llamada larga.
 
 ### 8.4 IPs permitidas
@@ -1029,7 +1030,7 @@ Todos con TDD, en el estilo del repo:
     - peor caso: 1000 líneas llenas de colores ANSI (`\x1b[31m…\x1b[0m`) con `max_bytes: 32768`: `lines` mide a lo más 32 768 bytes de JSON, cada línea a lo más 2 048, y el resultado entra en el tope;
     - con `max_bytes: 4096` y líneas de 16 KiB, sale al menos la más nueva, cortada;
     - con 8 SSE abiertos por HTTP con el mismo token, `rate_limited`;
-    - un log que no termina da `incomplete` a los 20 s (con un reloj de test o un plazo corto inyectado);
+    - un log que no termina (el fake sigue mandando líneas y nunca cierra) devuelve sus líneas con `incomplete: true`, y no `internal`, con los plazos inyectados: una lectura de 150 ms dentro de una llamada de 300 ms;
     - el servicio que falta en una compose;
   - `list_deploys` con `limit`, sin `requested_images`;
   - peor caso de `list_deploys`: una app compose de 20 servicios con refs con digest, 22 deploys guardados, errores de 300 caracteres y `limit: 22`: entra en el tope, del más nuevo al más viejo, con `omitted > 0` y `len(deploys) + omitted = 22`;

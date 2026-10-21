@@ -1584,7 +1584,7 @@ No hay herramientas de proyectos, stages o apps (escritura), dominios (escritura
 
 - **Qué hace:** los logs del servicio, sin follow nunca, con la búsqueda, la validación y el enmascarado de §2.9. `since` reemplaza a `tail`, como en §2.9: si vienen los dos, manda `since`.
   - Toma un lugar de los 8 streams del principal (§0.3, §8.5) mientras lee.
-  - Lee hasta el final del log o 20 s. Con el plazo vencido, devuelve lo que alcanzó, con `"incomplete": true`.
+  - Lee hasta el final del log o 15 s, un plazo propio y más corto que los 20 s de la llamada (§8.5). Con ese plazo vencido, devuelve lo que alcanzó, con `"incomplete": true`: no es un error.
   - Cada línea, **ya enmascarada**, se filtra por `stream` y por `contains` (sin distinguir mayúsculas). El filtro va **después** del enmascarado: buscar el valor de un secreto da 0 líneas.
   - Cada línea, ya con su prefijo (abajo), se corta respetando UTF-8 y con `…` para que su JSON mida a lo más 2 048 bytes. Un log con colores ANSI llega a ese corte con menos texto: cada ESC cuenta 6.
   - Las líneas entran en un buffer de `max_bytes` del que salen primero las más viejas. `max_bytes` mide `lines` en JSON: cada línea con sus comillas y su coma. El mínimo es más que una línea cortada (2 048 bytes), así la más nueva siempre entra.
@@ -1762,7 +1762,7 @@ Los `code` de ejecución:
 - **Cada resultado:** hasta 40 960 bytes en su `text`. Queda bajo los 50 000 caracteres a partir de los que Claude Code guarda el resultado en un archivo, así que no hace falta subir `MAX_MCP_OUTPUT_TOKENS`. Los tamaños que se piden se miden en el JSON que sale y llegan a 32 768 bytes; lo que no entra se recorta y se cuenta (§8.3).
 - **Llamadas a la vez:** hasta 8 por token (`"t:"+id`). La novena recibe `rate_limited` sin correr. No hay un límite por minuto: el estado tiene caché por app, y cada escritura pide aprobación humana.
 - **Streams:** `get_app_logs`, y `get_deploy` con `wait_s` y el deploy sin terminar, toman un lugar del **mismo** contador de 8 por principal que los SSE (§0.3), mientras dura la llamada. Para eso el contador pasa de `deploy/infra/in/http` a `deploy/app/usecases` (`StreamSlots`, con `ErrTooManyStreams`), compartido por los dos adaptadores.
-- **Plazos:** 20 s por llamada (con `wait_s`, `wait_s` + 10 s); 60 s de lectura y de escritura en la conexión (§8.2); el cuerpo, hasta 1 MiB.
+- **Plazos:** 20 s por llamada (con `wait_s`, `wait_s` + 10 s); 60 s de lectura y de escritura en la conexión (§8.2); el cuerpo, hasta 1 MiB. Una llamada que pasa su plazo da `internal`, así que las esperas propias de una herramienta terminan antes: la lectura de `get_app_logs` tiene 15 s, y `wait_s`, 10 s de margen.
 - **Sin follow:** los logs se leen hasta el final y vuelven. Para seguir un deploy, `get_deploy` con `wait_s`, repetido.
 
 ### 8.6 Auditoría
