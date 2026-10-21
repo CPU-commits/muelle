@@ -233,9 +233,12 @@ func loadInit() (Init, error) {
 		if err != nil {
 			return Init{}, fmt.Errorf("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE: %w", err)
 		}
+		// La forma de --cloudflare-token y de PATCH /settings (contrato
+		// §5.2), con los espacios de los extremos recortados. El error no
+		// cita el token.
 		token := strings.TrimSpace(string(b))
-		if token == "" || strings.ContainsAny(token, " \t\r\n") {
-			return Init{}, fmt.Errorf("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE: %s no tiene un token (una sola línea, sin espacios)", path)
+		if !validate.IsCloudflareToken(token) {
+			return Init{}, fmt.Errorf("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE: %s no tiene un token de Cloudflare: de 20 a 512 caracteres ASCII visibles, en una sola línea y sin espacios", path)
 		}
 		if err := validate.NoPlaceholders("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE", token); err != nil {
 			return Init{}, err

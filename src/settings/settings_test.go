@@ -260,6 +260,42 @@ func TestLoadRejectsInitPlaceholders(t *testing.T) {
 }
 
 // writeFile escribe content en un archivo nuevo del test y devuelve su ruta.
+// El token de MUELLE_INIT_CLOUDFLARE_TOKEN_FILE tiene la forma que piden
+// --cloudflare-token y PATCH /settings (contrato §5.2): de 20 a 512
+// caracteres ASCII visibles, en una sola línea y sin espacios (los de los
+// extremos se recortan). Uno que no la tiene no arranca muelle, y el error
+// nombra la variable sin citar el token.
+func TestLoadInitTokenShape(t *testing.T) {
+	for name, content := range map[string]string{
+		"corto":      "cf-token-123\n",
+		"largo":      strings.Repeat("x", 513) + "\n",
+		"no ASCII":   "cf-token-1234567890abcdeñ\n",
+		"dos líneas": "cf-token-1234567890abcdef\nsobra-1234567890abcdef\n",
+		"espacios":   "cf-token 1234567890abcdef\n",
+	} {
+		clearEnv(t)
+		t.Setenv("MUELLE_PANEL_ORIGIN", "https://panel.tudominio.cl")
+		t.Setenv("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE", writeFile(t, "token", content))
+		_, err := Load()
+		if err == nil || !strings.HasPrefix(err.Error(), "MUELLE_INIT_CLOUDFLARE_TOKEN_FILE: ") ||
+			!strings.Contains(err.Error(), "de 20 a 512 caracteres") {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "1234567890") || strings.Contains(err.Error(), "xxxxxxxx") {
+			t.Errorf("%s: el error cita el token: %v", name, err)
+		}
+	}
+	// Los espacios de los extremos se recortan, como antes.
+	clearEnv(t)
+	t.Setenv("MUELLE_PANEL_ORIGIN", "https://panel.tudominio.cl")
+	t.Setenv("MUELLE_INIT_CLOUDFLARE_TOKEN_FILE", writeFile(t, "token", "  cf-token-1234567890ab \r\n"))
+	c, err := Load()
+	if err != nil || c.Init.CloudflareToken != "cf-token-1234567890ab" {
+		t.Fatalf("recortado: %q %v", c.Init.CloudflareToken, err)
+	}
+}
+
 func writeFile(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
