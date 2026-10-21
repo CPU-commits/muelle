@@ -140,9 +140,10 @@ function validateSettings(body: SettingsBody) {
 		body.cloudflare_token !== undefined &&
 		!clearsOrMatches(body.cloudflare_token, CLOUDFLARE_TOKEN)
 	) {
+		// El texto del backend (`admin/app/usecases/settings.go`).
 		return invalid(
 			'cloudflare_token',
-			'debe tener entre 20 y 512 caracteres visibles, sin espacios',
+			'no parece un token de API de Cloudflare (de 20 a 512 caracteres visibles, sin espacios)',
 		)
 	}
 	// Después de la forma, como el backend; el mensaje nunca trae el token.

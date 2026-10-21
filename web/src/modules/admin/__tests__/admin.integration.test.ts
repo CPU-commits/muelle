@@ -199,8 +199,12 @@ describe('settings', () => {
 		})
 		expect(body).not.toContain(token)
 		const short = await patch({ cloudflare_token: 'a{b}' })
+		// El mismo texto que el backend (src/internal/admin/app/usecases/settings.go).
 		expect(await short.json()).toMatchObject({
-			error: { message: expect.stringMatching(/^cloudflare_token: debe tener entre 20/) },
+			error: {
+				message:
+					'cloudflare_token: no parece un token de API de Cloudflare (de 20 a 512 caracteres visibles, sin espacios)',
+			},
 		})
 
 		expect(adminDb.state.acmeEmail).toBe(before.email)
