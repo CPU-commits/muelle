@@ -113,7 +113,9 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
   [CSP](#csp)).
 - E2E contra el backend de verdad: `e2e-real/*.real.ts`, el panel embebido en un
   `muelle serve` con el Swarm local (`pnpm test:e2e:real`, ver
-  [E2E contra muelle](#e2e-contra-muelle)).
+  [E2E contra muelle](#e2e-contra-muelle)). Lo de node puro que usa (los códigos TOTP de
+  `totp.ts`) se prueba en `e2e-real/*.test.ts`, que corre en el proyecto server de vitest
+  con `pnpm test`, sin muelle ni Swarm.
 - Componentes: `__tests__/X.svelte.test.ts` junto al componente, en Chromium, con un
   harness cuando hace falta un contexto (ver `molecules/menu/__tests__/`). Un harness que
   mide posiciones importa `@/shared/ui/themes/global.css` (sin el `box-sizing` global las
@@ -789,7 +791,8 @@ http.post(api('/projects'), async ({ request }) => {
 verdad: lo que `e2e/` prueba contra MSW, acá contra Go y Swarm, bajo la CSP que manda Go.
 Un solo recorrido, en orden (`journey.real.ts`): el setup del primer usuario con el link del
 log, el 2FA con un código calculado de la clave que muestra el panel (`totp.ts`, RFC 6238;
-cada código de un paso nuevo, como exige el backend), salir y entrar con el código, un
+cada código de un paso nuevo, como exige el backend; sus tests, `totp.test.ts`, corren con
+`pnpm test`), salir y entrar con el código, un
 proyecto, un stage y una app de formulario (`nginx:alpine`), una variable secreta (que
 llega al servicio de Swarm), un deploy seguido en Deploys hasta "Exitoso", el Resumen con el
 estado de Swarm, los Logs en vivo, un segundo deploy y el rollback al primero, la Auditoría

@@ -88,7 +88,9 @@ export default defineConfig(({ mode }) => {
 						// Node 25+ trae localStorage/sessionStorage experimentales y avisa al
 						// tocarlos sin archivo. Acá sobran: los tests de node no tienen navegador.
 						execArgv: ['--no-experimental-webstorage'],
-						include: ['src/**/*.{test,spec}.{js,ts}'],
+						// e2e-real/*.test.ts: lo de node puro que usa el e2e real (los códigos
+						// TOTP), que así corre sin muelle ni Swarm. Los *.real.ts son de Playwright.
+						include: ['src/**/*.{test,spec}.{js,ts}', 'e2e-real/**/*.test.ts'],
 						exclude: ['src/**/*.svelte.{test,spec}.{js,ts}'],
 					},
 				},
