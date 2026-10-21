@@ -810,7 +810,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - corre con su propio plazo de 2 min, derivado con `context.WithoutCancel`;
   - aplica, según `next.ChangedKeys(old)`:
     - IPs, email, token, lista de IPs o `cloudflare_origin_ca` → regenera la configuración de Caddy. `POST /load` no corta las conexiones abiertas, así que la respuesta del `PATCH` sale igual. Si en el mismo `PATCH` cambiaron los puertos, no la manda ahora: la manda la recreación, con los ajustes de ese momento;
-    - `cloudflare_origin_ca`, o el token con la opción encendida → reinicia los reintentos de todos los certificados de Cloudflare y despierta su reconciliación (§3.7), sin esperarla. Al apagarla, la configuración que se manda ya no trae los de Origin CA, así que los dominios vuelven a Let's Encrypt antes de responder, los certificados se revocan después, y muelle olvida lo que vio en Cloudflare y las fallas: al encenderla otra vez empieza de cero;
+    - `cloudflare_origin_ca`, o el token con la opción encendida → reinicia los reintentos de todos los certificados de Cloudflare y despierta su reconciliación (§3.7), sin esperarla. Al apagarla, la configuración que se manda ya no trae los de Origin CA, así que los dominios vuelven a Let's Encrypt antes de responder, los certificados se revocan después, y muelle olvida lo que vio en Cloudflare y las fallas, así al encenderla otra vez no arrastra una falla vieja (salvo la de una pasada que todavía corría, §3.7);
     - IP pública → actualiza los registros que maneja muelle, de los dominios y el del panel (los que fallan dejan su dominio en `error`/`cloudflare`):
       - un `public_ip` nuevo cambia el contenido de los `A` (nunca su `proxied`); borrar `public_ip` no toca ningún registro (borrarlos dejaría los sitios sin DNS);
       - un dominio en `error`/`cloudflare` cuyos registros se actualizan bien vuelve a `pending`; los demás no cambian de estado;
@@ -901,8 +901,8 @@ Opcionales y apagados por defecto (`cloudflare_origin_ca`, §4). Con la opción 
 
 **Cuándo cambia lo que dice la API:**
 - Apagar la opción (`PATCH /settings`): desde su respuesta, todo `origin_ca` es null y todo `cert_source` es `letsencrypt`, y Caddy ya recibió la configuración sin los de Origin CA.
-- Encenderla: desde su respuesta, cada dominio y el panel dicen `issuing`, `dns_only` o `not_eligible`, y `active` cuando la pasada emite el suyo.
-- `PATCH {app}/domains/{hostname}` que cambia `proxied`: muelle olvida lo que había visto en Cloudflare de ese hostname. Con `proxied: false`, `dns_only` desde la respuesta; con `proxied: true`, `issuing` hasta la pasada que despierta.
+- Encenderla: desde su respuesta, cada dominio y el panel dicen `issuing`, `dns_only` o `not_eligible`, y `active` cuando la pasada emite el suyo. Si se vuelve a encender mientras termina una pasada que empezó antes de apagarla, puede verse lo que vio esa pasada (también un `failed`) hasta que otra pasada vuelve a mirar ese host.
+- `PATCH {app}/domains/{hostname}` que cambia `proxied`: muelle olvida lo que había visto en Cloudflare de ese hostname, pero no su última falla. Con `proxied: false`, `dns_only` desde la respuesta; con `proxied: true`, `issuing` hasta la pasada que despierta, o `failed` si tenía una falla guardada (se reintenta con su espera, o con `retry`).
 - DNS only puesto en el dashboard de Cloudflare: `dns_only` en a lo más 5 min.
 
 **El mensaje de `error`** es una oración en español para mostrar tal cual. Los clientes deciden por `status` y `error_code`, nunca por el texto:

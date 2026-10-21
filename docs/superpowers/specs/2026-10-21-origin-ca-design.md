@@ -253,7 +253,9 @@ Que la pista dé un falso positivo no es grave: la emisión falla con `permissio
 Va dentro de `usecases/settings_changed.go`:
 - Si cambió `cloudflare_origin_ca`, o cambió el token con la opción encendida, se reinicia el backoff de todos los hosts (`origin.ResetBackoff`) y se despierta al reconciliador (`origin.Kick()`, sin esperarlo).
 - `cloudflare_origin_ca` se suma a las claves que hacen `syncer.Sync`. Al apagarla, la configuración vuelve a Let's Encrypt **antes** de que responda el `PATCH`. Al encenderla, el Sync no cambia nada: todavía no hay certificados, y la emisión sigue en segundo plano.
-- Al apagarla, además, se borran las filas de `origin_ca_hosts` (`origin.Forget()`, sin el mutex de la pasada): lo observado y las fallas. Los `retired` de `origin_ca_certs` no se tocan, y se revocan igual. Así, al volver a encenderla, la API dice `issuing`, `dns_only` o `not_eligible`, y no una falla vieja. Si una pasada que empezó con la opción encendida escribe una fila después, la borra el paso 7 de la pasada siguiente (§5.5).
+- Al apagarla, además, se borran las filas de `origin_ca_hosts` (`origin.Forget()`, sin el mutex de la pasada): lo observado y las fallas. Los `retired` de `origin_ca_certs` no se tocan, y se revocan igual. Así, al volver a encenderla, la API dice `issuing`, `dns_only` o `not_eligible`, y no una falla vieja.
+  - La carrera: `Forget` no toma el mutex de la pasada, para no esperar hasta 5 min antes de responder. Si una pasada que empezó con la opción encendida escribe una fila después, esa fila queda hasta que la borra el paso 7 de una pasada con la opción apagada, y ese paso espera a que el host no tenga certificados, tampoco retirados sin revocar (§5.5).
+  - Si la opción se vuelve a encender antes, la API puede mostrar lo que vio esa pasada (también un `failed`) hasta que otra pasada vuelve a mirar el host. Es solo lo que se ve: encenderla reinicia el backoff de todos (§9.2), así que la pasada que despierta lo reintenta enseguida. El contrato (§3.7) lo dice así.
 
 ---
 
@@ -275,7 +277,7 @@ Son tres pasos, y los dos primeros son funciones puras en `ingress/domain/servic
 - `unreadable`: Cloudflare rechazó la lectura (un 4xx, por ejemplo una zona que el token ya no ve).
 - Si Cloudflare no responde (red, 5xx o 429), **no se cambia** lo observado antes. Con 429 se corta la pasada (§9.2).
 
-Lo observado se guarda en `origin_ca_hosts.observed`, con `observed_at`. Un `PATCH` que cambia el `proxied` de un dominio lo vuelve a NULL (`origin.ForgetObserved(hostname)`, en el mismo caso de uso, antes del Kick): la API dice `issuing` hasta que la pasada lo lee, y no un `dns_only` viejo.
+Lo observado se guarda en `origin_ca_hosts.observed`, con `observed_at`. Un `PATCH` que cambia el `proxied` de un dominio lo vuelve a NULL (`origin.ForgetObserved(hostname)`, en el mismo caso de uso, antes del Kick): la API dice `issuing` hasta que la pasada lo lee, y no un `dns_only` viejo. `ForgetObserved` no borra la falla: con una guardada, la API dice `failed` (§10.1, paso 7), y se reintenta con su backoff o con `retry`.
 
 **Se sirve con Origin CA** si se cumplen las cuatro cosas:
 - el host es candidato;
