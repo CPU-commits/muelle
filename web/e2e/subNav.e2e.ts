@@ -4,8 +4,8 @@ import { expect, type Locator, type Page, test } from '@playwright/test'
 // la nav al lado del contenido, acompaña el scroll (sticky) y sus links se pueden usar desde
 // cualquier altura; en un teléfono, con la nav arriba del contenido, se va con la página y
 // no tapa nada. El item marcado (aria-current) es la sección que se está leyendo: la que
-// cruzó una línea en la parte de arriba de la pantalla, la última al fondo, la de un link
-// recién seguido o la de un deep link.
+// ocupa la parte de arriba de la pantalla, la última al fondo, la de un link recién seguido
+// o la de un deep link.
 const USERNAME = 'felipe'
 const PASSWORD = 'una-contraseña-larga'
 
@@ -41,10 +41,16 @@ interface Screen {
 	/** Las secciones (id y link), en orden, para scrollear a mano hasta cada una. */
 	sections: { id: string; name: string }[]
 	/**
-	 * Una sección corta del final: después de saltar a ella, la línea de arriba queda en la
-	 * siguiente (o la página llega al fondo), y aun así queda marcada la del link.
+	 * Una sección corta del final: después de saltar a ella, la página puede quedar al fondo
+	 * (donde gana la última), y aun así queda marcada la del link.
 	 */
 	short: { id: string; name: string }
+	/**
+	 * Cuántas secciones, desde la primera, se pueden llevar a mano hasta la altura de la nav
+	 * antes de que la página llegue al fondo (a 1280x600): las que prueba "al scrollear a
+	 * mano…". Si el contenido cambia, el test lo dice en vez de probar menos sin avisar.
+	 */
+	reachable: number
 }
 
 const CONFIG_SCREEN: Screen = {
@@ -62,6 +68,8 @@ const CONFIG_SCREEN: Screen = {
 		{ id: 'c-del', name: 'Eliminar app' },
 	],
 	short: { id: 'c-res', name: 'Recursos' },
+	// Recursos no: la página llega al fondo antes (la prueba aparte, más abajo en la pantalla).
+	reachable: 4,
 }
 
 const SETTINGS_SCREEN: Screen = {
@@ -78,6 +86,7 @@ const SETTINGS_SCREEN: Screen = {
 		{ id: 'auditoria', name: 'Auditoría' },
 	],
 	short: { id: 'usuarios', name: 'Usuarios' },
+	reachable: 4,
 }
 
 const SCREENS = [CONFIG_SCREEN, SETTINGS_SCREEN]
@@ -175,13 +184,25 @@ async function atTheBottom(page: Page): Promise<boolean> {
 }
 
 /**
- * Cuánto le falta a la sección del salto para quedar a la altura del primer link de la nav
- * (pegada arriba): 0 cuando la tarjeta quedó alineada.
+ * Cuánto le falta a la sección `id` (por defecto, la del salto) para quedar a la altura del
+ * primer link de la nav (pegada arriba): 0 cuando la tarjeta quedó alineada.
  */
-async function alignment(page: Page, screen: Screen): Promise<number> {
-	const section = await boxOf(page.locator(screen.jump.hash))
+async function alignment(
+	page: Page,
+	screen: Screen,
+	id = screen.jump.hash.slice(1),
+): Promise<number> {
+	const section = await boxOf(page.locator(`#${id}`))
 	const link = await boxOf(subNav(page, screen.nav).getByRole('link').first())
 	return section.top - link.top
+}
+
+/** Los links de la nav pegada arriba quedan a 24 px del borde: ahí deja un salto la sección. */
+const NAV_TOP = 24
+
+/** Llegó todo lo que la pantalla carga con sus queries: ya no hay ningún "Cargando…". */
+async function loaded(page: Page): Promise<void> {
+	await expect(page.getByRole('status').filter({ hasText: 'Cargando…' })).toHaveCount(0)
 }
 
 /** Anota cada cambio del link marcado de la nav, para ver si pasó por otros. */
@@ -329,13 +350,19 @@ test('al scrollear a mano, la nav marca la sección que se está leyendo y, al f
 		const [first] = screen.sections
 		await expect(current(nav), `${screen.path}: arriba de todo`).toHaveText(first!.name)
 
-		// Cada sección, con su borde de arriba en la parte de arriba de la pantalla (a un
-		// cuarto del alto), mientras la página no llegó al fondo.
+		// Cada sección, con su borde de arriba a la altura de los links de la nav (donde la deja
+		// un salto), mientras la página no llegó al fondo: aunque sea corta y la siguiente ya
+		// asome en la parte de arriba de la pantalla (Registries, Usuarios).
+		const checked: string[] = []
 		for (const section of screen.sections.slice(0, -1)) {
-			await wheelSectionTo(page, section.id, 150)
+			await wheelSectionTo(page, section.id, NAV_TOP)
 			if (await atTheBottom(page)) break
 			await expect(current(nav), `${screen.path}: ${section.name}`).toHaveText(section.name)
+			checked.push(section.name)
 		}
+		expect(checked, `${screen.path}: las que se llevaron a mano hasta la nav`).toEqual(
+			screen.sections.slice(0, screen.reachable).map((section) => section.name),
+		)
 
 		// Al fondo gana la última, aunque no llegue arriba.
 		await scrollToBottom(page)
@@ -366,6 +393,35 @@ test('Volúmenes y Recursos se marcan al scrollear hasta ellas, antes del fondo'
 	await expect(current(nav)).toHaveText('Recursos')
 })
 
+test('con un alto de página con decimales, al fondo también gana la última', async ({ page }) => {
+	const errors = watchErrors(page)
+	await page.setViewportSize({ width: 1280, height: 600 })
+	await login(page)
+	await open(page, CONFIG_SCREEN)
+	const nav = subNav(page, CONFIG_SCREEN.nav)
+
+	// Sin healthcheck la tarjeta se achica y el alto de la página queda con decimales: al
+	// fondo, el documento termina una fracción de píxel por debajo de la pantalla.
+	// El radio está escondido detrás de su opción (SegmentedControl): el clic va a la opción.
+	await page.getByText('Ninguno', { exact: true }).click()
+	await expect(page.getByRole('radio', { name: 'Ninguno' })).toBeChecked()
+	await expect
+		.poll(() =>
+			page.evaluate(() => document.documentElement.getBoundingClientRect().height % 1),
+		)
+		.not.toBe(0)
+
+	await wheelTo(page, Number.MAX_SAFE_INTEGER)
+	expect(await atTheBottom(page)).toBe(true)
+	await expect(current(nav)).toHaveText('Eliminar app')
+
+	// Un poco más arriba ya no es el fondo: vuelve la que ocupa la parte de arriba.
+	await wheelTo(page, (await page.evaluate(() => window.scrollY)) - 40)
+	await expect(current(nav)).toHaveText('Recursos')
+
+	expect(errors).toEqual([])
+})
+
 test('un link de la nav marca su sección en el acto, sin pasar por otras, y scrollear no reescribe el hash', async ({
 	page,
 }) => {
@@ -390,8 +446,8 @@ test('un link de la nav marca su sección en el acto, sin pasar por otras, y scr
 		await page.waitForTimeout(300)
 		expect(await marks(), `${screen.path}: sin parpadeos`).toEqual([screen.jump.name])
 
-		// Una corta del final: la línea queda en la siguiente (o la página llega al fondo), y
-		// la marca sigue en la del link hasta que se scrollea a mano.
+		// Una corta del final: la página puede quedar al fondo (donde gana la última), y la
+		// marca sigue en la del link hasta que se scrollea a mano.
 		const short = nav.getByRole('link', { name: screen.short.name })
 		await short.click()
 		await expect(current(nav)).toHaveText(screen.short.name)
@@ -424,6 +480,46 @@ test('un link de la nav marca su sección en el acto, sin pasar por otras, y scr
 	expect(errors).toEqual([])
 })
 
+test('volver atrás después de un link marca lo que se ve, no la sección del link', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await page.setViewportSize({ width: 1280, height: 600 })
+	await login(page)
+	await open(page, SETTINGS_SCREEN)
+	await loaded(page)
+	const nav = subNav(page, SETTINGS_SCREEN.nav)
+
+	// Volver atrás antes de que SvelteKit anote la entrada del historial (en el hashchange) no
+	// recupera el scroll: se espera a que el link termine de navegar, como lo haría una persona.
+	for (const name of ['Usuarios', 'Seguridad']) {
+		const navigated = page.evaluate(
+			() =>
+				new Promise<void>((resolve) =>
+					addEventListener('hashchange', () => setTimeout(resolve), { once: true }),
+				),
+		)
+		await nav.getByRole('link', { name }).click()
+		await navigated
+		await expect(current(nav)).toHaveText(name)
+	}
+
+	// El historial vuelve a donde estaba el scroll: Usuarios (corta) arriba, a la altura de la
+	// nav, aunque Auditoría asome debajo.
+	await page.goBack()
+	await expect(page).toHaveURL(/#usuarios$/)
+	await expect.poll(() => alignment(page, SETTINGS_SCREEN, 'usuarios')).toBeCloseTo(0, 0)
+	await expect(current(nav)).toHaveText('Usuarios')
+
+	// Y arriba de todo, la primera: la marca del link de Seguridad no se queda.
+	await page.goBack()
+	await expect(page).toHaveURL(/\/ajustes$/)
+	await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+	await expect(current(nav)).toHaveText('Proxy y DNS')
+
+	expect(errors).toEqual([])
+})
+
 test('un deep link abre en su sección, marcada, aunque llegue después que la página', async ({
 	page,
 }) => {
@@ -450,6 +546,75 @@ test('un deep link abre en su sección, marcada, aunque llegue después que la p
 	await expect.poll(() => atTheBottom(page)).toBe(true)
 	await page.waitForTimeout(300)
 	await expect(current(nav)).toHaveText(CONFIG_SCREEN.short.name)
+
+	expect(errors).toEqual([])
+})
+
+for (const viewport of [
+	{ width: 1280, height: 600 },
+	{ width: 1440, height: 900 },
+]) {
+	test(`en Ajustes, un deep link abre en su sección, marcada, aunque arriba llegue contenido después (${viewport.width}x${viewport.height})`, async ({
+		page,
+	}) => {
+		const errors = watchErrors(page)
+		await page.setViewportSize(viewport)
+		await login(page)
+		const nav = subNav(page, SETTINGS_SCREEN.nav)
+
+		// Registries, Usuarios y Auditoría están en la página desde el principio; arriba, Proxy
+		// y DNS y Seguridad llegan con los ajustes (más de una pantalla), y cada lista con su
+		// query.
+		for (const section of SETTINGS_SCREEN.sections.slice(2)) {
+			await page.goto(`${SETTINGS_SCREEN.path}#${section.id}`)
+			await expect(current(nav), section.id).toHaveText(section.name)
+			await loaded(page)
+			await expect
+				.poll(() => alignment(page, SETTINGS_SCREEN, section.id), `${section.id}: alineada`)
+				.toBeCloseTo(0, 0)
+			await page.waitForTimeout(300)
+			await expect(current(nav), section.id).toHaveText(section.name)
+			expect(await alignment(page, SETTINGS_SCREEN, section.id), section.id).toBeCloseTo(0, 0)
+		}
+
+		expect(errors).toEqual([])
+	})
+}
+
+test('un link de la nav desde Tokens scrolleada lleva a su sección de Ajustes, marcada', async ({
+	page,
+}) => {
+	const errors = watchErrors(page)
+	await page.setViewportSize({ width: 1280, height: 600 })
+	await login(page)
+	const nav = subNav(page, SETTINGS_SCREEN.nav)
+	const tokensHeading = page.getByRole('heading', { name: 'Tokens de API', level: 2 })
+
+	// La primera vez los ajustes no están en el cache (Seguridad llega después que la página);
+	// la segunda, sí.
+	await page.goto('/ajustes/tokens')
+	for (const section of [
+		{ id: 'seguridad', name: 'Seguridad' },
+		{ id: 'usuarios', name: 'Usuarios' },
+	]) {
+		await expect(tokensHeading).toBeVisible()
+		await loaded(page)
+		await wheelTo(page, Number.MAX_SAFE_INTEGER)
+		expect(await page.evaluate(() => window.scrollY), 'Tokens scrolleada').toBeGreaterThan(0)
+
+		await nav.getByRole('link', { name: section.name }).click()
+		await expect(page).toHaveURL(new RegExp(`/ajustes#${section.id}$`))
+		await expect(current(nav), section.id).toHaveText(section.name)
+		await loaded(page)
+		await expect
+			.poll(() => alignment(page, SETTINGS_SCREEN, section.id), `${section.id}: alineada`)
+			.toBeCloseTo(0, 0)
+		await page.waitForTimeout(300)
+		await expect(current(nav), section.id).toHaveText(section.name)
+		expect(await alignment(page, SETTINGS_SCREEN, section.id), section.id).toBeCloseTo(0, 0)
+
+		await nav.getByRole('link', { name: 'Tokens de API' }).click()
+	}
 
 	expect(errors).toEqual([])
 })
