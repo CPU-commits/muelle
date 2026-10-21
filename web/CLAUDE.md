@@ -834,8 +834,9 @@ violaciones de CSP y los errores de la consola, como los de `e2e/`.
   muelle en `test-results/real-muelle.log` (con la traza de Playwright en
   `test-results/real/`). El log y el borrado de la carpeta temporal (la clave maestra y la
   base) van aunque falle el CLI de docker (`teardown.ts`, con sus tests en
-  `teardown.test.ts`); lo que quedó de Docker se avisa después. La corrida también falla si
-  el log de muelle trae un `error interno` (un 500, aunque el panel no lo mostrara); un
+  `teardown.test.ts`); lo que quedó de Docker (o el fallo del CLI) se avisa después. La
+  corrida también falla si el log de muelle trae un `error interno` (un 500, aunque el panel
+  no lo mostrara), con un solo error que nombra eso y lo de Docker; un
   pedido que el panel cortó al cambiar de pantalla no cuenta (el backend no lo registra
   como error). Al empezar, borra lo `it7p…` de más de 30 min (una corrida que murió con
   SIGKILL).
