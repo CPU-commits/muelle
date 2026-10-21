@@ -1,11 +1,12 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { createWriteStream, existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { createWriteStream, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { realCaddy, removeOwned, swarmManager, sweepStale } from './docker'
 import { PREFIX, publishRun, REAL_PORT, REAL_URL } from './env'
+import { createRunDir } from './runDir'
 import { cleanUpRun } from './teardown'
 
 // Arranca el `muelle serve` del recorrido (journey.real.ts) con una base nueva y devuelve la
@@ -104,10 +105,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
 	const id = randomBytes(2).toString('hex')
 	const project = `${PREFIX}p${id}`
-	const dir = mkdtempSync(join(tmpdir(), `muelle-${PREFIX}-`))
-	const logPath = join(dir, 'muelle.log')
-	const keyFile = join(dir, 'master.key')
-	writeFileSync(keyFile, execFileSync(bin, ['genkey']), { mode: 0o600 })
+	// Si genkey falla, createRunDir borra la carpeta: la limpieza de abajo todavía no existe.
+	const { dir, logPath, keyFile, dataDir } = createRunDir(tmpdir(), () =>
+		execFileSync(bin, ['genkey']),
+	)
 
 	const env: NodeJS.ProcessEnv = {}
 	for (const [key, value] of Object.entries(process.env)) {
@@ -117,7 +118,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 		MUELLE_LISTEN: `127.0.0.1:${REAL_PORT}`,
 		MUELLE_PANEL_ORIGIN: REAL_URL,
 		MUELLE_SECURE_COOKIES: 'false',
-		MUELLE_DATA_DIR: join(dir, 'data'),
+		MUELLE_DATA_DIR: dataDir,
 		MUELLE_MASTER_KEY_FILE: keyFile,
 	})
 	const child = spawn(bin, ['serve'], { env, stdio: ['ignore', 'pipe', 'pipe'] })

@@ -114,7 +114,8 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
 - E2E contra el backend de verdad: `e2e-real/*.real.ts`, el panel embebido en un
   `muelle serve` con el Swarm local (`pnpm test:e2e:real`, ver
   [E2E contra muelle](#e2e-contra-muelle)). Lo de node puro que usa (los códigos TOTP de
-  `totp.ts`) se prueba en `e2e-real/*.test.ts`, que corre en el proyecto server de vitest
+  `totp.ts`, la carpeta de `runDir.ts` y la limpieza de `teardown.ts`) se prueba en
+  `e2e-real/*.test.ts`, que corre en el proyecto server de vitest
   con `pnpm test`, sin muelle ni Swarm.
 - Componentes: `__tests__/X.svelte.test.ts` junto al componente, en Chromium, con un
   harness cuando hace falta un contexto (ver `molecules/menu/__tests__/`). Un harness que
@@ -825,7 +826,9 @@ violaciones de CSP y los errores de la consola, como los de `e2e/`.
 - `e2e-real/globalSetup.ts` arranca muelle con una base nueva en una carpeta temporal:
   `MUELLE_LISTEN=127.0.0.1:24080` (otro con `E2E_REAL_PORT`, del 24000 al 24999),
   `MUELLE_PANEL_ORIGIN` en esa dirección, `MUELLE_SECURE_COOKIES=false` y su clave maestra
-  (0600); ninguna otra `MUELLE_*` del entorno pasa. Sin dominio del panel el proxy queda
+  (0600); ninguna otra `MUELLE_*` del entorno pasa. La carpeta y la clave las prepara
+  `runDir.ts` (con `runDir.test.ts`): si `muelle genkey` falla, borra la carpeta, porque la
+  limpieza de abajo todavía no está armada. Sin dominio del panel el proxy queda
   deshabilitado: no hay muelle-caddy ni rutas. El link de setup sale del log
   (`event: setup_url`) y llega a los tests por el entorno (`realRun()` de `env.ts`).
 - Todo lo de Docker se llama `it7p<id>…` (el slug del proyecto; `id`, 4 hex al azar). La
