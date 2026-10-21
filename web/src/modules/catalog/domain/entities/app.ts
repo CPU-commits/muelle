@@ -28,7 +28,7 @@ interface AppBase {
 	readonly deployTimeoutSeconds: number
 	/** Cambia con el spec o el compose; el timeout no cuenta. */
 	readonly configChangedAt: Date
-	/** `null` mientras no se desplegó nunca (en la Fase 1, siempre). */
+	/** `null` mientras no se desplegó nunca. */
 	readonly lastDeployedAt: Date | null
 	/** La configuración cambió después del último deploy. Sin deploys, nunca. */
 	readonly pendingChanges: boolean
