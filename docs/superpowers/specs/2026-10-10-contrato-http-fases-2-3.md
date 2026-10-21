@@ -1146,7 +1146,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
   - `cf_record_id_aaaa`, `last_error_code`, `created_at` y `updated_at`;
   - `app_id` con `ON DELETE RESTRICT`: catalog no borra una app con dominios, `409 not_empty`.
 - **0004** (Fase 1, un pendiente de su revisión final): `audit_events.actor_name` (§4.2), con los eventos que ya había llenados con lo que se sabe de su autor. Es una migración nueva, y no un cambio a `0001_init.sql` (que no se edita, §1.3), para que corra también sobre una base de la Fase 1.
-- **0005** (lo pidió el panel): `deploys.routes_warning` (§2.1), 0 o 1. Los deploys que ya había quedan con 1 si son `succeeded` y su log trae la advertencia del paso 7 (§2.11). Es nueva, y no un cambio a `0002_deploy.sql`, por lo mismo que la 0004: para que corra también sobre una base que ya tiene deploys. La próxima migración nueva es la 0006.
+- **0005** (lo pidió el panel): `deploys.routes_warning` (§2.1), 0 o 1. Los deploys que ya había quedan con 1 si son `succeeded` y su log trae la advertencia del paso 7 (§2.11). Uno anterior a la 0005 cuya advertencia no entró en el log (el tope de 256 KB, §2.5) queda con 0: la migración solo tiene el texto. Es nueva, y no un cambio a `0002_deploy.sql`, por lo mismo que la 0004: para que corra también sobre una base que ya tiene deploys. La próxima migración nueva es la 0006.
 
 ## 7. Diferencias con lo que supuso el panel
 
