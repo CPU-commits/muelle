@@ -587,17 +587,17 @@ func failedTask(tasks []service.SwarmTask, appliedAt time.Time, hint string) *se
 // /api/v1/proxy, solo con sesión) y en el log del servidor.
 func (r *run) routes(ctx context.Context) error {
 	rctx, cancel := context.WithTimeout(ctx, r.u.Timing.RoutesTimeout)
-	err := r.u.Ingress.SyncRoutes(rctx)
+	warn := r.u.Ingress.SyncRoutes(rctx) != nil
 	cancel()
-	if err != nil && ctx.Err() != nil {
+	if warn && ctx.Err() != nil {
 		return ctx.Err()
 	}
 	// La marca va antes que la línea: quien ve la advertencia por el stream
 	// ya la encuentra en el deploy. Sin cancelación, como las líneas.
-	if err := r.u.Deploys.SetRoutesWarning(context.WithoutCancel(ctx), r.d.ID, err != nil); err != nil && r.logErr == nil {
+	if err := r.u.Deploys.SetRoutesWarning(context.WithoutCancel(ctx), r.d.ID, warn); err != nil && r.logErr == nil {
 		r.logErr = err
 	}
-	if err == nil {
+	if !warn {
 		r.line("rutas de Caddy actualizadas")
 		return nil
 	}
