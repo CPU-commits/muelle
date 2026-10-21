@@ -1580,14 +1580,14 @@ No hay herramientas de proyectos, stages o apps (escritura), dominios (escritura
 | `since?` | string | RFC 3339, o una duración de Go (`15m`, `2h`), de más de 0 y hasta `168h`, que es `ahora − d` | — |
 | `contains?` | string | hasta 200 caracteres | — |
 | `stream?` | string | `stdout` o `stderr` | los dos |
-| `max_bytes?` | integer | 1 024 a 32 768, en JSON | 16 384 |
+| `max_bytes?` | integer | 4 096 a 32 768, en JSON | 16 384 |
 
 - **Qué hace:** los logs del servicio, sin follow nunca, con la búsqueda, la validación y el enmascarado de §2.9. `since` reemplaza a `tail`, como en §2.9: si vienen los dos, manda `since`.
   - Toma un lugar de los 8 streams del principal (§0.3, §8.5) mientras lee.
   - Lee hasta el final del log o 20 s. Con el plazo vencido, devuelve lo que alcanzó, con `"incomplete": true`.
   - Cada línea, **ya enmascarada**, se filtra por `stream` y por `contains` (sin distinguir mayúsculas). El filtro va **después** del enmascarado: buscar el valor de un secreto da 0 líneas.
   - Cada línea, ya con su prefijo (abajo), se corta respetando UTF-8 y con `…` para que su JSON mida a lo más 2 048 bytes. Un log con colores ANSI llega a ese corte con menos texto: cada ESC cuenta 6.
-  - Las líneas entran en un buffer de `max_bytes` del que salen primero las más viejas. `max_bytes` mide `lines` en JSON: cada línea con sus comillas y su coma.
+  - Las líneas entran en un buffer de `max_bytes` del que salen primero las más viejas. `max_bytes` mide `lines` en JSON: cada línea con sus comillas y su coma. El mínimo es más que una línea cortada (2 048 bytes), así la más nueva siempre entra.
 - **Salida:**
 
   ```json

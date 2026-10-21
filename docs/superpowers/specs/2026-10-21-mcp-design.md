@@ -490,7 +490,7 @@ Cada fila dice qué módulo la registra (en su `infra/in/mcp`), qué caso de uso
   - `since?: string`: RFC 3339, o una duración de Go (`15m`, `2h`, hasta `168h`), que se vuelve `now − d`. Reemplaza a `tail`, como en el contrato §2.9;
   - `contains?: string`, hasta 200 caracteres, sin distinguir mayúsculas;
   - `stream?: "stdout"|"stderr"`;
-  - `max_bytes?: int` de 1 024 a 32 768, 16 384 por defecto, medido en el JSON de `lines`.
+  - `max_bytes?: int` de 4 096 a 32 768, 16 384 por defecto, medido en el JSON de `lines`. El mínimo es más que una línea cortada (2 KiB de JSON): con uno menor, una línea larga nunca entraría y la llamada daría 0 líneas.
 - Alcance: `(project, stage)`.
 - Caso de uso: `deploy.AppLogs.Open` con `Follow: false` (sin follow nunca). Valida y enmascara igual que REST (contrato §2.9).
 - Cómo se arma la respuesta:
@@ -1027,6 +1027,7 @@ Todos con TDD, en el estilo del repo:
     - el buffer descarta las más viejas al pasar `max_bytes`, medido en JSON;
     - el corte de cada línea, con su prefijo, a 2 KiB de JSON;
     - peor caso: 1000 líneas llenas de colores ANSI (`\x1b[31m…\x1b[0m`) con `max_bytes: 32768`: `lines` mide a lo más 32 768 bytes de JSON, cada línea a lo más 2 048, y el resultado entra en el tope;
+    - con `max_bytes: 4096` y líneas de 16 KiB, sale al menos la más nueva, cortada;
     - con 8 SSE abiertos por HTTP con el mismo token, `rate_limited`;
     - un log que no termina da `incomplete` a los 20 s (con un reloj de test o un plazo corto inyectado);
     - el servicio que falta en una compose;
