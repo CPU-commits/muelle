@@ -760,7 +760,8 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - `email` es `acme_email`, y no va si está vacío.
 - **Sin placeholders en los ajustes:** Caddy expande placeholders en el email del emisor `acme` y en `api_token` (`a{x}@b.cl` hace fallar el `POST /load` entero).
   - `PATCH /settings` rechaza un `acme_email` o un `cloudflare_token` con `{` o `}`: `422` en ese campo, y no guarda nada (§4.1).
-  - Si igual llegan a los ajustes por otro lado (la configuración inicial de install, `MUELLE_INIT_*`, o un `UPDATE` a mano), muelle no manda la configuración, y `GET /proxy` dice `out_of_sync` con el motivo.
+  - La configuración inicial también, con la misma regla (`validate.NoPlaceholders`): install, `--email` y `--cloudflare-token` (código 2 y el nombre del flag, antes de tocar Docker), y muelle, `MUELLE_INIT_ACME_EMAIL` y el token de `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE` (no arranca, y el error nombra la variable; §5.2). Con ellos Caddy nunca recibiría la configuración, y el panel, que va por Caddy, no serviría para corregirlos. El error no cita el token.
+  - Si igual llegan a los ajustes (un `UPDATE` a mano), muelle no manda la configuración, y `GET /proxy` dice `out_of_sync` con el motivo.
 - **Errores de Caddy:** el mensaje de un `POST /load` rechazado se guarda (y se registra en el log) con el token de Cloudflare reemplazado por `***`, cortado a 500 caracteres. La configuración misma nunca va al log.
 - **Ruta del panel:** `panel_domain → naming.MuelleService:naming.MuellePort` (`muelle_muelle:8080`), con `X-Real-IP` = `{http.vars.client_ip}` en `headers.request.set` del `reverse_proxy` (el JSON de arriba).
 - **TLS del panel:**
@@ -946,7 +947,7 @@ install acepta tres flags ocultos, solo para los tests de integración (no salen
 
 ### 5.2 La configuración inicial: `MUELLE_INIT_*`
 
-install despliega el servicio con estas variables. `settings.Load` las valida en cada arranque: si una no sirve, muelle no arranca y el error nombra la variable.
+install despliega el servicio con estas variables. `settings.Load` las valida en cada arranque, con las reglas de los flags de abajo (`{` o `}` en `MUELLE_INIT_ACME_EMAIL` o en el token tampoco pasan, §3.4): si una no sirve, muelle no arranca y el error nombra la variable.
 
 **Se aplican una sola vez**, en el primer arranque de la base: `admin.ApplyStartupSettings` guarda en la misma transacción la marca `init_applied`, y en los arranques siguientes no mira `MUELLE_INIT_*`. En ese primer arranque guarda cada valor que no es cero si la clave todavía no está, y deja un evento `settings.init` con las claves, sin valores.
 
@@ -967,7 +968,7 @@ install despliega el servicio con estas variables. `settings.Load` las valida en
 | `--advertise-addr` | — (solo `docker swarm init`; con el Swarm ya activo se ignora, con un aviso) | — |
 | `--reinstall` | — (ver §5.4) | — |
 
-Los flags se validan antes de tocar Docker, con las mismas reglas que `PATCH /settings` (§4.1): `validate.Hostname`, `Email`, `IPv4`, `IPv6`, `Port` e `ImageRef`; los dos puertos distintos; y el token con la forma de un token de Cloudflare (de 20 a 512 caracteres visibles, sin espacios). Uno que no sirve termina con código 2 y el nombre del flag.
+Los flags se validan antes de tocar Docker, con las mismas reglas que `PATCH /settings` (§4.1): `validate.Hostname`, `Email`, `IPv4`, `IPv6`, `Port` e `ImageRef`; los dos puertos distintos; y el token con la forma de un token de Cloudflare (de 20 a 512 caracteres visibles, sin espacios). `--email` y el token, además, sin `{` ni `}` (§3.4). Uno que no sirve termina con código 2 y el nombre del flag.
 
 **El origen del panel no va en la configuración de muelle:** install escribe el dominio (`MUELLE_PANEL_DOMAIN`) y el puerto HTTPS inicial (`MUELLE_INIT_PROXY_HTTPS_PORT`). El origen sale de los ajustes, `https://<panel_domain>[:<proxy_https_port>]`: si después se cambia `proxy_https_port` en el panel (la migración de §16 del diseño pasa de 8443 a 443), el `Origin` permitido y los links pasan al puerto nuevo, sin reiniciar muelle (§0.1).
 

@@ -174,8 +174,8 @@ func ParseArgs(args []string, stdin io.Reader) (Options, error) {
 		if o.CloudflareToken == "" {
 			return Options{}, errors.New("--cloudflare-token: la primera línea de stdin está vacía")
 		}
-		if !cloudflareTokenRe.MatchString(o.CloudflareToken) {
-			return Options{}, errTokenFormat
+		if err := checkToken(o.CloudflareToken); err != nil {
+			return Options{}, err
 		}
 	case *passwordStdin:
 		line, err := firstLine(stdin, "--registry-password-stdin")
@@ -236,6 +236,9 @@ func (o Options) validate() error {
 		check       func(field, s string) error
 	}{
 		{"--email", o.Email, validate.Email},
+		// Como en PATCH /settings: con { o }, Caddy nunca recibiría la
+		// configuración (contrato §3.4), y el panel va por Caddy.
+		{"--email", o.Email, validate.NoPlaceholders},
 		{"--public-ip", o.PublicIP, validate.IPv4},
 		{"--public-ipv6", o.PublicIPv6, validate.IPv6},
 		{"--caddy-image", o.CaddyImage, validate.ImageRef},
@@ -258,8 +261,10 @@ func (o Options) validate() error {
 	if o.HTTPPort == o.HTTPSPort {
 		return fmt.Errorf("--https-port: no puede ser el mismo que --http-port (%d)", o.HTTPPort)
 	}
-	if o.CloudflareToken != "" && !cloudflareTokenRe.MatchString(o.CloudflareToken) {
-		return errTokenFormat
+	if o.CloudflareToken != "" {
+		if err := checkToken(o.CloudflareToken); err != nil {
+			return err
+		}
 	}
 	if o.RegistryUser != "" {
 		if err := checkRegistryUser(o.RegistryUser); err != nil {
@@ -278,6 +283,16 @@ func (o Options) validate() error {
 		return fmt.Errorf("--advertise-addr: %q no es una IP, una IP:puerto ni un nombre de interfaz", o.AdvertiseAddr)
 	}
 	return nil
+}
+
+// checkToken es la regla de cloudflare_token en PATCH /settings: la forma de
+// un token de Cloudflare, y sin { ni }, que Caddy tomaría como placeholders
+// (contrato §3.4). Los errores no citan el token.
+func checkToken(s string) error {
+	if !cloudflareTokenRe.MatchString(s) {
+		return errTokenFormat
+	}
+	return validate.NoPlaceholders("--cloudflare-token", s)
 }
 
 // checkRegistryUser y checkRegistryPassword son las reglas de POST
