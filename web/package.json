@@ -18,6 +18,7 @@
 		"test": "node scripts/isolated-net.mjs vitest run",
 		"test:watch": "vitest",
 		"test:e2e": "node scripts/isolated-net.mjs playwright test",
+		"test:e2e:real": "node scripts/e2e-real.mjs",
 		"verify": "pnpm lint && pnpm check && pnpm test",
 		"clean": "rm -rf build build-e2e .svelte-kit src/shared/ui/i18n/paraglide test-results"
 	},
