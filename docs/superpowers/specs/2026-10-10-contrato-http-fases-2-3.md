@@ -1105,7 +1105,7 @@ install acepta tres flags ocultos, solo para los tests de integración (no salen
 
 ### 5.2 La configuración inicial: `MUELLE_INIT_*`
 
-install despliega el servicio con estas variables. `settings.Load` las valida en cada arranque, con las reglas de los flags de abajo (`{` o `}` en `MUELLE_INIT_ACME_EMAIL` o en el token tampoco pasan, §3.4): si una no sirve, muelle no arranca y el error nombra la variable.
+install despliega el servicio con estas variables. `settings.Load` las valida en cada arranque, con las reglas de los flags de abajo: el token de `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE`, sin los espacios de los extremos, con la forma de `--cloudflare-token` (`validate.IsCloudflareToken`, la misma de `PATCH /settings`), y `{` o `}` en `MUELLE_INIT_ACME_EMAIL` o en el token tampoco pasan (§3.4). Si una no sirve, muelle no arranca y el error nombra la variable, sin citar el token.
 
 **Se aplican una sola vez**, en el primer arranque de la base: `admin.ApplyStartupSettings` guarda en la misma transacción la marca `init_applied`, y en los arranques siguientes no mira `MUELLE_INIT_*`. En ese primer arranque guarda cada valor que no es cero si la clave todavía no está, y deja un evento `settings.init` con las claves, sin valores.
 
