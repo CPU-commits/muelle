@@ -1,6 +1,6 @@
 # muelle — Contrato de las Fases 2, 3 y 5
 
-> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos) y 2026-10-17 (lo que pidió el panel, §7) · Estado: aprobado para la etapa de contratos, e implementado en este árbol (Fases 2, 3 y 5).
+> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos), 2026-10-17 (lo que pidió el panel, §7) y 2026-10-21 (los certificados de Cloudflare, §3.7) · Estado: aprobado para la etapa de contratos, e implementado en este árbol (Fases 2, 3 y 5). Los certificados de Cloudflare (§3.7 y lo que suman §1, §3.1–§3.5, §4, §6 y §7) están aprobados y todavía sin implementar.
 > Complementa el diseño ([`2026-10-09-muelle-design.md`](2026-10-09-muelle-design.md)); las referencias `§N` apuntan a sus secciones. Donde este documento y el diseño difieren, manda este documento, y el diseño ya se actualizó.
 
 Las Fases 2 (deploy), 3 (ingress) y 5 (distribución) se implementan **en paralelo**, cada una en su rama y sin hablar con las otras. Este documento fija lo que comparten:
@@ -99,7 +99,7 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 | catalog → deploy | `catalog/domain/service.AppRuntime`: `RemoveApp(ctx, p, s, a)` | `deploy.Module` (hecho: `docker stack rm`) | Al borrar una app. Fase 2: antes del `stack rm`, deja de aceptar deploys de la app por 2 min (`409 conflict`, lo que tarda catalog en borrar la fila), cancela el deploy en curso (`failed`: "la app se borró durante el deploy") y marca `failed` los `queued`. Si el `stack rm` falla, vuelve a aceptar deploys enseguida. Si el deploy en curso no se detiene en 15 s, no sigue (ni `queued` ni `stack rm`): vuelve a aceptar deploys y el `DELETE` de la app responde `409 conflict` ("un deploy de la app todavía no se detiene"), sin borrarla; se reintenta. Opcional |
 | deploy → secrets | `deploy/domain/service.EnvResolver`: `ResolveEnv(ctx, appID) (vars, secretValues, err)` | `secrets.Module` (hecho) | Las variables del stage con las de la app encima, y los valores secretos para enmascarar el log |
 | deploy → ingress | `deploy/domain/service.Ingress`: `EnsureStageNetwork`, `SyncRoutes(ctx) error` | `ingress.Module` (hecho) | §7 pasos 4 y 7 |
-| admin → ingress | `admin/domain/service.ProxyHook`: `CheckCloudflareToken`, `CheckProxyPorts(ctx, old, next)`, `ProxySettingsChanged(ctx, old, next)` | `ingress.Module` (hecho) | Ver §3.5 |
+| admin → ingress | `admin/domain/service.ProxyHook`: `CheckCloudflareToken`, `CheckCloudflareOriginCA(ctx, token, field)`, `CheckProxyPorts(ctx, old, next)`, `ProxySettingsChanged(ctx, old, next)` | `ingress.Module` (hecho, salvo `CheckCloudflareOriginCA`, §3.7) | Ver §3.5 |
 | ingress → admin | `ingress.Deps.PortsRolledBack func()` (opcional) | `container.go`, con `admin.Module.InvalidatePanelOrigin` (hecho) | Al volver a los puertos anteriores del proxy, el origen del panel en caché se descarta (§3.5) |
 
 **Lecturas por SQL** (un adaptador en `infra/out/service` del que lee, que puede leer la tabla de otro módulo):
@@ -144,9 +144,10 @@ Un `docker stack deploy` cortado por el apagado se resuelve en el próximo arran
   - borra las redes con etiquetas de stage (`muelle.project`/`muelle.stage`) cuyo stage ya no existe. Solo las que se llaman `naming.Network` de esas etiquetas, y recién **la segunda vez seguida** que el job las ve huérfanas: catalog crea la red antes de guardar el stage, y así no se borra la de un stage que se está creando. Una red en uso queda para la próxima vez;
   - reenvía la configuración completa. Si acaba de crear muelle-caddy, espera a que su admin API responda;
   - con token, actualiza `cloudflare_zones` y el registro DNS del panel (§3.4, §3.6), y si cambió la zona del panel (y con ella su TLS), reenvía la configuración otra vez. Va al final: un Cloudflare lento no atrasa la configuración de los sitios.
+  - con los certificados de Cloudflare encendidos (§3.7), despierta su reconciliación, sin esperarla: lee el `proxied` de los registros, emite, renueva y revoca.
   - Un paso que falla no corta los que siguen.
 - El job `"certificados"`, cada hora (§3.1).
-- `ingress.Run` lleva los reintentos con backoff (1 s, 2 s… 60 s) de una configuración que Caddy no aceptó, las verificaciones de un dominio 30 s después de crearlo, adoptarlo o reintentarlo y la de los `pending` cada minuto (§3.1), y la recreación de muelle-caddy que agenda `ProxySettingsChanged`, que vuelve a los puertos anteriores si los nuevos no arrancan (§3.5).
+- `ingress.Run` lleva los reintentos con backoff (1 s, 2 s… 60 s) de una configuración que Caddy no aceptó, las verificaciones de un dominio 30 s después de crearlo, adoptarlo o reintentarlo y la de los `pending` cada minuto (§3.1), la recreación de muelle-caddy que agenda `ProxySettingsChanged`, que vuelve a los puertos anteriores si los nuevos no arrancan (§3.5), y la reconciliación de los certificados de Cloudflare (§3.7): una pasada a la vez, con un plazo de 5 min cada una.
 
 Un error de Docker al arrancar nunca detiene a muelle.
 
@@ -581,6 +582,8 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
   "last_error": null,
   "cert_issuer": null,
   "cert_expires_at": null,
+  "cert_source": "letsencrypt",
+  "origin_ca": null,
   "records": [
     { "type": "A", "name": "api.tudominio.cl", "content": "203.0.113.24" }
   ],
@@ -600,7 +603,9 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
 | `status` | `pending` · `active` · `error` |
 | `last_error_code` | Solo con `error`: `record_exists` (→ Adoptar), `cloudflare` (→ Reintentar) o `certificate` (→ Reintentar). La migración 0003 garantiza que un `error` siempre trae código |
 | `last_error` | El mensaje, en español |
-| `cert_issuer`, `cert_expires_at` | Lo último que vio la verificación de §8 en un certificado válido: la organización del emisor (o su CN, si no tiene) y su vencimiento. Un certificado inválido no los cambia |
+| `cert_issuer`, `cert_expires_at` | Lo último que vio la verificación de §8 en un certificado válido: la organización del emisor (o su CN, si no tiene) y su vencimiento. Un certificado inválido no los cambia. Es un texto observado, no un enum: para saber qué certificado se usa está `cert_source` |
+| `cert_source` | `letsencrypt` · `cloudflare_origin_ca`. **Calculado, no se guarda:** qué certificado le pide muelle a Caddy para el dominio ahora. `letsencrypt` es el de ACME (DNS-01 con `tls_mode: cloudflare`, HTTP-01 con `http`); `cloudflare_origin_ca`, el de Cloudflare Origin CA que emitió muelle (§3.7). Es `cloudflare_origin_ca` si y solo si `origin_ca.status` es `active`. Nunca null |
+| `origin_ca` | Objeto o null. **Calculado:** el estado del certificado de Cloudflare Origin CA del dominio (§3.7): `{"status", "error_code", "error", "retry_at", "expires_at"}`. Null con `cloudflare_origin_ca` apagado (§4), sin token o con el proxy deshabilitado (`disabled`, §3.3) |
 | `records` | **Calculado, no se guarda:** los registros que el dominio necesita con los ajustes actuales. Un `A` con `public_ip` si hay, y un `AAAA` con `public_ipv6` si hay. `name` es el hostname. Con `cf_record_id` son los que maneja muelle; sin zona, los que hay que crear a mano. `[]` sin IP pública |
 | `created_at`, `updated_at` | `updated_at` es el último cambio del dominio: crearlo, un `PATCH` que cambia algo, adoptarlo, un reintento que rehace el DNS y cada cambio de `status`. Una verificación que solo actualiza `cert_issuer`/`cert_expires_at` no lo mueve |
 
@@ -618,6 +623,7 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
 - **Un `pending` sin certificado válido 10 min después** de su último cambio (`updated_at`) pasa a `error` con `certificate`. Mientras tanto, el certificado autofirmado o vacío que sirve Caddy al emitir no cuenta como error.
 - **`active` → `error`** con `certificate`: el certificado es inválido o vence en menos de 14 días.
 - **`error` con `certificate` → `active`:** la verificación de cada hora también mira estos dominios, y uno que ya tiene un certificado válido vuelve a `active`. No mira los `error` con `cloudflare` ni con `record_exists`: primero hay que arreglar el DNS.
+- **Los certificados de Cloudflare** (§3.7) no cambian estos estados: un dominio que se sirve con Origin CA sigue las mismas reglas (la verificación acepta la hoja que guardó muelle), y una emisión que falla no lo deja en `error`: el aviso va en `origin_ca`.
 - **Cuándo no se sabe:** si la verificación no puede conectarse a Caddy, si el handshake TLS no termina en 5 s, o si el proxy no está `synced` (§3.3), no cambia nada: un Caddy que arranca, o que todavía no recibió la configuración, no sirve los certificados aunque existan. Un handshake que Caddy rechaza (no tiene un certificado para ese nombre) sí es un certificado inválido.
 
 ### 3.2 Endpoints
@@ -642,7 +648,7 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
 
 **Comportamiento:**
 - `POST` con un hostname que ya usa cualquier app: `409 conflict`.
-- Crear, editar y borrar aplican de inmediato el DNS y la ruta de Caddy, sin deploy (§5.2 regla 4).
+- Crear, editar y borrar aplican de inmediato el DNS y la ruta de Caddy, sin deploy (§5.2 regla 4). Con los certificados de Cloudflare encendidos (§3.7), crear, editar, adoptar, reintentar y borrar despiertan además su reconciliación, después de `SyncRoutes` y sin esperarla.
   - Primero se guarda, y después `SyncRoutes`.
   - Un fallo de Caddy no hace fallar la petición: se ve en `GET /proxy` y se reintenta.
   - Las operaciones sobre dominios (y la actualización de los registros de §3.5) van de a una, y no dependen del cliente: si se va a mitad de la petición, la operación termina igual (a lo más 30 s; 20 s en `retry`).
@@ -667,6 +673,7 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
     - `certificate`: con un certificado válido pasa a `active`; si no, vuelve a `pending` con otros 10 min de plazo, y muelle le reenvía la configuración a Caddy forzando la recarga (`Cache-Control: must-revalidate`), así Caddy vuelve a intentar la emisión.
     - `pending`: no reinicia el plazo de 10 min.
   - Sin zona: vuelve a buscar la zona, por si se agregó un token o una zona. Si la encuentra, crea los registros como al crear el dominio.
+  - Con los certificados de Cloudflare encendidos (§3.7), además reinicia los reintentos del de Origin CA de ese dominio y despierta su reconciliación, sin esperarla. La respuesta trae `origin_ca` con `retry_at` en la hora del pedido si había una falla, y el resultado se ve en un `GET` después.
   - Responde con el estado resultante.
 - **Auditoría:** `domain.create`, `domain.update`, `domain.delete`, `domain.adopt` y `domain.retry`, con target `domain:<hostname>` y details `{"app": "<p>/<s>/<a>"}`.
 
@@ -680,20 +687,22 @@ El estado del proxy, para el banner "proxy desincronizado" (§8, §13):
   "error": null,
   "synced_at": "2026-10-10T14:20:41Z",
   "caddy": { "image": "ghcr.io/cpu-commits/muelle-caddy:v0.1.0", "running": true, "http_port": 80, "https_port": 443 },
-  "ports_rollback": null
+  "ports_rollback": null,
+  "panel_certificate": { "hostname": "panel.tudominio.cl", "cert_source": "letsencrypt", "origin_ca": null }
 }
 ```
 
 | Campo | Qué |
 |---|---|
 | `status` | `synced`: la última configuración se aplicó. `out_of_sync`: la última falló, o el contenedor no se pudo crear (un puerto ocupado, la imagen que no baja), y se reintenta con backoff. `recreating`: muelle-caddy se va a recrear, o se está recreando, por un cambio de puertos en `PATCH /settings` (§3.5); termina en `synced` u `out_of_sync`. `disabled`: `ProxySettings.Enabled` es falso (sin `panel_domain` o sin imagen de Caddy, en desarrollo) |
-| `error` | Solo con `out_of_sync`: el último fallo del contenedor mientras no se resuelva (un puerto ocupado al recrear, la imagen que no baja) y, si no hay, el de `POST /load`. Null con los demás estados. Si el mensaje de Caddy trae el token de Cloudflare, va como `***` |
+| `error` | Solo con `out_of_sync`: el último fallo del contenedor mientras no se resuelva (un puerto ocupado al recrear, la imagen que no baja) y, si no hay, el de `POST /load`. Null con los demás estados. Si el mensaje de Caddy trae el token de Cloudflare o una clave de un certificado de Origin CA (§3.7), va como `***` |
 | `synced_at` | El último `POST /load` exitoso; null si todavía no hubo uno desde que arrancó muelle |
 | `caddy.image`, `caddy.running` | Lo que corre de verdad, según `InspectContainer`. Si el contenedor no existe: `image: null` y `running: false` |
 | `caddy.http_port`, `caddy.https_port` | Los puertos de los ajustes |
 | `ports_rollback` | La última vez que muelle volvió a los puertos anteriores porque muelle-caddy no arrancó con los nuevos (§3.5), o null. `{"attempted": {"http_port": 80, "https_port": 443}, "restored": {"http_port": 8080, "https_port": 8443}, "error": "…", "at": "2026-10-16T20:41:07.12Z"}`: los que fallaron, a los que volvió (los de los ajustes desde entonces), por qué (en español, sin secretos) y cuándo. Va en memoria: se pierde al reiniciar muelle (queda en la auditoría), y se limpia con el próximo `PATCH /settings` que cambia los puertos. El `status` sigue las reglas de siempre: `synced` si el contenedor volvió con los puertos anteriores y Caddy tiene la configuración |
+| `panel_certificate` | Objeto o null. El certificado del panel: null sin `panel_domain`. Si no, `{"hostname", "cert_source", "origin_ca"}`: `hostname` es `panel_domain`, y `cert_source` y `origin_ca` tienen la forma y las reglas de los de un dominio (§3.1, §3.7). El panel no tiene `status` ni `cert_issuer`: muelle no lo verifica. Va también con `disabled`, sin consultar Docker, y ahí `origin_ca` es null |
 
-Es un estado en memoria, más `InspectContainer`. Con Docker caído: `503 docker_unavailable`. Con `disabled` no se consulta Docker: responde `200` con `image: null` y `running: false`, también sin Docker (desarrollo). Al arrancar muelle, hasta el primer `POST /load` (el job `"proxy"` corre enseguida), dice `out_of_sync` con el mensaje "muelle todavía no le mandó la configuración a Caddy".
+Es un estado en memoria, más `InspectContainer` (y `panel_certificate`, que sale de la base). Con Docker caído: `503 docker_unavailable`. Con `disabled` no se consulta Docker: responde `200` con `image: null` y `running: false`, también sin Docker (desarrollo). Al arrancar muelle, hasta el primer `POST /load` (el job `"proxy"` corre enseguida), dice `out_of_sync` con el mensaje "muelle todavía no le mandó la configuración a Caddy".
 
 ### 3.4 Caddy
 
@@ -758,11 +767,12 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - `cloudflare`: el emisor `acme` con `challenges.dns.provider` = `{"name": "cloudflare", "api_token": …}` y `resolvers: ["1.1.1.1:53", "1.0.0.1:53"]` (la propagación se mira en Cloudflare, no en el DNS del host). Un dominio con `tls_mode: cloudflare` va por `http` si ya no hay token.
   - `http`: el emisor `acme`, sin desafío DNS (Let's Encrypt, HTTP-01 o TLS-ALPN-01).
   - `email` es `acme_email`, y no va si está vacío.
+  - Con los certificados de Cloudflare (§3.7), un host que se sirve con Origin CA no va en ninguna política: su certificado va en `apps.tls.certificates.load_pem`, el hostname en `automatic_https.skip_certificates` del servidor `muelle`, y `apps.tls.disable_ocsp_stapling` es `true`. Sin ninguno, la configuración no cambia.
 - **Sin placeholders en los ajustes:** Caddy expande placeholders en el email del emisor `acme` y en `api_token` (`a{x}@b.cl` hace fallar el `POST /load` entero).
   - `PATCH /settings` rechaza un `acme_email` o un `cloudflare_token` con `{` o `}`: `422` en ese campo, y no guarda nada (§4.1).
   - La configuración inicial también, con la misma regla (`validate.NoPlaceholders`): install, `--email` y `--cloudflare-token` (código 2 y el nombre del flag, antes de tocar Docker), y muelle, `MUELLE_INIT_ACME_EMAIL` y el token de `MUELLE_INIT_CLOUDFLARE_TOKEN_FILE` (no arranca, y el error nombra la variable; §5.2). Con ellos Caddy nunca recibiría la configuración, y el panel, que va por Caddy, no serviría para corregirlos. El error no cita el token.
   - Si igual llegan a los ajustes (un `UPDATE` a mano), muelle no manda la configuración, y `GET /proxy` dice `out_of_sync` con el motivo.
-- **Errores de Caddy:** el mensaje de un `POST /load` rechazado se guarda (y se registra en el log) con el token de Cloudflare reemplazado por `***`, cortado a 500 caracteres. La configuración misma nunca va al log.
+- **Errores de Caddy:** el mensaje de un `POST /load` rechazado se guarda (y se registra en el log) con el token de Cloudflare reemplazado por `***`, y también cada clave de un certificado de Origin CA (el PEM entero y cada una de sus líneas, §3.7), cortado a 500 caracteres. La configuración misma nunca va al log.
 - **Ruta del panel:** `panel_domain → naming.MuelleService:naming.MuellePort` (`muelle_muelle:8080`), con `X-Real-IP` = `{http.vars.client_ip}` en `headers.request.set` del `reverse_proxy` (el JSON de arriba).
 - **TLS del panel:**
   - `cloudflare` si hay token y `panel_domain` cae en una zona visible (`panel_cf_zone_id`, §3.6); si no, `http`.
@@ -771,6 +781,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - Sus ids se guardan en las claves reservadas de §3.6. Si cambia la IP pública, muelle actualiza solo el contenido de los suyos: nunca cambia su `proxied`, que se puede cambiar en Cloudflare.
   - Antes de tocar un registro guardado, muelle lo lee: si ya no existe, ya no es de `panel_domain` (cambió `MUELLE_PANEL_DOMAIN` o `MUELLE_PANEL_ORIGIN`) o el token ya no lo puede leer (Cloudflare rechaza la lectura: un token de otra cuenta, o una zona que ya no ve), olvida su id sin borrarlo, y vuelve a crear uno solo si no hay otro. Si Cloudflare no responde, no olvida nada.
   - La excepción: si el `A` guardado ya no existe y su `AAAA` sí, el `AAAA` se borra. Si no, contaría como un registro que muelle no creó, y el panel quedaría sin `A`.
+  - Con los certificados de Cloudflare encendidos, y si todos sus registros `A`, `AAAA` y `CNAME` tienen el proxy en Cloudflare (los cree muelle o no), el panel usa el de Origin CA (§3.7). Quien entre sin pasar por Cloudflare (con `/etc/hosts`, o a la IP) ve un certificado en el que su navegador no confía. Si se apaga el proxy del registro en Cloudflare, muelle vuelve a Let's Encrypt en a lo más 5 min.
 
 ### 3.5 Los hooks de admin
 
@@ -780,6 +791,14 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - un token rechazado (también uno desactivado o vencido), uno que no puede listar las zonas, o uno sin zonas, devuelve un `*validate.Error` en `cloudflare_token` (`422`), con un mensaje que dice qué pasó o qué permisos faltan (Zone:Read y DNS:Edit), sin el token;
   - si Cloudflare no responde (sin red, un 5xx o un 429), `entity.ErrCloudflareUnavailable` (`502`);
   - si falla, no se guarda nada del `PATCH`.
+- **`CheckCloudflareOriginCA(ctx, token, field)`** (antes de guardar, después de `CheckCloudflareToken`, si `cloudflare_origin_ca` queda encendido y se enciende en ese `PATCH` o cambió el token; §3.7):
+  - `field` es `cloudflare_origin_ca` si se enciende en ese `PATCH`, y `cloudflare_token` si cambió el token con la opción ya encendida;
+  - lista las zonas que ve el token (`GET /zones`, todas las páginas) y comprueba Zone → SSL and Certificates → Edit en cada una de las **activas** (`status: active`). Una zona `pending` todavía no la usa Cloudflare de proxy, y no se revisa; si ninguna está activa, no hay nada que revisar y pasa:
+    - si la zona trae `#ssl:edit` en `permissions` (un campo que Cloudflare marca como deprecado), pasa, sin efectos;
+    - si no, emite un certificado de prueba de 7 días para el apex de la zona y lo revoca enseguida. Nunca lo sirvió nadie, así que revocarlo no corta nada. Cloudflare no documenta una forma de comprobarlo sin efectos. Si la revocación falla, muelle la reintenta después;
+  - si falta en alguna, o el token no puede listar las zonas, o no ve ninguna, o Cloudflare rechaza la prueba por otro motivo: un `*validate.Error` en `field` (`422`), con los mensajes de §4.1;
+  - si Cloudflare no responde (sin red, un 5xx o un 429), `entity.ErrCloudflareUnavailable` (`502`);
+  - con un plazo de 30 s sobre el ctx de la petición; si falla, no se guarda nada del `PATCH`. `cloudflare_origin_ca: false` nunca llama a Cloudflare.
 - **`CheckProxyPorts(ctx, old, next)`** (antes de guardar, si cambió `proxy_http_port` o `proxy_https_port`):
   - con el proxy deshabilitado (desarrollo) no toca Docker y devuelve `nil`;
   - prueba solo los puertos que cambian, de a un campo: `proxy_http_port` en TCP, y `proxy_https_port` en TCP y en UDP (HTTP/3). No prueba los que ya publica el muelle-caddy que sirve, que los suelta al recrearse (cambiar 80/443 por 443/80 prueba solo el 80 en UDP);
@@ -790,7 +809,8 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
 - **`ProxySettingsChanged(ctx, old, next)`** (después de guardar, antes de responder):
   - corre con su propio plazo de 2 min, derivado con `context.WithoutCancel`;
   - aplica, según `next.ChangedKeys(old)`:
-    - IPs, email, token o lista de IPs → regenera la configuración de Caddy. `POST /load` no corta las conexiones abiertas, así que la respuesta del `PATCH` sale igual. Si en el mismo `PATCH` cambiaron los puertos, no la manda ahora: la manda la recreación, con los ajustes de ese momento;
+    - IPs, email, token, lista de IPs o `cloudflare_origin_ca` → regenera la configuración de Caddy. `POST /load` no corta las conexiones abiertas, así que la respuesta del `PATCH` sale igual. Si en el mismo `PATCH` cambiaron los puertos, no la manda ahora: la manda la recreación, con los ajustes de ese momento;
+    - `cloudflare_origin_ca`, o el token con la opción encendida → reinicia los reintentos de todos los certificados de Cloudflare y despierta su reconciliación (§3.7), sin esperarla. Al apagarla, la configuración que se manda ya no trae los de Origin CA, así que los dominios vuelven a Let's Encrypt antes de responder, los certificados se revocan después, y muelle olvida lo que vio en Cloudflare y las fallas: al encenderla otra vez empieza de cero;
     - IP pública → actualiza los registros que maneja muelle, de los dominios y el del panel (los que fallan dejan su dominio en `error`/`cloudflare`):
       - un `public_ip` nuevo cambia el contenido de los `A` (nunca su `proxied`); borrar `public_ip` no toca ningún registro (borrarlos dejaría los sitios sin DNS);
       - un dominio en `error`/`cloudflare` cuyos registros se actualizan bien vuelve a `pending`; los demás no cambian de estado;
@@ -826,6 +846,128 @@ Las tres `panel_cf_*` las escribe solo ingress (constantes en `shared/domain/ent
 
 Además, ingress reescribe `proxy_http_port` y `proxy_https_port`, que son de admin, en un solo caso: al volver a los puertos anteriores (§3.5), y solo si siguen siendo los que fallaron.
 
+### 3.7 Certificados de Cloudflare (Origin CA)
+
+Opcionales y apagados por defecto (`cloudflare_origin_ca`, §4). Con la opción encendida y un token con el permiso **Zone → SSL and Certificates → Edit**, cada dominio de Cloudflare con el proxy (nube naranja), también el del panel, usa un certificado de Cloudflare Origin CA en vez de Let's Encrypt. Sirve para el modo SSL **Full (strict)** de la zona, que muelle no cambia. **Solo Cloudflare confía en ese certificado, los navegadores no.** Los dominios en DNS only y los que están fuera de Cloudflare siguen con Let's Encrypt. Un dominio que pierde el proxy, o todos al apagar la opción, vuelven a Let's Encrypt. La investigación, las decisiones y los riesgos están en [`2026-10-21-origin-ca-design.md`](2026-10-21-origin-ca-design.md).
+
+- **Qué hostnames:**
+  - Un dominio con `tls_mode: cloudflare`, `cf_zone_id`, cuyo registro maneja muelle (`cf_record_id`), con `proxied: true`, y cuyos registros `A`, `AAAA` y `CNAME` de ese nombre tienen **todos** el proxy en Cloudflare, con el `A` de muelle entre ellos. El `status` del dominio no cuenta.
+  - Un dominio cuyo registro muelle no maneja no califica: siempre está en `error` (`record_exists` o `cloudflare`), y el registro puede apuntar a otro servidor (§16 del diseño). Después de Adoptar, califica.
+  - El panel califica si cae en una zona (`panel_cf_zone_id`, §3.6) y todos sus `A`, `AAAA` y `CNAME` tienen el proxy, aunque muelle no haya creado el registro: muelle nunca cambia el `proxied` del panel, solo lo lee.
+  - muelle lee los registros de cada uno en cada pasada de la reconciliación: cada 5 min (el job `"proxy"`, §1.2), con un `PATCH /settings` que la enciende o cambia el token (§3.5) y después de crear, editar, adoptar, reintentar o borrar un dominio (§3.2). Si Cloudflare no responde, vale lo último que vio. Si rechaza la lectura, el host vuelve a Let's Encrypt.
+  - Con el proxy deshabilitado (`disabled`, §3.3) no pasa nada de esto: no hay Caddy al que darle el certificado.
+- **Emisión y renovación:**
+  - muelle genera una clave ECDSA P-256 y un CSR, y pide `POST /certificates` con `request_type: origin-ecc`, `requested_validity: 90` y un solo hostname.
+  - Antes de guardarlo, revisa que el certificado sea para ese hostname, que vaya con la clave y que valga ahora.
+  - Se renueva cuando faltan 30 días, con otra clave. Cuando faltan 14, deja de servirse y el host vuelve a Let's Encrypt hasta que se renueve.
+  - Lo emite y lo renueva muelle, en segundo plano: Caddy no renueva los certificados cargados. Al encender la opción, la primera pasada empieza enseguida; con muchos dominios puede seguir en la próxima.
+- **Dónde se guarda:**
+  - La clave privada va cifrada con la clave maestra en `origin_ca_certs` (AAD `origin_ca_certs:private_key:<id>`, migración 0006, §6). Nunca va al log, a un error, a la API ni a la auditoría.
+  - En Caddy, como el token, queda en claro en el `autosave.json` del volumen `muelle_caddy_config` y en `GET /config/` del socket de admin.
+- **En Caddy** (§3.4):
+  - El certificado va en `apps.tls.certificates.load_pem`, con los tags `muelle_origin_ca` y `muelle_origin_ca:<hostname>`.
+  - El hostname va en `automatic_https.skip_certificates` del servidor `muelle` y sale de las políticas de `apps.tls.automation`.
+  - `apps.tls.disable_ocsp_stapling` es `true` si hay alguno.
+  - ACME sigue igual para los demás. El JSON de ejemplo está en §7.2 del diseño de Origin CA.
+- **La verificación** (§3.1, §8 del diseño): para un host que se sirve con Origin CA, la hoja que sirve Caddy es válida si es **idéntica** a la que guardó muelle, es de ese hostname y vale en ese momento, sin verificar la cadena contra las raíces del sistema. Una hoja que verifica contra las raíces del sistema también vale, así el cambio entre Let's Encrypt y Origin CA no deja el dominio en `error`. `cert_issuer` y `cert_expires_at` salen de la hoja, como siempre.
+- **Revocación** (`DELETE /certificates/{id}`):
+  - Cuándo: la opción se apaga, el host pierde el proxy (en muelle o en Cloudflare), se borra el dominio, cambia el dominio del panel o la zona, o se renueva (el anterior).
+  - Siempre **después** de que Caddy cargó una configuración sin ese certificado (un `POST /load` exitoso que leyó la base después de retirarlo), y con 1 min de margen: Cloudflare deja de hablar con un origen que sirve un certificado revocado.
+  - Cambiar el token no revoca nada. Sin token no se puede revocar: queda pendiente hasta que vuelva uno, o hasta que venza. Una revocación que falla se reintenta, de 5 min a 24 h.
+  - Va al log del servidor, sin auditoría: es una acción del sistema, como las verificaciones.
+- **Al volver a Let's Encrypt**, Caddy usa el de Let's Encrypt que todavía tenga en `/data` o lo emite (DNS-01, normalmente en menos de un minuto). Mientras tanto, Cloudflare puede responder `525`.
+- **Si la emisión falla**, el host sigue con Let's Encrypt y el dominio **no** pasa a `error`: el aviso va en `origin_ca`. Se reintenta solo, de 1 min a 1 h si Cloudflare no respondió (`cloudflare`), y cada 6 h si lo rechazó (`permission`, `rejected`). `retry` (§3.2) y un `PATCH /settings` que enciende la opción o cambia el token reintentan enseguida. Un `429` de Cloudflare bloquea el token 5 min: la pasada que lo recibe termina ahí, y sigue la del próximo job `"proxy"`.
+
+**`origin_ca`** (en el dominio, §3.1, y en `panel_certificate` de `GET /proxy`, §3.3). Las cinco claves van siempre:
+
+| Campo | Tipo | Qué |
+|---|---|---|
+| `status` | `active` · `issuing` · `failed` · `dns_only` · `not_eligible` | Abajo, en el orden en que se decide |
+| `error_code` | `permission` · `cloudflare` · `rejected`, o null | El motivo de la última falla, solo con `failed` y con `active` (una renovación que falló, y el actual todavía sirve); null con los demás. `permission`: al token le falta Zone → SSL and Certificates → Edit en esa zona, el usuario dueño del token no tiene "API Access", o la zona es de otra cuenta. `cloudflare`: Cloudflare no respondió (sin red, un 5xx, un 429). `rejected`: Cloudflare rechazó el pedido por otro motivo, o devolvió un certificado que no sirve |
+| `error` | string o null | El mensaje, en español (abajo). Null cuando `error_code` es null |
+| `retry_at` | RFC 3339 o null | Cuándo se reintenta la emisión o la renovación. Null cuando `error_code` es null. Después de un `retry` o de un `PATCH /settings` que reintenta enseguida, es la hora de ese pedido, y queda en el pasado hasta que termina la pasada |
+| `expires_at` | RFC 3339 o null | El vencimiento del certificado de Origin CA vigente que muelle tiene guardado para ese hostname, se sirva o no (por ejemplo, uno a menos de 14 días que todavía no se renovó); null si no tiene. Con `active` nunca es null |
+
+**`status`**, el primero que aplica:
+1. `not_eligible`: no califica (arriba): `tls_mode: http`, sin `cf_zone_id` o sin `cf_record_id`; en el panel, sin `panel_cf_zone_id`. Let's Encrypt.
+2. `dns_only`: un dominio con `proxied: false` en muelle. Let's Encrypt, desde la respuesta del `PATCH` que lo apagó.
+3. `dns_only`: en Cloudflare, alguno de sus `A`, `AAAA` o `CNAME` no tiene el proxy (la nube gris). Let's Encrypt. En un dominio, con `proxied: true` en muelle, quiere decir que alguien lo cambió en el dashboard de Cloudflare.
+4. `not_eligible`: en Cloudflare no hay ningún `A`, `AAAA` ni `CNAME` de ese nombre (en un dominio, o no está el `A` de muelle), o Cloudflare rechazó la lectura. Let's Encrypt.
+5. `active`: Caddy sirve el de Origin CA. Si falló una renovación, trae `error_code`, `error` y `retry_at`: el actual sirve hasta 14 días antes de vencer.
+6. `failed`: califica, pero no hay uno que se pueda servir y la última emisión falló. Let's Encrypt mientras tanto.
+7. `issuing`: califica y muelle lo está emitiendo, o todavía no leyó sus registros en Cloudflare. Let's Encrypt mientras tanto; dura lo que tarda la pasada (segundos, o unos minutos con muchos dominios).
+
+**`cert_source`** es `cloudflare_origin_ca` si y solo si `origin_ca.status` es `active`; si no (también con `origin_ca: null`), `letsencrypt`. Es lo que muelle le pide a Caddy: con el proxy `out_of_sync` (§3.3), Caddy puede tener todavía la configuración anterior.
+
+**Cuándo cambia lo que dice la API:**
+- Apagar la opción (`PATCH /settings`): desde su respuesta, todo `origin_ca` es null y todo `cert_source` es `letsencrypt`, y Caddy ya recibió la configuración sin los de Origin CA.
+- Encenderla: desde su respuesta, cada dominio y el panel dicen `issuing`, `dns_only` o `not_eligible`, y `active` cuando la pasada emite el suyo.
+- `PATCH {app}/domains/{hostname}` que cambia `proxied`: muelle olvida lo que había visto en Cloudflare de ese hostname. Con `proxied: false`, `dns_only` desde la respuesta; con `proxied: true`, `issuing` hasta la pasada que despierta.
+- DNS only puesto en el dashboard de Cloudflare: `dns_only` en a lo más 5 min.
+
+**El mensaje de `error`** es una oración en español para mostrar tal cual. Los clientes deciden por `status` y `error_code`, nunca por el texto:
+- emisión: `muelle no pudo emitir el certificado de Cloudflare: <causa>; mientras tanto usa Let's Encrypt`;
+- renovación (con `active`): `muelle no pudo renovar el certificado de Cloudflare, que vence el <fecha>: <causa>; si no lo renueva antes del <fecha menos 14 días>, vuelve a Let's Encrypt`;
+- `<causa>`, según `error_code`:
+  - `permission`: `el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de <hostname> (Cloudflare: <mensaje>); agrégalo al token y pulsa Reintentar`;
+  - `cloudflare`: `Cloudflare no respondió (<detalle>); se reintenta solo`;
+  - `rejected`: `Cloudflare lo rechazó (<mensaje>)`, o `Cloudflare devolvió un certificado que no sirve (<motivo>)`;
+- las fechas van en UTC como `2 ene 2027`, y el mensaje de Cloudflare se corta a 300 caracteres y nunca trae el token.
+
+**Ejemplos.** Un dominio que se sirve con Origin CA (el resto de los campos, como en §3.1):
+
+```json
+{
+  "hostname": "api.tudominio.cl",
+  "proxied": true,
+  "tls_mode": "cloudflare",
+  "status": "active",
+  "cert_issuer": "CloudFlare, Inc.",
+  "cert_expires_at": "2027-01-19T12:00:00Z",
+  "cert_source": "cloudflare_origin_ca",
+  "origin_ca": { "status": "active", "error_code": null, "error": null, "retry_at": null, "expires_at": "2027-01-19T12:00:00Z" },
+  "…": "…"
+}
+```
+
+`cert_issuer` es lo que trae la hoja; el texto de la de Cloudflare no está verificado, y por eso el panel nombra el origen con `cert_source`.
+
+Una emisión que falló, con Let's Encrypt mientras tanto:
+
+```json
+"cert_source": "letsencrypt",
+"origin_ca": {
+  "status": "failed",
+  "error_code": "permission",
+  "error": "muelle no pudo emitir el certificado de Cloudflare: el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de api.tudominio.cl (Cloudflare: Authentication error); agrégalo al token y pulsa Reintentar; mientras tanto usa Let's Encrypt",
+  "retry_at": "2026-10-21T21:04:10.5Z",
+  "expires_at": null
+}
+```
+
+Una renovación que falló, con el actual todavía sirviendo:
+
+```json
+"cert_source": "cloudflare_origin_ca",
+"origin_ca": {
+  "status": "active",
+  "error_code": "cloudflare",
+  "error": "muelle no pudo renovar el certificado de Cloudflare, que vence el 19 ene 2027: Cloudflare no respondió (HTTP 503); se reintenta solo; si no lo renueva antes del 5 ene 2027, vuelve a Let's Encrypt",
+  "retry_at": "2026-12-20T10:08:00Z",
+  "expires_at": "2027-01-19T12:00:00Z"
+}
+```
+
+El panel, en `GET /proxy` (§3.3), con su registro en DNS only en Cloudflare:
+
+```json
+"panel_certificate": {
+  "hostname": "panel.tudominio.cl",
+  "cert_source": "letsencrypt",
+  "origin_ca": { "status": "dns_only", "error_code": null, "error": null, "retry_at": null, "expires_at": null }
+}
+```
+
 ## 4. Settings (`GET/PATCH /settings`) · sesión — ya implementado
 
 `GET` (y la respuesta de `PATCH`) trae **siempre** todas las claves, sin `omitempty`. El panel usa su presencia para saber que la fase llegó.
@@ -835,6 +977,7 @@ Además, ingress reescribe `proxy_http_port` y `proxy_https_port`, que son de ad
   "require_2fa": false,
   "cloudflare_token_set": true,
   "cloudflare_zones": 4,
+  "cloudflare_origin_ca": false,
   "public_ip": "203.0.113.24",
   "public_ipv6": "",
   "acme_email": "tu@correo.cl",
@@ -850,6 +993,7 @@ Además, ingress reescribe `proxy_http_port` y `proxy_https_port`, que son de ad
 |---|---|
 | `cloudflare_token_set` | Si hay token. **El token nunca vuelve** |
 | `cloudflare_zones` | Valor guardado (no se consulta a Cloudflare en cada `GET`); null si no se sabe o no hay token |
+| `cloudflare_origin_ca` | Bool, nunca null: los certificados de Cloudflare (Origin CA, §3.7) para los dominios con el proxy. `false` por defecto. No hay un `MUELLE_INIT_*` para esto: se enciende en Ajustes |
 | `public_ip`, `public_ipv6`, `acme_email` | `""` si no están |
 | `panel_domain` | **Solo lectura**: `MUELLE_PANEL_DOMAIN` (lo que escribe install) o, si no está, el host de `MUELLE_PANEL_ORIGIN` si es un dominio, o `""` (una IP o `localhost`, en desarrollo). Se escribe en cada arranque |
 | `panel_allowed_cidrs` | Prefijos normalizados (`validate.CIDRs`). Nunca null; `[]` es cualquier IP |
@@ -857,7 +1001,7 @@ Además, ingress reescribe `proxy_http_port` y `proxy_https_port`, que son de ad
 
 ### 4.1 `PATCH /settings`
 
-Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `public_ip`, `public_ipv6`, `acme_email`, `panel_allowed_cidrs`, `proxy_http_port`, `proxy_https_port` y `confirm_lockout`. Cualquier otra, `panel_domain` incluida, es `400 invalid_json`.
+Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `cloudflare_origin_ca`, `public_ip`, `public_ipv6`, `acme_email`, `panel_allowed_cidrs`, `proxy_http_port`, `proxy_https_port` y `confirm_lockout`. Cualquier otra, `panel_domain` incluida, es `400 invalid_json`, y también un valor de otro tipo (`cloudflare_origin_ca` es un bool).
 
 | Regla | Respuesta |
 |---|---|
@@ -872,13 +1016,25 @@ Manda solo las claves que cambian: `require_2fa`, `cloudflare_token`, `public_ip
 | `cloudflare_token` rechazado por Cloudflare | `422 cloudflare_token` |
 | Cloudflare no responde al verificar el token | `502 cloudflare_unavailable` |
 | `cloudflare_token: ""` | Borra el token y `cloudflare_zones` |
+| `cloudflare_origin_ca: true` en un `PATCH` que la enciende, sin token con los valores resultantes (no hay uno guardado, o el mismo `PATCH` lo quita) | `422`: `cloudflare_origin_ca: necesita el token de Cloudflare: configúralo antes de activarla`; no se guarda nada |
+| `cloudflare_token: ""` con la opción encendida, sin `"cloudflare_origin_ca": false` en el mismo `PATCH` | `422`: `cloudflare_origin_ca: sin token no se pueden usar los certificados de Cloudflare: mándala en false en el mismo cambio para quitar el token`; no se guarda nada |
+| La opción queda encendida, y se enciende en este `PATCH` o cambia el token, y al token le falta Zone → SSL and Certificates → Edit en alguna de sus zonas activas (`CheckCloudflareOriginCA`, §3.5) | `422` en `cloudflare_origin_ca` si se enciende en este `PATCH`, y si no en `cloudflare_token`; no se guarda nada. Los mensajes, abajo |
+| Cloudflare no responde al comprobar ese permiso | `502 cloudflare_unavailable`; no se guarda nada |
 | `require_2fa: true` sin el 2FA propio | `409 totp_required_first` |
 | Una lista de `panel_allowed_cidrs` que deja fuera `client_ip` | `409 would_lock_out`, salvo que venga `"confirm_lockout": true` |
 
+- **El orden**, y el primero que falla es la respuesta: las validaciones de los campos (`422`; las dos de `cloudflare_origin_ca` sin token van después de la forma del token), `409 would_lock_out`, `CheckCloudflareToken`, `CheckCloudflareOriginCA`, `CheckProxyPorts` y, al guardar, `409 totp_required_first`.
+- **Los mensajes de `CheckCloudflareOriginCA`**, en `<campo>` (`cloudflare_origin_ca` o `cloudflare_token`, arriba):
+  - falta el permiso: `<campo>: el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona auditfy.cl (lo necesitan los certificados de Cloudflare): agrégalo al token en Cloudflare, o deja la opción apagada`. En `cloudflare_token` el final es `…: agrégalo al token en Cloudflare, o apaga antes los certificados de Cloudflare`. Las zonas van ordenadas por nombre: `en la zona a.cl`, `en las zonas a.cl y b.cl` y, con tres o más, las dos primeras y cuántas más: `en las zonas a.cl, b.cl y 3 más`;
+  - el token no puede listar las zonas: `<campo>: el token no puede listar las zonas (<mensaje de Cloudflare>): dale los permisos Zone:Read y DNS:Edit sobre las zonas de tus dominios`;
+  - no ve ninguna zona: `<campo>: el token no ve ninguna zona: dale los permisos Zone:Read y DNS:Edit sobre las zonas de tus dominios`;
+  - Cloudflare rechazó la prueba por otro motivo: `<campo>: Cloudflare rechazó la prueba del permiso en la zona <zona> (<mensaje de Cloudflare>)`.
+  - Con un token nuevo, los dos del medio ya los da antes `CheckCloudflareToken`, en `cloudflare_token` (§3.5).
+- `cloudflare_origin_ca: false` nunca llama a Cloudflare, y mandar el valor que ya tiene no es un cambio (no comprueba nada ni va a la auditoría). Quitar el token con la opción encendida es `{"cloudflare_token": "", "cloudflare_origin_ca": false}`.
 - Todo se guarda en una transacción. Después, si cambió algo del proxy, se llama a `ProxySettingsChanged`. El `PATCH` responde cuando el hook vuelve, y eso es antes de recrear muelle-caddy (§3.5).
 - **Cambiar `proxy_https_port` mueve el panel** a `https://<panel_domain>[:<puerto>]`. Desde que responde el `PATCH`, ese es el `Origin` que pasa y el de los links de las invitaciones; el del puerto viejo ya no pasa (§0.1). No hay que tocar la configuración de muelle. Si hay un `MUELLE_PANEL_ORIGIN` puesto a mano, ese sigue pasando y sigue siendo el de los links.
 - Un error de DNS al cambiar la IP pública nunca hace fallar el `PATCH` (§9).
-- **Auditoría:** `settings.update` con las claves y sus valores. El token solo aparece como `"set"` o `"removed"`. Si después muelle vuelve a los puertos anteriores (§3.5), va otro evento, `settings.ports_rollback`, del actor `system`.
+- **Auditoría:** `settings.update` con las claves y sus valores (`cloudflare_origin_ca` como bool). El token solo aparece como `"set"` o `"removed"`. Si después muelle vuelve a los puertos anteriores (§3.5), va otro evento, `settings.ports_rollback`, del actor `system`.
 
 **Recuperar el acceso** después de guardar una lista que te deja fuera, desde el servidor: `muelle settings reset-panel-ips` (§5.4), con `docker exec` en el contenedor de muelle, deja la lista en `[]` y reinicia muelle, que al arrancar le manda a Caddy la configuración sin la lista:
 
@@ -1147,7 +1303,8 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
   - `cf_record_id_aaaa`, `last_error_code`, `created_at` y `updated_at`;
   - `app_id` con `ON DELETE RESTRICT`: catalog no borra una app con dominios, `409 not_empty`.
 - **0004** (Fase 1, un pendiente de su revisión final): `audit_events.actor_name` (§4.2), con los eventos que ya había llenados con lo que se sabe de su autor. Es una migración nueva, y no un cambio a `0001_init.sql` (que no se edita, §1.3), para que corra también sobre una base de la Fase 1.
-- **0005** (lo pidió el panel): `deploys.routes_warning` (§2.1), 0 o 1. Los deploys que ya había quedan con 1 si son `succeeded` y su log trae la advertencia del paso 7 (§2.11). Uno anterior a la 0005 cuya advertencia no entró en el log (el tope de 256 KB, §2.5) queda con 0: la migración solo tiene el texto. Es nueva, y no un cambio a `0002_deploy.sql`, por lo mismo que la 0004: para que corra también sobre una base que ya tiene deploys. La próxima migración nueva es la 0006.
+- **0005** (lo pidió el panel): `deploys.routes_warning` (§2.1), 0 o 1. Los deploys que ya había quedan con 1 si son `succeeded` y su log trae la advertencia del paso 7 (§2.11). Uno anterior a la 0005 cuya advertencia no entró en el log (el tope de 256 KB, §2.5) queda con 0: la migración solo tiene el texto. Es nueva, y no un cambio a `0002_deploy.sql`, por lo mismo que la 0004: para que corra también sobre una base que ya tiene deploys.
+- **0006** (los certificados de Cloudflare, §3.7): `origin_ca_certs` (los certificados de Origin CA que emitió muelle, con la clave cifrada con la AAD `origin_ca_certs:private_key:<id>` y su estado, `active` o `retired`) y `origin_ca_hosts` (lo que vio en Cloudflare de cada hostname, y la última falla con su reintento). Es nueva, y no un cambio a `0003_ingress.sql`, por lo mismo que la 0004: para que corra también sobre una base que ya tiene dominios. La próxima migración nueva es la 0007.
 
 ## 7. Diferencias con lo que supuso el panel
 
@@ -1207,6 +1364,10 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | `Origin` después de cambiar los puertos | — | Pasa `https://<panel_domain>[:<proxy_https_port>]` con el puerto de ese momento (y el del puerto viejo ya no), además de `MUELLE_PANEL_ORIGIN` si está; los links de setup e invitaciones usan el mismo origen. install escribe `MUELLE_PANEL_DOMAIN` en vez de `MUELLE_PANEL_ORIGIN` | Si no, todo el panel, el login incluido, quedaría en `403 bad_origin`, y los links en el puerto viejo, hasta actualizar la configuración de muelle |
 | Lo que dice el panel del origen | `403 bad_origin`: "revisa `MUELLE_PANEL_ORIGIN`"; después de cambiar `proxy_https_port`, actualizar `MUELLE_PANEL_ORIGIN` con `docker service update` | `bad_origin`: el origen permitido es `https://<panel_domain>[:<proxy_https_port>]`, con los valores de Ajustes, o `MUELLE_PANEL_ORIGIN` si alguien la puso a mano (detrás de otro proxy, o en desarrollo). Cambiar los puertos no pide tocar la configuración de muelle, y el panel no muestra ese paso. Solo una instalación anterior que escribió `MUELLE_PANEL_ORIGIN` con el puerto de entonces lo necesita, y es otro comando: `docker service update --env-rm MUELLE_PANEL_ORIGIN --env-add MUELLE_PANEL_DOMAIN=<dominio> muelle_muelle` (README) | install ya no escribe `MUELLE_PANEL_ORIGIN` (§5.2): en producción, la pista nombraría una variable que no está |
 | Settings: `client_ip` | String o null | Siempre string | Compatible |
+| Settings: certificados de Cloudflare | — | `cloudflare_origin_ca` (bool, `false` por defecto, siempre en `GET /settings`) en `GET`/`PATCH /settings` (§4, §4.1). Encenderla sin token, quitar el token sin apagarla, o un token sin Zone → SSL and Certificates → Edit en alguna zona activa es `422`; Cloudflare caído, `502` | El dueño quiere Full (strict) con certificados de Cloudflare, sin dejar Let's Encrypt como lo normal (§3.7) |
+| Dominio: certificado | `cert_issuer` dice el emisor | `cert_issuer` sigue igual (lo que vio la verificación); el dominio suma `cert_source` (`letsencrypt` o `cloudflare_origin_ca`) y `origin_ca` (null con la opción apagada), los dos calculados y siempre presentes (§3.1, §3.7) | `cert_issuer` es un texto observado, no un enum: el panel nombra el origen sin depender del texto de la CA |
+| Dominio: falla del de Origin CA | — | No deja el dominio en `error`: sigue con Let's Encrypt, y el aviso va en `origin_ca` (`failed`, o `active` con `error_code` si falló una renovación) | El dominio funciona: un `error` lo mostraría caído y lo sacaría de la verificación |
+| `GET /proxy`: el certificado del panel | — | Suma `panel_certificate` (null sin `panel_domain`), siempre presente (§3.3) | El panel no está en `domains`, y Ajustes muestra su certificado |
 | Registries: `PATCH` | `{username, password}` | Los dos obligatorios: reemplaza | Igual al payload del panel |
 | Registries: host | Normalizado por el panel | El backend exige la forma canónica y no normaliza; Docker Hub es `docker.io`, y sus alias (`index.docker.io`…) son `422` | Una credencial con un alias nunca se usaría |
 | Registries: respuesta | `{host, username}` | Suma `created_at` y `updated_at` | Compatible |
