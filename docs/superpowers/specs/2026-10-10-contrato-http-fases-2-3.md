@@ -796,7 +796,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
   - lista las zonas que ve el token (`GET /zones`, todas las páginas) y comprueba Zone → SSL and Certificates → Edit en cada una de las **activas** (`status: active`). Una zona `pending` todavía no la usa Cloudflare de proxy, y no se revisa; si ninguna está activa, no hay nada que revisar y pasa:
     - si la zona trae `#ssl:edit` en `permissions` (un campo que Cloudflare marca como deprecado), pasa, sin efectos;
     - si no, emite un certificado de prueba de 7 días para el apex de la zona y lo revoca enseguida. Nunca lo sirvió nadie, así que revocarlo no corta nada. Cloudflare no documenta una forma de comprobarlo sin efectos. Si la revocación falla, muelle la reintenta después;
-  - si falta en alguna, o el token no puede listar las zonas, o no ve ninguna, o Cloudflare rechaza la prueba por otro motivo: un `*validate.Error` en `field` (`422`), con los mensajes de §4.1;
+  - si falta en alguna, o el token no puede listar las zonas, o no ve ninguna, o Cloudflare rechaza la prueba por otro motivo: un `*validate.Error` en `field` (`422`), con los mensajes de §4.1, sin el token: el mensaje de Cloudflare que citan se corta a 300 caracteres y nunca trae el token;
   - si Cloudflare no responde (sin red, un 5xx o un 429), `entity.ErrCloudflareUnavailable` (`502`);
   - con un plazo de 30 s sobre el ctx de la petición; si falla, no se guarda nada del `PATCH`. `cloudflare_origin_ca: false` nunca llama a Cloudflare.
 - **`CheckProxyPorts(ctx, old, next)`** (antes de guardar, si cambió `proxy_http_port` o `proxy_https_port`):
