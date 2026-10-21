@@ -636,6 +636,10 @@ Lo reinician:
 
 Reiniciarlo (`ResetBackoff`, en los dos primeros casos) pone `next_attempt_at` en la hora del pedido y deja `failures`, `last_error_code` y `last_error`: el aviso se sigue viendo hasta que la pasada que se despierta emite o vuelve a fallar. Solo una emisión que sale bien borra la falla. Mientras tanto, `retry_at` es la hora de ese pedido (en el pasado).
 
+**El panel no tiene `retry`** (no está en `domains`): el suyo lo reinicia solo un `PATCH /settings` que cambia el token (encender la opción, para el panel, es apagarla y encenderla, que revoca los de todos los dominios). Por eso su causa `permission` no nombra Reintentar (§9.3), y Ajustes no tiene un botón para él (§11.1). Mandar otra vez `cloudflare_origin_ca: true`, o el mismo token, no es un cambio (§3.2) y no reinicia nada.
+
+**Tampoco hay un reinicio de todos a la vez.** Después de arreglar en Cloudflare el permiso del mismo token, cada dominio tiene su Reintentar, y el panel y los demás esperan su reintento solo, a lo más 6 h. Mientras tanto sirven Let's Encrypt, que con Full (strict) también vale. Se deja para después (R18): sería un cambio de contrato, por ejemplo que mandar `true` con la opción encendida compruebe el permiso y reinicie el backoff de todos.
+
 **429:** "bloquea todas las llamadas por 5 minutos". La pasada que lo recibe termina ahí, sin más llamadas, y la siguiente es la del próximo job "proxy". Cuenta para el backoff del host que lo recibió, como `cloudflare`.
 
 **Presupuesto:** cada pasada hace, como mucho:
@@ -656,7 +660,8 @@ Con 100 dominios con proxy son unas 100 llamadas cada 5 min, contra 1200. Al enc
   - emisión: `muelle no pudo emitir el certificado de Cloudflare: <causa>; mientras tanto usa Let's Encrypt`;
   - renovación: `muelle no pudo renovar el certificado de Cloudflare, que vence el <fecha>: <causa>; si no lo renueva antes del <fecha − 14 días>, vuelve a Let's Encrypt`.
   - `<causa>` según el código:
-    - `permission`: `el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de <hostname> (Cloudflare: <mensaje>); agrégalo al token y pulsa Reintentar`;
+    - `permission`, en un dominio: `el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de <hostname> (Cloudflare: <mensaje>); agrégalo al token y pulsa Reintentar`;
+    - `permission`, en el panel, que no tiene `retry` (§9.2): `el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de <hostname> (Cloudflare: <mensaje>); agrégalo al token: muelle lo reintenta solo cada 6 h`;
     - `cloudflare`: `Cloudflare no respondió (<detalle>); se reintenta solo`;
     - `rejected`: `Cloudflare lo rechazó (<mensaje>)`, o `Cloudflare devolvió un certificado que no sirve (<motivo>)`.
   - Las fechas van con `shortDate` ("2 ene 2027"), y los mensajes de Cloudflare se cortan a 300 runas y nunca traen el token.
@@ -746,7 +751,7 @@ Los campos nuevos son **obligatorios** en los DTOs, como los demás que sumaron 
   - `CloudflareUnavailable`: Banner "Cloudflare no respondió: no se cambió nada. Vuelve a intentarlo en un momento.";
   - lo demás: `describeError`.
 - En el modal del token, con la opción encendida, la descripción suma el permiso. Un `422` en `cloudflare_token` ya se muestra en el campo.
-- **El panel:** con `panelCertificate` y la opción encendida, una línea "Panel: Cloudflare Origin CA · vence {date}", o "Panel: Let's Encrypt (DNS only en Cloudflare)", o el aviso de `failed`.
+- **El panel:** con `panelCertificate` y la opción encendida, una línea "Panel: Cloudflare Origin CA · vence {date}", o "Panel: Let's Encrypt (DNS only en Cloudflare)", o el aviso de `failed` (o de una renovación que falló) con `originCa.error`. El aviso del panel no lleva botón de Reintentar: el panel no tiene `retry`, y su mensaje dice que se reintenta solo (§9.2).
 - La nota de la tarjeta: "El token, y con los certificados de Cloudflare también sus claves, quedan en el autosave de Caddy".
 
 **Textos** (`messages/admin/{es,en}.json`):
@@ -865,7 +870,7 @@ Los campos nuevos son **obligatorios** en los DTOs, como los demás que sumaron 
   - `NeedsCert` (sin certificado, menos de 30 días, otra zona);
   - `ClassifyOriginError` (cada fila de §9.1);
   - `OriginBackoff`;
-  - los mensajes de §9.3, con las fechas.
+  - los mensajes de §9.3, con las fechas, y la causa `permission` del panel, que no nombra Reintentar.
 - **`cftest`** (el Cloudflare falso, en `cftest/origin_ca.go`):
   - `POST /certificates` firma el CSR con una CA de prueba en memoria (`OriginRoot()` la expone para los tests);
   - comprueba el permiso por token y zona (`GrantSSL(token, zoneID)`); sin él responde **400 con `10000`**, o lo que diga el Paso 0, y `FailNext` imita `1010` o `403`;
@@ -1074,3 +1079,4 @@ Cada paso es rojo → verde. `pnpm codegen` después de tocar `messages/`.
 | R15 | La otra sesión cambiaba el contrato y los ajustes (`SettingsOutput`, `PatchSettingsInput`, §4, quizás una migración nueva) | **Resuelto** en `main` @ a1238d9: no sumó claves de ajustes ni migraciones, y las secciones del contrato siguen con los mismos números. Lo que sí cambió es que el panel ya no acepta campos opcionales "por si falta la fase" (§2, §11.1). La 0006 es de esta función y la 0007 del MCP (§5.4) |
 | R16 | Con el panel en Origin CA, entrar sin pasar por Cloudflare da un error de certificado. La recuperación por `docker exec` sigue igual | La documentación y el texto del switch. Apagar el proxy del panel en Cloudflare: en a lo más 5 min muelle vuelve a Let's Encrypt |
 | R17 | Al encender la opción con muchos dominios, la primera pasada hace unas 2 llamadas por host | Corre en segundo plano, con 5 min por pasada; lo que falte sigue en la próxima |
+| R18 | El panel no tiene Reintentar, y no hay un reintento de todos a la vez. Después de arreglar en Cloudflare el permiso del mismo token, el panel espera hasta 6 h y cada dominio necesita su Reintentar (§9.2) | Mientras tanto sirve Let's Encrypt, que con Full (strict) también vale, y el mensaje del panel lo dice. Mejora posible, con un cambio de contrato (§1.3 del contrato): que mandar `cloudflare_origin_ca: true` con la opción encendida compruebe el permiso y reinicie el backoff de todos, con un Reintentar en Ajustes |
