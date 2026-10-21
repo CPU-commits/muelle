@@ -19,6 +19,9 @@ import { adminKeys } from '../../../../data'
 import ProxySettingsHarness from './ProxySettingsHarness.svelte'
 import { cacheHolds } from '../../../__tests__/cacheHolds'
 
+/** Cada cuánto vuelve a pedir `GET /proxy` mientras sigue una recreación (ingress). */
+const PROXY_REFRESH_MS = 10_000
+
 const mocks = vi.hoisted(() => ({
 	updatePublicIp: vi.fn(),
 	updateAcmeEmail: vi.fn(),
@@ -677,6 +680,37 @@ describe('ProxySettingsViewModel', () => {
 
 			await vi.advanceTimersByTimeAsync(PORTS_WATCH_TIMEOUT_MS)
 			await vi.waitFor(() => expect(vm.recreation).toBeNull())
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it('pasado el plazo, si GET /proxy sigue fallando deja de preguntar, aunque lo último que dijo fuera "recreando"', async () => {
+		const vm = await mountViewModel()
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+		vi.useFakeTimers({
+			toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+			shouldAdvanceTime: true,
+		})
+		try {
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ status: 'recreating' }))
+			vm.setField('httpPort', '8080')
+			mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+			vm.askSavePorts()
+			await vm.savePorts()
+			// Una respuesta de después del cambio: se está recreando.
+			await vi.waitFor(() =>
+				expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success'),
+			)
+			// Después el panel deja de llegar a muelle: TanStack guarda esa respuesta.
+			ingress.getProxyStatus.mockRejectedValue(new UnavailableError('sin red'))
+			await vi.advanceTimersByTimeAsync(PORTS_WATCH_TIMEOUT_MS + 2 * PROXY_REFRESH_MS)
+			expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('error')
+
+			// Los 2 min ya pasaron (web/CLAUDE.md): no pregunta más.
+			const asked = ingress.getProxyStatus.mock.calls.length
+			await vi.advanceTimersByTimeAsync(5 * PROXY_REFRESH_MS)
+			expect(ingress.getProxyStatus.mock.calls.length).toBe(asked)
 		} finally {
 			vi.useRealTimers()
 		}

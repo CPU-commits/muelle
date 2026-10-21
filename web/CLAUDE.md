@@ -641,7 +641,8 @@ desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es
   que el estado del proxy puede cambiar (contrato §3.5). Guardar solo el 2FA no la toca.
   Ajustes pide `GET /proxy` al abrirse (`proxyFollowQuery`, `proxyNotice` y el tipo
   `PortsRollback` del barrel de `ingress`) y, después de cambiar los puertos, lo sigue hasta
-  que dice cómo terminó, aunque falle (2 min como mucho). Antes, `resetQueries` saca lo que
+  que dice cómo terminó, aunque falle (2 min como mucho: pasado el plazo, un pedido que
+  falla corta, aunque la última respuesta guardada diga `recreating`). Antes, `resetQueries` saca lo que
   había en el cache: el `PATCH` limpió `ports_rollback`. Un cambio que falla (un `422`,
   `PanelMovedError`) no guardó nada: el seguimiento del anterior sigue.
     - Si el panel sigue en el mismo origen (solo cambió el HTTP, o se entró por otra

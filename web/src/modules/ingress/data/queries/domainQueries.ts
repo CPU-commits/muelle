@@ -38,6 +38,8 @@ export function proxyQuery() {
 export interface ProxyFollowOptions {
 	/** Si todavía falta una respuesta que diga cómo terminó (se lee en cada vuelta). */
 	readonly waiting: () => boolean
+	/** Si se dejó de esperar porque pasó el plazo, sin esa respuesta (se lee en cada vuelta). */
+	readonly expired: () => boolean
 }
 
 /**
@@ -45,12 +47,18 @@ export interface ProxyFollowOptions {
  * después de cambiar los puertos): lo mismo que `proxyQuery`, y además pregunta cada 10 s
  * mientras `waiting()` diga que sí, aunque la última respuesta haya fallado o sea de antes
  * del cambio. El panel puede pasar por el mismo muelle-caddy que se recrea.
+ *
+ * Pasado el plazo (`expired()`), un último pedido que falló corta: TanStack guarda la
+ * respuesta de antes, y si decía `recreating` se seguiría preguntando cada 10 s para siempre.
  */
-export function proxyFollowQuery({ waiting }: ProxyFollowOptions) {
+export function proxyFollowQuery({ waiting, expired }: ProxyFollowOptions) {
 	return queryOptions({
 		...proxyQuery(),
-		refetchInterval: (query) =>
-			waiting() || proxySettling(query.state.data) ? PROXY_SETTLING_REFRESH_MS : false,
+		refetchInterval: (query) => {
+			if (waiting()) return PROXY_SETTLING_REFRESH_MS
+			if (expired() && query.state.status === 'error') return false
+			return proxySettling(query.state.data) ? PROXY_SETTLING_REFRESH_MS : false
+		},
 	})
 }
 

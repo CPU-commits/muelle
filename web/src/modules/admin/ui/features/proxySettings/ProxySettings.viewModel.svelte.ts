@@ -163,11 +163,15 @@ export class ProxySettingsViewModel {
 	#watchingSince = 0
 	// `GET /proxy` (ingress): se pide al abrir Ajustes (por si muelle volvió a los puertos
 	// anteriores: `ports_rollback`) y, después de cambiar los puertos, se vuelve a pedir
-	// mientras no diga cómo terminó, aunque falle. `waiting` lo llama TanStack adentro del
-	// efecto que suscribe la query: leído con `untrack`, o cada respuesta haría que se vuelva
-	// a suscribir, y eso cancela el pedido en curso (y descarta su respuesta).
+	// mientras no diga cómo terminó, aunque falle (2 min como mucho). `waiting` y `expired` los
+	// llama TanStack adentro del efecto que suscribe la query: leídos con `untrack`, o cada
+	// respuesta haría que se vuelva a suscribir, y eso cancela el pedido en curso (y descarta
+	// su respuesta).
 	readonly #proxyStatus = createQuery(() =>
-		proxyFollowQuery({ waiting: () => untrack(() => this.#awaitingProxy) }),
+		proxyFollowQuery({
+			waiting: () => untrack(() => this.#awaitingProxy),
+			expired: () => untrack(() => this.#watchingProxy && this.#watchExpired),
+		}),
 	)
 
 	constructor(proxy: () => ProxySettings) {

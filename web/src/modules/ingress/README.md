@@ -187,7 +187,8 @@ Dominios, arriba del formulario.
   no se muestra nada: ni `<ComingSoon>` ni un error (los dominios tienen sus propios avisos).
 - Ajustes no es de este módulo, pero usa `proxyFollowQuery` y `proxyNotice` del barrel: lo
   pide al abrirse (muestra `ports_rollback`) y, después de cambiar los puertos, sigue
-  `GET /proxy` mientras dice `recreating` (aunque falle), y muestra si muelle-caddy quedó
+  `GET /proxy` mientras dice `recreating` (aunque falle, 2 min como mucho: pasado el plazo
+  con el último pedido fallado, `proxyFollowQuery` deja de preguntar), y muestra si muelle-caddy quedó
   escuchando, el `error` si no arrancó o, si muelle volvió a los puertos anteriores, por qué
   y la dirección anterior del panel (contrato §3.5).
 
