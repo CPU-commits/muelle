@@ -1781,7 +1781,7 @@ Los `code` de ejecución:
 - Los mismos eventos que REST, con el token como actor (`actor_type: token`, `actor_id`, y `actor_name` con su nombre, §4.2):
   - `deploy.create`: `deploy` (`trigger: api`) y `rollback` (`trigger: rollback`). En el deploy, `actor_name` es el nombre del token (§2.1) y la primera línea de su log lo dice (§2.11);
   - `env.patch`: `set_env` y `unset_env`, si cambió algo (un `PATCH` que no cambia nada no se audita).
-- **`"via": "mcp"`:** `details` lo suma, salvo que ya traiga un `via`. El precedente es `"via": "cli"` de `muelle settings reset-panel-ips` (§4.1). No hay un `trigger` nuevo ni columnas nuevas.
+- **`"via": "mcp"`:** `details` lo suma, salvo que ya traiga un `via`. El precedente es `"via": "cli"` de `muelle settings reset-panel-ips` (§5.4). No hay un `trigger` nuevo ni columnas nuevas.
 
   ```json
   { "action": "deploy.create", "actor_type": "token", "actor_id": 9, "actor_name": "claude-staging",
