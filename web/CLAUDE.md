@@ -111,6 +111,9 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
   no existe fuera del runtime de SvelteKit).
 - E2E: `e2e/*.e2e.ts` contra el build con MSW servido con la CSP (`pnpm test:e2e`, ver
   [CSP](#csp)).
+- E2E contra el backend de verdad: `e2e-real/*.real.ts`, el panel embebido en un
+  `muelle serve` con el Swarm local (`pnpm test:e2e:real`, ver
+  [E2E contra muelle](#e2e-contra-muelle)).
 - Componentes: `__tests__/X.svelte.test.ts` junto al componente, en Chromium, con un
   harness cuando hace falta un contexto (ver `molecules/menu/__tests__/`). Un harness que
   mide posiciones importa `@/shared/ui/themes/global.css` (sin el `box-sizing` global las
@@ -240,6 +243,8 @@ pnpm dev          # con un `muelle serve` local (ver web/README.md)
 pnpm verify       # antes de decir que terminaste
 pnpm test:e2e     # playwright contra build-e2e/ (con y sin MSW, bajo la CSP); no toca ./build
                   # aislado de la red como pnpm test (ver "Cosas que conviene saber")
+pnpm test:e2e:real  # el panel embebido en un muelle serve de verdad, con el Swarm local
+                    # (ver "E2E contra muelle"): construye ./build y el binario con -tags panel
 pnpm build        # el ./build que embebe el binario (sin MSW ni mockServiceWorker.js)
 ```
 
@@ -537,7 +542,8 @@ email ACME, puertos e IPs permitidas) y 5 (install y el panel embebido) están e
 árbol que el panel (`integracion-final`, que pasa a `main`), y `deploy` e `ingress` registran
 todas sus rutas (contrato §1): ahí un `404 no_route` es solo una ruta que no existe. La única
 fuente para §0–§5 es el contrato, `docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md`,
-resumido en `src/modules/{deploy,ingress}/README.md`, sin diferencias.
+resumido en `src/modules/{deploy,ingress}/README.md`, sin diferencias. `pnpm test:e2e:real`
+recorre el panel contra ese backend (ver [E2E contra muelle](#e2e-contra-muelle)).
 
 En producción el panel va embebido en el binario que lo sirve (contrato §5.5): las rutas del
 panel y las del backend llegan juntas, y `<ComingSoon>` no aparece. **El fallback se queda**
@@ -776,6 +782,48 @@ http.post(api('/projects'), async ({ request }) => {
 - Si igual una corrida se queda sin progreso, `scripts/vitest-stall-watchdog.mjs` (un
   reporter) la corta a los 120 s con la lista de archivos que no terminaron:
   `testTimeout`/`hookTimeout` no cubren un tester que no arrancó.
+
+### E2E contra muelle
+
+`e2e-real/` recorre el panel embebido en un `muelle serve` de verdad, con el Docker de
+verdad: lo que `e2e/` prueba contra MSW, acá contra Go y Swarm, bajo la CSP que manda Go.
+Un solo recorrido, en orden (`journey.real.ts`): el setup del primer usuario con el link del
+log, el 2FA con un código calculado de la clave que muestra el panel (`totp.ts`, RFC 6238;
+cada código de un paso nuevo, como exige el backend), salir y entrar con el código, un
+proyecto, un stage y una app de formulario (`nginx:alpine`), una variable secreta (que
+llega al servicio de Swarm), un deploy seguido en Deploys hasta "Exitoso", el Resumen con el
+estado de Swarm, los Logs en vivo, un segundo deploy y el rollback al primero, la Auditoría
+con el nombre del usuario (`actor_name`) y borrar la app, el stage y el proyecto. Junta las
+violaciones de CSP y los errores de la consola, como los de `e2e/`.
+
+- **Necesita** un Docker que sea manager de un Swarm activo (`docker swarm init`: el script
+  nunca lo crea; en CI lo hace el job), Go, el Chromium de Playwright y red para que el
+  daemon baje `nginx:alpine` y consulte su digest. Con un `muelle-caddy` en ese Docker no
+  corre: crear un stage lo conectaría a la red del stage.
+- `scripts/e2e-real.mjs` construye el panel como la imagen (`VITE_USE_MOCKS=0 pnpm build`,
+  con `200.html`, la CSP y sin `mockServiceWorker.js`), lo copia a
+  `src/cmd/http/panel/build/` y compila muelle con `-tags panel` en una carpeta temporal
+  (`E2E_REAL_BIN=<binario>` se salta los dos pasos). Toma el candado del Swarm de los tests
+  de integración de Go (`flock` sobre `$TMPDIR/muelle-it-swarm.lock`, el de
+  `dockertest/swarmlock`) y corre `playwright.real.config.ts` en el network namespace de
+  `scripts/isolated-net.mjs`: muelle llega a Docker por su socket, y Chromium no ve los
+  cambios de red que hace Docker al arrancar contenedores. Lo que sigue a `--` va a
+  Playwright: `pnpm test:e2e:real -- --headed`.
+- `e2e-real/globalSetup.ts` arranca muelle con una base nueva en una carpeta temporal:
+  `MUELLE_LISTEN=127.0.0.1:24080` (otro con `E2E_REAL_PORT`, del 24000 al 24999),
+  `MUELLE_PANEL_ORIGIN` en esa dirección, `MUELLE_SECURE_COOKIES=false` y su clave maestra
+  (0600); ninguna otra `MUELLE_*` del entorno pasa. Sin dominio del panel el proxy queda
+  deshabilitado: no hay muelle-caddy ni rutas. El link de setup sale del log
+  (`event: setup_url`) y llega a los tests por el entorno (`realRun()` de `env.ts`).
+- Todo lo de Docker se llama `it7p<id>…` (el slug del proyecto; `id`, 4 hex al azar). La
+  limpieza de `globalSetup.ts` corre al final aunque el test falle o se corte con Ctrl-C:
+  apaga muelle, borra los stacks, las redes y los volúmenes de `it7p<id>` y deja el log de
+  muelle en `test-results/real-muelle.log` (con la traza de Playwright en
+  `test-results/real/`). Al empezar, borra lo `it7p…` de más de 30 min (una corrida que
+  murió con SIGKILL).
+- Un test nuevo va en `e2e-real/*.real.ts`, con los mismos selectores que `e2e/` (roles y
+  textos en español). Lo que necesite de Docker, por `e2e-real/docker.ts` y solo con nombres
+  `it7p<id>`.
 
 ### CSP
 

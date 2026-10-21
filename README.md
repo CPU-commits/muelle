@@ -397,7 +397,7 @@ Los de integración (build tag `integration`) usan el Docker real: necesitan un 
 go test -tags integration -race -count=1 -timeout 40m ./...
 ```
 
-Cada paquete usa su prefijo (`it2` deploy, `it3` ingress e `it6` su vuelta atrás de los puertos del proxy, `it5` distribución e install, `ctr23` el cliente de Docker, `it9` la prueba de punta a punta de `container`) y borra lo suyo. Los que usan el Swarm (deploy, ingress, el cliente de Docker, install y `container`) corren de a uno aunque `go test` los lance a la vez: los serializa un candado en el directorio temporal (`dockertest/swarmlock`), porque con varios creando y borrando overlays a la vez, Swarm deja de conectar contenedores a una overlay attachable ("attaching to network failed … context deadline exceeded"). La espera cuenta para el `-timeout` de cada paquete. Los de install necesitan además la imagen `it5-muelle:test` de este árbol (ver `src/cmd/install/integration_test.go`).
+Cada paquete usa su prefijo (`it2` deploy, `it3` ingress e `it6` su vuelta atrás de los puertos del proxy, `it5` distribución e install, `ctr23` el cliente de Docker, `it9` la prueba de punta a punta de `container`; `it7` es el e2e real del panel, abajo) y borra lo suyo. Los que usan el Swarm (deploy, ingress, el cliente de Docker, install y `container`) corren de a uno aunque `go test` los lance a la vez: los serializa un candado en el directorio temporal (`dockertest/swarmlock`), porque con varios creando y borrando overlays a la vez, Swarm deja de conectar contenedores a una overlay attachable ("attaching to network failed … context deadline exceeded"). La espera cuenta para el `-timeout` de cada paquete. Los de install necesitan además la imagen `it5-muelle:test` de este árbol (ver `src/cmd/install/integration_test.go`).
 
 Los tests de `action/` corren el `deploy.sh` de la GitHub Action con bash, `curl` y `jq` contra un muelle falso (se saltan si falta alguno); CI corre además `shellcheck action/deploy.sh`.
 
@@ -407,7 +407,16 @@ Los tests de `src/shared/infra/container` arman muelle completo con los seis mó
 go test -tags integration -race -count=1 -timeout 25m -run Integration -v ./src/shared/infra/container/
 ```
 
-La prueba con el binario real y `curl` (spec §15) sigue siendo manual: los pasos de "Primer usuario" de arriba, más los endpoints de la fase.
+El panel (`web/`, ver `web/README.md`): `pnpm verify` (lint, svelte-check y vitest), `pnpm build` y `pnpm test:e2e` (Playwright contra el build con MSW, bajo la CSP). CI corre los tres en el job `web`, y el job `panel` compila y prueba Go con ese build embebido (`-tags panel`).
+
+La prueba con el binario real (spec §15) la hace `pnpm test:e2e:real` desde el panel: construye el panel y muelle con `-tags panel`, arranca `muelle serve` con una base nueva en `127.0.0.1:24080` (sin dominio del panel, así que sin muelle-caddy) y recorre con Playwright el setup del primer usuario con el link del log, el 2FA, un proyecto, un stage y una app de formulario, una variable, el deploy de `nginx:alpine` hasta que termina bien, el estado, los logs, un rollback, la auditoría con el nombre del usuario y el borrado de todo. Necesita un Swarm en el que este nodo es manager (no lo crea; en CI, el job `e2e-real` hace un `docker swarm init` de un nodo), usa el prefijo `it7` y los puertos 24000–24999, toma el mismo candado del Swarm que los tests de Go y borra lo suyo aunque falle. Detalles en "E2E contra muelle" de `web/CLAUDE.md`:
+
+```bash
+cd web && pnpm install && pnpm exec playwright install chromium
+pnpm test:e2e:real
+```
+
+Con `curl`, los pasos de "Primer usuario" de arriba, más los endpoints de cada fase.
 
 ## Imágenes
 

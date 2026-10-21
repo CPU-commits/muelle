@@ -46,5 +46,7 @@ pnpm format           # prettier --write
 pnpm test             # vitest: node (dominio, mappers, MSW) + Chromium (viewModels)
 pnpm test:e2e         # playwright: construye build-e2e/ (con MSW y sin) y lo sirve con la CSP;
                       # no toca ./build. Corre en su propio network namespace, como pnpm test
-pnpm verify           # lint + check + test, lo mismo que CI
+pnpm test:e2e:real    # playwright contra un muelle serve de verdad (-tags panel) y el Swarm
+                      # local: necesita un nodo manager. Ver "E2E contra muelle" en CLAUDE.md
+pnpm verify           # lint + check + test; CI corre además build, test:e2e y test:e2e:real
 ```
