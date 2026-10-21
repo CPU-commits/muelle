@@ -188,26 +188,12 @@ describe('SummaryViewModel', () => {
 		await vi.waitFor(() => expect(mocks.getAppStatus.mock.calls.length).toBe(before + 1))
 	})
 
-	it('contra un backend sin la Fase 2 muestra la fase, no un error', async () => {
-		mocks.getAppStatus.mockRejectedValue(
-			new UnavailableError('Llega con la Fase 2', { phase: 2 }),
-		)
-		mocks.listDeploys.mockRejectedValue(
-			new UnavailableError('Llega con la Fase 2', { phase: 2 }),
-		)
-		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
-
-		await vi.waitFor(() => expect(vm.pendingPhase).toBe(2))
-		expect(vm.loadError).toBeNull()
-		expect(vm.actionsEnabled).toBe(false)
-	})
-
-	it('un backend caído es un error con reintento', async () => {
+	it('un backend caído es un error con reintento, sin acciones de deploy', async () => {
 		mocks.getAppStatus.mockRejectedValue(new UnavailableError('caído'))
 		const { vm } = await mountViewModel(() => new SummaryViewModel(() => PROPS))
 
 		await vi.waitFor(() => expect(vm.loadError).toBeInstanceOf(UnavailableError))
-		expect(vm.pendingPhase).toBeNull()
+		expect(vm.actionsEnabled).toBe(false)
 
 		mocks.getAppStatus.mockResolvedValue(makeStatus())
 		vm.refresh()

@@ -1,6 +1,6 @@
 import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { describeError, formatDate, type StatusTone } from '@/shared/ui'
-import { DomainError, pendingPhase, UnavailableError, ValidationError } from '@/shared/domain'
+import { DomainError, UnavailableError, ValidationError } from '@/shared/domain'
 import {
 	type AppDomain,
 	certificateExpiresSoon,
@@ -107,8 +107,6 @@ export function sentence(text: string): string {
 
 /** El mensaje de un error del módulo para un toast o un banner. */
 export function ingressErrorMessage(error: unknown): string {
-	const phase = pendingPhase(error)
-	if (phase !== null) return m.common_coming_title({ phase })
 	if (error instanceof HostnameTaken) return m.ingress_error_taken()
 	if (error instanceof DomainNotFound) return m.ingress_error_not_found()
 	if (error instanceof NothingToAdopt) return m.ingress_error_nothing_to_adopt()

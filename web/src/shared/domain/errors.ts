@@ -8,9 +8,6 @@ export type DomainErrorCode =
 	| 'unavailable'
 	| 'unexpected'
 
-/** Las fases del roadmap de muelle que el panel muestra antes de que existan en el backend. */
-export type RoadmapPhase = 2 | 3
-
 export class DomainError extends Error {
 	readonly code: DomainErrorCode
 
@@ -113,28 +110,20 @@ export class RateLimitedError extends DomainError {
 export type UnavailableReason = 'network' | 'timeout' | 'server'
 
 export interface UnavailableOptions extends ErrorOptions {
-	/** La fase en la que llega el endpoint, si no responde porque todavía no existe. */
-	phase?: RoadmapPhase
 	reason?: UnavailableReason
 }
 
 /**
- * El backend no puede atender. Dos casos, que la UI distingue con `phase`:
- * - `phase === null`: caído o sin red. `reason` dice cuál: `network`, `server` (un 5xx)
- *   o `timeout`. Se reintenta, salvo un timeout.
- * - `phase === 2 | 3`: el endpoint es de una fase que el backend todavía no tiene (un 404
- *   de una ruta de deploys, dominios, registries…). No se reintenta y la pantalla
- *   muestra <ComingSoon phase={…} />.
+ * El backend no puede atender: caído o sin red. `reason` dice cuál: `network`, `server` (un
+ * 5xx) o `timeout`. Se reintenta, salvo un timeout.
  */
 export class UnavailableError extends DomainError {
-	readonly phase: RoadmapPhase | null
 	readonly reason: UnavailableReason | null
 
 	constructor(message: string, options: UnavailableOptions = {}) {
-		const { phase, reason, ...errorOptions } = options
+		const { reason, ...errorOptions } = options
 		super('unavailable', message, errorOptions)
 		this.name = 'UnavailableError'
-		this.phase = phase ?? null
 		this.reason = reason ?? null
 	}
 }
@@ -152,9 +141,4 @@ export function isDomainError(error: unknown): error is DomainError {
 
 export function hasCode(error: unknown, code: DomainErrorCode): boolean {
 	return isDomainError(error) && error.code === code
-}
-
-/** La fase que falta si el error es "todavía no existe"; si no, null. */
-export function pendingPhase(error: unknown): RoadmapPhase | null {
-	return error instanceof UnavailableError ? error.phase : null
 }

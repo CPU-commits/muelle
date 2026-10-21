@@ -5,7 +5,6 @@ import {
 	ForbiddenError,
 	NotFoundError,
 	RateLimitedError,
-	type RoadmapPhase,
 	UnauthorizedError,
 	UnavailableError,
 	UnexpectedError,
@@ -26,16 +25,12 @@ export interface DomainErrorMap {
 	 * `ValidationError.field`.
 	 */
 	readonly fields?: Readonly<Record<string, string>>
-	/**
-	 * Endpoints de una fase que el backend todavía no tiene (deploys, dominios, registries…).
-	 * Si la RUTA no existe (404 `no_route`, o 405 `method_not_allowed` si existe con otro
-	 * método) se traduce a `UnavailableError` con `phase`, y la pantalla muestra
-	 * <ComingSoon>. Un 404 `not_found` es un recurso que no existe: eso no cambia.
-	 */
-	readonly phase?: RoadmapPhase
 }
 
-// Lo que manda el backend cuando la ruta no existe o no acepta ese método (cmd/http).
+// Lo que manda el backend cuando la ruta no existe o no acepta ese método (cmd/http). El
+// panel va embebido en el mismo binario (contrato §5.5): es una ruta mal armada del panel,
+// no un recurso que no existe (eso es 404 `not_found`), y no se lee como el `notFound` del
+// módulo.
 const MISSING_ROUTE_CODES = new Set(['no_route', 'method_not_allowed'])
 
 // Códigos que cualquier endpoint puede devolver y que no dependen del módulo.
@@ -72,9 +67,8 @@ export function toDomainError(error: unknown, map: DomainErrorMap = {}): unknown
 	const byCode = map.codes?.[error.code] ?? SHARED_CODES[error.code]
 	if (byCode) return byCode(error)
 
-	if (map.phase !== undefined && MISSING_ROUTE_CODES.has(error.code)) {
-		return new UnavailableError(`Llega con la Fase ${map.phase}`, {
-			phase: map.phase,
+	if (MISSING_ROUTE_CODES.has(error.code)) {
+		return new UnexpectedError(`La ruta no existe en muelle (${error.status} ${error.code})`, {
 			cause: error,
 		})
 	}

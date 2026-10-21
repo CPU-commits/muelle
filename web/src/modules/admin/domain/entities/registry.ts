@@ -20,9 +20,6 @@ export interface RegistryCredentials {
 	readonly password: string
 }
 
-/** La fase en la que llega `/registries` (los deploys la usan para imágenes privadas). */
-export const REGISTRIES_PHASE = 2 as const
-
 /**
  * El registry de las imágenes de muelle (`ghcr.io/cpu-commits/muelle…`, contrato §5.1). Son
  * privadas: install guarda esta credencial en el primer arranque, y con ella ingress baja

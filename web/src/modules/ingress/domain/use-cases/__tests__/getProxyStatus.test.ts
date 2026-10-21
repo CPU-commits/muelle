@@ -16,9 +16,9 @@ describe('getProxyStatus', () => {
 		})
 	})
 
-	it('sin la Fase 3 rechaza con la fase', async () => {
+	it('si muelle no responde, rechaza con el error del repositorio', async () => {
 		const proxy = new InMemoryProxyRepository()
-		proxy.failure = new UnavailableError('Llega con la Fase 3', { phase: 3 })
-		await expect(makeGetProxyStatus({ proxy })()).rejects.toMatchObject({ phase: 3 })
+		proxy.failure = new UnavailableError('caído', { reason: 'server' })
+		await expect(makeGetProxyStatus({ proxy })()).rejects.toBe(proxy.failure)
 	})
 })

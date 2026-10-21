@@ -109,7 +109,6 @@ describe('SettingsScreen', () => {
 		await expect.element(screen.getByText(/^Actualizado /)).toBeVisible()
 		await expect.element(screen.getByLabelText('IPs permitidas para el panel')).toBeVisible()
 		await expect.element(screen.getByText('ghcr.io')).toBeVisible()
-		await expect.element(screen.getByText(/llega con la Fase/)).not.toBeInTheDocument()
 	})
 
 	it('el aviso de la dirección nueva del panel no pide tocar la configuración de muelle', async () => {

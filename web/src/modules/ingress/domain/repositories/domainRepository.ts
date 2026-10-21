@@ -2,8 +2,7 @@ import type { AppDomain, DomainChanges, NewDomain } from '../entities/appDomain'
 import type { AppRef } from '../value-objects/appRef'
 import type { Hostname } from '../value-objects/hostname'
 
-// El PUERTO del módulo: los dominios de una app (Fase 3, spec §8, §9 y §10). Contra un
-// backend sin la Fase 3, todo rechaza con `UnavailableError` (`phase: 3`).
+// El PUERTO del módulo: los dominios de una app (Fase 3, spec §8, §9 y §10).
 export interface DomainRepository {
 	list(app: AppRef, signal?: AbortSignal): Promise<readonly AppDomain[]>
 	/** `HostnameTaken` si el hostname ya existe en muelle. */

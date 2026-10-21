@@ -6,7 +6,7 @@ import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { identityDb } from '@/mocks/db/identity'
 import { ingressDb } from '@/mocks/db/ingress'
 import { server } from '@/mocks/server'
-import { pendingPhase, UnavailableError, ValidationError } from '@/shared/domain'
+import { UnavailableError, UnexpectedError, ValidationError } from '@/shared/domain'
 import { ingressUseCases } from '@/modules/ingress'
 import { adminUseCases } from '../container'
 import {
@@ -458,7 +458,6 @@ describe('settings', () => {
 
 		expect(error).toBeInstanceOf(CloudflareUnavailable)
 		expect(error).toBeInstanceOf(UnavailableError)
-		expect(pendingPhase(error)).toBeNull()
 	})
 })
 
@@ -651,9 +650,9 @@ describe('registries (Fase 2)', () => {
 		).rejects.toBeInstanceOf(RegistryExists)
 	})
 
-	it('contra el backend de la Fase 1, la ruta no existe: UnavailableError con fase 2', async () => {
+	it('una ruta que no existe (no_route, method_not_allowed) es un error inesperado, no un registry que falta', async () => {
 		server.use(
-			http.get(api('/registries'), () => apiError(404, 'no_route', 'no existe')),
+			http.get(api('/registries'), () => noRoute()),
 			http.post(api('/registries'), () =>
 				apiError(405, 'method_not_allowed', 'método no permitido'),
 			),
@@ -664,34 +663,23 @@ describe('registries (Fase 2)', () => {
 			.addRegistry({ host: 'ghcr.io', username: 'a', password: 'b' })
 			.catch((caught: unknown) => caught)
 
-		expect(listError).toBeInstanceOf(UnavailableError)
-		expect(pendingPhase(listError)).toBe(2)
-		expect(pendingPhase(addError)).toBe(2)
+		expect(listError).toBeInstanceOf(UnexpectedError)
+		expect(addError).toBeInstanceOf(UnexpectedError)
 	})
 
-	it('un not_found no es la Fase 2: es el registry que ya no está', async () => {
+	it('un not_found es el registry que ya no está', async () => {
 		const error = await adminUseCases
 			.removeRegistry('quay.io')
 			.catch((caught: unknown) => caught)
 
 		expect(error).toBeInstanceOf(RegistryNotFound)
-		expect(pendingPhase(error)).toBeNull()
 	})
 
-	it('una ruta sin handler en los mocks contesta no_route, como el backend', async () => {
-		server.use(http.get(api('/registries'), () => noRoute()))
-
-		const error = await adminUseCases.listRegistries().catch((caught: unknown) => caught)
-
-		expect(pendingPhase(error)).toBe(2)
-	})
-
-	it('un backend caído es UnavailableError sin fase (se reintenta)', async () => {
+	it('un backend caído es UnavailableError (se reintenta)', async () => {
 		server.use(http.get(api('/registries'), () => HttpResponse.error()))
 
 		const error = await adminUseCases.listRegistries().catch((caught: unknown) => caught)
 
 		expect(error).toBeInstanceOf(UnavailableError)
-		expect(pendingPhase(error)).toBeNull()
 	})
 })

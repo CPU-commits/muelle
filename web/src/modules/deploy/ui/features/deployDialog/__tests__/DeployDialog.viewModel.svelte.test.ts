@@ -254,15 +254,13 @@ describe('DeployDialogViewModel', () => {
 	})
 
 	it('otro error va al banner del diálogo', async () => {
-		mocks.createDeploy.mockRejectedValue(
-			new UnavailableError('Llega con la Fase 2', { phase: 2 }),
-		)
+		mocks.createDeploy.mockRejectedValue(new UnavailableError('caído', { reason: 'server' }))
 		const input = props()
 		const { vm } = await mountViewModel(() => new DeployDialogViewModel(() => input))
 
 		await vm.submit()
 
-		expect(vm.formError).toBe(m.common_coming_title({ phase: 2 }))
+		expect(vm.formError).toBe(m.common_server_error())
 		expect(input.onDeployed).not.toHaveBeenCalled()
 
 		vm.close()

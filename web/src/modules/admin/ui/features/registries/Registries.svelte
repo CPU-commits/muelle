@@ -3,7 +3,6 @@
 	import {
 		Banner,
 		Button,
-		ComingSoon,
 		ConfirmDialog,
 		EmptyState,
 		ErrorState,
@@ -36,7 +35,7 @@
 		description={m.admin_registries_description()}
 	>
 		{#snippet actions()}
-			{#if vm.pendingPhase === null && !vm.isLoading && !vm.loadError}
+			{#if !vm.isLoading && !vm.loadError}
 				<Button variant="secondary" size="sm" onclick={vm.openAdd}>
 					{m.admin_registries_add()}
 				</Button>
@@ -46,8 +45,6 @@
 
 	{#if vm.isLoading}
 		<LoadingState label={m.common_loading()} />
-	{:else if vm.pendingPhase !== null}
-		<ComingSoon phase={vm.pendingPhase} feature={m.admin_registries_feature()} />
 	{:else if vm.loadError}
 		<ErrorState title={vm.loadError} retryLabel={m.common_retry()} onRetry={vm.retry} />
 	{:else if vm.isEmpty}

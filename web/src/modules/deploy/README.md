@@ -21,7 +21,7 @@ está en [Diferencias con el contrato](#diferencias-con-el-contrato).
 
 | Respuesta                                   | Qué ve el panel                                                                      |
 | ------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `404 no_route`, `405 method_not_allowed`    | La Fase 2 todavía no está: `<ComingSoon phase={2}>` (`UnavailableError` con `phase`) |
+| `404 no_route`, `405 method_not_allowed`    | Una ruta mal armada del panel: `UnexpectedError` (el panel va con el backend entero) |
 | `404 not_found`                             | El recurso no existe. En un deploy, `DeployNotFound`: "Ese deploy ya no existe"      |
 | `503 docker_unavailable`                    | `DockerUnavailable`: "Docker no responde en el servidor de muelle…", con reintento   |
 | `409 no_previous_deploy` (rollback)         | `NoPreviousDeploy`: "No hay un deploy exitoso anterior al actual", en el diálogo     |
@@ -349,7 +349,7 @@ logfmt o `level`/`severity` de un JSON).
 - Para Proyectos: `AppDeployState`, una clase que se crea en la fila:
   `new AppDeployState(() => ref, () => enabled)` (`enabled` opcional: false no pide nada
   y todo dice "—"). Da `tone`, `statusText`, `lastDeployText`, `lastDeployFailed`,
-  `image` e `imageShort`; "—" si la Fase 2 no está o falla, sin reintentos. La ruta
+  `image` e `imageShort`; "—" si falla, sin reintentos. La ruta
   `(app)/+page.svelte` se la pasa a `ProjectsScreen` de `catalog` como `appDeploy` (un
   `AppRowDeployFactory`), y cada fila la crea con `enabled` en false hasta que se ve.
 - Queries: `appStatusQuery(ref, options)`, `deploysQuery(ref, options)` y

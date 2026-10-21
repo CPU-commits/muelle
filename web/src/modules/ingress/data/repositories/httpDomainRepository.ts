@@ -27,20 +27,16 @@ const UPSTREAM = {
 	docker_unavailable: (error: ApiError) => new DockerUnavailable(cause(error)),
 }
 
-// Todo es de la Fase 3: contra un backend sin ella, la ruta no existe (`no_route` /
-// `method_not_allowed`) y es `UnavailableError` con `phase: 3`.
-const LIST_ERRORS: DomainErrorMap = { phase: 3, fields: FIELDS, codes: UPSTREAM }
+const LIST_ERRORS: DomainErrorMap = { fields: FIELDS, codes: UPSTREAM }
 
 // Al crear, `409 conflict` es el hostname tomado (es único en todo muelle).
 const CREATE_ERRORS: DomainErrorMap = {
-	phase: 3,
 	fields: FIELDS,
 	codes: { ...UPSTREAM, conflict: (error) => new HostnameTaken(cause(error)) },
 }
 
 // Las rutas de UN dominio: `not_found` es ese dominio (no la ruta, que es `no_route`).
 const ONE_DOMAIN_ERRORS: DomainErrorMap = {
-	phase: 3,
 	fields: FIELDS,
 	codes: {
 		...UPSTREAM,

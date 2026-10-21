@@ -44,15 +44,10 @@ const cause = (error: ApiError) => ({ cause: error })
 // `503 docker_unavailable` (contrato §0.2): Docker no responde, con su propio texto.
 const docker = { docker_unavailable: (error: ApiError) => new DockerUnavailable(cause(error)) }
 
-// Todo es de la Fase 2: contra un backend sin ella, la ruta no existe (`no_route` /
-// `method_not_allowed`) y es `UnavailableError` con `phase: 2`: la pantalla muestra
-// <ComingSoon>. Un `not_found` es otra cosa: el recurso no existe.
-const DEPLOY_ERRORS: DomainErrorMap = { phase: 2, codes: docker }
+const DEPLOY_ERRORS: DomainErrorMap = { codes: docker }
 
-// Las rutas de UN deploy (`…/deploys/{id}`, su log): `not_found` es ese deploy. Va en
-// `codes` para que gane siempre; la ruta inexistente (`no_route`) sigue siendo la fase.
+// Las rutas de UN deploy (`…/deploys/{id}`, su log): `not_found` es ese deploy.
 const ONE_DEPLOY_ERRORS: DomainErrorMap = {
-	phase: 2,
 	codes: { ...docker, not_found: (error) => new DeployNotFound(cause(error)) },
 }
 
@@ -60,11 +55,10 @@ const ONE_DEPLOY_ERRORS: DomainErrorMap = {
 // (contrato §1.1 y §2.2), y dura a lo más 2 min.
 const removing = { conflict: (error: ApiError) => new AppRemoving(cause(error)) }
 
-const CREATE_ERRORS: DomainErrorMap = { phase: 2, codes: { ...docker, ...removing } }
+const CREATE_ERRORS: DomainErrorMap = { codes: { ...docker, ...removing } }
 
 // `409 no_previous_deploy`: no hay un succeeded anterior al actual (contrato §2.7).
 const ROLLBACK_ERRORS: DomainErrorMap = {
-	phase: 2,
 	codes: {
 		...docker,
 		...removing,

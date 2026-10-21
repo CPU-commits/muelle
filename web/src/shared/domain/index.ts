@@ -3,7 +3,7 @@ export type { Email } from './email'
 export { isEmail, parseEmail } from './email'
 export type { CursorPage } from './cursorPage'
 export { emptyCursorPage, flattenCursorPages, hasNextPage } from './cursorPage'
-export type { DomainErrorCode, RoadmapPhase, UnavailableOptions, UnavailableReason } from './errors'
+export type { DomainErrorCode, UnavailableOptions, UnavailableReason } from './errors'
 export {
 	AmbiguousSessionError,
 	BadOriginError,
@@ -14,7 +14,6 @@ export {
 	isDomainError,
 	NotFoundError,
 	PanelMovedError,
-	pendingPhase,
 	RateLimitedError,
 	UnauthorizedError,
 	UnavailableError,

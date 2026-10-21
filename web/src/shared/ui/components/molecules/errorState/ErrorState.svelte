@@ -3,8 +3,7 @@
 	import StatusDot from '../../atoms/statusDot/StatusDot.svelte'
 	import { action, body as bodyClass, panel, title as titleClass } from './styles.css'
 
-	// Una carga que falló, con reintento. Para "todavía no existe" (Fase 2/3) va
-	// <ComingSoon>, no esto.
+	// Una carga que falló, con reintento.
 	type Props = { title: string; body?: string; retryLabel?: string; onRetry?: () => void }
 
 	let { title, body, retryLabel, onRetry }: Props = $props()

@@ -33,7 +33,7 @@ export function adminErrorMessage(error: unknown): string {
 	if (error instanceof PortsDockerUnavailable) return m.admin_ports_docker_unavailable()
 	if (error instanceof RegistryExists) return m.admin_error_registry_exists()
 	if (error instanceof RegistryNotFound) return m.admin_error_registry_not_found()
-	// Lo común (sin red, fase pendiente, una dirección que no es la del panel, demasiados
+	// Lo común (sin red, un 5xx, una dirección que no es la del panel, demasiados
 	// intentos…).
 	return describeError(error)
 }

@@ -3,10 +3,10 @@ import { server } from '@/mocks/server'
 import { http } from '@/shared/data/http/client'
 import { withDomainErrors } from '@/shared/data/http/domainErrors'
 import { ApiError } from '@/shared/data/http/errors'
-import { NotFoundError, pendingPhase } from '@/shared/domain'
+import { UnexpectedError } from '@/shared/domain'
 
-// Como el backend: una ruta sin handler responde 404 `no_route`, y un repositorio de
-// Fase 2 la lee como "todavía no existe".
+// Como el backend: una ruta sin handler responde 404 `no_route`, y un repositorio la lee como
+// un error inesperado (una ruta mal armada del panel).
 //
 // Las rutas son a propósito de ningún módulo: cuando un módulo de F1 mockea las suyas
 // (deploys, status), una ruta real dejaría de ser "sin handler" y el test se rompería.
@@ -33,17 +33,9 @@ describe('handlers de MSW', () => {
 		expect((error as ApiError).code).toBe('no_route')
 	})
 
-	it('con { phase: 2 } esa respuesta es UnavailableError de la Fase 2', async () => {
-		const error = await withDomainErrors(() => http.get(NESTED_NO_HANDLER), { phase: 2 }).catch(
-			(caught: unknown) => caught,
-		)
-
-		expect(pendingPhase(error)).toBe(2)
-	})
-
-	it('sin fase, la misma respuesta es un NotFoundError común', async () => {
+	it('un repositorio la lee como un error inesperado, no como un recurso que no existe', async () => {
 		await expect(withDomainErrors(() => http.get(NO_HANDLER))).rejects.toBeInstanceOf(
-			NotFoundError,
+			UnexpectedError,
 		)
 	})
 })

@@ -1,10 +1,5 @@
 import { type DefaultOptions, QueryClient } from '@tanstack/svelte-query'
-import {
-	type DomainErrorCode,
-	isDomainError,
-	pendingPhase,
-	UnavailableError,
-} from '@/shared/domain'
+import { type DomainErrorCode, isDomainError, UnavailableError } from '@/shared/domain'
 import { ApiError, ContractError } from '@/shared/data/http/errors'
 
 // Cuando una query falla, lo que llega acá NO es un ApiError: el repositorio ya lo
@@ -21,11 +16,9 @@ const NON_RETRYABLE_CODES: readonly DomainErrorCode[] = [
 	'unexpected',
 ]
 
-// Un 4xx no se arregla reintentando, ni un endpoint de una fase que todavía no existe, ni
-// una respuesta con otra forma (ContractError: el backend cambió). Solo se reintentan
-// errores de red, timeouts y 5xx.
+// Un 4xx no se arregla reintentando, ni una respuesta con otra forma (ContractError: el
+// backend cambió). Solo se reintentan errores de red y 5xx.
 export function shouldRetry(failureCount: number, error: unknown): boolean {
-	if (pendingPhase(error) !== null) return false
 	// Un timeout ya esperó 30 s: reintentarlo dos veces deja la pantalla cargando 90 s.
 	if (error instanceof UnavailableError && error.reason === 'timeout') return false
 	if (error instanceof ContractError) return false

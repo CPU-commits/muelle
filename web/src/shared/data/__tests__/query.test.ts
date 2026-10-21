@@ -37,12 +37,6 @@ describe('shouldRetry', () => {
 		expect(shouldRetry(0, new UnavailableError('red', { reason: 'network' }))).toBe(true)
 	})
 
-	it('no reintenta un endpoint de una fase que todavía no existe', () => {
-		expect(shouldRetry(0, new UnavailableError('Llega con la Fase 2', { phase: 2 }))).toBe(
-			false,
-		)
-	})
-
 	it('sigue cortando un ApiError 4xx crudo y reintenta un error de red', () => {
 		expect(shouldRetry(0, new ApiError(422, 'invalid', 'slug: no vale'))).toBe(false)
 		expect(shouldRetry(0, new NetworkError(new Error('offline')))).toBe(true)

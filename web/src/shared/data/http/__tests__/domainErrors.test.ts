@@ -5,7 +5,6 @@ import {
 	ConflictError,
 	ForbiddenError,
 	NotFoundError,
-	pendingPhase,
 	RateLimitedError,
 	UnauthorizedError,
 	UnavailableError,
@@ -33,11 +32,10 @@ describe('toDomainError', () => {
 		expect(toDomainError(apiError(400, 'invalid_json'))).toBeInstanceOf(UnexpectedError)
 	})
 
-	it('un error de red es un servicio no disponible, sin fase', () => {
+	it('un error de red es un servicio no disponible', () => {
 		const error = toDomainError(new NetworkError(new Error('offline')))
 
 		expect(error).toBeInstanceOf(UnavailableError)
-		expect(pendingPhase(error)).toBeNull()
 	})
 
 	it('saca el campo de un 422 "campo: motivo" y lo renombra', () => {
@@ -76,29 +74,20 @@ describe('toDomainError', () => {
 		expect(error).toBeInstanceOf(ProjectNotFound)
 	})
 
-	it('en un endpoint de Fase 2/3, la ruta que no existe es "todavía no existe"', () => {
-		const notYet = toDomainError(apiError(404, 'no_route'), { phase: 2 })
-		const method = toDomainError(apiError(405, 'method_not_allowed'), { phase: 3 })
+	it('una ruta que no existe (404 no_route, 405 method_not_allowed) es un error inesperado', () => {
+		// El panel va embebido en el mismo binario que el backend (contrato §5.5): una ruta que
+		// no existe es una ruta mal armada del panel, no un recurso que no está.
+		const notFound = () => new ProjectNotFound('no existe auditfy')
+		const route = toDomainError(apiError(404, 'no_route'), { notFound })
+		const method = toDomainError(apiError(405, 'method_not_allowed'), { notFound })
 
-		expect(notYet).toBeInstanceOf(UnavailableError)
-		expect(pendingPhase(notYet)).toBe(2)
-		expect(pendingPhase(method)).toBe(3)
-		expect(pendingPhase(toDomainError(apiError(503, 'unknown'), { phase: 2 }))).toBeNull()
-	})
-
-	it('en un endpoint de Fase 2/3, un recurso que no existe sigue siendo not_found', () => {
-		const missing = toDomainError(apiError(404, 'not_found'), {
-			phase: 2,
-			notFound: () => new ProjectNotFound('no existe el deploy 9'),
-		})
-
-		expect(missing).toBeInstanceOf(ProjectNotFound)
-		expect(pendingPhase(missing)).toBeNull()
-	})
-
-	it('sin fase, una ruta inexistente es un NotFoundError común', () => {
-		expect(pendingPhase(toDomainError(apiError(404, 'no_route')))).toBeNull()
-		expect(toDomainError(apiError(404, 'no_route'))).toBeInstanceOf(NotFoundError)
+		expect(route).toBeInstanceOf(UnexpectedError)
+		expect(method).toBeInstanceOf(UnexpectedError)
+		expect(route).not.toBeInstanceOf(NotFoundError)
+		// Un recurso que no existe sigue siendo el notFound del módulo.
+		expect(toDomainError(apiError(404, 'not_found'), { notFound })).toBeInstanceOf(
+			ProjectNotFound,
+		)
 	})
 
 	it('bad_origin y ambiguous_session tienen su propio error, en cualquier módulo', () => {
@@ -112,7 +101,6 @@ describe('toDomainError', () => {
 		const error = toDomainError(new RequestTimeoutError('/projects', 30_000))
 
 		expect(error).toBeInstanceOf(UnavailableError)
-		expect(pendingPhase(error)).toBeNull()
 	})
 
 	it('un UnavailableError dice por qué: la red, un timeout o un 5xx de muelle', () => {
@@ -122,7 +110,6 @@ describe('toDomainError', () => {
 		expect(reason(toDomainError(new RequestTimeoutError('/projects', 30_000)))).toBe('timeout')
 		expect(reason(toDomainError(apiError(500, 'internal')))).toBe('server')
 		expect(reason(toDomainError(apiError(503, 'unknown')))).toBe('server')
-		expect(reason(toDomainError(apiError(404, 'no_route'), { phase: 2 }))).toBeNull()
 	})
 
 	it('deja pasar lo que no es un ApiError', () => {

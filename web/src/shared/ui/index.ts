@@ -42,7 +42,6 @@ export type {
 export { default as Card } from './components/molecules/card/Card.svelte'
 export type { CardTone } from './components/molecules/card/styles.css'
 export { default as CodeInput } from './components/molecules/codeInput/CodeInput.svelte'
-export { default as ComingSoon } from './components/molecules/comingSoon/ComingSoon.svelte'
 export { default as ConfirmDialog } from './components/molecules/confirmDialog/ConfirmDialog.svelte'
 export { default as CopyButton } from './components/molecules/copyButton/CopyButton.svelte'
 export { default as EmptyState } from './components/molecules/emptyState/EmptyState.svelte'

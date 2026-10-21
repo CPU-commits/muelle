@@ -49,10 +49,7 @@ describe('describeError', () => {
 		}
 	})
 
-	it('distingue una fase pendiente de un backend caído', () => {
-		expect(describeError(new UnavailableError('x', { phase: 2 }))).toBe(
-			m.common_coming_title({ phase: 2 }),
-		)
+	it('un backend caído o sin red pide revisar la conexión', () => {
 		expect(describeError(new UnavailableError('caído'))).toBe(m.common_unavailable())
 	})
 

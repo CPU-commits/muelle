@@ -21,7 +21,7 @@ mocks (`src/mocks/{db,handlers}/ingress.ts`).
 
 | Respuesta                                | Qué ve el panel                                                                                                                                                               |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `404 no_route`, `405 method_not_allowed` | La Fase 3 todavía no está: `<ComingSoon phase={3}>`                                                                                                                           |
+| `404 no_route`, `405 method_not_allowed` | Una ruta mal armada del panel: `UnexpectedError` (el panel va con el backend entero)                                                                                          |
 | `404 not_found` (un dominio)             | `DomainNotFound`. Al borrar: otra persona ya lo borró, se cierra el diálogo y se pide la lista                                                                                |
 | `409 conflict` (crear)                   | `HostnameTaken`: "Ese hostname ya está en uso en muelle", en el campo                                                                                                         |
 | `409 nothing_to_adopt`                   | `NothingToAdopt`: "No hay un registro que adoptar"                                                                                                                            |
@@ -183,8 +183,8 @@ Dominios, arriba del formulario.
 - Mientras dice `out_of_sync` o `recreating` se pregunta de nuevo cada 10 s (con la
   pestaña visible). Cada cambio de un dominio (crear, editar, borrar, adoptar,
   reintentar) lo vuelve a pedir: una ruta nueva puede dejarlo desincronizado.
-- Sin la Fase 3 (`no_route`), con Docker caído (`503 docker_unavailable`) o mientras carga,
-  no se muestra nada: ni `<ComingSoon>` ni un error (los dominios tienen sus propios avisos).
+- Si falla (Docker caído, `503 docker_unavailable`, o muelle sin responder) o mientras carga,
+  no se muestra nada: ni un error (los dominios tienen sus propios avisos).
 - Ajustes no es de este módulo, pero usa `proxyFollowQuery` y `proxyNotice` del barrel: lo
   pide al abrirse (muestra `ports_rollback`) y, después de cambiar los puertos, sigue
   `GET /proxy` mientras dice `recreating` (aunque falle, 2 min como mucho: pasado el plazo

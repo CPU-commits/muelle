@@ -21,7 +21,7 @@ export interface AuditRepository {
 	list(query: AuditQuery, signal?: AbortSignal): Promise<AuditEvent[]>
 }
 
-/** `/registries` llega con la Fase 2: hasta entonces todo responde `UnavailableError`. */
+/** `/registries` (contrato §2.10): las credenciales de los registries privados. */
 export interface RegistryRepository {
 	list(signal?: AbortSignal): Promise<Registry[]>
 	create(registry: NewRegistry): Promise<Registry>

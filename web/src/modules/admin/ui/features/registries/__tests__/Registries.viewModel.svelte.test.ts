@@ -63,19 +63,10 @@ describe('RegistriesViewModel', () => {
 		mocks.removeRegistry.mockResolvedValue(undefined)
 	})
 
-	it('contra un backend sin la Fase 2 muestra "llega con la Fase 2", no un error', async () => {
-		mocks.listRegistries.mockRejectedValue(new UnavailableError('x', { phase: 2 }))
-		const vm = await mountViewModel()
-
-		expect(vm.pendingPhase).toBe(2)
-		expect(vm.loadError).toBeNull()
-	})
-
-	it('un backend caído sí es un error', async () => {
+	it('un backend caído es un error', async () => {
 		mocks.listRegistries.mockRejectedValue(new UnavailableError('caído'))
 		const vm = await mountViewModel()
 
-		expect(vm.pendingPhase).toBeNull()
 		expect(vm.loadError).toBe(m.common_unavailable())
 	})
 

@@ -116,7 +116,6 @@
 	"admin_registries_updated_exact": "on {date}",
 	"admin_registries_empty_title": "No registries",
 	"admin_registries_empty_body": "They're only needed to pull private images.",
-	"admin_registries_feature": "The registries section",
 	"admin_registries_load_error": "The registries couldn't be loaded.",
 	"admin_registry_form_add_title": "Add registry",
 	"admin_registry_form_edit_title": "Credentials for {host}",

@@ -275,14 +275,11 @@ describe('DeploysViewModel', () => {
 		expect(vm.logError).toBeNull()
 	})
 
-	it('contra un backend sin la Fase 2 muestra la fase y no abre ningún log', async () => {
-		mocks.listDeploys.mockRejectedValue(
-			new UnavailableError('Llega con la Fase 2', { phase: 2 }),
-		)
+	it('si la lista falla, es un error y no abre ningún log', async () => {
+		mocks.listDeploys.mockRejectedValue(new UnavailableError('caído', { reason: 'server' }))
 		const { vm } = await mountViewModel(() => new DeploysViewModel(() => PROPS))
 
-		await vi.waitFor(() => expect(vm.pendingPhase).toBe(2))
-		expect(vm.loadError).toBeNull()
+		await vi.waitFor(() => expect(vm.loadError).toBeInstanceOf(UnavailableError))
 		expect(mocks.followDeployLog).not.toHaveBeenCalled()
 	})
 

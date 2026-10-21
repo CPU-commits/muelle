@@ -3,7 +3,6 @@
 	import {
 		Banner,
 		Button,
-		ComingSoon,
 		CopyButton,
 		EmptyState,
 		ErrorState,
@@ -79,9 +78,7 @@
 		{/snippet}
 	</PageHeader>
 
-	{#if vm.pendingPhase !== null}
-		<ComingSoon phase={vm.pendingPhase} feature={m.deploy_deploys_coming()} />
-	{:else if vm.isLoading}
+	{#if vm.isLoading}
 		<LoadingState label={m.deploy_deploys_loading()} />
 	{:else if vm.loadError}
 		<ErrorState

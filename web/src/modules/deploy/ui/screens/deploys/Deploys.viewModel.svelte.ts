@@ -3,7 +3,6 @@ import { createQuery, type CreateQueryResult, useQueryClient } from '@tanstack/s
 import { untrack } from 'svelte'
 import type { Attachment } from 'svelte/attachments'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { pendingPhase, type RoadmapPhase } from '@/shared/domain'
 import { type App as CatalogApp, appQuery, appRefFrom, catalogKeys } from '@/modules/catalog'
 import { type ProxyStatus, proxyNotice, proxyQuery } from '@/modules/ingress'
 import {
@@ -197,16 +196,12 @@ export class DeploysViewModel {
 		return this.#props().kind ?? this.#catalogApp.data?.kind ?? null
 	}
 
-	get pendingPhase(): RoadmapPhase | null {
-		return pendingPhase(this.deploys.error)
-	}
-
 	get isLoading(): boolean {
 		return this.deploys.isPending
 	}
 
 	get loadError(): unknown {
-		return this.pendingPhase === null ? this.deploys.error : null
+		return this.deploys.error
 	}
 
 	get history(): readonly Deploy[] {
