@@ -506,6 +506,12 @@ describe('rollback', () => {
 		expect(deploy.trigger).toBe('rollback')
 		expect(deploy.images[0]?.ref).toBe('ghcr.io/auditfy/api:sha-e52b8f0')
 	})
+
+	it('sin un succeeded anterior es NoPreviousDeploy (409)', async () => {
+		await expect(deployUseCases.rollback({ ...APP, app: 'nats' })).rejects.toBeInstanceOf(
+			NoPreviousDeploy,
+		)
+	})
 })
 
 describe('requested_images: la ref pedida y lo que queda fijo (contrato §2.1 y §2.2)', () => {
@@ -583,12 +589,6 @@ describe('requested_images: la ref pedida y lo que queda fijo (contrato §2.1 y 
 			rollback: null,
 			services: ['api'],
 		})
-	})
-
-	it('sin un succeeded anterior es NoPreviousDeploy (409)', async () => {
-		await expect(deployUseCases.rollback({ ...APP, app: 'nats' })).rejects.toBeInstanceOf(
-			NoPreviousDeploy,
-		)
 	})
 })
 
