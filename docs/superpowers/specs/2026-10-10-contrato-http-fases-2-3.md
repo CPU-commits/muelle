@@ -566,7 +566,7 @@ Es solo lectura: viene de la configuración guardada, no de Swarm.
 
 ## 3. Dominios y proxy (Fase 3, módulo `ingress`) · sesión
 
-Ningún endpoint de esta sección acepta tokens (§10.1).
+Ningún endpoint de esta sección acepta tokens (§10.1), salvo `GET {app}/domains` (§3.2), que un token lee en las apps de su alcance, de lectura, con la misma respuesta que una sesión (§8.1). Lo que escribe en un dominio, y `GET /proxy`, siguen siendo de sesión: el estado del proxy puede nombrar los hosts de otros proyectos.
 
 ### 3.1 El dominio
 
@@ -627,7 +627,7 @@ Ningún endpoint de esta sección acepta tokens (§10.1).
 
 | Endpoint | Cuerpo | Respuesta |
 |---|---|---|
-| `GET {app}/domains` | — | `200 [dominio]`, ordenados por hostname |
+| `GET {app}/domains` · token | — | `200 [dominio]`, ordenados por hostname. Un token, solo dentro de su alcance (§8.1) |
 | `POST {app}/domains` | `{hostname, target_service, target_port, proxied?}` (`proxied` por defecto `false`) | `201 dominio` |
 | `PATCH {app}/domains/{hostname}` | `{proxied?, target_service?, target_port?}`; `{}` no cambia nada | `200 dominio` |
 | `DELETE {app}/domains/{hostname}` | — | `204` |
@@ -1221,6 +1221,7 @@ Mientras no haya una versión publicada, `0002_deploy.sql` y `0003_ingress.sql` 
 | `POST /tokens` | `{name, project, stage, expires_in_days}` | Suma `read_only` y `all_projects`, opcionales (`false`). `all_projects` con `project` o `stage` es `422 project`; sin `read_only`, `422 read_only` (§8.1) | La base no admite un token de escritura de todos los proyectos |
 | Vencimiento de un token de todos los proyectos | — | Opcional, como el de los demás. El panel propone 90 días, editable | Decisión del dueño; el backend no lo exige |
 | Un token de solo lectura en una escritura | — | `403 read_only_token`, antes que el alcance (§8.1) | El panel no lo ve (usa la sesión). La GitHub Action lo muestra con su `code` |
+| `GET {app}/domains` | Solo sesión | También un token, de lectura y dentro de su alcance (§3, §8.1). Los demás endpoints de dominios siguen siendo de sesión | Decisión del dueño: los dominios en el detalle de una app, para Claude Code (`list_domains`, §8.3). Los hostnames son DNS público |
 
 ## 8. MCP: tokens de solo lectura y el servidor para Claude Code
 
@@ -1321,16 +1322,19 @@ Con un Bearer, `utils.Kit` revisa en este orden:
 
 Un token de todos los proyectos **no** abre `GET /projects` (listar), que sigue siendo de sesión (`403 token_not_allowed`). La lista la da `list_projects` por MCP (§8.3), que es exactamente la unión de los `GET /projects/{p}` que ese token ya lee.
 
+**Los dominios:** `GET {app}/domains` pasa de `· sesión` a `· token` (§3.2). Es la única lectura nueva para los tokens, y vale para todos los tipos, de escritura o de solo lectura, dentro de su alcance. La respuesta es la misma que con una sesión (§3.1): hostnames, destino, estado, `records` (la IP pública, que ya es DNS público) y `last_error` (un mensaje de muelle, o el de Cloudflare para ese hostname; nunca el token de Cloudflare). `POST`, `PATCH`, `DELETE`, `adopt` y `retry` siguen siendo de sesión: `403 token_not_allowed`.
+
 **La matriz REST**, con el proyecto `p1` (stages `s1` y `s2`) y otro proyecto `p2`:
 
 | Endpoint `· token` ↓ · token → | `p1` | `p1/s1` | `p1`, solo lectura | `p1/s1`, solo lectura | todos los proyectos |
 |---|---|---|---|---|---|
 | `GET` en `p1/s1` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `GET` en `p1/s2` | ✓ | `out_of_scope` | ✓ | `out_of_scope` | ✓ |
+| `GET {app}/domains` en `p1/s1` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `GET /projects/p1`, `GET /projects/p1/stages` | ✓ | ✓ (sus stages: `[s1]`) | ✓ | ✓ (`[s1]`) | ✓ |
 | `GET` en `p2` | `out_of_scope` | `out_of_scope` | `out_of_scope` | `out_of_scope` | ✓ |
 | Escritura en `p1/s1` (variables, deploy, rollback) | ✓ | ✓ | `read_only_token` | `read_only_token` | `read_only_token` |
 | Escritura en `p1/s2` | ✓ | `out_of_scope` | `read_only_token` | `read_only_token` | `read_only_token` |
 | Escritura en `p2` | `out_of_scope` | `out_of_scope` | `read_only_token` | `read_only_token` | `read_only_token` |
 
-Los endpoints de sesión (`GET /projects`, `/tokens`, `/registries`, `/settings`, `/audit`, `/proxy`, los dominios…) responden `403 token_not_allowed` a todo token, como hoy.
+Los endpoints de sesión (`GET /projects`, `/tokens`, `/registries`, `/settings`, `/audit`, `/proxy`, los dominios salvo su `GET`…) responden `403 token_not_allowed` a todo token, como hoy.
