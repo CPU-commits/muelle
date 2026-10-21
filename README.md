@@ -22,12 +22,15 @@ Fase 3 (ingress): muelle crea y mantiene el contenedor muelle-caddy y le manda l
 
 Fase 5 (distribución): el panel embebido en el binario (`-tags panel`), las imágenes `ghcr.io/cpu-commits/muelle` y `muelle-caddy` con su workflow de release, `muelle install`, `muelle settings reset-panel-ips` y la GitHub Action de deploy (`action/`).
 
+Fase 4 (panel): el panel web en `web/` (SvelteKit sin SSR, ver `web/README.md` y `web/CLAUDE.md`), que la imagen embebe en el binario.
+
 ## Estructura (spec §4.1)
 
 ```
 main.go             subcomandos serve, install, genkey, settings y version
 Dockerfile          la imagen de muelle (ver "Imágenes"); deploy/caddy/, la de muelle-caddy
 action/             la GitHub Action de deploy (ver "GitHub Action")
+web/                el panel (Fase 4): SvelteKit, se embebe con -tags panel (ver "Con el panel")
 src/
 ├── cmd/http/       ServeMux, middleware y errores → HTTP
 ├── cmd/http/panel/ sirve el panel embebido (-tags panel; ver "Con el panel")
@@ -257,7 +260,7 @@ Al arrancar sin usuarios, muelle imprime en el log un link de setup de un solo u
 {"level":"INFO","msg":"todavía no hay usuarios: abre este link para crear el primero (vence en 24 h)","event":"setup_url","url":"http://127.0.0.1:18080/setup?token=<TOKEN>"}
 ```
 
-La página `/setup` llega con el panel (Fase 4); mientras tanto, el usuario se crea con `curl`, con el `token` del link. Toda petición que modifica algo con la cookie de sesión tiene que traer el header `Origin` igual a `MUELLE_PANEL_ORIGIN` (o al origen de los ajustes, con `MUELLE_PANEL_DOMAIN`; si no, `403 bad_origin`):
+Con el panel embebido (la imagen, o `-tags panel`: ver "Con el panel"), el link abre la página `/setup`. Sin el panel, el usuario se crea con `curl`, con el `token` del link. Toda petición que modifica algo con la cookie de sesión tiene que traer el header `Origin` igual a `MUELLE_PANEL_ORIGIN` (o al origen de los ajustes, con `MUELLE_PANEL_DOMAIN`; si no, `403 bad_origin`):
 
 ```bash
 O=http://127.0.0.1:18080
@@ -428,15 +431,6 @@ docker run --rm ghcr.io/cpu-commits/muelle:v0.1.0 version            # v0.1.0
 ```
 
 La imagen de muelle construye el panel desde `web/` (Node 24 y pnpm 11.1.2, dentro de la imagen) y compila con `-tags panel`. La etapa del panel construye con `VITE_USE_MOCKS=0`, y el build de la imagen falla si al panel le falta el `200.html` o la CSP, o si trae el service worker de MSW. El `.dockerignore` es una lista de permitidos: al contexto solo entran `go.mod`, `go.sum`, `main.go`, `src/` y `web/`, sin tests, claves, bases, `.env`, `node_modules` ni builds.
-
-Mientras el panel siga en su rama (`fase-4-panel`), `web/` no está en esta, y el contexto se arma aparte, con el árbol de trabajo más el `web/` de esa rama:
-
-```bash
-CTX=$(mktemp -d)
-git ls-files -co --exclude-standard -z | tar --null -T - -cf - | tar -x -C "$CTX"
-git archive fase-4-panel web | tar -x -C "$CTX"
-docker build --build-arg VERSION=v0.0.0-dev -t muelle:dev "$CTX"
-```
 
 ## Publicar una versión
 
