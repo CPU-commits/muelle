@@ -178,8 +178,8 @@ Dominios, arriba del formulario.
 - `ports_rollback` (`portsRollback`): la última vez que muelle volvió a los puertos
   anteriores porque muelle-caddy no arrancó con los nuevos (§3.5), o null:
   `{attempted: {http_port, https_port}, restored: {…}, error, at}`. Vive en la memoria de
-  muelle (se pierde al reiniciarlo) y el próximo cambio de puertos la limpia. Opcional en el
-  DTO solo por un backend de antes de esa vuelta. Dominios no la usa; Ajustes sí.
+  muelle (se pierde al reiniciarlo) y el próximo cambio de puertos la limpia. Viene siempre
+  (null si no hubo). Dominios no la usa; Ajustes sí.
 - Mientras dice `out_of_sync` o `recreating` se pregunta de nuevo cada 10 s (con la
   pestaña visible). Cada cambio de un dominio (crear, editar, borrar, adoptar,
   reintentar) lo vuelve a pedir: una ruta nueva puede dejarlo desincronizado.

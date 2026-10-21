@@ -59,8 +59,7 @@ export const proxyDtoSchema = z.object({
 		http_port: z.number().int().nullish(),
 		https_port: z.number().int().nullish(),
 	}),
-	// La última vez que muelle volvió a los puertos anteriores (§3.5). Opcional solo por un
-	// backend de antes de esa vuelta: que falte es que no hubo.
+	// La última vez que muelle volvió a los puertos anteriores (§3.5), o null si no volvió.
 	ports_rollback: z
 		.object({
 			attempted: proxyPortsDtoSchema,
@@ -68,7 +67,7 @@ export const proxyDtoSchema = z.object({
 			error: z.string(),
 			at: timestamp,
 		})
-		.nullish(),
+		.nullable(),
 })
 
 export type DnsRecordDto = z.infer<typeof dnsRecordDtoSchema>
