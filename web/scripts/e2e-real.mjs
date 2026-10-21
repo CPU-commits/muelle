@@ -24,6 +24,13 @@ const root = resolve(web, '..')
 const embed = join(root, 'src/cmd/http/panel/build')
 const IMAGE = 'nginx:alpine'
 
+// La carpeta temporal del binario: se borra al salir por process.exit, sea en fail() (un go
+// build o un docker pull que falló) o cuando termina Playwright.
+let binDir = null
+process.on('exit', () => {
+	if (binDir) rmSync(binDir, { recursive: true, force: true })
+})
+
 function fail(message) {
 	console.error(`[e2e-real] ${message}`)
 	process.exit(1)
@@ -55,7 +62,6 @@ if (info.status !== 0 || info.stdout.trim() !== 'active true') {
 }
 
 let bin = process.env.E2E_REAL_BIN
-let binDir = null
 if (bin) {
 	if (!existsSync(bin)) fail(`E2E_REAL_BIN=${bin} no existe`)
 	step(`uso el binario de E2E_REAL_BIN: ${bin}`)
@@ -118,7 +124,4 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 	process.on(signal, () => child.kill(signal))
 }
 child.on('error', (error) => fail(error.message))
-child.on('exit', (code, signal) => {
-	if (binDir) rmSync(binDir, { recursive: true, force: true })
-	process.exit(code ?? (signal ? 1 : 0))
-})
+child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)))
