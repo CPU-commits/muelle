@@ -555,7 +555,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - **Repositorios SQLite:** SQLite real en `t.TempDir()`, con un helper compartido que crea la base y corre las migraciones.
 - **Casos de uso:** con los repositorios SQLite reales y un reloj controlado (`package/clock`), sin mocks.
 - **HTTP:** `httptest` contra el servidor armado de verdad.
-- **Punta a punta:** el binario real con `curl` al cerrar cada fase. Por ahora es manual, con los pasos del README; no hay un script ni un job de CI que lo corra.
+- **Punta a punta:** el panel embebido en un `muelle serve` de verdad (`-tags panel`) contra el Swarm local: `pnpm test:e2e:real` (`web/e2e-real/`, prefijo `it7`, puertos 24000–24999) recorre con Playwright el setup del primer usuario, el 2FA, el catálogo, una variable, los deploys, el rollback, la auditoría y el borrado. Necesita un Swarm en el que el nodo es manager y no lo crea; CI lo corre en el job `e2e-real`, que hace un `docker swarm init` de un nodo en el runner. Los pasos con `curl` del README quedan como la prueba manual de la API.
 - **Contratos entre módulos:** como los módulos no se importan (§4.1), lo que uno lee o escribe de las tablas de otro se prueba con el contenedor completo (`shared/infra/container`).
 
 **Unitarios:**
@@ -575,7 +575,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - repositorios y reglas: mezcla de variables, validación de slugs, servicios duplicados dentro de un stage, cálculo de "cambios pendientes", retención.
 - `dns`: contra un servidor HTTP falso: búsqueda de zona por sufijo, conflicto/adopción, borrar solo lo propio.
 
-**Integración** (`//go:build integration`; en CI con `docker swarm init` en el runner):
+**Integración** (`//go:build integration`, `go test -tags integration ./...`). Corren en local, con un Swarm activo en el que el nodo es manager, y se saltan si no lo hay o si falta una imagen que necesitan (`caddy:2-alpine`, `nginx:alpine`, `it5-muelle:test`…, ver el README); CI no los corre. Cubren:
 - deploy de `traefik/whoami` por formulario y por compose
 - convergencia `succeeded`
 - healthcheck que falla → `failed` con rollback detectado
@@ -591,7 +591,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - auditfy/staging completo desde GitHub Actions en una VM local.
 - Verificar los criterios de éxito de §1.
 
-**Frontend:** `svelte-check` en CI; pruebas manuales.
+**Frontend** (`web/`): `pnpm verify` (lint, `svelte-check` y vitest: dominio, casos de uso e integración contra MSW en node; componentes y viewModels en Chromium), `pnpm build` y `pnpm test:e2e` (Playwright contra el build con MSW, bajo la CSP). CI corre los tres en el job `web`, y el job `panel` compila y prueba Go con ese build embebido (`-tags panel`). Contra el backend de verdad, `pnpm test:e2e:real` (punta a punta, arriba).
 
 ## 16. Migración desde Dokploy
 
