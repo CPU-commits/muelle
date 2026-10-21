@@ -401,6 +401,7 @@ CREATE TABLE origin_ca_hosts (
   -- La última emisión o renovación que falló, y cuándo se reintenta.
   failures        INTEGER NOT NULL DEFAULT 0,
   last_error_code TEXT    CHECK (last_error_code IN ('permission', 'cloudflare', 'rejected')),
+  -- Solo la causa; el mensaje entero se arma al leer, según el status (§9.3).
   last_error      TEXT,
   next_attempt_at INTEGER,
   updated_at      INTEGER NOT NULL,
@@ -660,9 +661,10 @@ Con 100 dominios con proxy son unas 100 llamadas cada 5 min, contra 1200. Al enc
   - `status` es `failed` si no hay un Origin CA que se pueda servir;
   - es `active`, con `error`, si falló una renovación pero el certificado actual todavía sirve.
 - `error_code` es `permission`, `cloudflare` o `rejected`.
-- `error` es una oración en español, que el panel muestra tal cual:
-  - emisión: `muelle no pudo emitir el certificado de Cloudflare: <causa>; mientras tanto usa Let's Encrypt`;
-  - renovación: `muelle no pudo renovar el certificado de Cloudflare, que vence el <fecha>: <causa>; si no lo renueva antes del <fecha − 14 días>, vuelve a Let's Encrypt`.
+- `error` es una oración en español, que el panel muestra tal cual.
+  - La plantilla sigue al `status` de la API, no a lo que falló: `OriginCAView` (§10.1) arma el mensaje al leer, con `last_error` (que guarda solo la `<causa>`) y el `active` de ese momento. Con `failed` va la de emisión, también cuando falló una renovación y el actual ya no se sirve (menos de 14 días, aunque la fila siga `active`); la de renovación, solo con `active`. Así el mensaje nunca promete una vuelta a Let's Encrypt que ya pasó.
+  - emisión (con `failed`): `muelle no pudo emitir el certificado de Cloudflare: <causa>; mientras tanto usa Let's Encrypt`;
+  - renovación (con `active`): `muelle no pudo renovar el certificado de Cloudflare, que vence el <fecha>: <causa>; si no lo renueva antes del <fecha − 14 días>, vuelve a Let's Encrypt`.
   - `<causa>` según el código:
     - `permission`, en un dominio: `el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de <hostname> (Cloudflare: <mensaje>); agrégalo al token y pulsa Reintentar`;
     - `permission`, en el panel, que no tiene `retry` (§9.2): `el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de <hostname> (Cloudflare: <mensaje>); agrégalo al token: muelle lo reintenta solo cada 6 h`;
@@ -874,7 +876,8 @@ Los campos nuevos son **obligatorios** en los DTOs, como los demás que sumaron 
   - `NeedsCert` (sin certificado, menos de 30 días, otra zona);
   - `ClassifyOriginError` (cada fila de §9.1);
   - `OriginBackoff`;
-  - los mensajes de §9.3, con las fechas, y la causa `permission` del panel, que no nombra Reintentar.
+  - los mensajes de §9.3, con las fechas, y la causa `permission` del panel, que no nombra Reintentar;
+  - la plantilla según el `status`: una renovación que falló va con la de renovación mientras el actual se sirve, y con la de emisión (`failed`) cuando le quedan menos de 14 días.
 - **`cftest`** (el Cloudflare falso, en `cftest/origin_ca.go`):
   - `POST /certificates` firma el CSR con una CA de prueba en memoria (`OriginRoot()` la expone para los tests);
   - comprueba el permiso por token y zona (`GrantSSL(token, zoneID)`); sin él responde **400 con `10000`**, o lo que diga el Paso 0, y `FailNext` imita `1010` o `403`;

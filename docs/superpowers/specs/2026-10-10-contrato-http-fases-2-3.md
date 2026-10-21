@@ -906,7 +906,8 @@ Opcionales y apagados por defecto (`cloudflare_origin_ca`, §4). Con la opción 
 - DNS only puesto en el dashboard de Cloudflare: `dns_only` en a lo más 5 min.
 
 **El mensaje de `error`** es una oración en español para mostrar tal cual. Los clientes deciden por `status` y `error_code`, nunca por el texto:
-- emisión: `muelle no pudo emitir el certificado de Cloudflare: <causa>; mientras tanto usa Let's Encrypt`;
+- la plantilla sigue al `status`: muelle arma el mensaje al responder, con el `status` de ese momento. Con `failed` va la de emisión, también si lo que falló fue una renovación y el actual ya no se sirve (le quedan menos de 14 días). La de renovación va solo con `active`, mientras el actual todavía se sirve;
+- emisión (con `failed`): `muelle no pudo emitir el certificado de Cloudflare: <causa>; mientras tanto usa Let's Encrypt`;
 - renovación (con `active`): `muelle no pudo renovar el certificado de Cloudflare, que vence el <fecha>: <causa>; si no lo renueva antes del <fecha menos 14 días>, vuelve a Let's Encrypt`;
 - `<causa>`, según `error_code`:
   - `permission`, en un dominio: `el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de <hostname> (Cloudflare: <mensaje>); agrégalo al token y pulsa Reintentar`;
