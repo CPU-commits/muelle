@@ -26,7 +26,7 @@ La sección 8 fija los tokens de solo lectura y de todos los proyectos, y el ser
 | Nivel | En el código | Quién |
 |---|---|---|
 | sesión | `utils.AccessSession` | Solo la cookie `muelle_session` (sesión completa). Un token recibe `403 token_not_allowed`. |
-| token | `utils.AccessToken` | La sesión, o un token de API dentro de su alcance. `GET` es lectura; cualquier otro método es escritura (`Principal.Allows`). |
+| token | `utils.AccessToken` | La sesión, o un token de API dentro de su alcance. `GET` y `HEAD` son lectura; cualquier otro método es escritura (`Principal.Allows`). |
 | token de solo lectura | `TokenScope.ReadOnly` | Un token con `read_only` en una ruta `· token`: `GET` y `HEAD` como cualquier token; otro método, `403 read_only_token`, antes que el alcance. Un token de todos los proyectos (`all_projects`) es siempre de solo lectura y lee cualquier proyecto (§8.1). |
 | mcp | `utils.AccessBearer` | Solo un token de API, sin la cookie: `POST /api/v1/mcp` (§8.2). El alcance lo revisa cada herramienta con `Principal.Allows`. Sin Bearer, o con uno que no vale, `401 unauthenticated` con `WWW-Authenticate`. |
 

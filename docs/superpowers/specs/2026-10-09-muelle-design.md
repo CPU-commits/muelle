@@ -436,7 +436,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
   - `MUELLE_SECURE_COOKIES=false` (la cookie sin `Secure`) existe solo para desarrollo por http: con un `MUELLE_PANEL_ORIGIN` https, o con `MUELLE_PANEL_DOMAIN`, muelle no arranca.
 - **Token de API:** `Authorization: Bearer mk_<43 caracteres base64url>` (32 bytes aleatorios). Se guarda su SHA-256 y se muestra una sola vez. Su alcance es un proyecto, un proyecto + stage o todos los proyectos (contrato §8.1).
   - **Solo permite:** leer proyecto/stage/app/estado/deploys/logs/dominios dentro del alcance, `GET` de variables y, si no es de solo lectura, `PUT/PATCH` de variables, crear deploys y hacer rollback. Cualquier otra operación responde `403`. Los dominios se leen con `GET …/apps/{a}/domains`; el resto de los dominios sigue siendo de la sesión.
-  - **De solo lectura** (`read_only`): solo `GET`. Un método que escribe responde `403 read_only_token`, antes de revisar el alcance. Es el recomendado para Claude Code.
+  - **De solo lectura** (`read_only`): solo `GET` y `HEAD`. Un método que escribe responde `403 read_only_token`, antes de revisar el alcance. Es el recomendado para Claude Code.
   - **De todos los proyectos** (`all_projects`): lee cualquier proyecto y es siempre de solo lectura. No existe un token que escriba en todo muelle: la base lo impide. Listar los proyectos (`GET /projects`) sigue siendo de la sesión. El panel le propone un vencimiento de 90 días.
   - Por MCP (contrato §8), las mismas reglas: un token de solo lectura no ve las herramientas que escriben.
   - `GET /tokens` dice quién creó cada token (`created_by`: el username, o `null` si ese usuario se borró), para encontrar los tokens de una persona que se va.
