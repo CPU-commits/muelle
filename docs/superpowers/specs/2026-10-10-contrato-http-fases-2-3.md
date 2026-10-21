@@ -210,7 +210,7 @@ Las tres fases corren en paralelo y se integran después. Cada una toca **solo**
 | `actor_name` | string | El username o el nombre del token **al crear el deploy**: sigue aunque se borren. Nunca es null |
 | `error` | string o null | Por qué falló, en una línea de hasta 500 caracteres, ya enmascarada. Null si no falló |
 | `superseded_by` | int o null | El deploy que lo dejó `superseded` |
-| `routes_warning` | bool | `true` si el paso 7 (§7 del diseño) no pudo actualizar las rutas de Caddy y escribió la advertencia de §2.11. Un error de Caddy no hace fallar el deploy (§13 del diseño): la app corre, pero Caddy puede no tener sus rutas nuevas, y el motivo está en `GET /proxy` (`error`, §3.3, solo con sesión). Se marca antes de escribir la línea: quien la ve en el log ya la encuentra en el deploy. `false` en los demás, también mientras corre y en uno que no llegó al paso 7. Nunca null |
+| `routes_warning` | bool | `true` si el paso 7 (§7 del diseño) no pudo actualizar las rutas de Caddy y escribió la advertencia de §2.11. Un error de Caddy no hace fallar el deploy (§13 del diseño): la app corre, pero Caddy puede no tener sus rutas nuevas, y el motivo está en `GET /proxy` (`error`, §3.3, solo con sesión). Se marca en el paso 7, antes de escribir la línea: quien la ve en el log ya la encuentra en el deploy, y puede verse `true` con `status: running` hasta el cierre, que viene enseguida. `false` en los demás: mientras está `queued`, mientras corre antes del paso 7 y en uno que no llegó a él. Nunca null |
 | `created_at` | RFC 3339 | |
 | `started_at`, `finished_at` | RFC 3339 o null | Null mientras no empezó o no terminó. Un `superseded` tiene `finished_at` y no `started_at` |
 
