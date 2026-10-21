@@ -149,7 +149,7 @@ func TestDeploysListAndGet(t *testing.T) {
 	ref := "ghcr.io/x/api:1@sha256:" + strings.Repeat("a", 64)
 	h.finishWith(t, d1.ID, entity.StatusSucceeded, map[string]string{"api": "ghcr.io/x/api:1"}, map[string]string{"api": ref})
 	// El paso 7 de d1 no pudo actualizar Caddy.
-	if err := depsqlite.NewDeployRepository(h.db).SetRoutesWarning(context.Background(), d1.ID); err != nil {
+	if err := depsqlite.NewDeployRepository(h.db).SetRoutesWarning(context.Background(), d1.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	d2 := expectQueued(t, h.c.Do("POST", apiPath+"/deploys", map[string]string{"image": "ghcr.io/x/api:2"}, session()), apiPath)

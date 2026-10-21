@@ -329,6 +329,39 @@ func TestResumeDockerDown(t *testing.T) {
 	}
 }
 
+// Si muelle se cortó entre la marca de routes_warning y el cierre, Resume
+// vuelve a correr el paso 7 y guarda lo que da esta vez (contrato §2.1): sin
+// la marca si Caddy se actualizó, con ella si sigue sin poder.
+func TestResumeRoutesWarning(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		syncOK bool
+		line   string
+	}{
+		{"Caddy se actualizó", true, "rutas de Caddy actualizadas"},
+		{"Caddy sigue sin actualizarse", false, caddyWarning},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.ingress.syncOK = c.syncOK
+			started := time.Now()
+			id := w.running(t, w.apiID, started, map[string]string{"api": "ghcr.io/x/api:1"})
+			if err := w.deploys.SetRoutesWarning(context.Background(), id, true); err != nil {
+				t.Fatal(err)
+			}
+			w.putService("api", "api", id, docker.Service{RunningTasks: 1, CreatedAt: started})
+			w.startDispatcher(t, w.run)
+			d := w.waitStatus(t, id, entity.StatusSucceeded)
+			if d.RoutesWarning == c.syncOK {
+				t.Fatalf("routes_warning = %v con SyncRoutes ok = %v\n%s", d.RoutesWarning, c.syncOK, w.log(t, id))
+			}
+			if err := containsInOrder(w.texts(t, id), "muelle se reinició durante el deploy", c.line, "succeeded en "); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 // La retención (contrato §2.3) se aplica al cerrar cada deploy.
 func TestRetentionAfterClose(t *testing.T) {
 	w := newWorld(t)

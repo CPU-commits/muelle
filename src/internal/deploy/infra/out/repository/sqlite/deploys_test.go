@@ -151,8 +151,9 @@ func TestDeployCreateAppGone(t *testing.T) {
 	}
 }
 
-// SetRoutesWarning marca que el paso 7 no pudo actualizar Caddy (contrato
-// §2.1): un deploy nace sin la marca, y la lee cualquier consulta.
+// SetRoutesWarning guarda si el paso 7 pudo actualizar Caddy (contrato
+// §2.1): un deploy nace sin la marca, la lee cualquier consulta, y false la
+// quita (un Resume que vuelve a correr el paso 7 y esta vez actualiza Caddy).
 func TestDeploySetRoutesWarning(t *testing.T) {
 	db := sqlitetest.New(t)
 	r := NewDeployRepository(db)
@@ -164,7 +165,7 @@ func TestDeploySetRoutesWarning(t *testing.T) {
 		t.Fatal("un deploy nuevo ya trae routes_warning")
 	}
 	closeAs(t, r, d, entity.StatusRunning)
-	if err := r.SetRoutesWarning(ctx, d.ID); err != nil {
+	if err := r.SetRoutesWarning(ctx, d.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Finish(ctx, d.ID, entity.StatusSucceeded, nil, t0.Add(time.Minute)); err != nil {
@@ -185,8 +186,21 @@ func TestDeploySetRoutesWarning(t *testing.T) {
 	if mustGet(t, r, other.ID).RoutesWarning {
 		t.Fatal("la marca pasó a otro deploy")
 	}
-	if err := r.SetRoutesWarning(ctx, 9999); !errors.Is(err, repository.ErrNotFound) {
-		t.Fatalf("un deploy que no existe: %v", err)
+	if err := r.SetRoutesWarning(ctx, d.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGet(t, r, d.ID); got.RoutesWarning {
+		t.Fatalf("con false sigue la marca: %+v", got)
+	}
+	// Ya en false, false no es un ErrNotFound (SQLite cuenta la fila aunque no
+	// cambie).
+	if err := r.SetRoutesWarning(ctx, d.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, warn := range []bool{true, false} {
+		if err := r.SetRoutesWarning(ctx, 9999, warn); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("un deploy que no existe (%v): %v", warn, err)
+		}
 	}
 }
 

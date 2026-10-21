@@ -241,8 +241,8 @@ func (r *DeployRepository) SetImages(ctx context.Context, id int64, requested, c
 	return affected(res, err)
 }
 
-func (r *DeployRepository) SetRoutesWarning(ctx context.Context, id int64) error {
-	res, err := r.db.Conn(ctx).ExecContext(ctx, `UPDATE deploys SET routes_warning = 1 WHERE id = ?`, id)
+func (r *DeployRepository) SetRoutesWarning(ctx context.Context, id int64, warn bool) error {
+	res, err := r.db.Conn(ctx).ExecContext(ctx, `UPDATE deploys SET routes_warning = ? WHERE id = ?`, warn, id)
 	return affected(res, err)
 }
 
