@@ -191,7 +191,10 @@ que escribirla (o cambiarla en la configuración), con el mismo texto
 propósito en la configuración. Sale de `requested_images` del deploy
 actual: un servicio está fijo si su ref pedida trae `@sha256:`. Nombra el rollback ("fijada
 por el rollback #144") solo si sigue en el historial y su imagen es la fijada; si salió del
-historial, o lo fijó un override o la configuración, dice que está fijada en un digest.
+historial, o lo fijó un override o la configuración, dice que está fijada en un digest. Se
+mira por servicio (`PinnedImages`: `rollback` con los que fijó él, `others` con el resto):
+en una compose con servicios de los dos, el título nombra el rollback y los demás aparte ("Servicios
+fijados por el rollback #144: web. Otros servicios fijados en un digest: api.").
 
 `409 conflict`: la app se está borrando (el `DELETE` de la app frena sus deploys hasta 2
 min). El diálogo lo dice en su banner. El orden de los errores es `404` (la app), `400` (el

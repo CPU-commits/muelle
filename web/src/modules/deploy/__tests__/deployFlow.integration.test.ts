@@ -543,8 +543,8 @@ describe('requested_images: la ref pedida y lo que queda fijo (contrato §2.1 y 
 		const rollback = await finish((await deployUseCases.rollback(APP)).id)
 		expect(rollback.requestedImages).toEqual(target?.images)
 		expect(pinnedImages(await deployUseCases.listDeploys(APP))).toEqual({
-			rollback: rollback.id,
-			services: ['api'],
+			rollback: { id: rollback.id, services: ['api'] },
+			others: [],
 		})
 
 		const again = await finish(
@@ -552,7 +552,9 @@ describe('requested_images: la ref pedida y lo que queda fijo (contrato §2.1 y 
 		)
 		expect(again.requestedImages).toEqual(target?.images)
 		expect(again.images).toEqual(target?.images)
-		expect(pinnedImages(await deployUseCases.listDeploys(APP))?.services).toEqual(['api'])
+		expect(pinnedImages(await deployUseCases.listDeploys(APP))?.rollback?.services).toEqual([
+			'api',
+		])
 
 		const released = await finish(
 			(
@@ -587,7 +589,7 @@ describe('requested_images: la ref pedida y lo que queda fijo (contrato §2.1 y 
 		expect(deploy.images).toEqual([pinned])
 		expect(pinnedImages(await deployUseCases.listDeploys(APP))).toEqual({
 			rollback: null,
-			services: ['api'],
+			others: ['api'],
 		})
 	})
 })

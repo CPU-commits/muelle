@@ -311,7 +311,10 @@ describe('DeploysViewModel', () => {
 		])
 		const rolledBack = await mountViewModel(() => new DeploysViewModel(() => PROPS))
 		await vi.waitFor(() => expect(rolledBack.vm.selected?.id).toBe(147))
-		expect(rolledBack.vm.pinned).toEqual({ rollback: 144, services: ['api'] })
+		expect(rolledBack.vm.pinned).toEqual({
+			rollback: { id: 144, services: ['api'] },
+			others: [],
+		})
 	})
 
 	it('al encolar uno nuevo desde el diálogo, lo abre', async () => {

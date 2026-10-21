@@ -128,7 +128,10 @@ describe('SummaryViewModel', () => {
 		])
 		const rolledBack = await mountViewModel(() => new SummaryViewModel(() => PROPS))
 		await vi.waitFor(() => expect(rolledBack.vm.current?.id).toBe(145))
-		expect(rolledBack.vm.pinned).toEqual({ rollback: 144, services: ['api'] })
+		expect(rolledBack.vm.pinned).toEqual({
+			rollback: { id: 144, services: ['api'] },
+			others: [],
+		})
 
 		// Con una imagen nueva (un override) ya no hay nada fijado.
 		mocks.listDeploys.mockResolvedValue([

@@ -71,22 +71,32 @@ export class DeployDialogViewModel {
 	}
 
 	/**
-	 * El título del aviso de lo que sigue fijo en un digest, nombrando el rollback si se sabe
-	 * que fue él; null si no hay nada fijo.
+	 * El título del aviso de lo que sigue fijo en un digest, nombrando el rollback para los
+	 * servicios que fijó él y los demás aparte; null si no hay nada fijo.
 	 */
 	get pinnedTitle(): string | null {
 		const pin = this.#props().pinned
 		if (!pin) return null
-		const id = pin.rollback
-		const services = pin.services.join(', ')
+		const { rollback } = pin
+		const services = pin.others.join(', ')
 		if (this.fields.length > 1) {
-			return id === null
-				? m.deploy_dialog_digest_pin_services_title({ services })
-				: m.deploy_dialog_rollback_pin_services_title({ id, services })
+			if (rollback === null) return m.deploy_dialog_digest_pin_services_title({ services })
+			const byRollback = rollback.services.join(', ')
+			return pin.others.length === 0
+				? m.deploy_dialog_rollback_pin_services_title({
+						id: rollback.id,
+						services: byRollback,
+					})
+				: m.deploy_dialog_mixed_pin_services_title({
+						id: rollback.id,
+						rollback: byRollback,
+						services,
+					})
 		}
-		return id === null
+		// Un solo servicio: o lo fijó el rollback, o otra cosa.
+		return rollback === null
 			? m.deploy_dialog_digest_pin_title()
-			: m.deploy_dialog_rollback_pin_title({ id })
+			: m.deploy_dialog_rollback_pin_title({ id: rollback.id })
 	}
 
 	/**
