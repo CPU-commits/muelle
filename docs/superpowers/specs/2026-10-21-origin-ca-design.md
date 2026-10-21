@@ -150,7 +150,7 @@ Entre 58f7236 y a1238d9 entraron los menores de la integración. Para este dise�
 - **Los dominios:**
   - `entity.Domain` guarda `Proxied` (lo que pidió muelle), `TLSMode`, `CFZoneID`, `CFRecordID`, `Status`, `ErrorCode`, `CertIssuer` y `CertExpiresAt`.
   - `dnsOps` (`usecases/dns.go`) aplica `proxied` al A y al AAAA propios.
-  - Un dominio que muelle no maneja queda en `error`, con `record_exists` o `cloudflare`.
+  - Un dominio de una zona cuyo registro muelle no maneja queda en `error`, con `record_exists` o `cloudflare`. Uno fuera de toda zona (o creado sin token) tampoco tiene `cf_record_id`, pero es `tls_mode: http` y puede estar `pending` o `active`.
   - Si alguien cambia el `proxied` en el dashboard de Cloudflare, muelle no se entera: no lo vuelve a leer.
 - **El panel:**
   - `EnsurePanelDNS` (`usecases/panel_dns.go`) crea el A del panel con `proxied: false` y nunca cambia su `proxied`. Guarda `panel_cf_zone_id`, `panel_cf_record_id` y `_aaaa`.
@@ -295,8 +295,8 @@ Por qué se pide el proxy en muelle **y** en Cloudflare:
 
 ### 4.2 Registros que muelle no maneja
 
-- **Un dominio de una app sin `cf_record_id` no califica.** Por qué:
-  - un dominio así siempre está en `error` (`record_exists`, o `cloudflare` porque falló la creación). No tiene sentido emitir para un dominio que todavía no funciona;
+- **Un dominio de una app sin `cf_record_id` no califica.** Fuera de toda zona (o creado sin token) es `tls_mode: http`, así que ni siquiera es elegible. En una zona (`cf_zone_id`), por qué:
+  - un dominio de una zona sin `cf_record_id` siempre está en `error` (`record_exists`, o `cloudflare` porque falló la creación). No tiene sentido emitir para un dominio que todavía no funciona;
   - el registro ajeno puede apuntar a otro servidor. Es el caso de la migración desde Dokploy (§16 del diseño): el dominio se prepara en muelle con DNS-01 mientras Dokploy sigue sirviendo. Un certificado de origen ahí no lo usa nadie;
   - el contrato ya dice que `proxied` "solo tiene efecto si muelle maneja el registro", y el panel solo muestra el switch de Proxied en ese caso;
   - después de Adoptar pasa a calificar, sin hacer nada más.

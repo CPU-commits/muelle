@@ -852,7 +852,7 @@ Opcionales y apagados por defecto (`cloudflare_origin_ca`, §4). Con la opción 
 
 - **Qué hostnames:**
   - Un dominio con `tls_mode: cloudflare`, `cf_zone_id`, cuyo registro maneja muelle (`cf_record_id`), con `proxied: true`, y cuyos registros `A`, `AAAA` y `CNAME` de ese nombre tienen **todos** el proxy en Cloudflare, con el `A` de muelle entre ellos. El `status` del dominio no cuenta.
-  - Un dominio cuyo registro muelle no maneja no califica: siempre está en `error` (`record_exists` o `cloudflare`), y el registro puede apuntar a otro servidor (§16 del diseño). Después de Adoptar, califica.
+  - Un dominio de una zona (`cf_zone_id`) cuyo registro muelle no maneja no califica: siempre está en `error` (`record_exists` o `cloudflare`), y el registro puede apuntar a otro servidor (§16 del diseño). Después de Adoptar, califica. Uno fuera de toda zona, o creado sin token, tampoco: es `tls_mode: http` (puede estar `pending` o `active`), y su registro se crea a mano.
   - El panel califica si cae en una zona (`panel_cf_zone_id`, §3.6) y todos sus `A`, `AAAA` y `CNAME` tienen el proxy, aunque muelle no haya creado el registro: muelle nunca cambia el `proxied` del panel, solo lo lee.
   - muelle lee los registros de cada uno en cada pasada de la reconciliación: cada 5 min (el job `"proxy"`, §1.2), con un `PATCH /settings` que la enciende o cambia el token (§3.5) y después de crear, editar, adoptar, reintentar o borrar un dominio (§3.2). Si Cloudflare no responde, vale lo último que vio. Si rechaza la lectura, el host vuelve a Let's Encrypt.
   - Con el proxy deshabilitado (`disabled`, §3.3) no pasa nada de esto: no hay Caddy al que darle el certificado.
