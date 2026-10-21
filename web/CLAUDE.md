@@ -594,7 +594,7 @@ un digest sale solo de `requested_images` (`pinnedImages`), sin deducirlo del hi
 También el `actor_name` de cada evento de `GET /audit` (§4.2): la Auditoría muestra el
 nombre que trae el evento (el username, el del token; `system` es "sistema"), copiado al
 escribirlo, así sigue aunque se borre el usuario o el token. Sin nombre (`""`: un evento de
-antes de la migración 0004 cuyo autor ya no estaba, o un backend de la Fase 1 sola), el
+antes de la migración 0004 cuyo autor ya no estaba), el
 tipo y el id ("token #9").
 Mandarlos en un `PATCH` a ese backend responde 400 `invalid_json` (rechaza campos
 desconocidos): mientras su sección es `null`, no se mandan. `caddy_image` no es un ajuste

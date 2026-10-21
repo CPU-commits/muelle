@@ -116,18 +116,18 @@ describe('adminMapper', () => {
 		expect(actor('token', 9, '')).toEqual({ kind: 'token', id: 9, name: '' })
 	})
 
-	it('un backend sin actor_name (solo la Fase 1) no tiene nombres', () => {
-		const dto = auditEventDtoSchema.parse({
+	it('actor_name viene siempre y es un string (contrato §4.2): sin él no es un evento', () => {
+		const event = {
 			id: 1,
 			actor_type: 'user',
 			actor_id: 1,
 			action: 'auth.login',
 			target: 'user:felipe',
 			at: '2026-10-10T12:00:00Z',
-		})
-		expect(auditEventFromDto(dto).actor).toEqual({ kind: 'user', id: 1, name: '' })
-		// Si viene, es un string: nunca null.
-		expect(auditEventDtoSchema.safeParse({ ...dto, actor_name: null }).success).toBe(false)
+		}
+		expect(auditEventDtoSchema.safeParse(event).success).toBe(false)
+		expect(auditEventDtoSchema.safeParse({ ...event, actor_name: null }).success).toBe(false)
+		expect(auditEventDtoSchema.safeParse({ ...event, actor_name: '' }).success).toBe(true)
 	})
 
 	it('client_ip es siempre un string (contrato §4): ya no admite null', () => {

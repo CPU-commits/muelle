@@ -20,8 +20,8 @@ export interface AuditRow {
 	readonly target: string
 }
 
-// El nombre viene en el evento (`actor_name`, contrato §4.2). Sin él (un evento viejo cuyo
-// autor ya no estaba, o un backend sin `actor_name`), el tipo y el id.
+// El nombre viene en el evento (`actor_name`, contrato §4.2). Vacío (un evento viejo cuyo
+// autor ya no estaba), el tipo y el id.
 function actorLabel(actor: AuditActor): ActorLabel {
 	switch (actor.kind) {
 		case 'user':
