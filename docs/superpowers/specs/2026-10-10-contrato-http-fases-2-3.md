@@ -1327,7 +1327,13 @@ Con un Bearer, `utils.Kit` revisa en este orden:
 
 Un token de todos los proyectos **no** abre `GET /projects` (listar), que sigue siendo de sesión (`403 token_not_allowed`). La lista la da `list_projects` por MCP (§8.3), que es exactamente la unión de los `GET /projects/{p}` que ese token ya lee.
 
-**Los dominios:** `GET {app}/domains` pasa de `· sesión` a `· token` (§3.2). Es la única lectura nueva para los tokens, y vale para todos los tipos, de escritura o de solo lectura, dentro de su alcance. La respuesta es la misma que con una sesión (§3.1): hostnames, destino, estado, `records` (la IP pública, que ya es DNS público) y `last_error` (un mensaje de muelle, o el de Cloudflare para ese hostname; nunca el token de Cloudflare). `POST`, `PATCH`, `DELETE`, `adopt` y `retry` siguen siendo de sesión: `403 token_not_allowed`.
+**Los dominios:** `GET {app}/domains` pasa de `· sesión` a `· token` (§3.2). Es la única lectura nueva para los tokens, y vale para todos los tipos, de escritura o de solo lectura, dentro de su alcance. La respuesta es la misma que con una sesión (§3.1), con **todos** sus campos:
+- `hostname`, `target_service`, `target_port`, `proxied`, `tls_mode`, `status`, `cert_issuer`, `cert_expires_at`, `created_at` y `updated_at`: la configuración y el estado de los dominios de esa app;
+- `records`: la IP pública (y la IPv6), que ya es DNS público;
+- `last_error_code` y `last_error`: un mensaje de muelle, o el de Cloudflare para ese hostname; nunca el token de Cloudflare;
+- `cf_zone_id` y `cf_record_id`: los ids de la zona y del registro `A` en Cloudflare. Son identificadores, no credenciales: sin el token de Cloudflare no sirven para leer ni cambiar nada.
+
+Los campos que sume el dominio después también los lee un token, salvo que la rama que los suma los quite para los tokens. Así entran los de Origin CA (`cert_source` y `origin_ca`, con el código y el texto de su error). Nunca puede salir el token de Cloudflare ni la clave privada de un certificado. `POST`, `PATCH`, `DELETE`, `adopt` y `retry` siguen siendo de sesión: `403 token_not_allowed`.
 
 **La matriz REST**, con el proyecto `p1` (stages `s1` y `s2`) y otro proyecto `p2`:
 

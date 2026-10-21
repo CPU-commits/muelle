@@ -18,7 +18,7 @@
 | D9 | La salida es **un solo bloque de texto con JSON compacto**. No hay `outputSchema` ni `structuredContent`. Cada resultado tiene un tope de 40 KiB. Los tamaños que se piden se miden en el JSON que sale (ya escapado) y llegan a 32 KiB, con defaults de 12 a 32 KiB según la herramienta; lo que no entra se recorta y se cuenta, y no da error. | Claude Code avisa a los 10 000 tokens, corta a los 25 000 y guarda en un archivo lo que pasa de 50 000 caracteres. No está verificado qué ve el modelo si van `content` y `structuredContent` juntos (§5.1). |
 | D10 | La auditoría suma **`"via": "mcp"`** en `details`. El nombre del token ya queda en `actor_name` del evento y del deploy. | El precedente es `"via": "cli"` de `reset-panel-ips`. No cambia el esquema y no toca el panel (§7). |
 | D11 | Límites: los logs y la espera de un deploy toman un lugar de los **8 streams por principal** (el mismo contador que el SSE). Además, a lo más **8 llamadas MCP en curso por token**. | Hoy el único límite por principal es el de los streams. El resto son límites de login por IP (§8.3). |
-| D12 | **`list_domains` (lectura) entra** (decisión del dueño, §15): `GET {app}/domains` pasa de `· sesión` a `· token`, solo de lectura, también en REST. Es la única ampliación de privilegios de lectura de un token. | El dueño pidió los dominios en el detalle de la app. Los hostnames son DNS público y el estado no es secreto (§5.3). |
+| D12 | **`list_domains` (lectura) entra** (decisión del dueño, §15): `GET {app}/domains` pasa de `· sesión` a `· token`, solo de lectura, también en REST. Es la única ampliación de privilegios de lectura de un token. | El dueño pidió los dominios en el detalle de la app. Los hostnames son DNS público, el estado no es secreto y los ids de Cloudflare no son credenciales (§5.3, §14 riesgo 7). |
 | D13 | Panel: en el modal, "Solo lectura" y "Todos los proyectos (solo lectura)". Con "Todos los proyectos", el vencimiento viene puesto a **90 días**, y se puede cambiar o quitar (decisión del dueño, §15). Al crear el token aparece la caja "Conectar con Claude Code", con el `claude mcp add` listo y un `.mcp.json` con `${MUELLE_TOKEN}` (§9). | Lo pidió el dueño. |
 
 **Lo que la investigación contradijo o precisó**
@@ -1292,7 +1292,13 @@ Las dos líneas se juntan cuando los tests de las dos están en verde. El job `p
    - Todo lo que devuelve una herramienta (valores no secretos, logs enmascarados, un compose con literales) sale de muelle hacia la máquina del desarrollador y la API de Anthropic.
    - El enmascarado tiene los límites del contrato §2.5.
    - Es aceptado por diseño y va en el README.
-7. **D12 (dominios) es una ampliación de lectura para los tokens, en REST y en MCP.** El dueño la aprobó. Lo que ve un token son los dominios de sus apps: hostnames, estado, registros (la IP pública, que ya es DNS público) y el `last_error` (un mensaje de muelle o el de Cloudflare para ese hostname, nunca el token de Cloudflare). El estado del proxy (`GET /proxy`), que puede nombrar los hosts de otros proyectos, sigue siendo de sesión.
+7. **D12 (dominios) es una ampliación de lectura para los tokens, en REST y en MCP.** El dueño la aprobó. Lo que ve un token son los dominios de sus apps, con todos los campos del contrato §3.1 (la lista y el porqué de cada uno, en el contrato §8.1):
+   - hostnames, destino, estado y certificado;
+   - registros (la IP pública, que ya es DNS público);
+   - el `last_error` (un mensaje de muelle o el de Cloudflare para ese hostname, nunca el token de Cloudflare);
+   - `cf_zone_id` y `cf_record_id`, que son identificadores de Cloudflare y no credenciales: sin el token de Cloudflare no sirven para nada.
+
+   Los campos que sume Origin CA (`cert_source`, `origin_ca`) también los lee un token por REST, salvo que esa rama los quite para los tokens. El estado del proxy (`GET /proxy`), que puede nombrar los hosts de otros proyectos, sigue siendo de sesión.
 8. **Asimetría REST/MCP.**
    - Un token de todos los proyectos lista proyectos por MCP, pero `GET /projects` sigue siendo de sesión.
    - No es un privilegio nuevo: es la unión de los `GET /projects/{p}` que ya le permite REST.
