@@ -18,6 +18,8 @@ export interface AuditRow {
 	readonly actor: ActorLabel
 	readonly action: string
 	readonly target: string
+	/** Lo hizo un token con el servidor MCP: "vía MCP" junto a quién. */
+	readonly viaMcp: boolean
 }
 
 // El nombre viene en el evento (`actor_name`, contrato §4.2). Vacío (un evento viejo cuyo
@@ -58,11 +60,13 @@ function toRow(event: AuditEvent): AuditRow {
 		actor: actorLabel(event.actor),
 		action: event.action,
 		target: event.target,
+		viaMcp: event.viaMcp,
 	}
 }
 
-// La auditoría de Ajustes: quién, qué, sobre qué y cuándo, de la más nueva a la más vieja,
-// de a una página con "Cargar más" (`before`). Nunca muestra los `details`.
+// La auditoría de Ajustes: quién (y si fue por el servidor MCP), qué, sobre qué y cuándo, de
+// la más nueva a la más vieja, de a una página con "Cargar más" (`before`). Nunca muestra los
+// `details`.
 export class AuditLogViewModel {
 	readonly #client = useQueryClient()
 	readonly #audit = createInfiniteQuery(() => auditQuery())

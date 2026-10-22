@@ -7,6 +7,7 @@ import { revokeTokenMutation, tokensQuery } from '../../../data'
 import {
 	actionAppPath,
 	type ApiToken,
+	canDeploy,
 	type CreatedApiToken,
 	isTokenExpired,
 	partitionTokens,
@@ -14,10 +15,13 @@ import {
 	TokenNotFound,
 } from '../../../domain'
 import { identityErrorMessage } from '../../components/identityMessages'
+import { claudeAddCommand, mcpJsonSnippet, mcpServerUrl } from './claudeCode'
 
 export interface TokenRow {
 	readonly token: ApiToken
 	readonly scope: string
+	/** Para el badge "solo lectura". */
+	readonly readOnly: boolean
 	readonly lastUsed: string
 	readonly expiry: string
 	/** Quién lo creó ("Creado por felipe"), o que ese usuario se borró. */
@@ -50,9 +54,15 @@ function creatorText(token: ApiToken): string {
 		: m.identity_tokens_created_by_deleted()
 }
 
+function scopeText(token: ApiToken): string {
+	return token.scope.kind === 'allProjects'
+		? m.identity_tokens_scope_all()
+		: scopeLabel(token.scope)
+}
+
 // Ajustes · Tokens de API (`Ajustes-Tokens.dc.html`): la lista, crear en un modal (el
-// valor en claro se muestra una sola vez, en una tarjeta arriba) y revocar con
-// confirmación.
+// valor en claro se muestra una sola vez, en una tarjeta arriba, con cómo usarlo en GitHub
+// Actions y en Claude Code) y revocar con confirmación.
 export class TokensViewModel {
 	createOpen = $state(false)
 	/** El último token creado, con su valor en claro. Solo vive acá hasta "Listo". */
@@ -61,9 +71,15 @@ export class TokensViewModel {
 	/** Por qué falló revocar; el diálogo sigue abierto y lo muestra adentro. */
 	revokeError = $state<string | null>(null)
 
+	/** El origen en que se abrió el panel (`page.url.origin`), con su puerto si lo tiene. */
+	readonly #origin: () => string
 	readonly #client = useQueryClient()
 	readonly #tokens = createQuery(() => tokensQuery())
 	readonly #revoke = createMutation(() => revokeTokenMutation(this.#client))
+
+	constructor(origin: () => string) {
+		this.#origin = origin
+	}
 
 	get isLoading(): boolean {
 		return this.#tokens.isPending
@@ -85,7 +101,8 @@ export class TokensViewModel {
 		const newId = this.created?.token.id
 		const toRow = (token: ApiToken): TokenRow => ({
 			token,
-			scope: scopeLabel(token.scope),
+			scope: scopeText(token),
+			readOnly: token.readOnly,
 			lastUsed: lastUsedText(token),
 			expiry: expiryText(token, now),
 			creator: creatorText(token),
@@ -110,18 +127,48 @@ export class TokensViewModel {
 	}
 
 	/**
-	 * El paso de GitHub Actions para el token recién creado (spec §14). `@v0` es la versión
-	 * mayor de la action, que se mueve con cada release mientras no haya 1.0.
+	 * El token recién creado despliega: no es de solo lectura (uno de todos los proyectos
+	 * nunca lo es). Solo entonces sirve para la GitHub Action.
+	 */
+	get canDeploy(): boolean {
+		return this.created !== null && canDeploy(this.created.token)
+	}
+
+	/** El aviso de que Claude Code, con este token, puede desplegar y cambiar variables. */
+	get showWriteWarning(): boolean {
+		return this.canDeploy
+	}
+
+	/**
+	 * El paso de GitHub Actions para el token recién creado (spec §14), solo si despliega.
+	 * `@v0` es la versión mayor de la action, que se mueve con cada release mientras no haya
+	 * 1.0.
 	 */
 	get snippet(): string {
-		if (!this.created) return ''
+		const scope = this.created?.token.scope
+		if (!this.canDeploy || scope?.kind !== 'project') return ''
 		return [
 			'- uses: CPU-commits/muelle/action@v0',
 			'  with:',
 			'    url: ${{ secrets.MUELLE_URL }}',
 			'    token: ${{ secrets.MUELLE_TOKEN }}',
-			`    app: ${actionAppPath(this.created.token.scope)}`,
+			`    app: ${actionAppPath(scope)}`,
 		].join('\n')
+	}
+
+	/** El servidor MCP en el origen en que se abrió el panel (contrato §8.7). */
+	get mcpUrl(): string {
+		return mcpServerUrl(this.#origin())
+	}
+
+	/** `claude mcp add` con el token recién creado: lleva el secreto, y se va con "Listo". */
+	get claudeCommand(): string {
+		return this.created ? claudeAddCommand(this.mcpUrl, this.created.secret) : ''
+	}
+
+	/** El `.mcp.json` para compartir en el repositorio, con `${MUELLE_TOKEN}`. */
+	get mcpJson(): string {
+		return this.created ? mcpJsonSnippet(this.mcpUrl) : ''
 	}
 
 	get isRevoking(): boolean {

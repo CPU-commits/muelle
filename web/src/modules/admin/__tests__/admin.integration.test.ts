@@ -636,6 +636,24 @@ describe('auditoría', () => {
 		// Uno de antes de la migración 0004, de un token que ya no existía: sin nombre.
 		expect(actors).toContain(JSON.stringify({ kind: 'token', id: 9, name: '' }))
 	})
+
+	it('lo que hizo un token con el servidor MCP viene marcado ("via": "mcp", contrato §8.6)', async () => {
+		const events = []
+		let page = await adminUseCases.listAudit()
+		events.push(...page.items)
+		while (page.nextCursor) {
+			page = await adminUseCases.listAudit({ before: page.nextCursor })
+			events.push(...page.items)
+		}
+
+		const viaMcp = events.filter((event) => event.viaMcp)
+		expect(viaMcp.map((event) => [event.action, event.actor.kind])).toEqual([
+			['deploy.create', 'token'],
+		])
+		// Lo que se hace en el panel, no.
+		await adminUseCases.updateAcmeEmail('certs@tudominio.cl')
+		expect((await adminUseCases.listAudit()).items[0]?.viaMcp).toBe(false)
+	})
 })
 
 describe('registries (Fase 2)', () => {

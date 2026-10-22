@@ -1,8 +1,10 @@
 <script lang="ts">
 	import type { Attachment } from 'svelte/attachments'
+	import { page } from '$app/state'
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import {
 		Badge,
+		Banner,
 		Button,
 		Card,
 		ConfirmDialog,
@@ -18,6 +20,11 @@
 	} from '@/shared/ui'
 	import { CreateTokenModal } from '../../features/createTokenModal'
 	import {
+		claude,
+		claudeSubtitle,
+		claudeTitle,
+		codeBlock,
+		codeRow,
 		copyInput,
 		copyRow,
 		createdText,
@@ -43,10 +50,14 @@
 	} from './styles.css'
 	import { type TokenRow, TokensViewModel } from './Tokens.viewModel.svelte.ts'
 
-	const vm = new TokensViewModel()
+	// El servidor MCP está en el origen en que se abrió el panel, con su puerto si lo tiene.
+	const vm = new TokensViewModel(() => page.url.origin)
 	const activeId = $props.id()
 	const expiredId = `${activeId}-expired`
 	const secretId = `${activeId}-secret`
+	const claudeTitleId = `${activeId}-claude`
+	const commandId = `${activeId}-claude-command`
+	const mcpJsonId = `${activeId}-mcp-json`
 
 	// El token recién creado queda seleccionado, listo para copiar a mano si hace falta.
 	const selectOnMount: Attachment<HTMLInputElement> = (input) => {
@@ -68,7 +79,12 @@
 			</span>
 			<span class={creator}>{row.creator}</span>
 		</span>
-		<span class={scopeCell}><Mono size={13} tone="secondary">{row.scope}</Mono></span>
+		<span class={scopeCell}>
+			<Mono size={13} tone="secondary">{row.scope}</Mono>
+			{#if row.readOnly}
+				<Badge>{m.identity_tokens_read_only_badge()}</Badge>
+			{/if}
+		</span>
 		<span class={metaCell}>{row.lastUsed}</span>
 		<span class={[metaCell, expired && expiredText]}>{row.expiry}</span>
 		<Button
@@ -104,8 +120,12 @@
 				<Mono size={14} tone="primary">{vm.created.token.name}</Mono>
 			</h3>
 			<p class={createdText}>
-				{m.identity_tokens_created_body()}
-				<Mono size={13} tone="primary">MUELLE_TOKEN</Mono>.
+				{#if vm.canDeploy}
+					{m.identity_tokens_created_body()}
+					<Mono size={13} tone="primary">MUELLE_TOKEN</Mono>.
+				{:else}
+					{m.identity_tokens_created_body_short()}
+				{/if}
 			</p>
 			<div class={copyRow}>
 				<Input
@@ -120,7 +140,35 @@
 				/>
 				<CopyButton value={vm.created.secret} target={secretId} />
 			</div>
-			<pre class={snippet} aria-label={m.identity_tokens_snippet_label()}>{vm.snippet}</pre>
+			{#if vm.canDeploy}
+				<pre
+					class={snippet}
+					aria-label={m.identity_tokens_snippet_label()}>{vm.snippet}</pre>
+			{/if}
+
+			<section class={claude} aria-labelledby={claudeTitleId}>
+				<h4 id={claudeTitleId} class={claudeTitle}>{m.identity_tokens_claude_title()}</h4>
+				<p class={createdText}>{m.identity_tokens_claude_body()}</p>
+				<div class={codeRow}>
+					<pre
+						id={commandId}
+						class={codeBlock}
+						aria-label={m.identity_tokens_claude_command_label()}>{vm.claudeCommand}</pre>
+					<CopyButton value={vm.claudeCommand} target={commandId} />
+				</div>
+				<p class={claudeSubtitle}>{m.identity_tokens_claude_json_title()}</p>
+				<p class={createdText}>{m.identity_tokens_claude_json_body()}</p>
+				<div class={codeRow}>
+					<pre
+						id={mcpJsonId}
+						class={codeBlock}
+						aria-label={m.identity_tokens_claude_json_label()}>{vm.mcpJson}</pre>
+					<CopyButton value={vm.mcpJson} target={mcpJsonId} />
+				</div>
+				{#if vm.showWriteWarning}
+					<Banner tone="warn" title={m.identity_tokens_claude_write_warning()} />
+				{/if}
+			</section>
 			{#snippet footer()}
 				<Button size="sm" onclick={vm.dismissCreated}>{m.identity_tokens_done()}</Button>
 			{/snippet}

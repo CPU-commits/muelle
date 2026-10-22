@@ -572,10 +572,13 @@ secciones en el orden de la nav y de la página), arma cada item con
     - `fields`: nombre de dominio de los campos de un 422 (`{ deploy_timeout_s: 'deployTimeoutSeconds' }`).
       El 422 `invalid` trae `"<campo>: <motivo>"`; sale como `ValidationError` con `field` y
       `message` = el motivo. El viewModel lo pone en el campo del formulario.
-    - Siempre, en cualquier endpoint: 403 `bad_origin` → `BadOriginError` y 400
-      `ambiguous_session` → `AmbiguousSessionError` (dos cookies de sesión). `describeError`
-      les da el texto que dice qué hacer. `bad_origin` es una escritura desde una dirección
-      que no es la del panel (contrato §0.1): la de Ajustes, `https://<panel_domain>` con el
+    - Siempre, en cualquier endpoint: 403 `bad_origin` → `BadOriginError`, 400
+      `ambiguous_session` → `AmbiguousSessionError` (dos cookies de sesión) y 403
+      `read_only_token` → `ReadOnlyTokenError` (un `ForbiddenError`: un token de solo
+      lectura que escribe, contrato §8.1; el panel usa la sesión y no debería verlo).
+      `describeError` les da el texto que dice qué hacer. `bad_origin` es una escritura
+      desde una dirección que no es la del panel (contrato §0.1): la de Ajustes,
+      `https://<panel_domain>` con el
       puerto HTTPS si no es 443, o `MUELLE_PANEL_ORIGIN` si alguien la puso a mano (detrás de
       otro proxy, o en desarrollo). install ya no escribe `MUELLE_PANEL_ORIGIN`
       (`MUELLE_PANEL_DOMAIN`, §5.2): el texto la nombra solo para el caso del otro proxy.
@@ -637,7 +640,9 @@ compose guardado que no se puede leer, y ahí Dominios sugiere solo los destinos
 sus dominios), `requested_images` y `routes_warning` de un deploy (§2.1: lo fijado en un
 digest sale solo de `requested_images`, `pinnedImages`), `ports_rollback` de `GET /proxy`
 (§3.3, null si no hubo vuelta atrás), `created_by` de un token (un username, o null si se
-borró el usuario) y el `actor_name` de cada evento de `GET /audit` (§4.2). La Auditoría
+borró el usuario), sus `read_only` y `all_projects` (contrato §8.1, ver
+[Tokens de API y Claude Code](#tokens-de-api-y-claude-code-mcp)) y el `actor_name` de cada
+evento de `GET /audit` (§4.2). La Auditoría
 muestra el nombre que trae el evento (el username, el del token; `system` es "sistema"),
 copiado al escribirlo, así sigue aunque se borre el usuario o el token. Sin nombre (`""`: un
 evento de antes de la migración 0004 cuyo autor ya no estaba), el tipo y el id ("token
@@ -777,6 +782,43 @@ lo manda, y el mock lo rechaza.
 - `/setup?token=` e `/invite/<token>` sacan el token de la URL apenas lo leen
   (`replaceState` a `/setup` e `/invite`): no queda en el historial ni en un pantallazo.
 - Un 401 en `/2fa` es una sesión que se cayó: manda a `/login` como en el resto del panel.
+
+### Tokens de API y Claude Code (MCP)
+
+Ajustes · Tokens (`identity`), según el diseño del MCP
+(`docs/superpowers/specs/2026-10-21-mcp-design.md`, §9) y el contrato §8.1 y §8.7:
+
+- `read_only` y `all_projects` vienen siempre en `GET /tokens` (obligatorios en el DTO), y
+  `project` falta solo en uno de todos los proyectos. El schema exige un proyecto o todos
+  los proyectos, nunca los dos, y que uno de todos los proyectos sea de solo lectura y sin
+  stage: si no, es un `ContractError`.
+- `TokenScope` es una unión: `{ kind: 'project', project, stage }` o `{ kind: 'allProjects' }`.
+  `scopeLabel` y `actionAppPath` son solo de `ProjectTokenScope`; "todos los proyectos" lo
+  pone el viewModel con i18n. `canDeploy(token)` es `!token.readOnly`.
+- `ALL_PROJECTS` (`'*'`) es el valor del select de proyecto para "Todos los proyectos (solo
+  lectura)": `parseTokenScope('*', …)` da `allProjects` y `createToken` fuerza `readOnly`.
+  Nunca se piden los stages de `'*'`.
+- En el modal, `'*'` deja el stage en "—", marca "Solo lectura" y no deja desmarcarla y, si
+  no había fecha, propone vencer en `ALL_PROJECTS_EXPIRY_DAYS` (90) con `expiryInputInDays`.
+  Volver a un proyecto deja "Solo lectura" como estaba antes y quita la fecha propuesta si
+  nadie la cambió. Una fecha elegida no se pisa, y borrarla es válido (no vence). Sin
+  proyectos, `'*'` igual deja crear.
+- La tarjeta del token creado: el ejemplo de GitHub Actions solo si `canDeploy`, y siempre
+  "Conectar con Claude Code" (`claudeCode.ts`: la URL es `new URL('/api/v1/mcp', <origen>)`,
+  el `claude mcp add … --header "Authorization: Bearer <token>"` y un `.mcp.json` con
+  `${MUELLE_TOKEN}`, nunca el token), con el aviso de escritura si no es de solo lectura.
+  `TokensViewModel` recibe el origen por getter (`() => page.url.origin` en la pantalla), así
+  el test le pasa `https://panel.example:8443` sin `$app/state`; el test de la pantalla mockea
+  `$app/state`. El comando lleva el secreto: entra en la prueba de memoria de "Listo".
+- El mock de `POST /tokens` valida como el backend: `all_projects` con `project` o `stage`
+  es `422 project: …`, sin `read_only` es `422 read_only: …`, y un tipo equivocado es
+  `400 invalid_json`. La base de ejemplo tiene un token de solo lectura (`claude-auditfy`) y
+  uno de todos los proyectos (`claude-debug`).
+- La Auditoría (`admin`) lee de los `details` de `GET /audit` solo `via` (contrato §8.6): lo
+  demás Zod lo descarta, y unos details que no son un objeto con un `via` de texto quedan en
+  `{}` sin romper la página. `"via": "mcp"` es `AuditEvent.viaMcp`, y la fila dice "vía MCP"
+  junto a quién. La base de ejemplo del mock tiene un deploy por MCP (`extractor-ci`) en la
+  primera página.
 
 ### MSW
 

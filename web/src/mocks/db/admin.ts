@@ -82,6 +82,22 @@ const ORPHAN: Omit<MockAuditEvent, 'id' | 'at'> = {
 	details: {},
 }
 
+/**
+ * Un deploy que hizo Claude Code con la herramienta `deploy` del servidor MCP, con el token
+ * de escritura de extractor/staging: `details` suma `"via": "mcp"` (contrato §8.6). Va entre
+ * los más nuevos, en la primera página.
+ */
+const MCP_DEPLOY: Omit<MockAuditEvent, 'id' | 'at'> = {
+	actor_type: 'token',
+	actor_id: 2,
+	actor_name: 'extractor-ci',
+	action: 'deploy.create',
+	target: 'app:extractor/staging/api',
+	details: { deploy: 12, images: {}, trigger: 'api', via: 'mcp' },
+}
+
+const MCP_DEPLOY_INDEX = MOCK_AUDIT_SEED_COUNT - 2
+
 const LOGIN: SeedAction = { actor_type: 'user', action: 'auth.login', target: 'user:felipe' }
 
 const SEED_ACTIONS: readonly SeedAction[] = [
@@ -126,6 +142,7 @@ function seedAudit(): MockAuditEvent[] {
 			return { id: index + 1, ...install, actor_id: null, actor_name: 'system', at }
 		}
 		if (index === INSTALL_ACTIONS.length) return { id: index + 1, ...ORPHAN, at }
+		if (index === MCP_DEPLOY_INDEX) return { id: index + 1, ...MCP_DEPLOY, at }
 		const base = SEED_ACTIONS[index % SEED_ACTIONS.length] ?? LOGIN
 		return {
 			id: index + 1,

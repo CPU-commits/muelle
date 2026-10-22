@@ -2,11 +2,14 @@ export type {
 	ApiToken,
 	CreatedApiToken,
 	NewApiToken,
+	ProjectTokenScope,
 	TokenCreator,
 	TokenScope,
 } from './entities/apiToken'
 export {
+	ALL_PROJECTS,
 	actionAppPath,
+	canDeploy,
 	isTokenExpired,
 	parseTokenScope,
 	partitionTokens,
@@ -54,7 +57,9 @@ export { makeResetUserTotp } from './use-cases/resetUserTotp'
 export type { RevokeToken } from './use-cases/revokeToken'
 export { makeRevokeToken } from './use-cases/revokeToken'
 export {
+	ALL_PROJECTS_EXPIRY_DAYS,
 	expiresInDays,
+	expiryInputInDays,
 	expiryInputRange,
 	TOKEN_MAX_DAYS,
 	tokenExpiryProblem,

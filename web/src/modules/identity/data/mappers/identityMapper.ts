@@ -7,6 +7,7 @@ import type {
 	StageRef,
 	TokenCreator,
 	TokenId,
+	TokenScope,
 	User,
 } from '../../domain'
 import type {
@@ -40,11 +41,18 @@ function dateOrNull(value: string | null): Date | null {
 	return value === null ? null : new Date(value)
 }
 
+// El schema ya exige un proyecto sin `all_projects`.
+function scopeFromDto(dto: TokenDto): TokenScope {
+	if (dto.all_projects || dto.project === undefined) return { kind: 'allProjects' }
+	return { kind: 'project', project: dto.project, stage: dto.stage ? dto.stage : null }
+}
+
 export function tokenFromDto(dto: TokenDto): ApiToken {
 	return {
 		id: dto.id as TokenId,
 		name: dto.name,
-		scope: { project: dto.project, stage: dto.stage ? dto.stage : null },
+		scope: scopeFromDto(dto),
+		readOnly: dto.read_only,
 		createdBy: creatorFromDto(dto.created_by),
 		createdAt: new Date(dto.created_at),
 		lastUsedAt: dateOrNull(dto.last_used_at),
@@ -58,10 +66,23 @@ export function createdTokenFromDto(dto: CreatedTokenDto): CreatedApiToken {
 }
 
 export function createTokenPayload(token: NewApiToken): CreateTokenPayload {
+	const { scope } = token
+	if (scope.kind === 'allProjects') {
+		return {
+			name: token.name,
+			project: '',
+			stage: '',
+			read_only: true,
+			all_projects: true,
+			expires_in_days: token.expiresInDays,
+		}
+	}
 	return {
 		name: token.name,
-		project: token.scope.project,
-		stage: token.scope.stage ?? '',
+		project: scope.project,
+		stage: scope.stage ?? '',
+		read_only: token.readOnly,
+		all_projects: false,
 		expires_in_days: token.expiresInDays,
 	}
 }

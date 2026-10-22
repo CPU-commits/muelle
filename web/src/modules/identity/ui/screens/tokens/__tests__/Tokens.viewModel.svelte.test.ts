@@ -31,7 +31,8 @@ function token(overrides: Partial<ApiToken>): ApiToken {
 	return {
 		id: 1 as TokenId,
 		name: 'github-actions',
-		scope: { project: 'auditfy', stage: null },
+		scope: { kind: 'project', project: 'auditfy', stage: null },
+		readOnly: false,
 		createdBy: { kind: 'user', username: 'felipe' },
 		createdAt: new Date('2026-10-01T12:00:00Z'),
 		lastUsedAt: null,
@@ -45,7 +46,7 @@ const TOKENS: ApiToken[] = [
 	token({
 		id: 2 as TokenId,
 		name: 'extractor-ci',
-		scope: { project: 'extractor', stage: 'staging' },
+		scope: { kind: 'project', project: 'extractor', stage: 'staging' },
 		createdBy: { kind: 'deleted' },
 		lastUsedAt: new Date(Date.now() - 12 * 60_000),
 	}),
@@ -57,10 +58,14 @@ const TOKENS: ApiToken[] = [
 	}),
 ]
 
-async function mountViewModel(): Promise<TokensViewModel> {
+async function mountViewModel(origin?: string): Promise<TokensViewModel> {
 	const client = createQueryClient({ retry: false })
 	let vm: TokensViewModel | undefined
-	await render(TokensHarness, { client, onReady: (instance) => (vm = instance) })
+	await render(TokensHarness, {
+		client,
+		...(origin ? { origin } : {}),
+		onReady: (instance) => (vm = instance),
+	})
 	if (!vm) throw new Error('el harness no expuso el viewModel')
 	await vi.waitUntil(() => !vm?.isLoading)
 	return vm
@@ -100,12 +105,133 @@ describe('TokensViewModel', () => {
 		)
 	})
 
+	it('el alcance de un token de todos los proyectos es "todos los proyectos"', async () => {
+		mocks.listTokens.mockResolvedValue([
+			token({ id: 7 as TokenId, scope: { kind: 'allProjects' }, readOnly: true }),
+		])
+		const vm = await mountViewModel()
+
+		expect(vm.activeRows[0]?.scope).toBe(m.identity_tokens_scope_all())
+	})
+
+	it('cada fila dice si el token es de solo lectura', async () => {
+		mocks.listTokens.mockResolvedValue([
+			token({ id: 1 as TokenId }),
+			token({ id: 5 as TokenId, readOnly: true }),
+			token({ id: 7 as TokenId, scope: { kind: 'allProjects' }, readOnly: true }),
+		])
+		const vm = await mountViewModel()
+
+		expect(vm.activeRows.map((row) => row.readOnly)).toEqual([false, true, true])
+	})
+
+	describe('Conectar con Claude Code', () => {
+		const ORIGIN = 'https://panel.example:8443'
+		const MCP_URL = 'https://panel.example:8443/api/v1/mcp'
+
+		it('arma el comando con el origen del panel (y su puerto) y el token', async () => {
+			const vm = await mountViewModel(ORIGIN)
+			expect(vm.claudeCommand).toBe('')
+
+			vm.onCreated({ token: token({ id: 9 as TokenId }), secret: 'mk_secreto' })
+
+			expect(vm.mcpUrl).toBe(MCP_URL)
+			// El `--header` va después de la URL, como en la documentación de Claude Code.
+			expect(vm.claudeCommand).toBe(
+				`claude mcp add --transport http --scope user muelle ${MCP_URL} --header "Authorization: Bearer mk_secreto"`,
+			)
+		})
+
+		it('el .mcp.json lleva ${MUELLE_TOKEN}, nunca el token', async () => {
+			const vm = await mountViewModel(ORIGIN)
+			expect(vm.mcpJson).toBe('')
+
+			vm.onCreated({ token: token({ id: 9 as TokenId }), secret: 'mk_secreto' })
+
+			expect(vm.mcpJson).toBe(
+				[
+					'{',
+					'  "mcpServers": {',
+					'    "muelle": {',
+					'      "type": "http",',
+					`      "url": "${MCP_URL}",`,
+					'      "headers": { "Authorization": "Bearer ${MUELLE_TOKEN}" }',
+					'    }',
+					'  }',
+					'}',
+				].join('\n'),
+			)
+			expect(JSON.parse(vm.mcpJson)).toEqual({
+				mcpServers: {
+					muelle: {
+						type: 'http',
+						url: MCP_URL,
+						headers: { Authorization: 'Bearer ${MUELLE_TOKEN}' },
+					},
+				},
+			})
+			expect(vm.mcpJson).not.toContain('mk_secreto')
+		})
+
+		it('sin puerto, la URL es la del dominio', async () => {
+			const vm = await mountViewModel('https://panel.tudominio.cl')
+			vm.onCreated({ token: token({ id: 9 as TokenId }), secret: 'mk_secreto' })
+
+			expect(vm.mcpUrl).toBe('https://panel.tudominio.cl/api/v1/mcp')
+		})
+
+		it('"Listo" se lleva el comando con el token', async () => {
+			const vm = await mountViewModel(ORIGIN)
+			vm.onCreated({ token: token({ id: 9 as TokenId }), secret: 'mk_secreto' })
+
+			vm.dismissCreated()
+
+			expect(vm.claudeCommand).toBe('')
+			expect(vm.mcpJson).toBe('')
+		})
+
+		it('un token de escritura: el ejemplo de Actions y el aviso de escritura', async () => {
+			const vm = await mountViewModel(ORIGIN)
+			vm.onCreated({ token: token({ id: 9 as TokenId }), secret: 'mk_secreto' })
+
+			expect(vm.canDeploy).toBe(true)
+			expect(vm.snippet).toContain('app: auditfy/<stage>/<app>')
+			expect(vm.showWriteWarning).toBe(true)
+		})
+
+		it('uno de solo lectura: sin ejemplo de Actions ni aviso, pero sí Claude Code', async () => {
+			const vm = await mountViewModel(ORIGIN)
+			vm.onCreated({
+				token: token({ id: 9 as TokenId, readOnly: true }),
+				secret: 'mk_secreto',
+			})
+
+			expect(vm.canDeploy).toBe(false)
+			expect(vm.snippet).toBe('')
+			expect(vm.showWriteWarning).toBe(false)
+			expect(vm.claudeCommand).toContain('Bearer mk_secreto')
+		})
+
+		it('uno de todos los proyectos nunca puede desplegar', async () => {
+			const vm = await mountViewModel(ORIGIN)
+			vm.onCreated({
+				token: token({ id: 9 as TokenId, scope: { kind: 'allProjects' }, readOnly: true }),
+				secret: 'mk_secreto',
+			})
+
+			expect(vm.canDeploy).toBe(false)
+			expect(vm.snippet).toBe('')
+			expect(vm.showWriteWarning).toBe(false)
+			expect(vm.claudeCommand).toContain(MCP_URL)
+		})
+	})
+
 	it('el token creado se muestra una vez, marcado como nuevo, con su ejemplo', async () => {
 		const vm = await mountViewModel()
 		const created = token({
 			id: 2 as TokenId,
 			name: 'extractor-ci',
-			scope: { project: 'extractor', stage: 'staging' },
+			scope: { kind: 'project', project: 'extractor', stage: 'staging' },
 		})
 
 		vm.openCreate()

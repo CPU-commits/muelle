@@ -4,6 +4,7 @@ import {
 	ForbiddenError,
 	PanelMovedError,
 	RateLimitedError,
+	ReadOnlyTokenError,
 	UnavailableError,
 } from '@/shared/domain'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
@@ -21,6 +22,7 @@ export function describeError(error: unknown): string {
 		return m.common_unavailable()
 	}
 	if (error instanceof RateLimitedError) return m.common_rate_limited()
+	if (error instanceof ReadOnlyTokenError) return m.common_read_only_token()
 	if (error instanceof ForbiddenError) return m.common_forbidden()
 	return m.common_error_generic()
 }

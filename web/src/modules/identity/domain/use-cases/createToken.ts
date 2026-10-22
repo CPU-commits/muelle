@@ -7,9 +7,12 @@ import { parseTokenName, tokenNameProblem } from '../value-objects/tokenName'
 
 export interface CreateTokenInput {
 	name: string
+	/** Un slug, o `ALL_PROJECTS` (todos los proyectos, siempre de solo lectura). */
 	project: string
-	/** `''`: todo el proyecto. */
+	/** `''`: todo el proyecto. Con `ALL_PROJECTS` no cuenta. */
 	stage: string
+	/** Solo lee: no despliega ni cambia variables. Con `ALL_PROJECTS` es siempre true. */
+	readOnly: boolean
 	/** El valor del `<input type="date">`; `''` es que no vence. */
 	expiresOn: string
 }
@@ -38,10 +41,15 @@ export function makeCreateToken(
 	{ tokens }: TokenDeps,
 	today: () => Date = () => new Date(),
 ): CreateToken {
-	return async (input) =>
-		tokens.create({
-			name: parseTokenName(input.name),
-			scope: parseTokenScope(input.project, input.stage),
+	return async (input) => {
+		const name = parseTokenName(input.name)
+		const scope = parseTokenScope(input.project, input.stage)
+		return tokens.create({
+			name,
+			scope,
+			// No hay un token de escritura de todos los proyectos (contrato §8.1).
+			readOnly: scope.kind === 'allProjects' || input.readOnly,
 			expiresInDays: expiresInDays(input.expiresOn, today()),
 		})
+	}
 }

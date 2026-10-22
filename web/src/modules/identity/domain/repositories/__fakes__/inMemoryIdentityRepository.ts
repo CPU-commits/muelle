@@ -38,7 +38,8 @@ export function fakeToken(overrides: Partial<ApiToken> = {}): ApiToken {
 	return {
 		id: 1 as TokenId,
 		name: 'github-actions',
-		scope: { project: 'auditfy', stage: null },
+		scope: { kind: 'project', project: 'auditfy', stage: null },
+		readOnly: false,
 		createdBy: { kind: 'user', username: 'felipe' },
 		createdAt: new Date('2026-10-01T12:00:00.000Z'),
 		lastUsedAt: null,
@@ -129,15 +130,19 @@ export class InMemoryIdentityRepository {
 
 	#createToken(input: NewApiToken): Promise<CreatedApiToken> {
 		this.calls.create += 1
-		const stages = this.projectsBySlug[input.scope.project]
-		if (!stages || (input.scope.stage !== null && !stages.includes(input.scope.stage))) {
-			return Promise.reject(new TokenScopeNotFound())
+		const { scope } = input
+		if (scope.kind === 'project') {
+			const stages = this.projectsBySlug[scope.project]
+			if (!stages || (scope.stage !== null && !stages.includes(scope.stage))) {
+				return Promise.reject(new TokenScopeNotFound())
+			}
 		}
 		const now = this.now()
 		const token: ApiToken = {
 			id: this.#nextTokenId as TokenId,
 			name: input.name,
-			scope: input.scope,
+			scope,
+			readOnly: input.readOnly,
 			createdBy: { kind: 'user', username: this.sessionUser },
 			createdAt: now,
 			lastUsedAt: null,

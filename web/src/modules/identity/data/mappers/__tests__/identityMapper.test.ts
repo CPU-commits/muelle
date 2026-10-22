@@ -11,11 +11,14 @@ import {
 	userFromDto,
 } from '../identityMapper'
 
-// Sin `stage`, la única clave que puede faltar (omitempty: un token de todo el proyecto).
+// Sin `stage`, que falta en un token de todo el proyecto (omitempty). `project` solo falta
+// en uno de todos los proyectos.
 const TOKEN_BASE = {
 	id: 7,
 	name: 'github-actions',
 	project: 'auditfy',
+	read_only: false,
+	all_projects: false,
 	created_by: 'felipe',
 	created_at: '2026-10-10T19:36:53.770Z',
 	last_used_at: null,
@@ -23,6 +26,18 @@ const TOKEN_BASE = {
 }
 
 const TOKEN_DTO = { ...TOKEN_BASE, stage: 'staging' }
+
+/** El DTO sin una de sus claves (no `undefined`: que no venga). */
+function without(dto: object, key: string): object {
+	return Object.fromEntries(Object.entries(dto).filter(([name]) => name !== key))
+}
+
+// Un token de todos los proyectos: sin `project`, de solo lectura.
+const ALL_PROJECTS_DTO = {
+	...without(TOKEN_BASE, 'project'),
+	read_only: true,
+	all_projects: true,
+}
 
 describe('identityMapper', () => {
 	it('traduce un usuario de snake_case al dominio', () => {
@@ -49,7 +64,8 @@ describe('identityMapper', () => {
 		expect(tokenFromDto(TOKEN_DTO)).toEqual({
 			id: 7,
 			name: 'github-actions',
-			scope: { project: 'auditfy', stage: 'staging' },
+			scope: { kind: 'project', project: 'auditfy', stage: 'staging' },
+			readOnly: false,
 			createdBy: { kind: 'user', username: 'felipe' },
 			createdAt: new Date('2026-10-10T19:36:53.770Z'),
 			lastUsedAt: null,
@@ -60,8 +76,45 @@ describe('identityMapper', () => {
 	it('sin stage es todo el proyecto; created_by null es un usuario borrado', () => {
 		const token = tokenFromDto({ ...TOKEN_BASE, created_by: null })
 
-		expect(token.scope).toEqual({ project: 'auditfy', stage: null })
+		expect(token.scope).toEqual({ kind: 'project', project: 'auditfy', stage: null })
 		expect(token.createdBy).toEqual({ kind: 'deleted' })
+	})
+
+	it('un token de solo lectura lo dice; uno de todos los proyectos viene sin proyecto', () => {
+		expect(tokenFromDto({ ...TOKEN_DTO, read_only: true }).readOnly).toBe(true)
+
+		const all = tokenDtoSchema.parse(ALL_PROJECTS_DTO)
+
+		expect(tokenFromDto(all)).toMatchObject({ scope: { kind: 'allProjects' }, readOnly: true })
+	})
+
+	it('read_only y all_projects vienen siempre: sin ellos no es un token', () => {
+		expect(tokenDtoSchema.safeParse(without(TOKEN_DTO, 'read_only')).success).toBe(false)
+		expect(tokenDtoSchema.safeParse(without(TOKEN_DTO, 'all_projects')).success).toBe(false)
+	})
+
+	it('es de un proyecto o de todos (y entonces de solo lectura y sin stage), nunca los dos', () => {
+		expect(tokenDtoSchema.safeParse(ALL_PROJECTS_DTO).success).toBe(true)
+		// Los dos a la vez, o ninguno.
+		expect(tokenDtoSchema.safeParse({ ...ALL_PROJECTS_DTO, project: 'auditfy' }).success).toBe(
+			false,
+		)
+		expect(tokenDtoSchema.safeParse(without(TOKEN_BASE, 'project')).success).toBe(false)
+		// No hay un token de escritura de todos los proyectos (contrato §8.1), ni uno con stage.
+		expect(tokenDtoSchema.safeParse({ ...ALL_PROJECTS_DTO, read_only: false }).success).toBe(
+			false,
+		)
+		expect(tokenDtoSchema.safeParse({ ...ALL_PROJECTS_DTO, stage: 'staging' }).success).toBe(
+			false,
+		)
+		// El 201 de POST /tokens sigue la misma regla.
+		expect(
+			createdTokenDtoSchema.safeParse({
+				...ALL_PROJECTS_DTO,
+				project: 'auditfy',
+				token: 'mk_x',
+			}).success,
+		).toBe(false)
 	})
 
 	it('created_by viene siempre (un username o null): sin él no es un token', () => {
@@ -93,7 +146,8 @@ describe('identityMapper', () => {
 	it('arma el cuerpo con los nombres exactos de form.CreateToken (json/v2 estricto)', () => {
 		const token: NewApiToken = {
 			name: 'ci' as TokenName,
-			scope: { project: 'auditfy', stage: null },
+			scope: { kind: 'project', project: 'auditfy', stage: null },
+			readOnly: false,
 			expiresInDays: 0,
 		}
 
@@ -101,11 +155,34 @@ describe('identityMapper', () => {
 			name: 'ci',
 			project: 'auditfy',
 			stage: '',
+			read_only: false,
+			all_projects: false,
 			expires_in_days: 0,
 		})
+		const staging = createTokenPayload({
+			...token,
+			scope: { kind: 'project', project: 'auditfy', stage: 'prod' },
+			readOnly: true,
+		})
+		expect(staging).toMatchObject({ stage: 'prod', read_only: true, all_projects: false })
+	})
+
+	it('un token de todos los proyectos va sin proyecto ni stage, y de solo lectura', () => {
 		expect(
-			createTokenPayload({ ...token, scope: { project: 'auditfy', stage: 'prod' } }).stage,
-		).toBe('prod')
+			createTokenPayload({
+				name: 'claude-debug' as TokenName,
+				scope: { kind: 'allProjects' },
+				readOnly: true,
+				expiresInDays: 90,
+			}),
+		).toEqual({
+			name: 'claude-debug',
+			project: '',
+			stage: '',
+			read_only: true,
+			all_projects: true,
+			expires_in_days: 90,
+		})
 	})
 
 	it('de catalog solo toma el slug y el nombre', () => {

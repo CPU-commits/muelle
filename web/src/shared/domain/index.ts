@@ -15,6 +15,7 @@ export {
 	NotFoundError,
 	PanelMovedError,
 	RateLimitedError,
+	ReadOnlyTokenError,
 	UnauthorizedError,
 	UnavailableError,
 	UnexpectedError,

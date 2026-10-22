@@ -81,12 +81,16 @@ function actorFromDto(dto: AuditEventDto): AuditActor {
 	}
 }
 
+/** El `via` de los details de lo que hizo una herramienta del servidor MCP (contrato §8.6). */
+const VIA_MCP = 'mcp'
+
 export function auditEventFromDto(dto: AuditEventDto): AuditEvent {
 	return {
 		id: dto.id as AuditEventId,
 		actor: actorFromDto(dto),
 		action: dto.action,
 		target: dto.target,
+		viaMcp: dto.details.via === VIA_MCP,
 		at: new Date(dto.at),
 	}
 }

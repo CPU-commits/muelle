@@ -5,8 +5,10 @@ import { adminDb } from '@/mocks/db/admin'
 import { authDb, MOCK_USERNAME } from '@/mocks/db/auth'
 import { identityDb } from '@/mocks/db/identity'
 import { server } from '@/mocks/server'
+import { ApiError } from '@/shared/data/http/errors'
 import { UnauthorizedError, ValidationError } from '@/shared/domain'
 import { identityUseCases } from '../container'
+import { identityHttpDataSource } from '../data/datasources/identityHttpDataSource'
 import {
 	CannotDeleteSelf,
 	type TokenId,
@@ -120,14 +122,85 @@ describe('tokens', () => {
 			'extractor-ci',
 			'extractor-prod-ci',
 			'aumi-viejo',
+			'claude-auditfy',
+			'claude-debug',
 		])
 		expect(tokens[0]).toMatchObject({
-			scope: { project: 'auditfy', stage: null },
+			scope: { kind: 'project', project: 'auditfy', stage: null },
+			readOnly: false,
 			createdBy: { kind: 'user', username: 'felipe' },
 			expiresAt: null,
 		})
 		expect(tokens[0]?.lastUsedAt).toBeInstanceOf(Date)
 		expect(tokens[2]?.createdBy).toEqual({ kind: 'deleted' })
+		// Los de Claude Code: uno de solo lectura de un stage y uno de todos los proyectos.
+		expect(tokens[4]).toMatchObject({
+			scope: { kind: 'project', project: 'auditfy', stage: 'staging' },
+			readOnly: true,
+		})
+		expect(tokens[5]).toMatchObject({ scope: { kind: 'allProjects' }, readOnly: true })
+	})
+
+	it('crea un token de todos los proyectos: de solo lectura, sin proyecto', async () => {
+		const created = await identityUseCases.createToken({
+			name: 'claude-todo',
+			project: '*',
+			stage: '',
+			// "*" lo fuerza: no hay un token de escritura de todos los proyectos.
+			readOnly: false,
+			expiresOn: '',
+		})
+
+		expect(created.token).toMatchObject({
+			name: 'claude-todo',
+			scope: { kind: 'allProjects' },
+			readOnly: true,
+		})
+		const tokens = await identityUseCases.listTokens()
+		expect(tokens.at(-1)).toEqual(created.token)
+		expect(lastAudit()).toMatchObject({
+			action: 'token.create',
+			details: { all_projects: true, read_only: true },
+		})
+	})
+
+	it('el backend rechaza un token de todos los proyectos con proyecto, o de escritura', async () => {
+		const body = {
+			name: 'claude',
+			project: '',
+			stage: '',
+			read_only: true,
+			all_projects: true,
+			expires_in_days: 0,
+		}
+		const rejection = (payload: typeof body) =>
+			identityHttpDataSource.createToken(payload).catch((error: unknown) => error)
+
+		const withProject = await rejection({ ...body, project: 'auditfy' })
+		expect(withProject).toBeInstanceOf(ApiError)
+		expect(withProject).toMatchObject({ status: 422, code: 'invalid' })
+		expect((withProject as ApiError).message).toMatch(/^project: /)
+		expect(await rejection({ ...body, stage: 'staging' })).toMatchObject({ status: 422 })
+
+		const writable = await rejection({ ...body, read_only: false })
+		expect(writable).toMatchObject({ status: 422, code: 'invalid' })
+		expect((writable as ApiError).message).toMatch(/^read_only: /)
+		expect(identityDb.state.tokens).toHaveLength(6)
+	})
+
+	it('un tipo equivocado en read_only es invalid_json, como en json/v2', async () => {
+		const error = await identityHttpDataSource
+			.createToken({
+				name: 'ci',
+				project: 'auditfy',
+				stage: '',
+				read_only: 'sí' as unknown as boolean,
+				all_projects: false,
+				expires_in_days: 0,
+			})
+			.catch((caught: unknown) => caught)
+
+		expect(error).toMatchObject({ status: 400, code: 'invalid_json' })
 	})
 
 	it('crea un token: el valor en claro sale una vez y el token aparece en la lista', async () => {
@@ -135,13 +208,15 @@ describe('tokens', () => {
 			name: 'github-actions-aumi',
 			project: 'aumi-agents',
 			stage: 'staging',
+			readOnly: false,
 			expiresOn: '',
 		})
 
 		expect(created.secret).toMatch(/^mk_[\w-]{43}$/)
 		expect(created.token).toMatchObject({
 			name: 'github-actions-aumi',
-			scope: { project: 'aumi-agents', stage: 'staging' },
+			scope: { kind: 'project', project: 'aumi-agents', stage: 'staging' },
+			readOnly: false,
 			createdBy: { kind: 'user', username: 'felipe' },
 			lastUsedAt: null,
 			expiresAt: null,
@@ -149,6 +224,27 @@ describe('tokens', () => {
 		const tokens = await identityUseCases.listTokens()
 		expect(tokens.at(-1)?.id).toBe(created.token.id)
 		expect(JSON.stringify(adminDb.state.audit)).not.toContain(created.secret)
+	})
+
+	it('crea un token de solo lectura de un stage, y la lista lo dice', async () => {
+		const created = await identityUseCases.createToken({
+			name: 'claude-staging',
+			project: 'aumi-agents',
+			stage: 'staging',
+			readOnly: true,
+			expiresOn: '',
+		})
+
+		expect(created.token).toMatchObject({
+			scope: { kind: 'project', project: 'aumi-agents', stage: 'staging' },
+			readOnly: true,
+		})
+		const tokens = await identityUseCases.listTokens()
+		expect(tokens.at(-1)).toEqual(created.token)
+		expect(lastAudit()).toMatchObject({
+			action: 'token.create',
+			details: { project: 'aumi-agents', read_only: true, stage: 'staging' },
+		})
 	})
 
 	it('un 422 del backend llega al campo del formulario', async () => {
@@ -159,7 +255,13 @@ describe('tokens', () => {
 		)
 
 		const error = await identityUseCases
-			.createToken({ name: 'ci', project: 'auditfy', stage: '', expiresOn: '' })
+			.createToken({
+				name: 'ci',
+				project: 'auditfy',
+				stage: '',
+				readOnly: false,
+				expiresOn: '',
+			})
 			.catch((caught: unknown) => caught)
 
 		expect(error).toBeInstanceOf(ValidationError)
@@ -171,7 +273,13 @@ describe('tokens', () => {
 		server.use(http.post(api('/tokens'), () => apiError(404, 'not_found', 'no existe')))
 
 		await expect(
-			identityUseCases.createToken({ name: 'ci', project: 'x', stage: '', expiresOn: '' }),
+			identityUseCases.createToken({
+				name: 'ci',
+				project: 'x',
+				stage: '',
+				readOnly: false,
+				expiresOn: '',
+			}),
 		).rejects.toBeInstanceOf(TokenScopeNotFound)
 	})
 
@@ -194,6 +302,8 @@ describe('tokens', () => {
 						id: 1,
 						name: 'ci',
 						project: 'auditfy',
+						read_only: false,
+						all_projects: false,
 						created_at: '2026-10-10T16:36:53.123456-03:00',
 						last_used_at: null,
 						expires_at: null,

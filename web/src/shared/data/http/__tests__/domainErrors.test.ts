@@ -6,6 +6,7 @@ import {
 	ForbiddenError,
 	NotFoundError,
 	RateLimitedError,
+	ReadOnlyTokenError,
 	UnauthorizedError,
 	UnavailableError,
 	UnexpectedError,
@@ -95,6 +96,13 @@ describe('toDomainError', () => {
 		expect(toDomainError(apiError(400, 'ambiguous_session'))).toBeInstanceOf(
 			AmbiguousSessionError,
 		)
+	})
+
+	it('read_only_token (un token de solo lectura que escribe) es un 403 con su propio error', () => {
+		const error = toDomainError(apiError(403, 'read_only_token', 'el token es de solo lectura'))
+
+		expect(error).toBeInstanceOf(ReadOnlyTokenError)
+		expect(error).toBeInstanceOf(ForbiddenError)
 	})
 
 	it('una petición que tardó demasiado es un servicio no disponible', () => {

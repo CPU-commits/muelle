@@ -16,7 +16,8 @@ export type AuditActor =
 
 /**
  * Un evento de `GET /audit`. Los `details` del backend no llegan acá a propósito: nunca
- * traen valores secretos, pero la tabla solo muestra quién, qué, sobre qué y cuándo.
+ * traen valores secretos, pero la tabla solo muestra quién, qué, sobre qué, cuándo y si lo
+ * hizo Claude Code por el servidor MCP.
  */
 export interface AuditEvent {
 	readonly id: AuditEventId
@@ -25,6 +26,11 @@ export interface AuditEvent {
 	readonly action: string
 	/** `app:auditfy/staging/api`, `user:felipe`, `token:5`… */
 	readonly target: string
+	/**
+	 * Lo hizo un token con una herramienta del servidor MCP (`"via": "mcp"` en los details,
+	 * contrato §8.6): un deploy, un rollback o un cambio de variables.
+	 */
+	readonly viaMcp: boolean
 	readonly at: Date
 }
 

@@ -25,6 +25,7 @@
 	"common_load_more": "Cargar más",
 	"common_no_more": "No hay más",
 	"common_forbidden": "No tienes permiso para hacer esto.",
+	"common_read_only_token": "El token es de solo lectura: no puede desplegar ni cambiar variables. Usa uno que no sea de solo lectura.",
 	"common_rate_limited": "Demasiados intentos. Espera unos minutos y vuelve a intentar.",
 	"common_bad_origin": "muelle no acepta cambios desde esta dirección. Entra por la del panel: https://<dominio del panel>, con el puerto HTTPS de Ajustes si no es 443. Si muelle está detrás de otro proxy, esta dirección va en MUELLE_PANEL_ORIGIN.",
 	"common_panel_moved": "El panel se mudó a {origin}: esta dirección ya no acepta cambios. Sigue allá. Si allá no responde en un minuto, recarga esta página: si muelle-caddy no arrancó con el puerto nuevo, muelle vuelve solo a los puertos anteriores y esta dirección acepta cambios otra vez.",

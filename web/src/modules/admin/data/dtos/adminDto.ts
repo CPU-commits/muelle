@@ -35,9 +35,14 @@ export const settingsDtoSchema = z.object({
 })
 
 /**
- * Un evento de `GET /audit`. `details` no se declara a propósito: Zod lo descarta y no
- * llega ni al dominio ni a la pantalla.
+ * De los `details` de un evento solo se lee `via`, por dónde llegó la acción (`"mcp"`: una
+ * herramienta del servidor MCP, contrato §8.6; `"cli"`: la CLI de muelle, §5.4). Lo demás
+ * Zod lo descarta y no llega ni al dominio ni a la pantalla. Unos details que no son un
+ * objeto con un `via` de texto no dicen por dónde: quedan en `{}`, sin romper la página.
  */
+const auditDetailsSchema = z.object({ via: z.string().optional() }).catch({})
+
+/** Un evento de `GET /audit`. */
 export const auditEventDtoSchema = z.object({
 	id: z.number().int().positive(),
 	actor_type: z.string(),
@@ -47,6 +52,7 @@ export const auditEventDtoSchema = z.object({
 	actor_name: z.string(),
 	action: z.string(),
 	target: z.string(),
+	details: auditDetailsSchema,
 	at: timestamp,
 })
 

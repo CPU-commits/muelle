@@ -3,9 +3,12 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { UnavailableError } from '@/shared/domain'
 import { createTokenMutation, scopeProjectsQuery, scopeStagesQuery } from '../../../data'
 import {
+	ALL_PROJECTS,
+	ALL_PROJECTS_EXPIRY_DAYS,
 	type CreatedApiToken,
 	type CreateTokenInput,
 	createTokenProblems,
+	expiryInputInDays,
 	expiryInputRange,
 	type ProjectRef,
 	type StageRef,
@@ -28,28 +31,45 @@ function loadErrorMessage(error: unknown, fallback: string): string {
 	return error instanceof UnavailableError ? m.common_unavailable() : fallback
 }
 
-// El modal "Crear token": nombre, proyecto y stage (de las listas del backend) y un
-// vencimiento opcional. Se monta al abrirse, así cada vez empieza vacío y con las listas
-// frescas.
+// El modal "Crear token": nombre, proyecto (o todos los proyectos) y stage, de las listas
+// del backend, si es de solo lectura y un vencimiento opcional. Se monta al abrirse, así
+// cada vez empieza vacío y con las listas frescas.
 export class CreateTokenModalViewModel {
 	name = $state('')
+	/** Un slug, `ALL_PROJECTS` o `''` (sin elegir). */
 	project = $state('')
 	/** `''`: todo el proyecto. */
 	stage = $state('')
+	/** Lo que muestra la casilla: con todos los proyectos, siempre true. */
+	readOnly = $state(false)
 	expiresOn = $state('')
 	errors = $state<FieldErrors>({})
 	formError = $state<string | null>(null)
 
 	readonly expiryRange = expiryInputRange()
 
+	/** Lo que la persona eligió en "Solo lectura" antes de pasar a todos los proyectos. */
+	#readOnlyChoice = false
+	/** El vencimiento que puso "todos los proyectos", mientras nadie lo cambie. */
+	#proposedExpiry: string | null = null
+
 	readonly #params: CreateTokenModalParams
 	readonly #client = useQueryClient()
 	readonly #projects = createQuery(() => scopeProjectsQuery())
-	readonly #stages = createQuery(() => scopeStagesQuery(this.project))
+	// "Todos los proyectos" no es un proyecto: no tiene stages que pedir.
+	readonly #stages = createQuery(() => scopeStagesQuery(this.#stageProject))
 	readonly #create = createMutation(() => createTokenMutation(this.#client))
 
 	constructor(params: CreateTokenModalParams) {
 		this.#params = params
+	}
+
+	get #stageProject(): string {
+		return this.isAllProjects ? '' : this.project
+	}
+
+	get isAllProjects(): boolean {
+		return this.project === ALL_PROJECTS
 	}
 
 	get projects(): readonly ProjectRef[] {
@@ -58,6 +78,11 @@ export class CreateTokenModalViewModel {
 
 	get isLoadingProjects(): boolean {
 		return this.#projects.isPending
+	}
+
+	/** Mientras cargan. Sin proyectos (o si no cargaron) queda "todos los proyectos". */
+	get projectSelectDisabled(): boolean {
+		return this.isLoadingProjects
 	}
 
 	get projectsError(): string | null {
@@ -69,17 +94,31 @@ export class CreateTokenModalViewModel {
 		return this.#projects.isSuccess && this.projects.length === 0
 	}
 
+	/** El aviso de "no hay proyectos", salvo con todos los proyectos, que no los necesita. */
+	get showNoProjects(): boolean {
+		return this.hasNoProjects && !this.isAllProjects
+	}
+
 	get stages(): readonly StageRef[] {
-		return this.project === '' ? [] : (this.#stages.data ?? [])
+		return this.#stageProject === '' ? [] : (this.#stages.data ?? [])
 	}
 
 	get isLoadingStages(): boolean {
-		return this.project !== '' && this.#stages.isPending
+		return this.#stageProject !== '' && this.#stages.isPending
+	}
+
+	get stageDisabled(): boolean {
+		return this.#stageProject === '' || this.isLoadingStages
 	}
 
 	get stagesError(): string | null {
-		if (this.project === '' || !this.#stages.isError) return null
+		if (this.#stageProject === '' || !this.#stages.isError) return null
 		return loadErrorMessage(this.#stages.error, m.identity_token_form_stages_error())
+	}
+
+	/** Un token de todos los proyectos siempre es de solo lectura: la casilla no se toca. */
+	get readOnlyLocked(): boolean {
+		return this.isAllProjects
 	}
 
 	get isSubmitting(): boolean {
@@ -87,7 +126,9 @@ export class CreateTokenModalViewModel {
 	}
 
 	get canSubmit(): boolean {
-		return !this.isSubmitting && !this.hasNoProjects && this.projectsError === null
+		if (this.isSubmitting) return false
+		if (this.isAllProjects) return true
+		return !this.hasNoProjects && this.projectsError === null
 	}
 
 	setName = (value: string): void => {
@@ -96,15 +137,23 @@ export class CreateTokenModalViewModel {
 	}
 
 	setProject = (value: string): void => {
+		const wasAll = this.isAllProjects
 		this.project = value
 		this.stage = ''
 		this.#clear('project')
 		this.#clear('stage')
+		if (this.isAllProjects && !wasAll) this.#enterAllProjects()
+		else if (!this.isAllProjects && wasAll) this.#leaveAllProjects()
 	}
 
 	setStage = (value: string): void => {
 		this.stage = value
 		this.#clear('stage')
+	}
+
+	setReadOnly = (value: boolean): void => {
+		if (this.readOnlyLocked) return
+		this.readOnly = value
 	}
 
 	setExpiresOn = (value: string): void => {
@@ -123,10 +172,11 @@ export class CreateTokenModalViewModel {
 	submit = async (): Promise<void> => {
 		if (!this.canSubmit) return
 		this.formError = null
-		const input = {
+		const input: CreateTokenInput = {
 			name: this.name,
 			project: this.project,
 			stage: this.stage,
+			readOnly: this.readOnly,
 			expiresOn: this.expiresOn,
 		}
 		// Todos los campos mal se marcan a la vez, antes de mandar nada.
@@ -145,6 +195,28 @@ export class CreateTokenModalViewModel {
 			// El valor en claro no se queda en el cache de mutaciones.
 			this.#create.reset()
 		}
+	}
+
+	// Todos los proyectos: de solo lectura y, si no había fecha, vence en 90 días (diseño
+	// del MCP, §9.3). Una fecha que la persona ya eligió no se pisa.
+	#enterAllProjects(): void {
+		this.#readOnlyChoice = this.readOnly
+		this.readOnly = true
+		if (this.expiresOn !== '') return
+		this.expiresOn = expiryInputInDays(ALL_PROJECTS_EXPIRY_DAYS)
+		this.#proposedExpiry = this.expiresOn
+		this.#clear('expiresOn')
+	}
+
+	// De vuelta a un proyecto: "Solo lectura" como estaba, y sin la fecha que se propuso si
+	// nadie la cambió.
+	#leaveAllProjects(): void {
+		this.readOnly = this.#readOnlyChoice
+		if (this.#proposedExpiry !== null && this.expiresOn === this.#proposedExpiry) {
+			this.expiresOn = ''
+			this.#clear('expiresOn')
+		}
+		this.#proposedExpiry = null
 	}
 
 	#problems(input: CreateTokenInput): FieldErrors {
