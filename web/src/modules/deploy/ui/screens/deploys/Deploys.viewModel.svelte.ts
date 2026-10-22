@@ -251,7 +251,7 @@ export class DeploysViewModel {
 	/** Dominios de la app: ahí está el estado del proxy, con el link a Ajustes. */
 	get domainsHref(): string {
 		const { project, stage, app } = this.#props()
-		return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/dominios', {
+		return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/domains', {
 			p: project,
 			s: stage,
 			a: app,

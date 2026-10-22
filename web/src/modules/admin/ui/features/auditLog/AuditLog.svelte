@@ -16,14 +16,12 @@
 	import { AuditLogViewModel } from './AuditLog.viewModel.svelte.ts'
 	import { moreError, section, target, via, when } from './styles.css'
 
-	// La sección "Auditoría" de Ajustes (`Ajustes.dc.html`). `id` es el ancla de la nav.
-	let { id }: { id?: string } = $props()
-
+	// La vista "Auditoría" de Ajustes (`Ajustes.dc.html`).
 	const vm = new AuditLogViewModel()
 	const titleId = $props.id()
 </script>
 
-<section {id} class={section} aria-labelledby={titleId}>
+<section class={section} aria-labelledby={titleId}>
 	<SectionHeading
 		id={titleId}
 		title={m.admin_audit_title()}

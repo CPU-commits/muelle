@@ -4,7 +4,7 @@ import type { AppRef } from '../../../domain'
 // Los destinos de los selectores del breadcrumb. Cambiar de proyecto, stage o app deja al
 // usuario en el mismo tab (Configuración de una app → Configuración de la otra).
 
-export const APP_TABS = ['', 'configuracion', 'variables', 'dominios', 'deploys', 'logs'] as const
+export const APP_TABS = ['', 'configuration', 'variables', 'domains', 'deploys', 'logs'] as const
 export type AppTab = (typeof APP_TABS)[number]
 
 /** El tab de una app que muestra la URL (`…/apps/api/deploys` → `deploys`). */
@@ -18,12 +18,12 @@ export function appTabHref(ref: AppRef, tab: AppTab): string {
 	switch (tab) {
 		case '':
 			return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]', params)
-		case 'configuracion':
-			return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/configuracion', params)
+		case 'configuration':
+			return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/configuration', params)
 		case 'variables':
 			return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/variables', params)
-		case 'dominios':
-			return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/dominios', params)
+		case 'domains':
+			return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/domains', params)
 		case 'deploys':
 			return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/deploys', params)
 		case 'logs':

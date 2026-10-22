@@ -343,15 +343,18 @@ cambiar `shared/`, `package.json` o una ruta ajena, se detiene y lo reporta.
 | `/`                                                             | `(app)/+page.svelte`                                     | F1-catalog (Proyectos)                                                         |
 | `/projects/[p]/stages/[s]/apps/[a]` (layout)                    | `(app)/projects/[p]/stages/[s]/apps/[a]/+layout.svelte`  | F0 lo arma; F1-catalog cambia los items del breadcrumb por selectores (sin h1) |
 | `/projects/[p]/stages/[s]/apps/[a]` (Resumen)                   | `…/apps/[a]/+page.svelte`                                | F1-deploy-ingress                                                              |
-| `…/apps/[a]/configuracion`                                      | `…/apps/[a]/configuracion/+page.svelte`                  | F1-catalog (formulario o editor de compose)                                    |
+| `…/apps/[a]/configuration`                                      | `…/apps/[a]/configuration/+page.svelte`                  | F1-catalog (formulario o editor de compose)                                    |
 | `…/apps/[a]/variables`                                          | `…/apps/[a]/variables/+page.svelte`                      | F1-secrets                                                                     |
-| `…/apps/[a]/dominios`                                           | `…/apps/[a]/dominios/+page.svelte`                       | F1-deploy-ingress                                                              |
+| `…/apps/[a]/domains`                                            | `…/apps/[a]/domains/+page.svelte`                        | F1-deploy-ingress                                                              |
 | `…/apps/[a]/deploys`                                            | `…/apps/[a]/deploys/+page.svelte`                        | F1-deploy-ingress                                                              |
 | `…/apps/[a]/logs`                                               | `…/apps/[a]/logs/+page.svelte`                           | F1-deploy-ingress                                                              |
 | `/projects/[p]/stages/[s]/variables`                            | `(app)/projects/[p]/stages/[s]/variables/+page.svelte`   | F1-secrets                                                                     |
-| `/ajustes`                                                      | `(app)/ajustes/+page.svelte`                             | F1-identity-admin                                                              |
-| `/ajustes/tokens`                                               | `(app)/ajustes/tokens/+page.svelte`                      | F1-identity-admin                                                              |
+| `/settings` (layout; la página redirige a `/settings/proxy`)    | `(app)/settings/+layout.svelte`, `+page.ts`              | F1-identity-admin                                                              |
+| `/settings/proxy`, `security`, `registries`, `users`, `audit`   | `(app)/settings/<sección>/+page.svelte`                  | F1-identity-admin (`<SettingsScreen section="…">` de `admin`)                  |
+| `/settings/tokens`                                              | `(app)/settings/tokens/+page.svelte`                     | F1-identity-admin                                                              |
 
+- Las rutas van en inglés (`settings`, `configuration`, `domains`), y las anclas también
+  (`#c-image`); los textos de la UI siguen en español.
 - Todo lo de `(app)` pasa por el guard de `(app)/+layout.ts`: sin sesión va a `/login`, con
   `needsTotpSetup` a `/2fa`. Las páginas reciben `params` tipados (`let { params }: PageProps = $props()`).
 - Los placeholders de F0 (`EmptyState` "En construcción") se reemplazan enteros por

@@ -35,7 +35,7 @@
 	} from './styles.css'
 
 	// Las tarjetas de "Proxy y DNS" (`Ajustes.dc.html`).
-	let { proxy, id }: { proxy: ProxySettings; id?: string } = $props()
+	let { proxy }: { proxy: ProxySettings } = $props()
 
 	const vm = new ProxySettingsViewModel(() => proxy)
 	const uid = $props.id()
@@ -46,7 +46,7 @@
 	const domainLabel = `${uid}-domain`
 </script>
 
-<div {id} class={stack}>
+<div class={stack}>
 	<Card
 		title={m.admin_cf_title()}
 		description={m.admin_cf_description()}

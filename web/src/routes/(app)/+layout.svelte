@@ -17,12 +17,12 @@
 				{
 					href: resolve('/'),
 					label: m.nav_projects(),
-					active: !page.url.pathname.startsWith(resolve('/ajustes')),
+					active: !page.url.pathname.startsWith(resolve('/settings')),
 				},
 				{
-					href: resolve('/ajustes'),
+					href: resolve('/settings/proxy'),
 					label: m.nav_settings(),
-					active: page.url.pathname.startsWith(resolve('/ajustes')),
+					active: page.url.pathname.startsWith(resolve('/settings')),
 				},
 			]}
 		/>

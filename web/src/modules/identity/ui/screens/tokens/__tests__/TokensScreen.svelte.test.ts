@@ -37,7 +37,7 @@ vi.mock('@/modules/identity/container', () => ({
 // `page` de `$app/state` no existe fuera del runtime de SvelteKit. El panel, detrás de
 // muelle-caddy en un puerto HTTPS que no es 443.
 vi.mock('$app/state', () => ({
-	page: { url: new URL('https://panel.example:8443/ajustes/tokens') },
+	page: { url: new URL('https://panel.example:8443/settings/tokens') },
 }))
 
 const TOKEN: ApiToken = {

@@ -65,7 +65,11 @@
 					: m.ingress_proxy_out_of_sync_generic()}
 			>
 				{#snippet action()}
-					<LinkButton variant="secondary" size="sm" href={resolve('/(app)/ajustes')}>
+					<LinkButton
+						variant="secondary"
+						size="sm"
+						href={resolve('/(app)/settings/proxy')}
+					>
 						{m.ingress_proxy_open_settings()}
 					</LinkButton>
 				{/snippet}

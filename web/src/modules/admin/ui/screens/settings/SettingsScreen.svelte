@@ -6,18 +6,16 @@
 	import { ProxySettings } from '../../features/proxySettings'
 	import { Registries } from '../../features/registries'
 	import { SecuritySettings } from '../../features/securitySettings'
-	import { SETTINGS_SECTIONS } from '../../features/settingsLayout'
 	import { type SettingsProps, SettingsViewModel } from './Settings.viewModel.svelte.ts'
 	import { screen } from './styles.css'
 
-	// Las secciones de Ajustes, en el orden del diseño. El marco (h1 y nav) es
-	// <SettingsLayout>, que pone la ruta.
+	// Una sección de Ajustes, la de la ruta. El marco (h1 y nav) es <SettingsLayout>.
 	let props: SettingsProps = $props()
 
 	const vm = new SettingsViewModel(() => props)
 </script>
 
-<div class={screen}>
+{#snippet settingsCards(render: 'proxy' | 'security')}
 	{#if vm.isLoading}
 		<LoadingState label={m.common_loading()} />
 	{:else if vm.loadError || !vm.settings}
@@ -26,12 +24,21 @@
 			retryLabel={m.common_retry()}
 			onRetry={vm.retry}
 		/>
+	{:else if render === 'proxy'}
+		<ProxySettings proxy={vm.settings.proxy} />
 	{:else}
-		<ProxySettings id={SETTINGS_SECTIONS.proxy} proxy={vm.settings.proxy} />
-		<SecuritySettings id={SETTINGS_SECTIONS.security} settings={vm.settings} />
+		<SecuritySettings settings={vm.settings} />
 	{/if}
+{/snippet}
 
-	<Registries id={SETTINGS_SECTIONS.registries} />
-	<UsersSection id={SETTINGS_SECTIONS.users} />
-	<AuditLog id={SETTINGS_SECTIONS.audit} />
+<div class={screen}>
+	{#if vm.section === 'proxy' || vm.section === 'security'}
+		{@render settingsCards(vm.section)}
+	{:else if vm.section === 'registries'}
+		<Registries />
+	{:else if vm.section === 'users'}
+		<UsersSection />
+	{:else}
+		<AuditLog />
+	{/if}
 </div>

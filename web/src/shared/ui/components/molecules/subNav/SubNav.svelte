@@ -2,7 +2,7 @@
 	import { link, linkActive, nav } from './styles.css'
 	import type { SubNavItem } from './types'
 
-	// Los items pueden ser rutas (`/ajustes/tokens`) o anclas de la misma página (`#seguridad`).
+	// Los items pueden ser rutas (`/settings/tokens`) o anclas de la misma página (`#c-health`).
 	let { label, items }: { label: string; items: readonly SubNavItem[] } = $props()
 
 	// El link se sigue en esta pestaña: no lo frenó nadie ni lo manda a otra pestaña o ventana

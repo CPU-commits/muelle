@@ -54,7 +54,7 @@ describe('NewAppViewModel', () => {
 		})
 		expect(mocks.onDone).toHaveBeenCalled()
 		expect(mocks.goto).toHaveBeenCalledWith(
-			'/projects/auditfy/stages/staging/apps/web/configuracion',
+			'/projects/auditfy/stages/staging/apps/web/configuration',
 		)
 	})
 

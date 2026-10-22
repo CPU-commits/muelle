@@ -467,7 +467,7 @@ export class ProxySettingsViewModel {
 	get rollbackHref(): string | null {
 		const origin = this.rollback?.origin ?? null
 		if (origin === null || origin === currentOrigin()) return null
-		return `${origin}${resolve('/(app)/ajustes')}`
+		return `${origin}${resolve('/(app)/settings/proxy')}`
 	}
 
 	/**
@@ -489,7 +489,7 @@ export class ProxySettingsViewModel {
 
 	/** Ajustes del origen nuevo, con el aviso (allá el localStorage es otro). */
 	get movedPanelHref(): string {
-		return withQuery(`${this.movedTo ?? ''}${resolve('/(app)/ajustes')}`, {
+		return withQuery(`${this.movedTo ?? ''}${resolve('/(app)/settings/proxy')}`, {
 			[PANEL_MOVED_PARAM]: 1,
 		})
 	}

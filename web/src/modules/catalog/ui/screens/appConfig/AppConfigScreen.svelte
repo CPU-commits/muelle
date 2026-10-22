@@ -7,7 +7,7 @@
 	import { ServiceConfig } from '../../features/serviceConfig'
 	import { AppConfigViewModel } from './AppConfig.viewModel.svelte.ts'
 
-	// `…/apps/[a]/configuracion`: el formulario de una app de servicio
+	// `…/apps/[a]/configuration`: el formulario de una app de servicio
 	// (`App-Configuracion.dc.html`) o el editor de una compose (`App-Compose.dc.html`).
 	let { project, stage, app }: { project: string; stage: string; app: string } = $props()
 

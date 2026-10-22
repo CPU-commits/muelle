@@ -25,7 +25,7 @@ vi.mock('@/modules/catalog/container', () => ({
 		deleteApp: vi.fn(),
 	},
 }))
-vi.mock('$app/state', () => ({ page: { url: new URL('http://localhost/configuracion') } }))
+vi.mock('$app/state', () => ({ page: { url: new URL('http://localhost/configuration') } }))
 vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn(), goto: vi.fn() }))
 
 const app: ServiceApp = fakeServiceApp('auditfy', 'staging', 'api', {

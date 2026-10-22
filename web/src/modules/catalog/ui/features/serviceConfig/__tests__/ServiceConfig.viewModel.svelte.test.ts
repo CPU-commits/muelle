@@ -25,7 +25,7 @@ import { SECTION_IDS, ServiceConfigViewModel } from '../ServiceConfig.viewModel.
 const mocks = vi.hoisted(() => ({
 	updateApp: vi.fn(),
 	guards: [] as ((navigation: BeforeNavigate) => void)[],
-	page: { url: new URL('http://localhost/configuracion') },
+	page: { url: new URL('http://localhost/configuration') },
 }))
 
 vi.mock('@/modules/catalog/container', () => ({
@@ -77,7 +77,7 @@ describe('ServiceConfigViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mocks.guards.length = 0
-		mocks.page.url = new URL('http://localhost/configuracion')
+		mocks.page.url = new URL('http://localhost/configuration')
 		mocks.updateApp.mockImplementation(async ({ changes }) => ({
 			...app,
 			...(changes.spec ? { spec: changes.spec } : {}),
@@ -273,7 +273,7 @@ describe('ServiceConfigViewModel', () => {
 		})
 
 		it('un deep link (el ancla con la que se abrió) marca su tarjeta', async () => {
-			mocks.page.url = new URL('http://localhost/configuracion#c-res')
+			mocks.page.url = new URL('http://localhost/configuration#c-res')
 			const vm = await mount()
 
 			expect(activeLabel(vm)).toBe(m.catalog_config_resources())

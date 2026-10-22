@@ -42,7 +42,7 @@ test('de un proyecto nuevo al rollback: stage, app, variable secreta, deploys y 
 		await appDialog.getByLabel('Imagen').fill('nginx:1.27-alpine')
 		await appDialog.getByLabel('Puerto').fill('80')
 		await appDialog.getByRole('button', { name: 'Crear' }).click()
-		await expect(page).toHaveURL(new RegExp(`${APP_PATH}/configuracion$`))
+		await expect(page).toHaveURL(new RegExp(`${APP_PATH}/configuration$`))
 		await expect(page.getByRole('heading', { name: 'Configuración', level: 1 })).toBeVisible()
 	})
 

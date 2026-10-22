@@ -7,7 +7,11 @@ import { settingsQuery } from '../../../data'
 import type { Settings } from '../../../domain'
 import { savePanelMove } from '../../features/proxySettings'
 
+/** Las vistas de Ajustes que son de admin, cada una en su ruta (`/settings/<sección>`). */
+export type SettingsSection = 'proxy' | 'security' | 'registries' | 'users' | 'audit'
+
 export interface SettingsProps {
+	readonly section: SettingsSection
 	/**
 	 * Se llegó con "Ir al panel" desde la dirección anterior del panel (`?panel_moved=1`):
 	 * el aviso de la dirección nueva sigue acá, en el localStorage de este origen.
@@ -15,13 +19,21 @@ export interface SettingsProps {
 	readonly panelMoved?: boolean
 }
 
-// Ajustes (`Ajustes.dc.html`): carga los settings una vez para "Proxy y DNS" y
-// "Seguridad". Registries, Usuarios y Auditoría tienen su propia query, y se ven aunque
-// los settings fallen.
-export class SettingsViewModel {
-	readonly #settings = createQuery(() => settingsQuery())
+// "Proxy y DNS" y "Seguridad" leen los settings. Registries, Usuarios y Auditoría tienen su
+// propia query: no los piden.
+const READS_SETTINGS: ReadonlySet<SettingsSection> = new Set(['proxy', 'security'])
 
-	constructor(props: () => SettingsProps = () => ({})) {
+// Una vista de Ajustes (`Ajustes.dc.html`).
+export class SettingsViewModel {
+	readonly #props: () => SettingsProps
+	readonly #settings
+
+	constructor(props: () => SettingsProps) {
+		this.#props = props
+		this.#settings = createQuery(() => ({
+			...settingsQuery(),
+			enabled: READS_SETTINGS.has(this.#props().section),
+		}))
 		if (!props().panelMoved) return
 		savePanelMove(location.origin)
 		// El parámetro se saca de la URL (una sola vez, con el router andando, como /setup):
@@ -30,8 +42,12 @@ export class SettingsViewModel {
 		afterNavigate(() => {
 			if (dropped) return
 			dropped = true
-			replaceState(resolve('/(app)/ajustes'), {})
+			replaceState(resolve('/(app)/settings/proxy'), {})
 		})
+	}
+
+	get section(): SettingsSection {
+		return this.#props().section
 	}
 
 	get isLoading(): boolean {

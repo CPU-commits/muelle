@@ -23,8 +23,8 @@ import {
 
 /** Los ids de las tarjetas: la subnav de la izquierda salta a ellas. */
 export const SECTION_IDS = {
-	image: 'c-imagen',
-	run: 'c-ejecucion',
+	image: 'c-image',
+	run: 'c-run',
 	health: 'c-health',
 	volumes: 'c-vol',
 	resources: 'c-res',

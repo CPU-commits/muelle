@@ -143,7 +143,7 @@ export class NewAppViewModel {
 			toast.success(m.catalog_app_created({ app: app.slug }), m.catalog_app_created_body())
 			this.#onDone()
 			await goto(
-				resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/configuracion', {
+				resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/configuration', {
 					p: app.project,
 					s: app.stage,
 					a: app.slug,

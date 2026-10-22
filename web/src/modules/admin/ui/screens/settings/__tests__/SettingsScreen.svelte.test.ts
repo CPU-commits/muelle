@@ -105,21 +105,50 @@ describe('SettingsScreen', () => {
 		mocks.listTokens.mockResolvedValue([])
 	})
 
-	it('muestra todas las secciones', async () => {
+	it('Proxy y DNS muestra sus tarjetas, y nada de las otras vistas', async () => {
 		mocks.getSettings.mockResolvedValue(SETTINGS)
+
+		const screen = await render(SettingsView, { client: client(), section: 'proxy' })
+
+		await expect.element(screen.getByRole('heading', { name: 'Cloudflare' })).toBeVisible()
+		await expect.element(screen.getByText('4 zonas visibles · cifrado')).toBeVisible()
+		await expect.element(screen.getByRole('button', { name: 'Quitar token' })).toBeVisible()
+		await expect
+			.element(screen.getByRole('heading', { name: 'Puertos del proxy' }))
+			.toBeVisible()
+		expect(screen.container.textContent).not.toContain('IPs permitidas para el panel')
+		expect(mocks.listRegistries).not.toHaveBeenCalled()
+		expect(mocks.listUsers).not.toHaveBeenCalled()
+		expect(mocks.listAudit).not.toHaveBeenCalled()
+	})
+
+	it('Seguridad muestra solo su tarjeta', async () => {
+		mocks.getSettings.mockResolvedValue(SETTINGS)
+
+		const screen = await render(SettingsView, { client: client(), section: 'security' })
+
+		await expect.element(screen.getByLabelText('IPs permitidas para el panel')).toBeVisible()
+		expect(screen.container.textContent).not.toContain('Cloudflare')
+	})
+
+	it('Registries, Usuarios y Auditoría se ven sin pedir los settings', async () => {
 		const at = new Date('2026-10-09T15:30:00.000Z')
 		mocks.listRegistries.mockResolvedValue([
 			{ host: 'ghcr.io', username: 'cpu-commits', createdAt: at, updatedAt: at },
 		])
 
-		const screen = await render(SettingsView, { client: client() })
+		const registries = await render(SettingsView, { client: client(), section: 'registries' })
+		await expect.element(registries.getByText('ghcr.io')).toBeVisible()
+		registries.unmount()
 
-		await expect.element(screen.getByRole('heading', { name: 'Cloudflare' })).toBeVisible()
-		await expect.element(screen.getByText('4 zonas visibles · cifrado')).toBeVisible()
-		await expect.element(screen.getByRole('button', { name: 'Quitar token' })).toBeVisible()
-		await expect.element(screen.getByText(/^Actualizado /)).toBeVisible()
-		await expect.element(screen.getByLabelText('IPs permitidas para el panel')).toBeVisible()
-		await expect.element(screen.getByText('ghcr.io')).toBeVisible()
+		const users = await render(SettingsView, { client: client(), section: 'users' })
+		await expect.element(users.getByRole('heading', { name: 'Usuarios' })).toBeVisible()
+		users.unmount()
+
+		const audit = await render(SettingsView, { client: client(), section: 'audit' })
+		await expect.element(audit.getByRole('heading', { name: 'Auditoría' })).toBeVisible()
+
+		expect(mocks.getSettings).not.toHaveBeenCalled()
 	})
 
 	it('el aviso de la dirección nueva del panel no pide tocar la configuración de muelle', async () => {
@@ -130,7 +159,6 @@ describe('SettingsScreen', () => {
 			...SETTINGS,
 			proxy: { ...SETTINGS.proxy, httpsPort: 8443 },
 		})
-		mocks.listRegistries.mockResolvedValue([])
 
 		const screen = await render(SettingsView, { client: client() })
 
@@ -150,7 +178,6 @@ describe('SettingsScreen', () => {
 
 	it('si muelle volvió a los puertos anteriores, lo dice en Puertos, sin la dirección de Caddy si no se entró por ella', async () => {
 		mocks.getSettings.mockResolvedValue(SETTINGS)
-		mocks.listRegistries.mockResolvedValue([])
 		ingress.getProxyStatus.mockResolvedValue({
 			status: 'synced',
 			error: null,
@@ -186,12 +213,11 @@ describe('SettingsScreen', () => {
 			.not.toBeInTheDocument()
 	})
 
-	it('en la dirección que falló, Puertos ofrece volver a la anterior: Ajustes allá', async () => {
+	it('en la dirección que falló, Puertos ofrece volver a la anterior: Proxy y DNS allá', async () => {
 		// Una pestaña que quedó en la dirección nueva: muelle-caddy no arrancó con el 8443 y
 		// muelle volvió al 443 (contrato §3.5).
 		page.origin = 'https://panel.tudominio.cl:8443'
 		mocks.getSettings.mockResolvedValue(SETTINGS)
-		mocks.listRegistries.mockResolvedValue([])
 		ingress.getProxyStatus.mockResolvedValue({
 			status: 'synced',
 			error: null,
@@ -218,7 +244,9 @@ describe('SettingsScreen', () => {
 			.toBeVisible()
 		const back = ports.getByRole('link', { name: 'Volver a la dirección anterior' })
 		await expect.element(back).toBeVisible()
-		await expect.element(back).toHaveAttribute('href', 'https://panel.tudominio.cl/ajustes')
+		await expect
+			.element(back)
+			.toHaveAttribute('href', 'https://panel.tudominio.cl/settings/proxy')
 	})
 
 	it('el switch de los certificados de Cloudflare muestra lo guardado: apagarlo pide confirmar, y cancelar lo deja encendido', async () => {
@@ -229,7 +257,6 @@ describe('SettingsScreen', () => {
 				cloudflare: { tokenSet: true, zones: 4, originCa: true },
 			},
 		})
-		mocks.listRegistries.mockResolvedValue([])
 
 		const screen = await render(SettingsView, { client: client() })
 
@@ -256,7 +283,6 @@ describe('SettingsScreen', () => {
 				cloudflare: { tokenSet: true, zones: 4, originCa: true },
 			},
 		})
-		mocks.listRegistries.mockResolvedValue([])
 		const error =
 			"muelle no pudo emitir el certificado de Cloudflare: el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de panel.tudominio.cl (Cloudflare: Authentication error); agrégalo al token: muelle lo reintenta solo cada 6 h; mientras tanto usa Let's Encrypt"
 		ingress.getProxyStatus.mockResolvedValue({
@@ -296,7 +322,6 @@ describe('SettingsScreen', () => {
 
 	it('si encenderlos falla, el switch sigue apagado y la tarjeta dice por qué', async () => {
 		mocks.getSettings.mockResolvedValue(SETTINGS)
-		mocks.listRegistries.mockResolvedValue([])
 		mocks.setCloudflareOriginCa.mockRejectedValueOnce(new CloudflareUnavailable())
 
 		const screen = await render(SettingsView, { client: client() })
@@ -326,7 +351,7 @@ describe('SettingsScreen', () => {
 			{ host: 'ghcr.io', username: 'cpu-commits', createdAt: at, updatedAt: at },
 		])
 
-		const screen = await render(SettingsView, { client: client() })
+		const screen = await render(SettingsView, { client: client(), section: 'registries' })
 
 		const updated = screen.getByText(/^Actualizado /)
 		await expect.element(updated).toBeVisible()

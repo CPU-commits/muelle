@@ -27,16 +27,12 @@
 	} from './styles.css'
 
 	// La tarjeta "Seguridad" de Ajustes (`Ajustes.dc.html`).
-	let { settings, id }: { settings: Settings; id?: string } = $props()
+	let { settings }: { settings: Settings } = $props()
 
 	const vm = new SecuritySettingsViewModel(() => settings)
 </script>
 
-<Card
-	{...id ? { id } : {}}
-	title={m.admin_security_title()}
-	description={m.admin_security_description()}
->
+<Card title={m.admin_security_title()} description={m.admin_security_description()}>
 	{#if vm.totpRequiredFirst}
 		<Banner
 			tone="warn"

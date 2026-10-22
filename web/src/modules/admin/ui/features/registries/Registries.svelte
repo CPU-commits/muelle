@@ -20,15 +20,13 @@
 	import { RegistriesViewModel } from './Registries.viewModel.svelte.ts'
 	import { dateCell, form as formClass, hostCell, section, userCell } from './styles.css'
 
-	// La sección "Registries" de Ajustes (`Ajustes.dc.html`). `id` es el ancla de la nav.
-	let { id }: { id?: string } = $props()
-
+	// La vista "Registries" de Ajustes (`Ajustes.dc.html`).
 	const vm = new RegistriesViewModel()
 	const titleId = $props.id()
 	const formId = `${titleId}-form`
 </script>
 
-<section {id} class={section} aria-labelledby={titleId}>
+<section class={section} aria-labelledby={titleId}>
 	<SectionHeading
 		id={titleId}
 		title={m.admin_registries_title()}

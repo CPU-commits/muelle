@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { type QueryClient, setQueryClientContext } from '@tanstack/svelte-query'
 	import { untrack } from 'svelte'
-	import { SettingsScreen } from '..'
+	import { type SettingsSection, SettingsScreen } from '..'
 
 	// Renderiza la pantalla de verdad (markup incluido) con el QueryClient del test.
-	const props: { client: QueryClient } = $props()
+	const props: { client: QueryClient; section?: SettingsSection } = $props()
 
 	untrack(() => setQueryClientContext(props.client))
 </script>
 
-<SettingsScreen />
+<SettingsScreen section={props.section ?? 'proxy'} />

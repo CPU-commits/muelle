@@ -37,11 +37,11 @@ const SCREENS: Screen[] = [
 	{ path: APP, heading: 'api', level: 1 },
 	{ path: `${APP}/deploys`, heading: 'Deploys', level: 1 },
 	{ path: `${APP}/logs`, heading: 'Logs', level: 1 },
-	{ path: `${APP}/dominios`, heading: 'Dominios', level: 1 },
+	{ path: `${APP}/domains`, heading: 'Dominios', level: 1 },
 	{ path: `${APP}/variables`, heading: 'Variables', level: 1 },
-	{ path: `${APP}/configuracion`, heading: 'Configuración', level: 1 },
+	{ path: `${APP}/configuration`, heading: 'Configuración', level: 1 },
 	{
-		path: '/projects/aumi-agents/stages/staging/apps/agents/configuracion',
+		path: '/projects/aumi-agents/stages/staging/apps/agents/configuration',
 		heading: 'Configuración',
 		level: 1,
 		// El compose se edita en CodeMirror, que inyecta sus estilos: adentro de un shadow
@@ -55,8 +55,13 @@ const SCREENS: Screen[] = [
 		},
 	},
 	{ path: '/projects/auditfy/stages/staging/variables', heading: 'Variables del stage' },
-	{ path: '/ajustes', heading: 'Ajustes', level: 1 },
-	{ path: '/ajustes/tokens', heading: 'Tokens de API', level: 2 },
+	// `/settings` abre en Proxy y DNS.
+	{ path: '/settings', heading: 'Cloudflare' },
+	{ path: '/settings/security', heading: 'Seguridad' },
+	{ path: '/settings/registries', heading: 'Registries', level: 2 },
+	{ path: '/settings/users', heading: 'Usuarios', level: 2 },
+	{ path: '/settings/tokens', heading: 'Tokens de API', level: 2 },
+	{ path: '/settings/audit', heading: 'Auditoría', level: 2 },
 	// El QR es un <svg> armado en el cliente.
 	{ path: '/2fa', heading: 'Configurar 2FA' },
 	{ path: '/invite', heading: 'Unirte a muelle' },
@@ -70,7 +75,7 @@ test('el panel corre bajo la CSP del header sin una sola violación, y cada pant
 
 	await test.step('el build de producción arranca en un deep link', async () => {
 		// Sin backend `/auth/me` es 401: el guard corrió y mandó al login.
-		const response = await page.goto(`${PROD_URL}${APP}/dominios`)
+		const response = await page.goto(`${PROD_URL}${APP}/domains`)
 		const header = response?.headers()['content-security-policy'] ?? ''
 		expect(header).toContain("default-src 'self'")
 		expect(header).toMatch(/script-src 'self' 'sha256-[^']+'/)

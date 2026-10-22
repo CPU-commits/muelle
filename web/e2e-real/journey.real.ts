@@ -113,7 +113,7 @@ test('de la instalación al borrado: setup, 2FA, catálogo, variables, deploys, 
 		await appDialog.getByLabel('Imagen').fill(IMAGE)
 		await appDialog.getByLabel('Puerto').fill('80')
 		await appDialog.getByRole('button', { name: 'Crear' }).click()
-		await expect(page).toHaveURL(new RegExp(`${appPath}/configuracion$`))
+		await expect(page).toHaveURL(new RegExp(`${appPath}/configuration$`))
 		await expect(page.getByRole('heading', { name: 'Configuración', level: 1 })).toBeVisible()
 	})
 
@@ -198,7 +198,7 @@ test('de la instalación al borrado: setup, 2FA, catálogo, variables, deploys, 
 	})
 
 	await test.step('la Auditoría nombra al usuario en cada evento', async () => {
-		await page.goto('/ajustes#auditoria')
+		await page.goto('/settings/audit')
 		const audit = page.getByRole('table', {
 			name: 'Eventos de auditoría, del más nuevo al más viejo',
 		})
@@ -215,7 +215,7 @@ test('de la instalación al borrado: setup, 2FA, catálogo, variables, deploys, 
 	})
 
 	await test.step('borrar la app, el stage y el proyecto', async () => {
-		await page.goto(`${appPath}/configuracion`)
+		await page.goto(`${appPath}/configuration`)
 		await page.getByRole('button', { name: 'Eliminar', exact: true }).click()
 		await page
 			.getByRole('dialog', { name: `¿Eliminar la app ${APP}?` })

@@ -19,7 +19,7 @@ test('setup del primer usuario, 2FA, salir y entrar con la contraseña y el cód
 	await seedMock(page, { auth: { users: [] } })
 
 	await test.step('sin sesión, una ruta del panel lleva al login', async () => {
-		await page.goto('/ajustes')
+		await page.goto('/settings')
 		await expect(page).toHaveURL(/\/login$/)
 		await expect(page.getByRole('heading', { name: 'Entrar a muelle' })).toBeVisible()
 	})

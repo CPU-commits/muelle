@@ -33,14 +33,12 @@
 	} from './styles.css'
 	import { UsersSectionViewModel } from './UsersSection.viewModel.svelte.ts'
 
-	// La sección "Usuarios" de Ajustes (`Ajustes.dc.html`). `id` es el ancla de la nav.
-	let { id }: { id?: string } = $props()
-
+	// La vista "Usuarios" de Ajustes (`Ajustes.dc.html`).
 	const vm = new UsersSectionViewModel()
 	const titleId = $props.id()
 </script>
 
-<section {id} class={section} aria-labelledby={titleId}>
+<section class={section} aria-labelledby={titleId}>
 	<div class={heading}>
 		<div class={headingText}>
 			<h2 id={titleId} class={title}>{m.identity_users_title()}</h2>

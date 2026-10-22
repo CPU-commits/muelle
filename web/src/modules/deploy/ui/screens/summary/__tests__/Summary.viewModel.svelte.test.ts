@@ -253,7 +253,7 @@ describe('SummaryViewModel', () => {
 		await vi.waitFor(() => expect(vm.pendingChanges).toBe(true))
 		// La marca lleva a Configuración.
 		expect(vm.pendingChangesHref).toBe(
-			'/projects/auditfy/stages/staging/apps/api/configuracion',
+			'/projects/auditfy/stages/staging/apps/api/configuration',
 		)
 		expect(vm.healthcheck).toBe(m.deploy_healthcheck_http({ path: '/health', interval: 10 }))
 		expect(vm.healthcheck).toBe('GET /health · cada 10 s')

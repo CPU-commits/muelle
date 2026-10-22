@@ -93,7 +93,7 @@ describe('LocationBreadcrumbViewModel', () => {
 	it('los selectores de una app llevan al mismo tab en el otro lugar', async () => {
 		const vm = await loaded(
 			{ project: 'auditfy', stage: 'staging', app: 'redis' },
-			'/projects/auditfy/stages/staging/apps/redis/configuracion',
+			'/projects/auditfy/stages/staging/apps/redis/configuration',
 		)
 		const [project, stage, app] = [menu(vm.items, 0), menu(vm.items, 1), menu(vm.items, 2)]
 
@@ -103,13 +103,13 @@ describe('LocationBreadcrumbViewModel', () => {
 			{ label: m.catalog_crumb_projects(), href: '/', current: false },
 			{
 				label: 'auditfy',
-				href: '/projects/auditfy/stages/staging/apps/redis/configuracion',
+				href: '/projects/auditfy/stages/staging/apps/redis/configuration',
 				current: true,
 			},
 			// Sin redis allá: la primera app del mismo stage, en el mismo tab.
 			{
 				label: 'aumi-agents',
-				href: '/projects/aumi-agents/stages/staging/apps/agents/configuracion',
+				href: '/projects/aumi-agents/stages/staging/apps/agents/configuration',
 				current: false,
 			},
 			// Sin apps: su sección en Proyectos.
@@ -123,24 +123,24 @@ describe('LocationBreadcrumbViewModel', () => {
 			},
 			{
 				label: 'staging',
-				href: '/projects/auditfy/stages/staging/apps/redis/configuracion',
+				href: '/projects/auditfy/stages/staging/apps/redis/configuration',
 				current: true,
 			},
 			{
 				label: 'production',
-				href: '/projects/auditfy/stages/production/apps/redis/configuracion',
+				href: '/projects/auditfy/stages/production/apps/redis/configuration',
 				current: false,
 			},
 		])
 		expect(links(app.items)).toEqual([
 			{
 				label: 'api',
-				href: '/projects/auditfy/stages/staging/apps/api/configuracion',
+				href: '/projects/auditfy/stages/staging/apps/api/configuration',
 				current: false,
 			},
 			{
 				label: 'redis',
-				href: '/projects/auditfy/stages/staging/apps/redis/configuracion',
+				href: '/projects/auditfy/stages/staging/apps/redis/configuration',
 				current: true,
 			},
 		])

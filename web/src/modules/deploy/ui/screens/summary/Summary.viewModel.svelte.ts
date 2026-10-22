@@ -166,7 +166,7 @@ export class SummaryViewModel {
 		const fromProps = this.#props().pendingChangesHref
 		if (fromProps !== undefined) return fromProps
 		const { project: p, stage: s, app: a } = this.ref
-		return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/configuracion', { p, s, a })
+		return resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/configuration', { p, s, a })
 	}
 
 	get stack(): string {

@@ -25,14 +25,14 @@
 			{@const path = page.url.pathname}
 			{@const base = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]', params)}
 			{@const config = resolve(
-				'/(app)/projects/[p]/stages/[s]/apps/[a]/configuracion',
+				'/(app)/projects/[p]/stages/[s]/apps/[a]/configuration',
 				params,
 			)}
 			{@const variables = resolve(
 				'/(app)/projects/[p]/stages/[s]/apps/[a]/variables',
 				params,
 			)}
-			{@const domains = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/dominios', params)}
+			{@const domains = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/domains', params)}
 			{@const deploys = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/deploys', params)}
 			{@const logs = resolve('/(app)/projects/[p]/stages/[s]/apps/[a]/logs', params)}
 			<Tabs

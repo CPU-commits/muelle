@@ -6,4 +6,4 @@
 	// dirección anterior (Proxy y DNS lo avisa acá también).
 </script>
 
-<SettingsScreen panelMoved={page.url.searchParams.has(PANEL_MOVED_PARAM)} />
+<SettingsScreen section="proxy" panelMoved={page.url.searchParams.has(PANEL_MOVED_PARAM)} />

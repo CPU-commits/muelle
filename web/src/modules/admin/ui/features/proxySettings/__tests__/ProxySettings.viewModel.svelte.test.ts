@@ -587,7 +587,9 @@ describe('ProxySettingsViewModel', () => {
 		// El link lleva a Ajustes del origen nuevo, que muestra el mismo aviso (la otra
 		// pestaña no ve este localStorage: es de otro origen).
 		expect(vm.canGoToMovedPanel).toBe(true)
-		expect(vm.movedPanelHref).toBe('https://panel.tudominio.cl:8443/ajustes?panel_moved=1')
+		expect(vm.movedPanelHref).toBe(
+			'https://panel.tudominio.cl:8443/settings/proxy?panel_moved=1',
+		)
 	})
 
 	it('si se entró por la dirección de Caddy y cambió el HTTPS, no salen más escrituras desde acá', async () => {
@@ -915,7 +917,7 @@ describe('ProxySettingsViewModel', () => {
 			const vm = await mountViewModel({ ...PROXY, httpsPort: 8443 })
 
 			await vi.waitFor(() => expect(vm.rollback?.origin).toBe('https://panel.tudominio.cl'))
-			expect(vm.rollbackHref).toBe('https://panel.tudominio.cl/ajustes')
+			expect(vm.rollbackHref).toBe('https://panel.tudominio.cl/settings/proxy')
 		})
 
 		it('entrando por otra dirección (otro proxy, una IP), no nombra ni ofrece la de Caddy', async () => {
