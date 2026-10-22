@@ -101,11 +101,14 @@ export class DeployDialogViewModel {
 
 	/**
 	 * Qué pasa sin una imagen nueva y cómo cambiarla. Sirve para cualquier digest fijo (un
-	 * rollback, un override con digest o uno puesto a propósito en la configuración). null si
-	 * no hay nada fijo.
+	 * rollback, un override con digest o uno puesto a propósito en la configuración). Con
+	 * varios servicios fijados (una compose), habla de esos digests. null si no hay nada fijo.
 	 */
 	get pinnedBody(): string | null {
-		return this.#props().pinned ? m.deploy_dialog_pinned_body() : null
+		const pin = this.#props().pinned
+		if (!pin) return null
+		const count = (pin.rollback?.services.length ?? 0) + pin.others.length
+		return count > 1 ? m.deploy_dialog_pinned_services_body() : m.deploy_dialog_pinned_body()
 	}
 
 	placeholder(service: string): string {

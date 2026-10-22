@@ -21,9 +21,10 @@ import {
 
 const cause = (error: ApiError) => ({ cause: error })
 
-// `totp_required_first` (mapper_errors.go), `would_lock_out`, `cloudflare_unavailable` y
-// `docker_unavailable` (contrato §4.1: el único `PATCH` que toca Docker es el de los puertos,
-// que los prueba antes de guardar), y los 422 de los campos de la Fase 3.
+// `totp_required_first` (mapper_errors.go), `would_lock_out`, `cloudflare_unavailable` (al
+// verificar el token o el permiso de los certificados de Cloudflare) y `docker_unavailable`
+// (contrato §4.1: el único `PATCH` que toca Docker es el de los puertos, que los prueba antes
+// de guardar), y los 422 de los campos de la Fase 3 y de Origin CA.
 const SETTINGS_ERRORS: DomainErrorMap = {
 	codes: {
 		totp_required_first: (error) => new TotpRequiredFirst(cause(error)),
@@ -39,6 +40,7 @@ const SETTINGS_ERRORS: DomainErrorMap = {
 		proxy_https_port: 'httpsPort',
 		panel_allowed_cidrs: 'panelAllowedCidrs',
 		cloudflare_token: 'cloudflareToken',
+		cloudflare_origin_ca: 'cloudflareOriginCa',
 	},
 }
 

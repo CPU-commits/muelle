@@ -17,6 +17,11 @@ export const settingsDtoSchema = z.object({
 	cloudflare_token_set: z.boolean(),
 	/** Cuántas zonas ve el token; null si no se pudo consultar. */
 	cloudflare_zones: z.number().int().nonnegative().nullable(),
+	/**
+	 * Los certificados de Cloudflare (Origin CA, contrato §3.7) para los dominios con el
+	 * proxy. Nunca null: `false` por defecto.
+	 */
+	cloudflare_origin_ca: z.boolean(),
 	/** `''` si no está configurada. */
 	public_ip: z.string(),
 	public_ipv6: z.string(),
@@ -68,6 +73,8 @@ export interface SettingsPatchPayload {
 	panel_allowed_cidrs?: string[]
 	/** `""` quita el token y las zonas. */
 	cloudflare_token?: string
+	/** Los certificados de Cloudflare (Origin CA, contrato §3.7). */
+	cloudflare_origin_ca?: boolean
 	/** Guardar una lista que deja fuera esta sesión (si no, `409 would_lock_out`). */
 	confirm_lockout?: boolean
 }

@@ -71,11 +71,14 @@ export const deployDtoSchema = z.object({
 /** `GET …/apps/{a}/deploys`: del más nuevo al más viejo. */
 export const deployListDtoSchema = z.array(deployDtoSchema)
 
-/** `POST …/deploys` y `POST …/rollback` (202). */
+/**
+ * `POST …/deploys` y `POST …/rollback` (202, contrato §2.2): el backend manda siempre los
+ * tres campos. El panel usa solo el `id`.
+ */
 export const deployAcceptedDtoSchema = z.object({
 	id: z.number().int().positive(),
-	status: deployStatusDtoSchema.optional(),
-	status_url: z.string().optional(),
+	status: deployStatusDtoSchema,
+	status_url: z.string(),
 })
 
 /** `GET …/deploys/{id}/log?offset=N`. */

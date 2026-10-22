@@ -6,6 +6,7 @@ import {
 } from '@tanstack/svelte-query'
 import { adminUseCases } from '../../container'
 import type {
+	CloudflareStatus,
 	RegistryInput,
 	Settings,
 	UpdateProxyPortsInput,
@@ -105,8 +106,23 @@ export function replaceCloudflareTokenMutation(client: QueryClient) {
 	}
 }
 
+/** La variable es lo que se ve del token: con los certificados de Cloudflare, los apaga. */
 export function removeCloudflareTokenMutation(client: QueryClient) {
-	return settingsMutation(client, () => adminUseCases.removeCloudflareToken())
+	return settingsMutation(client, (current: CloudflareStatus) =>
+		adminUseCases.removeCloudflareToken(current),
+	)
+}
+
+export interface SetCloudflareOriginCaInput {
+	readonly enabled: boolean
+	/** Lo que se ve del token: sin él, encenderlos no sale (`OriginCaNeedsToken`). */
+	readonly current: CloudflareStatus
+}
+
+export function setCloudflareOriginCaMutation(client: QueryClient) {
+	return settingsMutation(client, ({ enabled, current }: SetCloudflareOriginCaInput) =>
+		adminUseCases.setCloudflareOriginCa(enabled, current),
+	)
 }
 
 function registryMutation<TInput, TResult>(

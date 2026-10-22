@@ -12,6 +12,8 @@ import {
 	type HostnameProblem,
 	HostnameTaken,
 	NothingToAdopt,
+	originCaExpiresSoon,
+	type OriginCaNotice,
 	type TargetProblem,
 } from '../../../domain'
 
@@ -59,8 +61,20 @@ export function dnsText(domain: AppDomain): string {
 	}
 }
 
-/** "Let's Encrypt · vence 8 ene 2027", o "Certificado pendiente". */
+/**
+ * "Let's Encrypt · vence 8 ene 2027", o "Certificado pendiente". Con el de Cloudflare Origin
+ * CA, "Cloudflare Origin CA · vence 19 ene 2027", con el vencimiento que guardó muelle: el de
+ * la verificación (`cert_expires_at`) puede ir hasta una hora atrasado después del cambio, y
+ * su emisor no se sabe cómo se llama (contrato §3.7).
+ */
 export function certificateText(domain: AppDomain): string | null {
+	const originExpiresAt = domain.originCa?.expiresAt
+	if (domain.certSource === 'cloudflare_origin_ca' && originExpiresAt) {
+		const values = { date: formatDate(originExpiresAt) }
+		return originCaExpiresSoon(domain)
+			? m.ingress_cert_origin_ca_expiring(values)
+			: m.ingress_cert_origin_ca(values)
+	}
 	const certificate = domain.certificate
 	if (!certificate) {
 		// Fuera de Cloudflare, "certificado por HTTP-01" ya lo dice la parte del DNS.
@@ -70,6 +84,32 @@ export function certificateText(domain: AppDomain): string | null {
 	return certificateExpiresSoon(domain)
 		? m.ingress_cert_expiring(values)
 		: m.ingress_cert_valid(values)
+}
+
+/**
+ * La pista del certificado de Cloudflare debajo del dominio (emitiendo, o por qué no lo usa),
+ * o null: las fallas van en el pie, con Reintentar (`originCaFailureText`).
+ */
+export function originCaHint(notice: OriginCaNotice | null): string | null {
+	switch (notice) {
+		case 'issuing':
+			return m.ingress_origin_ca_issuing()
+		case 'dns_only':
+			return m.ingress_origin_ca_dns_only()
+		case 'dns_only_in_cloudflare':
+			return m.ingress_origin_ca_dns_only_cloudflare()
+		default:
+			return null
+	}
+}
+
+/** Por qué falló el certificado de Cloudflare: el mensaje de muelle, o el del panel si no hay. */
+export function originCaFailureText(domain: AppDomain): string {
+	const originCa = domain.originCa
+	if (originCa?.error) return sentence(originCa.error)
+	return originCa?.status === 'active'
+		? m.ingress_origin_ca_renew_failed()
+		: m.ingress_origin_ca_failed()
 }
 
 export function hostnameProblemMessage(problem: HostnameProblem): string {

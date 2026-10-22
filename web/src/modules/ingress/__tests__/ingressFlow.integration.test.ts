@@ -17,6 +17,7 @@ import {
 	domainState,
 	HostnameTaken,
 	NothingToAdopt,
+	originCaNotice,
 } from '../domain'
 
 // Recorre el módulo entero —caso de uso, repositorio, datasource, schema Zod y mapper—
@@ -422,6 +423,72 @@ describe('el mock sigue a los ajustes, como el backend', () => {
 	})
 })
 
+// Los certificados de Cloudflare (Origin CA, contrato §3.7), encendidos en los ajustes del mock.
+describe('certificados de Cloudflare', () => {
+	beforeEach(() => {
+		ingressDb.reset({ provisionMs: 0 })
+		adminDb.state.cloudflareOriginCa = true
+	})
+
+	it("cada dominio trae su certificado: Origin CA, o Let's Encrypt si no califica", async () => {
+		const domains = await ingressUseCases.listDomains(APP)
+
+		expect(
+			domains.map((domain) => [domain.hostname, domain.certSource, domain.originCa?.status]),
+		).toEqual([
+			['api-staging.tudominio.cl', 'cloudflare_origin_ca', 'active'],
+			['api.staging.otro-dominio.com', 'letsencrypt', 'not_eligible'],
+			['webhooks-staging.tudominio.cl', 'letsencrypt', 'not_eligible'],
+		])
+		expect(domains[0]?.originCa?.expiresAt).toBeInstanceOf(Date)
+	})
+
+	it("apagar Proxied lo deja en DNS only (Let's Encrypt) desde la respuesta", async () => {
+		await ingressUseCases.listDomains(APP)
+		const toggled = await ingressUseCases.setProxied({
+			app: APP,
+			hostname: asHostname('api-staging.tudominio.cl'),
+			proxied: false,
+		})
+
+		expect(toggled).toMatchObject({
+			certSource: 'letsencrypt',
+			originCa: { status: 'dns_only' },
+		})
+		expect(originCaNotice(toggled)).toBe('dns_only')
+	})
+
+	it("una emisión que falló (falla-) se reintenta con retry: Let's Encrypt mientras tanto", async () => {
+		const created = await ingressUseCases.addDomain({
+			app: APP,
+			hostname: 'falla-ssl.tudominio.cl',
+			target: 'api:3000',
+			proxied: true,
+		})
+		expect(created).toMatchObject({
+			certSource: 'letsencrypt',
+			originCa: { status: 'failed', errorCode: 'permission' },
+		})
+		expect(originCaNotice(created)).toBe('failed')
+
+		const before = Date.now()
+		const retried = await ingressUseCases.retryDomain({ app: APP, hostname: created.hostname })
+
+		// El reintento reinicia la espera: retry_at es la hora del pedido.
+		expect(retried.originCa?.retryAt?.getTime()).toBeGreaterThanOrEqual(before - 1000)
+		expect(retried.originCa?.retryAt?.getTime()).toBeLessThanOrEqual(Date.now())
+	})
+
+	it('el panel trae el suyo en GET /proxy', async () => {
+		const proxy = await ingressUseCases.getProxyStatus()
+		expect(proxy.panelCertificate).toMatchObject({
+			hostname: 'panel.tudominio.cl',
+			certSource: 'cloudflare_origin_ca',
+			originCa: { status: 'active', errorCode: null, error: null },
+		})
+	})
+})
+
 describe('GET /proxy', () => {
 	it('sin dominio del panel está apagado, sin contenedor (image null) y sin error', async () => {
 		adminDb.state.panelDomain = ''
@@ -429,6 +496,17 @@ describe('GET /proxy', () => {
 		expect(proxy.status).toBe('disabled')
 		expect(proxy.caddy).toMatchObject({ image: null, running: false })
 		expect(proxy.error).toBeNull()
+		// Sin dominio del panel no hay certificado del panel (contrato §3.3).
+		expect(proxy.panelCertificate).toBeNull()
+	})
+
+	it("trae el certificado del panel: con los de Cloudflare apagados, Let's Encrypt", async () => {
+		const proxy = await ingressUseCases.getProxyStatus()
+		expect(proxy.panelCertificate).toEqual({
+			hostname: 'panel.tudominio.cl',
+			certSource: 'letsencrypt',
+			originCa: null,
+		})
 	})
 
 	it('sincronizado, con muelle-caddy corriendo', async () => {

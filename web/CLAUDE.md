@@ -588,9 +588,11 @@ secciones en el orden de la nav y de la página), arma cada item con
       puertos anteriores). El freno es de la página, no del viewModel que lo puso:
       `heldWritesOrigin()` dice a dónde se mudó, y Ajustes lo suelta al ver la vuelta atrás
       de esa dirección aunque sea otra visita a la pantalla. Fuera de Ajustes nadie lo
-      suelta: las otras pantallas no siguen `GET /proxy` (Dominios y Deploys lo piden, pero
-      `GET /proxy` no trae el dominio del panel para armar la dirección que falló), y por eso
-      el texto pide recargar, que suelta el freno.
+      suelta. Se podría (alcanza con que el puerto de `heldWritesOrigin()` sea
+      `ports_rollback.attempted.httpsPort`), pero solo Dominios y Deploys (con un
+      `routes_warning`) leen `GET /proxy`: soltarlo desde ahí cubriría pocas pantallas y
+      ataría `ingress` al freno del cliente. Por eso el texto pide recargar, que suelta el
+      freno.
     - Sin mapa: 401 `UnauthorizedError`, 403 `ForbiddenError`, 404 `NotFoundError`,
       409 `ConflictError`, 423/429 `RateLimitedError`, 5xx, red y timeout `UnavailableError`,
       el resto `UnexpectedError`. Una respuesta con otra forma es `ContractError`
@@ -612,7 +614,9 @@ Las Fases 2 (deploys, status, logs, rollback, registries y los `services` de una
 permitidas) y 5 (install y el panel embebido) están en este mismo árbol que el panel. La
 única fuente para §0–§5 es el contrato,
 `docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md`, resumido en
-`src/modules/{deploy,ingress}/README.md`, sin diferencias. `pnpm test:e2e:real` recorre el
+`src/modules/{deploy,ingress}/README.md`, sin diferencias (también los certificados de
+Cloudflare, Origin CA, de §3.7: el diseño es
+`docs/superpowers/specs/2026-10-21-origin-ca-design.md`, §11). `pnpm test:e2e:real` recorre el
 panel contra ese backend (ver [E2E contra muelle](#e2e-contra-muelle)).
 
 El panel va embebido en el binario que lo sirve (contrato §5.5): las rutas del panel y las
@@ -625,8 +629,10 @@ pantalla muestra un error. `shouldRetry` no lo reintenta. Con `pnpm dev:mock`, u
 
 Los **campos** que las Fases 2 y 3 sumaron a endpoints que ya existían son obligatorios en
 los DTO, como en el contrato: una respuesta sin ellos es un `ContractError`. Son los de
-proxy y DNS de `GET /settings` (§4: todas las claves, siempre; `Settings.proxy` y
-`panelAccess` nunca son null), los `services` de una app de catalog (§2.12: `[]` es un
+proxy y DNS de `GET /settings` (§4: todas las claves, siempre, también
+`cloudflare_origin_ca`; `Settings.proxy` y `panelAccess` nunca son null), `cert_source` y
+`origin_ca` de un dominio y `panel_certificate` de `GET /proxy` (§3.1, §3.3 y §3.7: la clave
+va siempre, el objeto puede ser null), los `services` de una app de catalog (§2.12: `[]` es un
 compose guardado que no se puede leer, y ahí Dominios sugiere solo los destinos que ya usan
 sus dominios), `requested_images` y `routes_warning` de un deploy (§2.1: lo fijado en un
 digest sale solo de `requested_images`, `pinnedImages`), `ports_rollback` de `GET /proxy`
@@ -687,10 +693,20 @@ lo manda, y el mock lo rechaza.
   falla corta, aunque la última respuesta guardada diga `recreating`). Antes, `resetQueries` saca lo que
   había en el cache: el `PATCH` limpió `ports_rollback`. Un cambio que falla (un `422`,
   `PanelMovedError`) no guardó nada: el seguimiento del anterior sigue.
+    - Los certificados de Cloudflare (Origin CA, contrato §3.7): el switch de la tarjeta de
+      Cloudflare guarda `cloudflare_origin_ca` y, si sale bien, invalida `ingressKeys.all`
+      (los dominios recalculan `cert_source` y `origin_ca`, y cambia `GET /proxy`). Con la
+      opción encendida, la tarjeta lee `panel_certificate` de ese mismo `GET /proxy` (con
+      `originCaNotice` y los tipos `PanelCertificate` y `OriginCaState` del barrel) para la
+      línea "Panel: …" y el aviso de su falla (sin Reintentar: el del panel se reintenta
+      solo), y `proxyFollowQuery` lo vuelve a pedir cada 10 s mientras el del panel dice
+      `issuing`.
     - Si el panel sigue en el mismo origen (solo cambió el HTTP, o se entró por otra
       dirección que la de Caddy), dice "Recreando muelle-caddy…" y después si quedó
-      escuchando o el error; pasados los 2 min sin una respuesta que lo diga, que no se pudo
-      confirmar y que recargue en un momento (`recreation.kind === 'unknown'`).
+      escuchando o el error. Pasados los 2 min, si `GET /proxy` no respondió desde el cambio
+      o su último pedido falló, que no se pudo confirmar y que recargue en un momento
+      (`recreation.kind === 'unknown'`); si responde y todavía dice `recreating`, sigue en
+      "Recreando muelle-caddy…" (se sigue preguntando hasta que diga cómo terminó).
     - Si cambió el HTTPS y se entró por la dirección de Caddy, esa dirección deja de
       responder: el aviso lleva a la nueva, no salen más escrituras (`holdWrites`) y se
       sigue preguntando solo por si muelle vuelve atrás (la dirección vuelve a responder).
@@ -717,7 +733,11 @@ lo manda, y el mock lo rechaza.
   `ingressDb.list` (una app con dominios es `409 not_empty`). `list` siembra los tres
   dominios del diseño la primera vez que se piden los de una app, así que una app del mock
   los tiene aunque nadie haya abierto Dominios; una app creada en el mock empieza sin
-  ninguno (`ingressDb.startEmpty`). Los mocks de deploy e ingress leen el tipo y los
+  ninguno (`ingressDb.startEmpty`). Con `cloudflare_origin_ca` encendido en `db/admin.ts`,
+  `db/ingress.ts` calcula `cert_source` y `origin_ca` de cada dominio y del panel (las reglas,
+  con `falla-`, `gris-` y `renueva-`, en el README de ingress), y el `PATCH` de los ajustes
+  responde los `422` y el `502` del contrato con un token que contiene `sin-ssl` o
+  `ssl-lento`. Los mocks de deploy e ingress leen el tipo y los
   servicios de una app del catálogo (`catalogDb.configured`, en `db/catalog.ts` junto a
   `servicesOf` y `composeServices`): deploy valida `image`/`images` contra la configuración
   y saca de ahí la ref de un servicio que el deploy actual no tiene (§2.2), e ingress exige

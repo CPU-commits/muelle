@@ -2,7 +2,7 @@ import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent } from '../api'
 import { catalogDb } from '../db/catalog'
 import { adminDb } from '../db/admin'
-import { appKey, ingressDb, type MockDomain, NO_TOKEN_REASON } from '../db/ingress'
+import { appKey, certFields, ingressDb, type MockDomain, NO_TOKEN_REASON } from '../db/ingress'
 import { requireSession } from '../session'
 
 // Dominios (Fase 3) del backend simulado, con el contrato de
@@ -38,7 +38,7 @@ function records(hostname: string) {
 	]
 }
 
-function domainDto(domain: MockDomain) {
+function domainDto(domain: MockDomain, now = Date.now()) {
 	return {
 		hostname: domain.hostname,
 		target_service: domain.targetService,
@@ -52,6 +52,8 @@ function domainDto(domain: MockDomain) {
 		last_error_code: domain.lastErrorCode,
 		cert_issuer: domain.certIssuer,
 		cert_expires_at: iso(domain.certExpiresAt),
+		// Calculados con los ajustes de ahora (los certificados de Cloudflare, contrato §3.7).
+		...certFields(ingressDb.originCa(domain, now)),
 		records: records(domain.hostname),
 		created_at: iso(domain.createdAt),
 		updated_at: iso(domain.updatedAt ?? domain.createdAt),
@@ -122,7 +124,7 @@ export const ingressHandlers: RequestHandler[] = [
 		const denied = requireSession()
 		if (denied) return denied
 		const domains = ingressDb.list(param(params, 'p'), param(params, 's'), param(params, 'a'))
-		return HttpResponse.json(domains.map(domainDto))
+		return HttpResponse.json(domains.map((domain) => domainDto(domain)))
 	}),
 
 	http.post(api(DOMAINS), async ({ params, request }) => {
@@ -242,6 +244,9 @@ export const ingressHandlers: RequestHandler[] = [
 		const domain = ingressDb.find(keyOf(params), hostname)
 		if (!domain) return domainNotFound(hostname)
 		await latency()
-		return HttpResponse.json(domainDto(ingressDb.retry(domain)))
+		// La respuesta es de la hora del pedido: el certificado de Cloudflare que falló dice
+		// que se reintenta ahora (`retry_at` en el pasado), y el resultado se ve en un GET.
+		const now = Date.now()
+		return HttpResponse.json(domainDto(ingressDb.retry(domain, now), now))
 	}),
 ]

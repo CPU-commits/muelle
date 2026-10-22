@@ -7,6 +7,7 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { PanelMovedError, UnavailableError, ValidationError } from '@/shared/domain'
 import { PORTS_WATCH_TIMEOUT_MS, type ProxySettingsViewModel } from '..'
 import { toast } from '@/shared/ui/stores'
+import { formatDate } from '@/shared/ui'
 import {
 	CloudflareUnavailable,
 	InvalidIpAddress,
@@ -14,7 +15,12 @@ import {
 	type ProxySettings,
 	type Settings,
 } from '../../../../domain'
-import { ingressKeys, type PortsRollback, type ProxyStatus } from '@/modules/ingress'
+import {
+	ingressKeys,
+	type OriginCaState,
+	type PortsRollback,
+	type ProxyStatus,
+} from '@/modules/ingress'
 import { adminKeys } from '../../../../data'
 import ProxySettingsHarness from './ProxySettingsHarness.svelte'
 import { cacheHolds } from '../../../__tests__/cacheHolds'
@@ -28,6 +34,7 @@ const mocks = vi.hoisted(() => ({
 	updateProxyPorts: vi.fn(),
 	replaceCloudflareToken: vi.fn(),
 	removeCloudflareToken: vi.fn(),
+	setCloudflareOriginCa: vi.fn(),
 }))
 
 // `GET /proxy` (de ingress, por su barrel): Ajustes lo sigue mientras se recrea muelle-caddy.
@@ -52,6 +59,7 @@ function proxyStatus(overrides: Partial<ProxyStatus> = {}): ProxyStatus {
 			httpsPort: 443,
 		},
 		portsRollback: null,
+		panelCertificate: null,
 		...overrides,
 	}
 }
@@ -65,6 +73,7 @@ vi.mock('@/modules/admin/container', () => ({
 		updateProxyPorts: mocks.updateProxyPorts,
 		replaceCloudflareToken: mocks.replaceCloudflareToken,
 		removeCloudflareToken: mocks.removeCloudflareToken,
+		setCloudflareOriginCa: mocks.setCloudflareOriginCa,
 		listAudit: vi.fn(),
 		listRegistries: vi.fn(),
 		addRegistry: vi.fn(),
@@ -74,7 +83,7 @@ vi.mock('@/modules/admin/container', () => ({
 }))
 
 const PROXY: ProxySettings = {
-	cloudflare: { tokenSet: false, zones: null },
+	cloudflare: { tokenSet: false, zones: null, originCa: false },
 	publicIpv4: '203.0.113.24',
 	publicIpv6: '',
 	acmeEmail: 'ops@tudominio.cl',
@@ -132,17 +141,21 @@ describe('ProxySettingsViewModel', () => {
 		mocks.updateAcmeEmail.mockResolvedValue(saved({}))
 		mocks.updateProxyPorts.mockResolvedValue(saved({ httpPort: 8080, httpsPort: 8443 }))
 		mocks.replaceCloudflareToken.mockResolvedValue(
-			saved({ cloudflare: { tokenSet: true, zones: 2 } }),
+			saved({ cloudflare: { tokenSet: true, zones: 2, originCa: false } }),
 		)
 		mocks.removeCloudflareToken.mockResolvedValue(
-			saved({ cloudflare: { tokenSet: false, zones: null } }),
+			saved({ cloudflare: { tokenSet: false, zones: null, originCa: false } }),
 		)
 	})
 
 	it('dice cuántas zonas ve el token, en singular o plural, o solo "cifrado"', async () => {
 		const zones = async (count: number | null) =>
-			(await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: count } }))
-				.cloudflareMeta
+			(
+				await mountViewModel({
+					...PROXY,
+					cloudflare: { tokenSet: true, zones: count, originCa: false },
+				})
+			).cloudflareMeta
 
 		expect(await zones(4)).toBe(m.admin_cf_zones({ count: 4 }))
 		expect(await zones(1)).toBe(m.admin_cf_zones_one())
@@ -170,7 +183,10 @@ describe('ProxySettingsViewModel', () => {
 	})
 
 	it('cada cambio que sale bien vuelve a pedir los dominios y el proxy (records, estado)', async () => {
-		const vm = await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: 4 } })
+		const vm = await mountViewModel({
+			...PROXY,
+			cloudflare: { tokenSet: true, zones: 4, originCa: false },
+		})
 		const invalidate = vi.spyOn(client, 'invalidateQueries')
 		const refreshedIngress = () =>
 			invalidate.mock.calls.filter(([filters]) => filters?.queryKey === ingressKeys.all)
@@ -358,7 +374,10 @@ describe('ProxySettingsViewModel', () => {
 
 	it('quitar el token pide confirmación y lo borra', async () => {
 		const success = vi.spyOn(toast, 'success')
-		const vm = await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: 4 } })
+		const vm = await mountViewModel({
+			...PROXY,
+			cloudflare: { tokenSet: true, zones: 4, originCa: false },
+		})
 
 		vm.askRemoveCloudflare()
 		expect(vm.confirmingRemoveCloudflare).toBe(true)
@@ -366,14 +385,22 @@ describe('ProxySettingsViewModel', () => {
 
 		await vm.removeCloudflare()
 
-		expect(mocks.removeCloudflareToken).toHaveBeenCalledOnce()
+		// Con lo que se ve del token: con los certificados de Cloudflare, los apaga también.
+		expect(mocks.removeCloudflareToken).toHaveBeenCalledExactlyOnceWith({
+			tokenSet: true,
+			zones: 4,
+			originCa: false,
+		})
 		expect(vm.confirmingRemoveCloudflare).toBe(false)
 		expect(success).toHaveBeenCalledWith(m.admin_cf_removed())
 	})
 
 	it('si quitar el token falla, el error queda en la confirmación', async () => {
 		mocks.removeCloudflareToken.mockRejectedValueOnce(new UnavailableError('caído'))
-		const vm = await mountViewModel({ ...PROXY, cloudflare: { tokenSet: true, zones: 4 } })
+		const vm = await mountViewModel({
+			...PROXY,
+			cloudflare: { tokenSet: true, zones: 4, originCa: false },
+		})
 
 		vm.askRemoveCloudflare()
 		await vm.removeCloudflare()
@@ -745,6 +772,37 @@ describe('ProxySettingsViewModel', () => {
 		}
 	})
 
+	it('pasado el plazo, si GET /proxy responde y sigue diciendo "recreando", el aviso sigue en "recreando" y no pide recargar', async () => {
+		const vm = await mountViewModel()
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+		vi.useFakeTimers({
+			toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+			shouldAdvanceTime: true,
+		})
+		try {
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ status: 'recreating' }))
+			vm.setField('httpPort', '8080')
+			mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+			vm.askSavePorts()
+			await vm.savePorts()
+			await vi.waitFor(() =>
+				expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success'),
+			)
+
+			// muelle responde, y dice que todavía se recrea: no hay nada que recargar.
+			await vi.advanceTimersByTimeAsync(PORTS_WATCH_TIMEOUT_MS + PROXY_REFRESH_MS)
+			expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success')
+			expect(vm.recreation).toEqual({ kind: 'recreating' })
+
+			// Se sigue preguntando (muelle dice que se recrea) hasta que dice cómo terminó.
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus())
+			await vi.advanceTimersByTimeAsync(PROXY_REFRESH_MS)
+			await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'done' }))
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	it('un estado del proxy de antes del cambio (en el cache, de Dominios) no cuenta como "ya escucha"', async () => {
 		ingress.getProxyStatus.mockReturnValue(new Promise<ProxyStatus>(() => {}))
 		const vm = await mountViewModel()
@@ -1091,6 +1149,316 @@ describe('ProxySettingsViewModel', () => {
 			await vi.waitFor(() => expect(vm.rollback).not.toBeNull())
 			expect(vm.rollback?.origin).toBeNull()
 			expect(vm.rollbackHref).toBeNull()
+		})
+	})
+
+	// Los certificados de Cloudflare (Origin CA, contrato §3.7 y §4.1): el switch de la tarjeta.
+	describe('certificados de Cloudflare (Origin CA)', () => {
+		const WITH_TOKEN: ProxySettings = {
+			...PROXY,
+			cloudflare: { tokenSet: true, zones: 4, originCa: false },
+		}
+		const ON: ProxySettings = {
+			...PROXY,
+			cloudflare: { tokenSet: true, zones: 4, originCa: true },
+		}
+		const refreshedIngress = () =>
+			vi
+				.mocked(client.invalidateQueries)
+				.mock.calls.filter(([filters]) => filters?.queryKey === ingressKeys.all).length
+
+		it('sin token, el switch está deshabilitado y la ayuda dice qué falta', async () => {
+			const vm = await mountViewModel()
+
+			expect(vm.originCaDisabled).toBe(true)
+			expect(vm.originCaHelp).toBe(
+				`${m.admin_cf_origin_ca_help()} ${m.admin_cf_origin_ca_permission()} ${m.admin_cf_origin_ca_needs_token()}`,
+			)
+
+			const withToken = await mountViewModel(WITH_TOKEN)
+			expect(withToken.originCaDisabled).toBe(false)
+			expect(withToken.originCaHelp).toBe(
+				`${m.admin_cf_origin_ca_help()} ${m.admin_cf_origin_ca_permission()}`,
+			)
+		})
+
+		it("la ayuda dice lo que importa: solo Cloudflare confía, la nube naranja y DNS only con Let's Encrypt", () => {
+			expect(m.admin_cf_origin_ca_help()).toMatch(/nube naranja/)
+			expect(m.admin_cf_origin_ca_help()).toMatch(/Solo Cloudflare confía/)
+			expect(m.admin_cf_origin_ca_help()).toMatch(/DNS only .* Let's Encrypt/)
+			expect(m.admin_cf_origin_ca_permission()).toMatch(/SSL and Certificates → Edit/)
+			expect(m.admin_cf_origin_ca_help({}, { locale: 'en' })).toMatch(/orange cloud/)
+		})
+
+		it('encendidos sin token (a mano) se pueden apagar', async () => {
+			const vm = await mountViewModel({
+				...PROXY,
+				cloudflare: { tokenSet: false, zones: null, originCa: true },
+			})
+
+			expect(vm.originCaDisabled).toBe(false)
+		})
+
+		it('encenderlos no pide confirmación: guarda, avisa y vuelve a pedir los dominios y el proxy', async () => {
+			const success = vi.spyOn(toast, 'success')
+			mocks.setCloudflareOriginCa.mockResolvedValue(saved({ cloudflare: ON.cloudflare }))
+			const vm = await mountViewModel(WITH_TOKEN)
+			vi.spyOn(client, 'invalidateQueries')
+
+			vm.toggleOriginCa(true)
+
+			expect(vm.confirmingOriginCaOff).toBe(false)
+			await vi.waitFor(() =>
+				expect(success).toHaveBeenCalledWith(m.admin_cf_origin_ca_enabled()),
+			)
+			expect(mocks.setCloudflareOriginCa).toHaveBeenCalledExactlyOnceWith(
+				true,
+				WITH_TOKEN.cloudflare,
+			)
+			// Los dominios recalculan cert_source y origin_ca, y cambia GET /proxy.
+			expect(refreshedIngress()).toBe(1)
+			// Lo que vuelve va al cache de los ajustes, y de ahí al switch.
+			expect(client.getQueryData<Settings>(adminKeys.settings())?.proxy.cloudflare).toEqual(
+				ON.cloudflare,
+			)
+		})
+
+		it('mientras guarda, el switch queda deshabilitado y en lo guardado: no es optimista', async () => {
+			let resolve: (settings: Settings) => void = () => undefined
+			mocks.setCloudflareOriginCa.mockReturnValueOnce(
+				new Promise<Settings>((done) => (resolve = done)),
+			)
+			const vm = await mountViewModel(WITH_TOKEN)
+
+			vm.toggleOriginCa(true)
+
+			await vi.waitFor(() => expect(vm.isSavingOriginCa).toBe(true))
+			expect(vm.originCaDisabled).toBe(true)
+			expect(vm.originCaChecked).toBe(false)
+			resolve(saved({ cloudflare: ON.cloudflare }))
+			await vi.waitFor(() => expect(vm.isSavingOriginCa).toBe(false))
+		})
+
+		it('apagarlos pide confirmación; cancelar no cambia nada', async () => {
+			const success = vi.spyOn(toast, 'success')
+			mocks.setCloudflareOriginCa.mockResolvedValue(
+				saved({ cloudflare: WITH_TOKEN.cloudflare }),
+			)
+			const vm = await mountViewModel(ON)
+
+			vm.toggleOriginCa(false)
+			expect(vm.confirmingOriginCaOff).toBe(true)
+			expect(vm.originCaChecked).toBe(true)
+			vm.cancelOriginCaOff()
+			expect(vm.confirmingOriginCaOff).toBe(false)
+			expect(mocks.setCloudflareOriginCa).not.toHaveBeenCalled()
+
+			vm.toggleOriginCa(false)
+			await vm.confirmOriginCaOff()
+
+			expect(mocks.setCloudflareOriginCa).toHaveBeenCalledExactlyOnceWith(
+				false,
+				ON.cloudflare,
+			)
+			expect(success).toHaveBeenCalledWith(m.admin_cf_origin_ca_disabled())
+			expect(vm.confirmingOriginCaOff).toBe(false)
+		})
+
+		it("la confirmación dice que Caddy vuelve a Let's Encrypt y que puede haber un 525 mientras tanto", () => {
+			expect(m.admin_cf_origin_ca_off_body()).toMatch(/525/)
+			expect(m.admin_cf_origin_ca_off_body()).toMatch(/menos de un minuto/)
+			expect(m.admin_cf_origin_ca_off_body({}, { locale: 'en' })).toMatch(/525/)
+		})
+
+		it('un 422 del backend va en un aviso de la tarjeta, con su motivo, y el switch queda en lo guardado', async () => {
+			const reason =
+				'el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona tudominio.cl (lo necesitan los certificados de Cloudflare): agrégalo al token en Cloudflare, o deja la opción apagada'
+			mocks.setCloudflareOriginCa.mockRejectedValueOnce(
+				new ValidationError(reason, 'cloudflareOriginCa'),
+			)
+			const vm = await mountViewModel(WITH_TOKEN)
+
+			vm.toggleOriginCa(true)
+
+			await vi.waitFor(() => expect(vm.originCaError).toBe(`E${reason.slice(1)}`))
+			expect(vm.originCaChecked).toBe(false)
+			expect(vm.errors).toEqual({})
+
+			// Volver a intentarlo limpia el aviso.
+			mocks.setCloudflareOriginCa.mockResolvedValueOnce(saved({ cloudflare: ON.cloudflare }))
+			vm.toggleOriginCa(true)
+			expect(vm.originCaError).toBeNull()
+		})
+
+		it('con ellos encendidos, el modal del token pide también su permiso y quitar el token avisa que se apagan', async () => {
+			const off = await mountViewModel(WITH_TOKEN)
+			expect(off.cloudflareModalDescription).toBe(m.admin_cf_modal_description())
+			expect(off.removeCloudflareBody).toBe(m.admin_cf_remove_body())
+
+			const on = await mountViewModel(ON)
+			expect(on.cloudflareModalDescription).toBe(
+				`${m.admin_cf_modal_description()} ${m.admin_cf_modal_origin_ca()}`,
+			)
+			expect(on.removeCloudflareBody).toBe(
+				`${m.admin_cf_remove_body()} ${m.admin_cf_remove_body_origin_ca()}`,
+			)
+			expect(m.admin_cf_modal_origin_ca()).toMatch(/SSL and Certificates → Edit/)
+		})
+
+		it('quitar el token con ellos encendidos pasa lo que se ve: el caso de uso los apaga también', async () => {
+			mocks.removeCloudflareToken.mockResolvedValueOnce(
+				saved({ cloudflare: { tokenSet: false, zones: null, originCa: false } }),
+			)
+			const vm = await mountViewModel(ON)
+
+			vm.askRemoveCloudflare()
+			await vm.removeCloudflare()
+
+			expect(mocks.removeCloudflareToken).toHaveBeenCalledExactlyOnceWith(ON.cloudflare)
+		})
+
+		describe('el certificado del panel (panel_certificate de GET /proxy)', () => {
+			const EXPIRES = new Date('2027-01-19T12:00:00Z')
+			const panel = (originCa: OriginCaState | null): ProxyStatus =>
+				proxyStatus({
+					panelCertificate: {
+						hostname: 'panel.tudominio.cl',
+						certSource:
+							originCa?.status === 'active' ? 'cloudflare_origin_ca' : 'letsencrypt',
+						originCa,
+					},
+				})
+			const state = (overrides: Partial<OriginCaState>): OriginCaState => ({
+				status: 'active',
+				errorCode: null,
+				error: null,
+				retryAt: null,
+				expiresAt: EXPIRES,
+				...overrides,
+			})
+			async function panelLine(originCa: OriginCaState | null, proxy = ON) {
+				ingress.getProxyStatus.mockResolvedValue(panel(originCa))
+				const vm = await mountViewModel(proxy)
+				await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+				await vi.waitFor(() =>
+					expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success'),
+				)
+				return vm
+			}
+
+			it('con Origin CA, la línea dice que el panel lo usa y cuándo vence', async () => {
+				const vm = await panelLine(state({}))
+
+				expect(vm.panelOriginCaLine).toBe(
+					m.admin_cf_origin_ca_panel({
+						source: m.admin_cf_origin_ca_panel_origin_ca({ date: formatDate(EXPIRES) }),
+					}),
+				)
+				expect(vm.panelOriginCaLine).toMatch(/^Panel: Cloudflare Origin CA · vence /)
+				expect(vm.panelOriginCaWarning).toBeNull()
+			})
+
+			it("en DNS only en Cloudflare, o mientras se emite, Let's Encrypt", async () => {
+				const dnsOnly = await panelLine(state({ status: 'dns_only', expiresAt: null }))
+				expect(dnsOnly.panelOriginCaLine).toBe(
+					"Panel: Let's Encrypt (DNS only en Cloudflare)",
+				)
+
+				const issuing = await panelLine(state({ status: 'issuing', expiresAt: null }))
+				expect(issuing.panelOriginCaLine).toBe(
+					m.admin_cf_origin_ca_panel({ source: m.admin_cf_origin_ca_panel_issuing() }),
+				)
+			})
+
+			it('si su emisión falló, el aviso con el mensaje de muelle, sin Reintentar (se reintenta solo)', async () => {
+				const error =
+					"muelle no pudo emitir el certificado de Cloudflare: el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de panel.tudominio.cl (Cloudflare: Authentication error); agrégalo al token: muelle lo reintenta solo cada 6 h; mientras tanto usa Let's Encrypt"
+				const vm = await panelLine(
+					state({
+						status: 'failed',
+						errorCode: 'permission',
+						error,
+						retryAt: new Date(),
+						expiresAt: null,
+					}),
+				)
+
+				expect(vm.panelOriginCaLine).toBe("Panel: Let's Encrypt")
+				expect(vm.panelOriginCaWarning).toEqual({
+					title: m.admin_cf_origin_ca_panel_failed(),
+					body: `M${error.slice(1)}`,
+				})
+			})
+
+			it('si falló su renovación, el aviso de la renovación y sigue con Origin CA', async () => {
+				const vm = await panelLine(
+					state({
+						errorCode: 'cloudflare',
+						error: 'muelle no pudo renovar…',
+						retryAt: new Date(),
+					}),
+				)
+
+				expect(vm.panelOriginCaLine).toMatch(/Cloudflare Origin CA/)
+				expect(vm.panelOriginCaWarning).toEqual({
+					title: m.admin_cf_origin_ca_panel_renew_failed(),
+					body: 'Muelle no pudo renovar…',
+				})
+			})
+
+			it('con la opción apagada, o sin panel_certificate, no hay línea ni aviso', async () => {
+				const off = await panelLine(null, WITH_TOKEN)
+				expect(off.panelOriginCaLine).toBeNull()
+				expect(off.panelOriginCaWarning).toBeNull()
+
+				ingress.getProxyStatus.mockResolvedValue(proxyStatus({ panelCertificate: null }))
+				const none = await mountViewModel(ON)
+				await vi.waitFor(() =>
+					expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success'),
+				)
+				expect(none.panelOriginCaLine).toBeNull()
+			})
+
+			it('mientras el del panel se emite, GET /proxy se vuelve a pedir hasta que sale', async () => {
+				ingress.getProxyStatus.mockResolvedValue(
+					panel(state({ status: 'issuing', expiresAt: null })),
+				)
+				vi.useFakeTimers({
+					toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+					shouldAdvanceTime: true,
+				})
+				try {
+					const vm = await mountViewModel(ON)
+					await vi.waitFor(() =>
+						expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success'),
+					)
+
+					ingress.getProxyStatus.mockResolvedValue(panel(state({})))
+					await vi.advanceTimersByTimeAsync(PROXY_REFRESH_MS)
+
+					await vi.waitFor(() =>
+						expect(vm.panelOriginCaLine).toMatch(/Cloudflare Origin CA/),
+					)
+					// Ya salió: no pregunta más.
+					const asked = ingress.getProxyStatus.mock.calls.length
+					await vi.advanceTimersByTimeAsync(3 * PROXY_REFRESH_MS)
+					expect(ingress.getProxyStatus.mock.calls.length).toBe(asked)
+				} finally {
+					vi.useRealTimers()
+				}
+			})
+		})
+
+		it('Cloudflare caído (502): el aviso dice que no se cambió nada; apagarlos también cierra la confirmación', async () => {
+			mocks.setCloudflareOriginCa.mockRejectedValueOnce(new CloudflareUnavailable())
+			const vm = await mountViewModel(ON)
+
+			vm.toggleOriginCa(false)
+			await vm.confirmOriginCaOff()
+
+			expect(vm.originCaError).toBe(m.admin_cf_origin_ca_unavailable())
+			expect(vm.confirmingOriginCaOff).toBe(false)
+			expect(vm.originCaChecked).toBe(true)
 		})
 	})
 })

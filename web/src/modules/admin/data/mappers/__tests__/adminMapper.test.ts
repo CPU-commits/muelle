@@ -14,6 +14,7 @@ const PHASE_3 = {
 	require_2fa: true,
 	cloudflare_token_set: true,
 	cloudflare_zones: 4,
+	cloudflare_origin_ca: false,
 	public_ip: '203.0.113.24',
 	public_ipv6: '2001:db8::24',
 	acme_email: 'ops@tudominio.cl',
@@ -37,13 +38,18 @@ describe('adminMapper', () => {
 		expect(settingsDtoSchema.safeParse({ ...PHASE_3, cloudflare_zones: null }).success).toBe(
 			true,
 		)
+		// cloudflare_origin_ca nunca es null, y es un bool (contrato §4).
+		for (const value of [null, 'true', 1]) {
+			const dto = { ...PHASE_3, cloudflare_origin_ca: value }
+			expect(settingsDtoSchema.safeParse(dto).success, String(value)).toBe(false)
+		}
 	})
 
 	it('arma cada sección', () => {
 		expect(settingsFromDto(settingsDtoSchema.parse(PHASE_3))).toEqual({
 			require2fa: true,
 			proxy: {
-				cloudflare: { tokenSet: true, zones: 4 },
+				cloudflare: { tokenSet: true, zones: 4, originCa: false },
 				publicIpv4: '203.0.113.24',
 				publicIpv6: '2001:db8::24',
 				acmeEmail: 'ops@tudominio.cl',
@@ -52,6 +58,15 @@ describe('adminMapper', () => {
 				httpsPort: 443,
 			},
 			panelAccess: { allowedCidrs: ['198.51.100.0/24'], clientIp: '198.51.100.17' },
+		})
+	})
+
+	it('los certificados de Cloudflare (Origin CA) van con el token, en cloudflare.originCa', () => {
+		const dto = settingsDtoSchema.parse({ ...PHASE_3, cloudflare_origin_ca: true })
+		expect(settingsFromDto(dto).proxy.cloudflare).toEqual({
+			tokenSet: true,
+			zones: 4,
+			originCa: true,
 		})
 	})
 
@@ -81,6 +96,15 @@ describe('adminMapper', () => {
 		expect(settingsPatchPayload({})).toEqual({})
 		// Quitar el token es mandar "".
 		expect(settingsPatchPayload({ cloudflareToken: '' })).toEqual({ cloudflare_token: '' })
+		// Los certificados de Cloudflare: encenderlos, y apagarlos junto con quitar el token
+		// (contrato §4.1). `false` también es un valor: va.
+		expect(settingsPatchPayload({ cloudflareOriginCa: true })).toEqual({
+			cloudflare_origin_ca: true,
+		})
+		expect(settingsPatchPayload({ cloudflareToken: '', cloudflareOriginCa: false })).toEqual({
+			cloudflare_token: '',
+			cloudflare_origin_ca: false,
+		})
 	})
 
 	it('un evento de auditoría pierde los details en el borde', () => {

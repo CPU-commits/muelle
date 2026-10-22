@@ -7,10 +7,11 @@ import {
 	InvalidCloudflareToken,
 	InvalidRegistryCredential,
 	InvalidRegistryHost,
+	OriginCaNeedsToken,
 	PortsDockerUnavailable,
 	WouldLockOut,
 } from '../../../../domain'
-import { adminErrorMessage, adminFieldError } from '../adminErrorMessage'
+import { adminErrorMessage, adminFieldError, originCaErrorMessage } from '../adminErrorMessage'
 
 describe('adminErrorMessage', () => {
 	it('Cloudflare caído no es un problema del token: dice que se reintente', () => {
@@ -125,5 +126,33 @@ describe('adminFieldError', () => {
 		expect(
 			adminFieldError(new ValidationError('Cloudflare rechazó el token', 'cloudflareToken')),
 		).toEqual({ field: 'cloudflareToken', message: 'Cloudflare rechazó el token' })
+	})
+})
+
+// El aviso de la tarjeta de Cloudflare cuando no se pudieron cambiar los certificados de
+// Cloudflare (Origin CA, contrato §4.1).
+describe('originCaErrorMessage', () => {
+	it('sin token, el texto del panel; el 422 del backend, su motivo como oración', () => {
+		expect(originCaErrorMessage(new OriginCaNeedsToken())).toBe(
+			m.admin_cf_origin_ca_needs_token(),
+		)
+		const reason =
+			'el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona tudominio.cl (lo necesitan los certificados de Cloudflare): agrégalo al token en Cloudflare, o deja la opción apagada'
+		expect(originCaErrorMessage(new ValidationError(reason, 'cloudflareOriginCa'))).toBe(
+			`E${reason.slice(1)}`,
+		)
+	})
+
+	it('Cloudflare caído dice que no se cambió nada y que se reintente', () => {
+		expect(originCaErrorMessage(new CloudflareUnavailable())).toBe(
+			m.admin_cf_origin_ca_unavailable(),
+		)
+		expect(m.admin_cf_origin_ca_unavailable()).toMatch(/no se cambió nada/)
+		expect(m.admin_cf_origin_ca_unavailable({}, { locale: 'en' })).toMatch(/nothing changed/)
+	})
+
+	it('lo demás, como cualquier error de Ajustes', () => {
+		const error = new UnavailableError('caído', { reason: 'network' })
+		expect(originCaErrorMessage(error)).toBe(adminErrorMessage(error))
 	})
 })

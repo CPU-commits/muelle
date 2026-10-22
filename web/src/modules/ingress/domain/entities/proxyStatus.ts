@@ -1,3 +1,6 @@
+import type { CertSource } from '../value-objects/domainStatus'
+import type { OriginCaState } from './originCa'
+
 // El estado del proxy de muelle (muelle-caddy), para el aviso "proxy desincronizado" (spec
 // §8 y §13; contrato §3.3, `GET /proxy`). Es de la Fase 3: sin ella, no se muestra nada.
 
@@ -39,6 +42,18 @@ export interface PortsRollback {
 	readonly at: Date
 }
 
+/**
+ * El certificado del panel (`panel_certificate`, contrato §3.3): como el de un dominio, sin
+ * `status` ni la verificación de muelle, y sin Reintentar (su falla se reintenta sola).
+ */
+export interface PanelCertificate {
+	/** `panel_domain`. */
+	readonly hostname: string
+	readonly certSource: CertSource
+	/** null con los certificados de Cloudflare apagados, sin token o con el proxy deshabilitado. */
+	readonly originCa: OriginCaState | null
+}
+
 export interface ProxyStatus {
 	readonly status: ProxySyncStatus
 	/** El motivo de `out_of_sync`, o del último fallo del contenedor. */
@@ -47,6 +62,8 @@ export interface ProxyStatus {
 	readonly syncedAt: Date | null
 	readonly caddy: CaddyState
 	readonly portsRollback: PortsRollback | null
+	/** null sin dominio del panel. */
+	readonly panelCertificate: PanelCertificate | null
 }
 
 /**
@@ -69,4 +86,12 @@ export function proxyNotice(proxy: ProxyStatus | null | undefined): ProxyNotice 
 /** Mientras el proxy se está arreglando solo, se pregunta de nuevo cada tanto. */
 export function proxySettling(proxy: ProxyStatus | null | undefined): boolean {
 	return proxy?.status === 'out_of_sync' || proxy?.status === 'recreating'
+}
+
+/**
+ * muelle está emitiendo el certificado de Cloudflare del panel (contrato §3.7): termina en
+ * segundos, o en unos minutos con muchos dominios, y Ajustes lo sigue hasta que sale.
+ */
+export function panelCertificateIssuing(proxy: ProxyStatus | null | undefined): boolean {
+	return proxy?.panelCertificate?.originCa?.status === 'issuing'
 }

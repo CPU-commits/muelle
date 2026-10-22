@@ -12,6 +12,7 @@ import type {
 	SettingsPatch,
 	SettingsRepository,
 } from '../..'
+import { ValidationError } from '@/shared/domain'
 import {
 	cidrListAllows,
 	RegistryExists,
@@ -22,7 +23,7 @@ import {
 
 export function fakeProxySettings(overrides: Partial<ProxySettings> = {}): ProxySettings {
 	return {
-		cloudflare: { tokenSet: true, zones: 4 },
+		cloudflare: { tokenSet: true, zones: 4, originCa: false },
 		publicIpv4: '203.0.113.24',
 		publicIpv6: '',
 		acmeEmail: 'ops@tudominio.cl',
@@ -79,6 +80,28 @@ export class InMemorySettingsRepository implements SettingsRepository {
 			return Promise.reject(new WouldLockOut())
 		}
 		const removingToken = patch.cloudflareToken === ''
+		const cloudflare = proxy.cloudflare
+		const tokenAfter = removingToken
+			? false
+			: patch.cloudflareToken !== undefined || cloudflare.tokenSet
+		const originCaAfter = patch.cloudflareOriginCa ?? cloudflare.originCa
+		// Las reglas de `cloudflare_origin_ca` sin token (contrato §4.1), con sus motivos.
+		if (patch.cloudflareOriginCa === true && !cloudflare.originCa && !tokenAfter) {
+			return Promise.reject(
+				new ValidationError(
+					'necesita el token de Cloudflare: configúralo antes de activarla',
+					'cloudflareOriginCa',
+				),
+			)
+		}
+		if (removingToken && cloudflare.tokenSet && originCaAfter) {
+			return Promise.reject(
+				new ValidationError(
+					'sin token no se pueden usar los certificados de Cloudflare: mándala en false en el mismo cambio para quitar el token',
+					'cloudflareOriginCa',
+				),
+			)
+		}
 		this.settings = {
 			require2fa: patch.require2fa ?? this.settings.require2fa,
 			proxy: {
@@ -89,10 +112,10 @@ export class InMemorySettingsRepository implements SettingsRepository {
 				httpPort: patch.httpPort ?? proxy.httpPort,
 				httpsPort: patch.httpsPort ?? proxy.httpsPort,
 				cloudflare: removingToken
-					? { tokenSet: false, zones: null }
+					? { tokenSet: false, zones: null, originCa: originCaAfter }
 					: patch.cloudflareToken !== undefined
-						? { tokenSet: true, zones: 3 }
-						: proxy.cloudflare,
+						? { tokenSet: true, zones: 3, originCa: originCaAfter }
+						: { ...cloudflare, originCa: originCaAfter },
 			},
 			panelAccess: {
 				...panelAccess,

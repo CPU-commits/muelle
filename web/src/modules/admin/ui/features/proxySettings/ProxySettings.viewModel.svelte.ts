@@ -3,10 +3,12 @@ import { untrack } from 'svelte'
 import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query'
 import { heldWritesOrigin, holdWrites, releaseWrites } from '@/shared/data/http/client'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { formatRelative, withQuery } from '@/shared/ui'
+import { formatDate, formatRelative, withQuery } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
 import {
 	ingressKeys,
+	originCaNotice,
+	type OriginCaState,
 	type PortsRollback,
 	proxyFollowQuery,
 	proxyNotice,
@@ -17,6 +19,7 @@ import {
 	adminKeys,
 	removeCloudflareTokenMutation,
 	replaceCloudflareTokenMutation,
+	setCloudflareOriginCaMutation,
 	updateAcmeEmailMutation,
 	updateProxyPortsMutation,
 	updatePublicIpMutation,
@@ -31,7 +34,12 @@ import {
 	type ProxySettings,
 	type Settings,
 } from '../../../domain'
-import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
+import {
+	adminErrorMessage,
+	adminFieldError,
+	originCaErrorMessage,
+	sentence,
+} from '../../components/adminMessages'
 import { currentOrigin } from './currentOrigin'
 import { clearPanelMove, loadPanelMove, PANEL_MOVED_PARAM, savePanelMove } from './panelMoveNotice'
 import { loadDismissedRollback, saveDismissedRollback } from './rollbackNotice'
@@ -71,7 +79,9 @@ export interface PortsMove {
  * Cómo va muelle-caddy después de cambiar los puertos sin mudarse de origen (contrato §3.5):
  * se recrea con los puertos nuevos, quedó escuchando, no pudo (un puerto ocupado: el
  * `error` de `GET /proxy`, y muelle reintenta con los mismos puertos), o pasó el plazo sin
- * una respuesta que lo diga (`unknown`: `GET /proxy` falló o seguía diciendo `recreating`).
+ * una respuesta que lo diga (`unknown`: no llegó ninguna después del cambio, o el último
+ * pedido falló). Pasado el plazo, una respuesta que sigue diciendo `recreating` es
+ * `recreating`: muelle responde y todavía no terminó.
  */
 export type PortsRecreation =
 	| { readonly kind: 'recreating' }
@@ -101,6 +111,23 @@ export interface PortsRollbackView {
 export interface CloudflareNotice {
 	readonly title: string
 	readonly body: string | null
+}
+
+/** De dónde sale el certificado del panel, para "Panel: {source}". */
+function panelCertificateSource(originCa: OriginCaState): string {
+	switch (originCa.status) {
+		case 'active':
+			return originCa.expiresAt
+				? m.admin_cf_origin_ca_panel_origin_ca({ date: formatDate(originCa.expiresAt) })
+				: 'Cloudflare Origin CA'
+		case 'dns_only':
+			return m.admin_cf_origin_ca_panel_dns_only()
+		case 'issuing':
+			return m.admin_cf_origin_ca_panel_issuing()
+		case 'failed':
+		case 'not_eligible':
+			return m.admin_cf_origin_ca_panel_letsencrypt()
+	}
 }
 
 /**
@@ -141,6 +168,10 @@ export class ProxySettingsViewModel {
 	/** Por qué no se pudieron cambiar los puertos; se muestra adentro de la confirmación. */
 	portsError = $state<string | null>(null)
 	errors = $state<FieldErrors>({})
+	/** Por qué no se cambiaron los certificados de Cloudflare: un aviso en la tarjeta. */
+	originCaError = $state<string | null>(null)
+	/** Se pide confirmar el apagado: los dominios vuelven a Let's Encrypt. */
+	confirmingOriginCaOff = $state(false)
 
 	readonly #proxy: () => ProxySettings
 	readonly #client = useQueryClient()
@@ -149,6 +180,12 @@ export class ProxySettingsViewModel {
 	readonly #ports = createMutation(() => updateProxyPortsMutation(this.#client))
 	readonly #cloudflare = createMutation(() => replaceCloudflareTokenMutation(this.#client))
 	readonly #removeCloudflare = createMutation(() => removeCloudflareTokenMutation(this.#client))
+	readonly #originCa = createMutation(() => setCloudflareOriginCaMutation(this.#client))
+	/**
+	 * Cuántas veces se movió el switch de los certificados de Cloudflare: el switch muestra
+	 * siempre lo guardado, y cada movimiento lo vuelve a poner ahí (ver `originCaChecked`).
+	 */
+	#originCaMoves = $state(0)
 	/** Se prende al cambiar los puertos: se sigue la recreación y si muelle vuelve atrás. */
 	#watchingProxy = $state(false)
 	/**
@@ -165,11 +202,12 @@ export class ProxySettingsViewModel {
 	/** Cuándo se guardaron: un estado del proxy de antes (en el cache) no dice nada. */
 	#watchingSince = 0
 	// `GET /proxy` (ingress): se pide al abrir Ajustes (por si muelle volvió a los puertos
-	// anteriores: `ports_rollback`) y, después de cambiar los puertos, se vuelve a pedir
-	// mientras no diga cómo terminó, aunque falle (2 min como mucho). `waiting` y `expired` los
-	// llama TanStack adentro del efecto que suscribe la query: leídos con `untrack`, o cada
-	// respuesta haría que se vuelva a suscribir, y eso cancela el pedido en curso (y descarta
-	// su respuesta).
+	// anteriores: `ports_rollback`; y el certificado del panel, `panel_certificate`, que
+	// `proxyFollowQuery` sigue mientras se emite) y, después de cambiar los puertos, se vuelve
+	// a pedir mientras no diga cómo terminó, aunque falle (2 min como mucho). `waiting` y
+	// `expired` los llama TanStack adentro del efecto que suscribe la query: leídos con
+	// `untrack`, o cada respuesta haría que se vuelva a suscribir, y eso cancela el pedido en
+	// curso (y descarta su respuesta).
 	readonly #proxyStatus = createQuery(() =>
 		proxyFollowQuery({
 			waiting: () => untrack(() => this.#awaitingProxy),
@@ -235,6 +273,63 @@ export class ProxySettingsViewModel {
 		return zones === 1 ? m.admin_cf_zones_one() : m.admin_cf_zones({ count: zones })
 	}
 
+	/**
+	 * El certificado de Cloudflare del panel (`panel_certificate` de `GET /proxy`, contrato
+	 * §3.3), si los certificados de Cloudflare están encendidos y `GET /proxy` lo trae.
+	 */
+	get #panelOriginCa(): OriginCaState | null {
+		if (!this.proxy.cloudflare.originCa) return null
+		return this.#proxyStatus.data?.panelCertificate?.originCa ?? null
+	}
+
+	/**
+	 * Qué certificado usa el panel: "Panel: Cloudflare Origin CA · vence 19 ene 2027", o Let's
+	 * Encrypt (en DNS only en Cloudflare, mientras se emite el de Cloudflare, o si no se pudo).
+	 * null con los certificados de Cloudflare apagados, o si no se sabe.
+	 */
+	get panelOriginCaLine(): string | null {
+		const originCa = this.#panelOriginCa
+		if (!originCa) return null
+		return m.admin_cf_origin_ca_panel({ source: panelCertificateSource(originCa) })
+	}
+
+	/**
+	 * Si falló la emisión o la renovación del certificado de Cloudflare del panel, con el
+	 * mensaje de muelle. Sin Reintentar: el panel no tiene `retry` y se reintenta solo
+	 * (contrato §3.7), lo que ya dice el mensaje.
+	 */
+	get panelOriginCaWarning(): CloudflareNotice | null {
+		const originCa = this.#panelOriginCa
+		if (!originCa) return null
+		// El panel no tiene Proxied en muelle: su DNS only es siempre el de Cloudflare.
+		const notice = originCaNotice({ proxied: true, originCa })
+		if (notice !== 'failed' && notice !== 'renew_failed') return null
+		return {
+			title:
+				notice === 'failed'
+					? m.admin_cf_origin_ca_panel_failed()
+					: m.admin_cf_origin_ca_panel_renew_failed(),
+			body: originCa.error ? sentence(originCa.error) : null,
+		}
+	}
+
+	/**
+	 * La descripción del modal del token: con los certificados de Cloudflare encendidos, el
+	 * token nuevo también necesita su permiso (si no, el backend lo rechaza en el campo).
+	 */
+	get cloudflareModalDescription(): string {
+		return this.proxy.cloudflare.originCa
+			? `${m.admin_cf_modal_description()} ${m.admin_cf_modal_origin_ca()}`
+			: m.admin_cf_modal_description()
+	}
+
+	/** La confirmación de quitar el token: con los certificados de Cloudflare, también se apagan. */
+	get removeCloudflareBody(): string {
+		return this.proxy.cloudflare.originCa
+			? `${m.admin_cf_remove_body()} ${m.admin_cf_remove_body_origin_ca()}`
+			: m.admin_cf_remove_body()
+	}
+
 	get isIpDirty(): boolean {
 		return (
 			this.ipv4.trim() !== this.proxy.publicIpv4 ||
@@ -284,7 +379,9 @@ export class ProxySettingsViewModel {
 	 * (este origen deja de responder) o sin el proxy de muelle (`disabled`): los puertos ya se
 	 * guardaron, esto es solo el seguimiento. Mientras `GET /proxy` no diga cómo terminó
 	 * (también si falla: el panel puede pasar por el mismo muelle-caddy que se recrea), dice
-	 * `recreating`, hasta `PORTS_WATCH_TIMEOUT_MS`; después, `unknown`.
+	 * `recreating`, hasta `PORTS_WATCH_TIMEOUT_MS`; después, `unknown` si no hubo una
+	 * respuesta desde el cambio o el último pedido falló, y `recreating` si muelle responde
+	 * que todavía recrea.
 	 */
 	get recreation(): PortsRecreation | null {
 		// Si se fue de esta dirección, el aviso de la nueva dice a dónde ir; si volvió atrás,
@@ -292,11 +389,17 @@ export class ProxySettingsViewModel {
 		if (!this.#watchingProxy || this.#leaving || this.#rollbackStatus) return null
 		const fresh = this.#freshProxy
 		if (this.#awaitingProxy) return { kind: 'recreating' }
-		// Pasó el plazo sin una respuesta de después del cambio, o la última seguía recreando.
+		// Pasó el plazo sin una respuesta de después del cambio.
 		if (fresh === undefined) return { kind: 'unknown' }
 		const notice = proxyNotice(fresh)
 		if (notice === null) return { kind: 'done' }
-		if (notice === 'recreating') return { kind: 'unknown' }
+		// Pasado el plazo, muelle sigue diciendo que recrea: mientras responda, es lo que pasa
+		// (se sigue preguntando). Si el último pedido falló, ya no se sabe.
+		if (notice === 'recreating') {
+			return this.#proxyStatus.status === 'error'
+				? { kind: 'unknown' }
+				: { kind: 'recreating' }
+		}
 		if (notice === 'disabled') return null
 		return { kind: 'failed', error: fresh.error }
 	}
@@ -414,6 +517,80 @@ export class ProxySettingsViewModel {
 
 	get isRemovingCloudflare(): boolean {
 		return this.#removeCloudflare.isPending
+	}
+
+	/**
+	 * Lo que muestra el switch de los certificados de Cloudflare: lo guardado, no es
+	 * optimista. Depende también de `#originCaMoves`: si el usuario lo mueve y lo guardado no
+	 * cambia (se pide confirmar, sigue guardando o falló), el switch vuelve a lo guardado.
+	 */
+	get originCaChecked(): boolean {
+		void this.#originCaMoves
+		return this.proxy.cloudflare.originCa
+	}
+
+	get isSavingOriginCa(): boolean {
+		return this.#originCa.isPending
+	}
+
+	/**
+	 * Sin token no se pueden encender (contrato §4.1). Si quedaron encendidos sin token (un
+	 * cambio a mano en la base), apagarlos sí se puede.
+	 */
+	get originCaDisabled(): boolean {
+		const { tokenSet, originCa } = this.proxy.cloudflare
+		return this.#originCa.isPending || (!tokenSet && !originCa)
+	}
+
+	/** Qué hacen, el permiso que necesita el token y, sin token, qué falta. */
+	get originCaHelp(): string {
+		const help = `${m.admin_cf_origin_ca_help()} ${m.admin_cf_origin_ca_permission()}`
+		return this.proxy.cloudflare.tokenSet
+			? help
+			: `${help} ${m.admin_cf_origin_ca_needs_token()}`
+	}
+
+	/**
+	 * El switch se movió. Encenderlos guarda enseguida; apagarlos pide confirmación (la vuelta
+	 * a Let's Encrypt puede dar un `525` un momento). En los dos casos el switch sigue en lo
+	 * guardado hasta que el cambio se guarde.
+	 */
+	toggleOriginCa = (enabled: boolean): void => {
+		this.#originCaMoves += 1
+		if (this.#originCa.isPending || enabled === this.proxy.cloudflare.originCa) return
+		this.originCaError = null
+		if (enabled) {
+			void this.#saveOriginCa(true)
+			return
+		}
+		this.confirmingOriginCaOff = true
+	}
+
+	cancelOriginCaOff = (): void => {
+		if (this.#originCa.isPending) return
+		this.confirmingOriginCaOff = false
+	}
+
+	confirmOriginCaOff = async (): Promise<void> => {
+		await this.#saveOriginCa(false)
+	}
+
+	async #saveOriginCa(enabled: boolean): Promise<void> {
+		if (this.#originCa.isPending) return
+		this.originCaError = null
+		try {
+			await this.#originCa.mutateAsync({ enabled, current: this.proxy.cloudflare })
+			// Los dominios y el panel recalculan `cert_source` y `origin_ca` (contrato §3.7).
+			this.#refreshIngress()
+			toast.success(
+				enabled ? m.admin_cf_origin_ca_enabled() : m.admin_cf_origin_ca_disabled(),
+			)
+		} catch (error) {
+			// No se guardó nada: el switch sigue en lo guardado, y el motivo va en la tarjeta.
+			this.originCaError = originCaErrorMessage(error)
+		} finally {
+			this.confirmingOriginCaOff = false
+		}
 	}
 
 	setField = (field: ProxyField, value: string): void => {
@@ -582,7 +759,7 @@ export class ProxySettingsViewModel {
 		if (this.#removeCloudflare.isPending) return
 		this.removeCloudflareError = null
 		try {
-			await this.#removeCloudflare.mutateAsync()
+			await this.#removeCloudflare.mutateAsync(this.proxy.cloudflare)
 			this.#refreshIngress()
 			toast.success(m.admin_cf_removed())
 			this.confirmingRemoveCloudflare = false

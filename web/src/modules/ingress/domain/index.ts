@@ -6,6 +6,7 @@ export type {
 	DomainChanges,
 	DomainState,
 	NewDomain,
+	OriginCaNotice,
 } from './entities/appDomain'
 export {
 	canToggleProxied,
@@ -18,11 +19,15 @@ export {
 	hasWaitingDns,
 	isReachable,
 	manualRecords,
+	ORIGIN_CA_RENEW_DAYS,
+	originCaExpiresSoon,
+	originCaNotice,
 	publicAddress,
 	replaceDomain,
 	sortDomains,
 	suggestedTargets,
 } from './entities/appDomain'
+export type { OriginCaState } from './entities/originCa'
 export {
 	DomainNotFound,
 	CloudflareUnavailable,
@@ -32,13 +37,19 @@ export {
 } from './errors/ingressErrors'
 export type {
 	CaddyState,
+	PanelCertificate,
 	PortsRollback,
 	ProxyNotice,
 	ProxyPorts,
 	ProxyStatus,
 	ProxySyncStatus,
 } from './entities/proxyStatus'
-export { PROXY_SYNC_STATUSES, proxyNotice, proxySettling } from './entities/proxyStatus'
+export {
+	panelCertificateIssuing,
+	PROXY_SYNC_STATUSES,
+	proxyNotice,
+	proxySettling,
+} from './entities/proxyStatus'
 export type { DomainRepository, IngressDeps } from './repositories/domainRepository'
 export type { ProxyDeps, ProxyRepository } from './repositories/proxyRepository'
 export type { GetProxyStatus } from './use-cases/getProxyStatus'
@@ -61,15 +72,21 @@ export type { AppRef } from './value-objects/appRef'
 export type { DomainTarget, TargetProblem } from './value-objects/domainTarget'
 export { formatTarget, parseTarget, sameTarget, targetProblem } from './value-objects/domainTarget'
 export type {
+	CertSource,
 	DnsRecordType,
 	DomainErrorKind,
 	DomainStatus,
+	OriginCaErrorCode,
+	OriginCaStatus,
 	TlsMode,
 } from './value-objects/domainStatus'
 export {
+	CERT_SOURCES,
 	DNS_RECORD_TYPES,
 	DOMAIN_ERROR_KINDS,
 	DOMAIN_STATUSES,
+	ORIGIN_CA_ERROR_CODES,
+	ORIGIN_CA_STATUSES,
 	TLS_MODES,
 } from './value-objects/domainStatus'
 export type { Hostname, HostnameProblem } from './value-objects/hostname'

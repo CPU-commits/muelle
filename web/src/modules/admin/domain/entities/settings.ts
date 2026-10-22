@@ -6,6 +6,12 @@ export interface CloudflareStatus {
 	readonly tokenSet: boolean
 	/** Cuántas zonas ve el token, si el backend lo sabe. */
 	readonly zones: number | null
+	/**
+	 * Los certificados de Cloudflare (Origin CA, contrato §3.7): con el token y el permiso
+	 * Zone → SSL and Certificates → Edit, los dominios con el proxy (nube naranja), también
+	 * el del panel, usan uno de Cloudflare en vez de Let's Encrypt. Apagado por defecto.
+	 */
+	readonly originCa: boolean
 }
 
 export interface ProxySettings {
@@ -47,6 +53,11 @@ export interface SettingsPatch {
 	readonly panelAllowedCidrs?: readonly string[]
 	/** `''` quita el token (y las zonas que veía). */
 	readonly cloudflareToken?: string
+	/**
+	 * Encender o apagar los certificados de Cloudflare (Origin CA). Quitar el token con la
+	 * opción encendida la apaga en el mismo cambio (contrato §4.1).
+	 */
+	readonly cloudflareOriginCa?: boolean
 	/** Guardar una lista de IPs que deja fuera esta sesión (si no, `WouldLockOut`). */
 	readonly confirmLockout?: boolean
 }

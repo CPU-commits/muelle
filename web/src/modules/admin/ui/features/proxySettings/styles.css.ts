@@ -33,6 +33,42 @@ export const statusMeta = style({
 	color: theme.colors.text.tertiary,
 })
 
+// El switch de los certificados de Cloudflare: el título y la ayuda a la izquierda.
+export const switchRow = style({
+	display: 'flex',
+	alignItems: 'flex-start',
+	justifyContent: 'space-between',
+	gap: theme.space[16],
+	maxWidth: '560px',
+	cursor: 'pointer',
+})
+
+export const switchText = style({
+	display: 'flex',
+	flexDirection: 'column',
+	gap: theme.space[2],
+})
+
+export const switchTitle = style({
+	fontWeight: theme.typography.fontWeight.medium,
+})
+
+export const switchHint = style({
+	fontSize: theme.typography.fontSize[13],
+	color: theme.colors.text.tertiary,
+})
+
+export const switchControl = style({
+	flexShrink: 0,
+	marginTop: theme.space[2],
+})
+
+// Qué certificado usa el panel, con los certificados de Cloudflare encendidos.
+export const panelLine = style({
+	fontSize: theme.typography.fontSize[13],
+	color: theme.colors.text.secondary,
+})
+
 export const fields = style({
 	display: 'grid',
 	gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))',

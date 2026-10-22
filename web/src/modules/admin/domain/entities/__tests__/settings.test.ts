@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { movedPanelOrigin, panelOrigin, parsePanelOrigin, type ProxySettings } from '../..'
 
 const PROXY: ProxySettings = {
-	cloudflare: { tokenSet: false, zones: null },
+	cloudflare: { tokenSet: false, zones: null, originCa: false },
 	publicIpv4: '203.0.113.24',
 	publicIpv6: '',
 	acmeEmail: 'ops@tudominio.cl',

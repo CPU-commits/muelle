@@ -1,8 +1,11 @@
 import { z } from 'zod'
 import {
+	CERT_SOURCES,
 	DNS_RECORD_TYPES,
 	DOMAIN_ERROR_KINDS,
 	DOMAIN_STATUSES,
+	ORIGIN_CA_ERROR_CODES,
+	ORIGIN_CA_STATUSES,
 	PROXY_SYNC_STATUSES,
 	TLS_MODES,
 } from '../../domain'
@@ -17,6 +20,19 @@ export const dnsRecordDtoSchema = z.object({
 	type: z.enum(DNS_RECORD_TYPES),
 	name: z.string().min(1),
 	content: z.string().min(1),
+})
+
+/**
+ * El certificado de Cloudflare Origin CA de un hostname (contrato §3.7): las cinco claves van
+ * siempre. Un `error_code` que el panel no conoce se trata como una falla cualquiera, con su
+ * `error` (como `last_error_code`).
+ */
+export const originCaDtoSchema = z.object({
+	status: z.enum(ORIGIN_CA_STATUSES),
+	error_code: z.enum(ORIGIN_CA_ERROR_CODES).nullable().catch(null),
+	error: z.string().nullable(),
+	retry_at: timestamp.nullable(),
+	expires_at: timestamp.nullable(),
 })
 
 export const domainDtoSchema = z.object({
@@ -34,6 +50,10 @@ export const domainDtoSchema = z.object({
 	last_error_code: z.enum(DOMAIN_ERROR_KINDS).nullish().catch(null),
 	cert_issuer: z.string().nullish(),
 	cert_expires_at: timestamp.nullish(),
+	// Calculados, obligatorios (los certificados de Cloudflare, §3.1 y §3.7): `origin_ca` es
+	// null con la opción apagada, sin token o con el proxy deshabilitado.
+	cert_source: z.enum(CERT_SOURCES),
+	origin_ca: originCaDtoSchema.nullable(),
 	// Calculados con los ajustes actuales: `[]` sin IP pública.
 	records: z.array(dnsRecordDtoSchema).default([]),
 	created_at: timestamp.nullish(),
@@ -46,6 +66,16 @@ export const domainListDtoSchema = z.array(domainDtoSchema)
 const proxyPortsDtoSchema = z.object({
 	http_port: z.number().int(),
 	https_port: z.number().int(),
+})
+
+/**
+ * El certificado del panel (contrato §3.3): `cert_source` y `origin_ca` con las reglas de los
+ * de un dominio.
+ */
+export const panelCertificateDtoSchema = z.object({
+	hostname: z.string().min(1),
+	cert_source: z.enum(CERT_SOURCES),
+	origin_ca: originCaDtoSchema.nullable(),
 })
 
 /** `GET /proxy` (contrato §3.3): el estado de muelle-caddy. */
@@ -68,8 +98,11 @@ export const proxyDtoSchema = z.object({
 			at: timestamp,
 		})
 		.nullable(),
+	// El certificado del panel; null sin dominio del panel. Obligatorio, como `ports_rollback`.
+	panel_certificate: panelCertificateDtoSchema.nullable(),
 })
 
+export type OriginCaDto = z.infer<typeof originCaDtoSchema>
 export type DnsRecordDto = z.infer<typeof dnsRecordDtoSchema>
 export type DomainDto = z.infer<typeof domainDtoSchema>
 export type ProxyDto = z.infer<typeof proxyDtoSchema>

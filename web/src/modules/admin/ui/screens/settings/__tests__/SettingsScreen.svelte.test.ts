@@ -4,7 +4,7 @@ import { render } from 'vitest-browser-svelte'
 import { createQueryClient } from '@/shared/data/query'
 import { formatDateTime } from '@/shared/ui'
 import { authKeys } from '@/modules/auth'
-import type { Settings } from '../../../../domain'
+import { CloudflareUnavailable, type Settings } from '../../../../domain'
 import SettingsView from './SettingsView.svelte'
 
 const mocks = vi.hoisted(() => ({
@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 	listAudit: vi.fn(),
 	listUsers: vi.fn(),
 	listTokens: vi.fn(),
+	setCloudflareOriginCa: vi.fn(),
 }))
 
 vi.mock('@/modules/admin/container', () => ({
@@ -24,6 +25,7 @@ vi.mock('@/modules/admin/container', () => ({
 		updateProxyPorts: vi.fn(),
 		replaceCloudflareToken: vi.fn(),
 		removeCloudflareToken: vi.fn(),
+		setCloudflareOriginCa: mocks.setCloudflareOriginCa,
 		listAudit: mocks.listAudit,
 		listRegistries: mocks.listRegistries,
 		addRegistry: vi.fn(),
@@ -36,6 +38,13 @@ vi.mock('@/modules/admin/container', () => ({
 // anteriores.
 const ingress = vi.hoisted(() => ({ getProxyStatus: vi.fn() }))
 vi.mock('@/modules/ingress/container', () => ({ ingressUseCases: ingress }))
+
+// El origen de la página: el de vitest, salvo que un test entre por una dirección de Caddy
+// (`https://<panel_domain>[:puerto]`), que no es la de vitest.
+const page = vi.hoisted(() => ({ origin: null as string | null }))
+vi.mock('@/modules/admin/ui/features/proxySettings/currentOrigin', () => ({
+	currentOrigin: () => page.origin ?? location.origin,
+}))
 
 // Usuarios es de identity.
 vi.mock('@/modules/identity/container', () => ({
@@ -55,7 +64,7 @@ vi.mock('@/modules/identity/container', () => ({
 const SETTINGS: Settings = {
 	require2fa: false,
 	proxy: {
-		cloudflare: { tokenSet: true, zones: 4 },
+		cloudflare: { tokenSet: true, zones: 4, originCa: false },
 		publicIpv4: '203.0.113.24',
 		publicIpv6: '',
 		acmeEmail: 'ops@tudominio.cl',
@@ -80,12 +89,14 @@ describe('SettingsScreen', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		localStorage.clear()
+		page.origin = null
 		ingress.getProxyStatus.mockResolvedValue({
 			status: 'synced',
 			error: null,
 			syncedAt: new Date('2026-10-16T12:00:00Z'),
 			caddy: { image: null, running: true, httpPort: 80, httpsPort: 443 },
 			portsRollback: null,
+			panelCertificate: null,
 		})
 		mocks.listAudit.mockResolvedValue({ items: [], nextCursor: null })
 		mocks.listUsers.mockResolvedValue([
@@ -173,6 +184,139 @@ describe('SettingsScreen', () => {
 		await expect
 			.element(ports.getByRole('link', { name: 'Volver a la dirección anterior' }))
 			.not.toBeInTheDocument()
+	})
+
+	it('en la dirección que falló, Puertos ofrece volver a la anterior: Ajustes allá', async () => {
+		// Una pestaña que quedó en la dirección nueva: muelle-caddy no arrancó con el 8443 y
+		// muelle volvió al 443 (contrato §3.5).
+		page.origin = 'https://panel.tudominio.cl:8443'
+		mocks.getSettings.mockResolvedValue(SETTINGS)
+		mocks.listRegistries.mockResolvedValue([])
+		ingress.getProxyStatus.mockResolvedValue({
+			status: 'synced',
+			error: null,
+			syncedAt: new Date('2026-10-16T12:00:00Z'),
+			caddy: { image: null, running: true, httpPort: 80, httpsPort: 443 },
+			portsRollback: {
+				attempted: { httpPort: 80, httpsPort: 8443 },
+				restored: { httpPort: 80, httpsPort: 443 },
+				error: 'el puerto 8443 del host ya está en uso, y muelle-caddy no pudo arrancar con él',
+				at: new Date(Date.now() - 60_000),
+			},
+			panelCertificate: null,
+		})
+
+		const screen = await render(SettingsView, { client: client() })
+
+		const ports = screen.getByRole('region', { name: 'Puertos del proxy' })
+		await expect
+			.element(
+				ports.getByText(
+					/La dirección del panel sigue siendo https:\/\/panel\.tudominio\.cl\./,
+				),
+			)
+			.toBeVisible()
+		const back = ports.getByRole('link', { name: 'Volver a la dirección anterior' })
+		await expect.element(back).toBeVisible()
+		await expect.element(back).toHaveAttribute('href', 'https://panel.tudominio.cl/ajustes')
+	})
+
+	it('el switch de los certificados de Cloudflare muestra lo guardado: apagarlo pide confirmar, y cancelar lo deja encendido', async () => {
+		mocks.getSettings.mockResolvedValue({
+			...SETTINGS,
+			proxy: {
+				...SETTINGS.proxy,
+				cloudflare: { tokenSet: true, zones: 4, originCa: true },
+			},
+		})
+		mocks.listRegistries.mockResolvedValue([])
+
+		const screen = await render(SettingsView, { client: client() })
+
+		const toggle = screen.getByRole('switch', {
+			name: /Certificados de Cloudflare \(Origin CA\)/,
+		})
+		await expect.element(toggle).toBeChecked()
+		await toggle.click()
+
+		const dialog = screen.getByRole('dialog', { name: "¿Volver a Let's Encrypt?" })
+		await expect.element(dialog).toBeVisible()
+		await expect.element(toggle).toBeChecked()
+		await dialog.getByRole('button', { name: 'Cancelar' }).click()
+		await expect.element(dialog).not.toBeInTheDocument()
+		await expect.element(toggle).toBeChecked()
+		expect(mocks.setCloudflareOriginCa).not.toHaveBeenCalled()
+	})
+
+	it('con los certificados de Cloudflare encendidos, la tarjeta dice cuál usa el panel y el aviso de su falla', async () => {
+		mocks.getSettings.mockResolvedValue({
+			...SETTINGS,
+			proxy: {
+				...SETTINGS.proxy,
+				cloudflare: { tokenSet: true, zones: 4, originCa: true },
+			},
+		})
+		mocks.listRegistries.mockResolvedValue([])
+		const error =
+			"muelle no pudo emitir el certificado de Cloudflare: el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de panel.tudominio.cl (Cloudflare: Authentication error); agrégalo al token: muelle lo reintenta solo cada 6 h; mientras tanto usa Let's Encrypt"
+		ingress.getProxyStatus.mockResolvedValue({
+			status: 'synced',
+			error: null,
+			syncedAt: new Date('2026-10-16T12:00:00Z'),
+			caddy: { image: null, running: true, httpPort: 80, httpsPort: 443 },
+			portsRollback: null,
+			panelCertificate: {
+				hostname: 'panel.tudominio.cl',
+				certSource: 'letsencrypt',
+				originCa: {
+					status: 'failed',
+					errorCode: 'permission',
+					error,
+					retryAt: new Date(),
+					expiresAt: null,
+				},
+			},
+		})
+
+		const screen = await render(SettingsView, { client: client() })
+
+		const cloudflare = screen.getByRole('region', { name: 'Cloudflare' })
+		await expect.element(cloudflare.getByText("Panel: Let's Encrypt")).toBeVisible()
+		await expect
+			.element(
+				cloudflare.getByText('No se pudo emitir el certificado de Cloudflare del panel'),
+			)
+			.toBeVisible()
+		await expect.element(cloudflare.getByText(`M${error.slice(1)}`)).toBeVisible()
+		// El panel no tiene Reintentar: se reintenta solo.
+		await expect
+			.element(cloudflare.getByRole('button', { name: 'Reintentar' }))
+			.not.toBeInTheDocument()
+	})
+
+	it('si encenderlos falla, el switch sigue apagado y la tarjeta dice por qué', async () => {
+		mocks.getSettings.mockResolvedValue(SETTINGS)
+		mocks.listRegistries.mockResolvedValue([])
+		mocks.setCloudflareOriginCa.mockRejectedValueOnce(new CloudflareUnavailable())
+
+		const screen = await render(SettingsView, { client: client() })
+
+		const toggle = screen.getByRole('switch', {
+			name: /Certificados de Cloudflare \(Origin CA\)/,
+		})
+		await expect.element(toggle).not.toBeChecked()
+		await toggle.click()
+
+		const cloudflare = screen.getByRole('region', { name: 'Cloudflare' })
+		await expect
+			.element(
+				cloudflare.getByText(
+					'Cloudflare no respondió: no se cambió nada. Vuelve a intentarlo en un momento.',
+				),
+			)
+			.toBeVisible()
+		expect(mocks.setCloudflareOriginCa).toHaveBeenCalledOnce()
+		await expect.element(toggle).not.toBeChecked()
 	})
 
 	it('cuándo se actualizó un registry es un <time> con la fecha, y la fecha exacta se lee', async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
 	appLogLineDtoSchema,
 	appStatusDtoSchema,
+	deployAcceptedDtoSchema,
 	deployDtoSchema,
 	logPageDtoSchema,
 } from '../../dtos/deployDto'
@@ -283,8 +284,26 @@ describe('payloads', () => {
 	})
 
 	it('deployAcceptedFromDto se queda con el id', () => {
-		expect(deployAcceptedFromDto({ id: 145, status_url: '/api/v1/…/deploys/145' })).toEqual({
+		expect(
+			deployAcceptedFromDto({
+				id: 145,
+				status: 'queued',
+				status_url: '/api/v1/…/deploys/145',
+			}),
+		).toEqual({ id: 145 })
+	})
+
+	it('la respuesta de POST deploys y de rollback trae siempre status y status_url (contrato §2.2)', () => {
+		const accepted = {
 			id: 145,
-		})
+			status: 'queued',
+			status_url: '/api/v1/projects/auditfy/stages/staging/apps/api/deploys/145',
+		}
+		expect(deployAcceptedDtoSchema.safeParse(accepted).success).toBe(true)
+		for (const field of ['status', 'status_url'] as const) {
+			const rest: Record<string, unknown> = { ...accepted }
+			delete rest[field]
+			expect(deployAcceptedDtoSchema.safeParse(rest).success).toBe(false)
+		}
 	})
 })

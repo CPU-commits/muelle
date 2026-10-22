@@ -14,6 +14,11 @@ export function makeProxyStatus(overrides: Partial<ProxyStatus> = {}): ProxyStat
 			httpsPort: 443,
 		},
 		portsRollback: null,
+		panelCertificate: {
+			hostname: 'panel.tudominio.cl',
+			certSource: 'letsencrypt',
+			originCa: null,
+		},
 		...overrides,
 	}
 }

@@ -30,6 +30,7 @@ export {
 	InvalidPort,
 	InvalidRegistryCredential,
 	InvalidRegistryHost,
+	OriginCaNeedsToken,
 	PortsDockerUnavailable,
 	RegistryExists,
 	RegistryNotFound,
@@ -60,6 +61,8 @@ export type { ReplaceCloudflareToken } from './use-cases/replaceCloudflareToken'
 export { makeReplaceCloudflareToken } from './use-cases/replaceCloudflareToken'
 export type { RemoveCloudflareToken } from './use-cases/removeCloudflareToken'
 export { makeRemoveCloudflareToken } from './use-cases/removeCloudflareToken'
+export type { SetCloudflareOriginCa } from './use-cases/setCloudflareOriginCa'
+export { makeSetCloudflareOriginCa } from './use-cases/setCloudflareOriginCa'
 export type { UpdateAcmeEmail } from './use-cases/updateAcmeEmail'
 export { makeUpdateAcmeEmail } from './use-cases/updateAcmeEmail'
 export type { UpdateProxyPorts, UpdateProxyPortsInput } from './use-cases/updateProxyPorts'

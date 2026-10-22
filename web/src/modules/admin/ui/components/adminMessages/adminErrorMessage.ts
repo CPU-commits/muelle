@@ -12,6 +12,7 @@ import {
 	InvalidPort,
 	InvalidRegistryCredential,
 	InvalidRegistryHost,
+	OriginCaNeedsToken,
 	PortsDockerUnavailable,
 	REGISTRY_HOST_MAX_LENGTH,
 	REGISTRY_PASSWORD_MAX_BYTES,
@@ -36,6 +37,25 @@ export function adminErrorMessage(error: unknown): string {
 	// Lo común (sin red, un 5xx, una dirección que no es la del panel, demasiados
 	// intentos…).
 	return describeError(error)
+}
+
+/** Un mensaje del backend (en minúscula, estilo Go) para mostrar como oración. */
+export function sentence(text: string): string {
+	return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/**
+ * Por qué no se cambiaron los certificados de Cloudflare (Origin CA), para el aviso de la
+ * tarjeta: sin token, el texto del panel; el `422` del backend (al token le falta el permiso
+ * Zone → SSL and Certificates → Edit), su motivo; Cloudflare caído, que no se cambió nada.
+ */
+export function originCaErrorMessage(error: unknown): string {
+	if (error instanceof OriginCaNeedsToken) return m.admin_cf_origin_ca_needs_token()
+	if (error instanceof CloudflareUnavailable) return m.admin_cf_origin_ca_unavailable()
+	if (error instanceof ValidationError && error.field === 'cloudflareOriginCa') {
+		return sentence(error.message)
+	}
+	return adminErrorMessage(error)
 }
 
 const REGISTRY_HOST_MESSAGES: Record<RegistryHostProblem, () => string> = {
