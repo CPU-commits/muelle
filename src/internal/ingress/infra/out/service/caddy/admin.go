@@ -61,16 +61,17 @@ func NewAdmin(dial func(ctx context.Context) (net.Conn, error)) *Admin {
 // Load arma el JSON (Render) y lo manda con POST /load. Errores:
 // service.ErrPlaceholderInSettings sin mandar nada; service.ErrCaddyUnreachable
 // si no hubo respuesta; un *service.CaddyRejected si Caddy respondió con
-// error (y conserva la configuración anterior). Ninguno trae el token, ni
-// escapado.
+// error (y conserva la configuración anterior). Ninguno trae el token ni las
+// claves de Origin CA (secrets), ni escapados.
 func (a *Admin) Load(ctx context.Context, cfg service.ProxyConfig, force bool) error {
 	body, err := Render(cfg)
 	if err != nil {
 		return err
 	}
+	secrets := secretsOf(cfg)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loadURL, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("%w: %s", service.ErrCaddyUnreachable, redact(err.Error(), cfg.CloudflareToken))
+		return fmt.Errorf("%w: %s", service.ErrCaddyUnreachable, redact(err.Error(), secrets))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if force {
@@ -78,12 +79,12 @@ func (a *Admin) Load(ctx context.Context, cfg service.ProxyConfig, force bool) e
 	}
 	resp, err := a.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %s", service.ErrCaddyUnreachable, redact(err.Error(), cfg.CloudflareToken))
+		return fmt.Errorf("%w: %s", service.ErrCaddyUnreachable, redact(err.Error(), secrets))
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
 	if err != nil {
-		return fmt.Errorf("%w: leyendo la respuesta: %s", service.ErrCaddyUnreachable, redact(err.Error(), cfg.CloudflareToken))
+		return fmt.Errorf("%w: leyendo la respuesta: %s", service.ErrCaddyUnreachable, redact(err.Error(), secrets))
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
@@ -99,19 +100,54 @@ func (a *Admin) Load(ctx context.Context, cfg service.ProxyConfig, force bool) e
 	if msg == "" {
 		msg = "respondió " + strconv.Itoa(resp.StatusCode)
 	}
-	return &service.CaddyRejected{Message: redact(strings.ToValidUTF8(msg, "�"), cfg.CloudflareToken)}
+	return &service.CaddyRejected{Message: redact(strings.ToValidUTF8(msg, "�"), secrets)}
 }
 
-// redact reemplaza por "***" el token y sus formas escapadas (sin las
+// minSecretLine es el largo mínimo de una línea base64 de una clave que se
+// oculta sola: una más corta podría ser parte de cualquier texto.
+const minSecretLine = 16
+
+// secretsOf son lo que nunca sale en un error de Load: el token de
+// Cloudflare y cada clave de Origin CA, entera y cada una de sus líneas
+// base64 de 16 caracteres o más (contrato §3.4).
+func secretsOf(cfg service.ProxyConfig) []string {
+	secrets := []string{cfg.CloudflareToken}
+	addKey := func(p *service.OriginPEM) {
+		if p == nil || p.KeyPEM == "" {
+			return
+		}
+		secrets = append(secrets, p.KeyPEM)
+		for line := range strings.Lines(p.KeyPEM) {
+			line = strings.TrimSpace(line)
+			if len(line) >= minSecretLine && !strings.HasPrefix(line, "-----") {
+				secrets = append(secrets, line)
+			}
+		}
+	}
+	if cfg.Panel != nil {
+		addKey(cfg.Panel.OriginCA)
+	}
+	for _, r := range cfg.Routes {
+		addKey(r.OriginCA)
+	}
+	return secrets
+}
+
+// redact reemplaza por "***" cada secreto y sus formas escapadas (sin las
 // comillas de afuera): strconv.Quote, y JSON con y sin el escape de HTML,
 // también una dentro de otra. Las reemplaza de la más larga a la más corta,
-// y corta a 500 runas. Con token "" no reemplaza nada (un ReplaceAll con ""
+// y corta a 500 runas. Un secreto "" no reemplaza nada (un ReplaceAll con ""
 // metería *** entre cada letra).
-func redact(msg, token string) string {
-	if token != "" {
-		for _, form := range tokenForms(token) {
-			msg = strings.ReplaceAll(msg, form, "***")
+func redact(msg string, secrets []string) string {
+	var forms []string
+	for _, s := range secrets {
+		if s != "" {
+			forms = append(forms, tokenForms(s)...)
 		}
+	}
+	slices.SortFunc(forms, func(a, b string) int { return cmp.Or(cmp.Compare(len(b), len(a)), strings.Compare(a, b)) })
+	for _, form := range forms {
+		msg = strings.ReplaceAll(msg, form, "***")
 	}
 	return truncate(msg, maxMessage)
 }

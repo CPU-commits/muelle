@@ -127,6 +127,42 @@ func TestLoadRejected(t *testing.T) {
 	}
 }
 
+// Las claves de Origin CA tampoco salen en un rechazo de Caddy: ni el PEM
+// entero (tal cual o escapado) ni una línea base64 suelta (contrato §3.4).
+func TestLoadRejectedHidesOriginKeys(t *testing.T) {
+	const line1 = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgA1b2C3d4E5f6G7h8"
+	const line2 = "I9j0K1l2M3n4O5p6Q7r8S9t0U1v2W3x4Y5z6A7b8C9d0E1f2G3h4"
+	key := "-----BEGIN PRIVATE KEY-----\n" + line1 + "\n" + line2 + "\n-----END PRIVATE KEY-----\n"
+	cfg := loadConfig(testToken)
+	cfg.Routes[0].OriginCA = &service.OriginPEM{CertPEM: "-----BEGIN CERTIFICATE-----\nMIIBcert\n-----END CERTIFICATE-----\n", KeyPEM: key}
+	fake := caddytest.New(t)
+	a := NewAdmin(fake.Dial)
+	quoted, _ := json.Marshal(key)
+	for name, msg := range map[string]string{
+		"el PEM":         "loading certificates: tls: failed to find any PEM data in key input " + key,
+		"el PEM en JSON": "decoding: " + string(quoted),
+		"%q del PEM":     fmt.Sprintf("key %q", key),
+		"una línea":      "illegal base64 data at input byte 4 in " + line2 + " fin",
+	} {
+		fake.Reject(msg)
+		err := a.Load(context.Background(), cfg, false)
+		var rej *service.CaddyRejected
+		if !errors.As(err, &rej) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if strings.Contains(err.Error(), line1) || strings.Contains(err.Error(), line2) || !strings.Contains(rej.Message, "***") {
+			t.Errorf("%s: %q", name, rej.Message)
+		}
+	}
+	// El PEM del certificado no es secreto, y una línea corta tampoco se
+	// toca (podría ser parte de cualquier texto).
+	fake.Reject("certificado MIIBcert inválido")
+	err := a.Load(context.Background(), cfg, false)
+	if rej, ok := errors.AsType[*service.CaddyRejected](err); !ok || rej.Message != "certificado MIIBcert inválido" {
+		t.Fatalf("sin secretos: %v", err)
+	}
+}
+
 // Un 4xx o 5xx que no trae el JSON de Caddy también es un rechazo, con el
 // cuerpo (o el status) como mensaje.
 func TestLoadRejectedPlainBody(t *testing.T) {
@@ -163,7 +199,7 @@ func TestRedactEscapedToken(t *testing.T) {
 	}
 	for name, form := range forms {
 		msg := "loading config: " + form + " fin"
-		got := redact(msg, token)
+		got := redact(msg, []string{token})
 		if !strings.Contains(got, "***") || !strings.HasSuffix(got, " fin") {
 			t.Errorf("%s: %q", name, got)
 		}
@@ -173,7 +209,7 @@ func TestRedactEscapedToken(t *testing.T) {
 			}
 		}
 	}
-	if got := redact("sin token", ""); got != "sin token" {
+	if got := redact("sin token", []string{""}); got != "sin token" {
 		t.Errorf("con token vacío no reemplaza nada: %q", got)
 	}
 }
