@@ -20,13 +20,16 @@ export const inviteDtoSchema = z.object({
 	expires_at: timestamp,
 })
 
-/** Un elemento de `GET /tokens`. */
-export const tokenDtoSchema = z.object({
+const tokenFields = z.object({
 	id: z.number().int().positive(),
 	name: z.string(),
-	project: z.string().min(1),
-	/** `omitempty`: falta si el token es de todo el proyecto. */
+	/** Falta solo en un token de todos los proyectos (contrato §8.1). */
+	project: z.string().min(1).optional(),
+	/** `omitempty`: falta si el token es de todo el proyecto o de todos los proyectos. */
 	stage: z.string().optional(),
+	/** Siempre vienen: el panel y el backend van en el mismo binario. */
+	read_only: z.boolean(),
+	all_projects: z.boolean(),
 	/** El username de quien lo creó, o null si ese usuario se borró (el token sigue). */
 	created_by: z.string().nullable(),
 	created_at: timestamp,
@@ -34,10 +37,24 @@ export const tokenDtoSchema = z.object({
 	expires_at: timestamp.nullable(),
 })
 
+/**
+ * El alcance que permite la base (migración 0007): un proyecto, o todos los proyectos, que
+ * no lleva stage y siempre es de solo lectura.
+ */
+function validScope(token: z.infer<typeof tokenFields>): boolean {
+	if (!token.all_projects) return token.project !== undefined
+	return token.project === undefined && token.stage === undefined && token.read_only
+}
+
+const SCOPE_ERROR = 'un token es de un proyecto o de todos los proyectos (de solo lectura)'
+
+/** Un elemento de `GET /tokens`. */
+export const tokenDtoSchema = tokenFields.refine(validScope, SCOPE_ERROR)
+
 /** `POST /tokens` (201): el token más su valor en claro, que se muestra una vez. */
-export const createdTokenDtoSchema = tokenDtoSchema.extend({
-	token: z.string().min(1),
-})
+export const createdTokenDtoSchema = tokenFields
+	.extend({ token: z.string().min(1) })
+	.refine(validScope, SCOPE_ERROR)
 
 /** Un elemento de `GET /projects` (catalog). Solo se lee lo que hace falta. */
 export const projectRefDtoSchema = z.object({
@@ -59,11 +76,14 @@ export type StageRefDto = z.infer<typeof stageRefDtoSchema>
 
 /**
  * Cuerpo de `POST /tokens` (`form.CreateToken`). `stage` vacío es todo el proyecto y
- * `expires_in_days` 0 es que no vence.
+ * `expires_in_days` 0 es que no vence. Con `all_projects`, `project` y `stage` van vacíos y
+ * `read_only` en true (contrato §8.1).
  */
 export interface CreateTokenPayload {
 	name: string
 	project: string
 	stage: string
+	read_only: boolean
+	all_projects: boolean
 	expires_in_days: number
 }

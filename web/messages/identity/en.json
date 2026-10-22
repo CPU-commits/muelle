@@ -48,6 +48,7 @@
 	"identity_tokens_expired_on": "expired on {date}",
 	"identity_tokens_created_by": "created by {username}",
 	"identity_tokens_created_by_deleted": "created by a deleted user",
+	"identity_tokens_scope_all": "all projects",
 	"identity_tokens_revoke": "Revoke",
 	"identity_tokens_revoke_label": "Revoke {name}",
 	"identity_tokens_revoke_title": "Revoke {name}?",

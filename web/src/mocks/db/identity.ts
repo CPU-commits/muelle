@@ -8,9 +8,13 @@ import { loadPersisted, savePersisted } from './persist'
 export interface MockToken {
 	id: number
 	name: string
+	/** `''` solo con `allProjects`. */
 	project: string
-	/** `''`: todo el proyecto. */
+	/** `''`: todo el proyecto (o todos los proyectos). */
 	stage: string
+	readOnly: boolean
+	/** Todos los proyectos: sin proyecto ni stage, y siempre `readOnly` (contrato §8.1). */
+	allProjects: boolean
 	/** El username de quien lo creó, o null si ese usuario se borró. */
 	createdBy: string | null
 	createdAt: string
@@ -42,6 +46,8 @@ function seed(): IdentityState {
 				name: 'github-actions',
 				project: 'auditfy',
 				stage: '',
+				readOnly: false,
+				allProjects: false,
 				createdBy: 'felipe',
 				createdAt: ago(20 * DAY_MS),
 				lastUsedAt: ago(12 * MINUTE_MS),
@@ -52,6 +58,8 @@ function seed(): IdentityState {
 				name: 'extractor-ci',
 				project: 'extractor',
 				stage: 'staging',
+				readOnly: false,
+				allProjects: false,
 				createdBy: 'felipe',
 				createdAt: ago(12 * DAY_MS),
 				lastUsedAt: ago(40 * MINUTE_MS),
@@ -62,6 +70,8 @@ function seed(): IdentityState {
 				name: 'extractor-prod-ci',
 				project: 'extractor',
 				stage: 'production',
+				readOnly: false,
+				allProjects: false,
 				createdBy: null,
 				createdAt: ago(30 * DAY_MS),
 				lastUsedAt: ago(6 * DAY_MS),
@@ -72,13 +82,42 @@ function seed(): IdentityState {
 				name: 'aumi-viejo',
 				project: 'aumi-agents',
 				stage: 'staging',
+				readOnly: false,
+				allProjects: false,
 				createdBy: 'felipe',
 				createdAt: ago(120 * DAY_MS),
 				lastUsedAt: ago(95 * DAY_MS),
 				expiresAt: ago(30 * DAY_MS),
 			},
+			// Para Claude Code (MCP): uno de solo lectura de un stage y uno de todos los
+			// proyectos, que siempre es de solo lectura y el panel propone a 90 días.
+			{
+				id: 5,
+				name: 'claude-auditfy',
+				project: 'auditfy',
+				stage: 'staging',
+				readOnly: true,
+				allProjects: false,
+				createdBy: 'felipe',
+				createdAt: ago(3 * DAY_MS),
+				lastUsedAt: ago(2 * 60 * MINUTE_MS),
+				expiresAt: null,
+			},
+			{
+				id: 6,
+				name: 'claude-debug',
+				project: '',
+				stage: '',
+				readOnly: true,
+				allProjects: true,
+				createdBy: 'felipe',
+				createdAt: ago(DAY_MS),
+				lastUsedAt: null,
+				// En 89 días: se creó ayer con el vencimiento que propone el panel.
+				expiresAt: ago(-89 * DAY_MS),
+			},
 		],
-		nextTokenId: 5,
+		nextTokenId: 7,
 		userIds: { felipe: 1 },
 		nextUserId: 2,
 	}

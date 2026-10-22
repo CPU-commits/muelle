@@ -2,11 +2,14 @@ export type {
 	ApiToken,
 	CreatedApiToken,
 	NewApiToken,
+	ProjectTokenScope,
 	TokenCreator,
 	TokenScope,
 } from './entities/apiToken'
 export {
+	ALL_PROJECTS,
 	actionAppPath,
+	canDeploy,
 	isTokenExpired,
 	parseTokenScope,
 	partitionTokens,

@@ -39,7 +39,8 @@ const CREATED: CreatedApiToken = {
 	token: {
 		id: 9 as TokenId,
 		name: 'ci',
-		scope: { project: 'auditfy', stage: 'staging' },
+		scope: { kind: 'project', project: 'auditfy', stage: 'staging' },
+		readOnly: false,
 		createdBy: { kind: 'user', username: 'felipe' },
 		createdAt: new Date(),
 		lastUsedAt: null,

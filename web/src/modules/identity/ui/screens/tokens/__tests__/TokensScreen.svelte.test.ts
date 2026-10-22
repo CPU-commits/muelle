@@ -29,7 +29,8 @@ vi.mock('@/modules/identity/container', () => ({
 const TOKEN: ApiToken = {
 	id: 9 as TokenId,
 	name: 'github-actions',
-	scope: { project: 'auditfy', stage: null },
+	scope: { kind: 'project', project: 'auditfy', stage: null },
+	readOnly: false,
 	createdBy: { kind: 'user', username: 'felipe' },
 	createdAt: new Date('2026-10-10T12:00:00Z'),
 	lastUsedAt: null,

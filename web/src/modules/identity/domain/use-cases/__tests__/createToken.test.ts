@@ -49,7 +49,7 @@ describe('createToken', () => {
 			expiresOn: '',
 		})
 
-		expect(created.token.scope).toEqual({ project: 'auditfy', stage: null })
+		expect(created.token.scope).toEqual({ kind: 'project', project: 'auditfy', stage: null })
 		expect(created.token.expiresAt).toBeNull()
 	})
 

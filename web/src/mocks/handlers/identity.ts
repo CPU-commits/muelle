@@ -24,9 +24,12 @@ function tokenRes(token: MockToken) {
 	return {
 		id: token.id,
 		name: token.name,
-		project: token.project,
-		// `omitempty` en el backend: sin stage, la clave no viene.
+		// `omitempty` en el backend: un token de todos los proyectos no trae `project`, y uno
+		// sin stage no trae `stage`.
+		...(token.allProjects ? {} : { project: token.project }),
 		...(token.stage ? { stage: token.stage } : {}),
+		read_only: token.readOnly,
+		all_projects: token.allProjects,
 		created_by: token.createdBy,
 		created_at: token.createdAt,
 		last_used_at: token.lastUsedAt,
@@ -38,12 +41,32 @@ interface CreateTokenBody {
 	name?: unknown
 	project?: unknown
 	stage?: unknown
+	read_only?: unknown
+	all_projects?: unknown
 	expires_in_days?: unknown
 }
 
-const CREATE_TOKEN_FIELDS = new Set(['name', 'project', 'stage', 'expires_in_days'])
+const CREATE_TOKEN_FIELDS = new Set([
+	'name',
+	'project',
+	'stage',
+	'read_only',
+	'all_projects',
+	'expires_in_days',
+])
 
-// `validate.Name("name", …, 64)` y el rango de `expires_in_days` de CreateToken.
+// json/v2: un tipo equivocado (`"read_only": "sí"`) es `invalid_json`, como todo campo.
+function hasWrongType(body: CreateTokenBody): boolean {
+	return [body.read_only, body.all_projects].some(
+		(value) => value !== undefined && typeof value !== 'boolean',
+	)
+}
+
+const filled = (value: unknown) => typeof value === 'string' && value !== ''
+
+// CreateToken, en su orden (contrato §8.1): `validate.Name("name", …, 64)`, el rango de
+// `expires_in_days`, las reglas de un token de todos los proyectos (que no busca ningún
+// proyecto) y, si no, el alcance.
 function validateToken(body: CreateTokenBody) {
 	const name = typeof body.name === 'string' ? body.name : ''
 	if (name.trim() === '') return invalid('name', 'es obligatorio')
@@ -57,7 +80,16 @@ function validateToken(body: CreateTokenBody) {
 	if (typeof days !== 'number' || !Number.isInteger(days) || days < 0 || days > MAX_TOKEN_DAYS) {
 		return invalid('expires_in_days', `debe estar entre 0 y ${MAX_TOKEN_DAYS}`)
 	}
-	if (typeof body.project !== 'string' || body.project === '') return notFound()
+	if (body.all_projects === true) {
+		if (filled(body.project) || filled(body.stage)) {
+			return invalid('project', 'un token de todos los proyectos no lleva proyecto ni stage')
+		}
+		if (body.read_only !== true) {
+			return invalid('read_only', 'un token de todos los proyectos es de solo lectura')
+		}
+		return undefined
+	}
+	if (!filled(body.project)) return notFound()
 	return undefined
 }
 
@@ -139,6 +171,7 @@ export const identityHandlers: RequestHandler[] = [
 		if (Object.keys(body).some((key) => !CREATE_TOKEN_FIELDS.has(key))) {
 			return apiError(400, 'invalid_json', 'campo desconocido')
 		}
+		if (hasWrongType(body)) return apiError(400, 'invalid_json', 'tipo equivocado')
 		const problem = validateToken(body)
 		if (problem) return problem
 		// El alcance (proyecto y stage) lo valida catalog; este mock no tiene sus datos y
@@ -147,11 +180,14 @@ export const identityHandlers: RequestHandler[] = [
 		const now = new Date()
 		const expires = new Date(now)
 		expires.setDate(expires.getDate() + days)
+		const allProjects = body.all_projects === true
 		const token: MockToken = {
 			id: identityDb.state.nextTokenId,
 			name: String(body.name),
-			project: String(body.project),
-			stage: typeof body.stage === 'string' ? body.stage : '',
+			project: allProjects ? '' : String(body.project),
+			stage: !allProjects && typeof body.stage === 'string' ? body.stage : '',
+			readOnly: body.read_only === true,
+			allProjects,
 			createdBy: identityDb.sessionUsername(),
 			createdAt: now.toISOString(),
 			lastUsedAt: null,
@@ -160,10 +196,13 @@ export const identityHandlers: RequestHandler[] = [
 		identityDb.state.tokens = [...identityDb.state.tokens, token]
 		identityDb.state.nextTokenId += 1
 		identityDb.commit()
-		adminDb.record('token.create', `token:${token.id}`, {
-			project: token.project,
-			stage: token.stage,
-		})
+		adminDb.record(
+			'token.create',
+			`token:${token.id}`,
+			allProjects
+				? { all_projects: true, read_only: true }
+				: { project: token.project, read_only: token.readOnly, stage: token.stage },
+		)
 		return HttpResponse.json({ ...tokenRes(token), token: randomToken('mk_') }, { status: 201 })
 	}),
 

@@ -42,6 +42,7 @@ export function makeCreateToken(
 		tokens.create({
 			name: parseTokenName(input.name),
 			scope: parseTokenScope(input.project, input.stage),
+			readOnly: false,
 			expiresInDays: expiresInDays(input.expiresOn, today()),
 		})
 }

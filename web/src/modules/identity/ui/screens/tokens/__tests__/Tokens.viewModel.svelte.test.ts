@@ -31,7 +31,8 @@ function token(overrides: Partial<ApiToken>): ApiToken {
 	return {
 		id: 1 as TokenId,
 		name: 'github-actions',
-		scope: { project: 'auditfy', stage: null },
+		scope: { kind: 'project', project: 'auditfy', stage: null },
+		readOnly: false,
 		createdBy: { kind: 'user', username: 'felipe' },
 		createdAt: new Date('2026-10-01T12:00:00Z'),
 		lastUsedAt: null,
@@ -45,7 +46,7 @@ const TOKENS: ApiToken[] = [
 	token({
 		id: 2 as TokenId,
 		name: 'extractor-ci',
-		scope: { project: 'extractor', stage: 'staging' },
+		scope: { kind: 'project', project: 'extractor', stage: 'staging' },
 		createdBy: { kind: 'deleted' },
 		lastUsedAt: new Date(Date.now() - 12 * 60_000),
 	}),
@@ -100,12 +101,21 @@ describe('TokensViewModel', () => {
 		)
 	})
 
+	it('el alcance de un token de todos los proyectos es "todos los proyectos"', async () => {
+		mocks.listTokens.mockResolvedValue([
+			token({ id: 7 as TokenId, scope: { kind: 'allProjects' }, readOnly: true }),
+		])
+		const vm = await mountViewModel()
+
+		expect(vm.activeRows[0]?.scope).toBe(m.identity_tokens_scope_all())
+	})
+
 	it('el token creado se muestra una vez, marcado como nuevo, con su ejemplo', async () => {
 		const vm = await mountViewModel()
 		const created = token({
 			id: 2 as TokenId,
 			name: 'extractor-ci',
-			scope: { project: 'extractor', stage: 'staging' },
+			scope: { kind: 'project', project: 'extractor', stage: 'staging' },
 		})
 
 		vm.openCreate()

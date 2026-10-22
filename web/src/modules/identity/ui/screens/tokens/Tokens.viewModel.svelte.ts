@@ -50,6 +50,12 @@ function creatorText(token: ApiToken): string {
 		: m.identity_tokens_created_by_deleted()
 }
 
+function scopeText(token: ApiToken): string {
+	return token.scope.kind === 'allProjects'
+		? m.identity_tokens_scope_all()
+		: scopeLabel(token.scope)
+}
+
 // Ajustes · Tokens de API (`Ajustes-Tokens.dc.html`): la lista, crear en un modal (el
 // valor en claro se muestra una sola vez, en una tarjeta arriba) y revocar con
 // confirmación.
@@ -85,7 +91,7 @@ export class TokensViewModel {
 		const newId = this.created?.token.id
 		const toRow = (token: ApiToken): TokenRow => ({
 			token,
-			scope: scopeLabel(token.scope),
+			scope: scopeText(token),
 			lastUsed: lastUsedText(token),
 			expiry: expiryText(token, now),
 			creator: creatorText(token),
@@ -114,13 +120,14 @@ export class TokensViewModel {
 	 * mayor de la action, que se mueve con cada release mientras no haya 1.0.
 	 */
 	get snippet(): string {
-		if (!this.created) return ''
+		const scope = this.created?.token.scope
+		if (scope?.kind !== 'project') return ''
 		return [
 			'- uses: CPU-commits/muelle/action@v0',
 			'  with:',
 			'    url: ${{ secrets.MUELLE_URL }}',
 			'    token: ${{ secrets.MUELLE_TOKEN }}',
-			`    app: ${actionAppPath(this.created.token.scope)}`,
+			`    app: ${actionAppPath(scope)}`,
 		].join('\n')
 	}
 
