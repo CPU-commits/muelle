@@ -513,6 +513,7 @@ Cada fila dice qué módulo la registra (en su `infra/in/mcp`), qué caso de uso
   - La línea es `<time> <task> <stream> <line>`.
   - El pedazo de una línea larga que llegó solo, con `time` y `task` null, va con `-` en esos dos lugares.
 - Si el servicio no existe en una app compose, el `not_found` dice que `service` es obligatorio ahí y que los servicios están en `get_app`.
+- Los errores van en el orden de REST (contrato §2.9): primero la app (`not_found`), después `since`, `contains` y `stream` (`invalid`) y al final el servicio en Swarm.
 
 **8. `list_deploys`** · deploy · "Listar deploys"
 - Entrada:

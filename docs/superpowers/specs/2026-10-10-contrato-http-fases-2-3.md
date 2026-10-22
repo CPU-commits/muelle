@@ -1618,6 +1618,7 @@ No hay herramientas de proyectos, stages o apps (escritura), dominios (escritura
   - `invalid`: `since: …` (no es una fecha ni una duración válida), `contains: es de hasta 200 caracteres`, `stream: debe ser stdout o stderr`. Los valida muelle, no el esquema (§8.3, "Entrada");
   - `not_found` si el servicio no existe en Swarm para la app (§2.9), con el mensaje "el servicio no existe en la app; en una app compose, service es obligatorio (los servicios están en get_app)";
   - `rate_limited` sin lugar en los streams; `docker_unavailable`.
+  - El orden, como en §2.9: primero la app (`not_found`), después los argumentos (`invalid`) y al final el servicio en Swarm.
 
 #### 8. `list_deploys`
 

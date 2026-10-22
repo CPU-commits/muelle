@@ -105,13 +105,14 @@ func parseSince(s string, now time.Time) (time.Time, error) {
 
 // appLogs lee el log con un lugar de los streams del principal, hasta el
 // final o LogReadTimeout, y se queda con las líneas más nuevas que entran en
-// max_bytes de JSON.
+// max_bytes de JSON. Los errores van en el orden de REST (§2.9): la app,
+// después los argumentos y al final el servicio en Swarm.
 func appLogs(ctx context.Context, uc UseCases, cfg Config, in logsIn) (logsOut, error) {
-	req, err := logRequest(in, cfg.Clock.Now())
-	if err != nil {
+	if err := uc.CheckApp(ctx, in.ref()); err != nil {
 		return logsOut{}, err
 	}
-	if err := uc.CheckApp(ctx, req.AppRef); err != nil {
+	req, err := logRequest(in, cfg.Clock.Now())
+	if err != nil {
 		return logsOut{}, err
 	}
 	release, ok := cfg.Slots.Acquire(principal(ctx))

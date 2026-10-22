@@ -268,6 +268,14 @@ func TestMCPGetAppLogs(t *testing.T) {
 	if code, msg := toolstest.Fail(s, "get_app_logs", args(map[string]any{"app": "nada"})); code != "not_found" || msg != "no existe" {
 		t.Errorf("app que no existe: %s %q", code, msg)
 	}
+	// Primero la app y después los argumentos, como en REST (§2.9): una app
+	// que no existe es not_found aunque since, contains o stream no valgan.
+	for _, bad := range []map[string]any{{"since": "ayer"}, {"contains": strings.Repeat("ñ", 201)}, {"stream": "stdin"}} {
+		bad["app"] = "nada"
+		if code, msg := toolstest.Fail(s, "get_app_logs", args(bad)); code != "not_found" || msg != "no existe" {
+			t.Errorf("app que no existe con %v: %s %q", bad, code, msg)
+		}
+	}
 }
 
 // El buffer descarta las más viejas al pasar max_bytes, medido en JSON, y
