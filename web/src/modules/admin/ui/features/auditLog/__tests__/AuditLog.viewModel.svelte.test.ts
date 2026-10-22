@@ -40,7 +40,8 @@ function event(id: number, actor: AuditEvent['actor']): AuditEvent {
 const FIRST: AuditPage = {
 	items: [
 		event(5, { kind: 'user', id: 1, name: 'felipe' }),
-		event(4, { kind: 'token', id: 7, name: 'github-actions' }),
+		// Un deploy que hizo Claude Code con el servidor MCP ("via": "mcp", contrato §8.6).
+		{ ...event(4, { kind: 'token', id: 7, name: 'github-actions' }), viaMcp: true },
 		// Eventos de antes de la migración 0004 cuyo autor ya no estaba: sin nombre.
 		event(3, { kind: 'token', id: 99, name: '' }),
 		event(2, { kind: 'user', id: 8, name: '' }),
@@ -83,6 +84,12 @@ describe('AuditLogViewModel', () => {
 			target: 'app:auditfy/staging/api',
 			iso: '2026-10-10T14:27:00.000Z',
 		})
+	})
+
+	it('marca lo que hizo un token con el servidor MCP, y nada más', async () => {
+		const vm = await mountViewModel()
+
+		expect(vm.rows.map((row) => row.viaMcp)).toEqual([false, true, false, false])
 	})
 
 	it('"Cargar más" pide la página siguiente con before y la agrega abajo', async () => {

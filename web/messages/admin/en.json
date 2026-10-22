@@ -156,6 +156,7 @@
 	"admin_audit_actor_token": "token",
 	"admin_audit_actor_token_id": "token #{id}",
 	"admin_audit_actor_system": "system",
+	"admin_audit_via_mcp": "via MCP",
 	"admin_audit_more": "Load more",
 	"admin_audit_empty_title": "No events yet",
 	"admin_audit_empty_body": "What's done in the panel and through the API shows up here.",

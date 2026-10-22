@@ -13,6 +13,14 @@ export const when = style({
 	whiteSpace: 'nowrap',
 })
 
+// "vía MCP" junto a quién: un deploy, un rollback o un cambio de variables que hizo Claude
+// Code con un token (contrato §8.6).
+export const via = style({
+	display: 'inline-flex',
+	marginLeft: theme.space[6],
+	verticalAlign: 'middle',
+})
+
 export const target = style({
 	color: theme.colors.text.secondary,
 	overflowWrap: 'anywhere',

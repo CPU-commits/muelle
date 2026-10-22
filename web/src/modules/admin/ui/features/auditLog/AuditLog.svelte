@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import {
+		Badge,
 		Button,
 		cellMono,
 		EmptyState,
@@ -13,7 +14,7 @@
 	} from '@/shared/ui'
 	import { SectionHeading } from '../../components/sectionHeading'
 	import { AuditLogViewModel } from './AuditLog.viewModel.svelte.ts'
-	import { moreError, section, target, when } from './styles.css'
+	import { moreError, section, target, via, when } from './styles.css'
 
 	// La sección "Auditoría" de Ajustes (`Ajustes.dc.html`). `id` es el ancla de la nav.
 	let { id }: { id?: string } = $props()
@@ -67,6 +68,9 @@
 								{m.admin_audit_actor_token()} <Mono>{row.actor.name}</Mono>
 							{:else}
 								{row.actor.text}
+							{/if}
+							{#if row.viaMcp}
+								<span class={via}><Badge>{m.admin_audit_via_mcp()}</Badge></span>
 							{/if}
 						</td>
 						<td class={cellMono}>{row.action}</td>
