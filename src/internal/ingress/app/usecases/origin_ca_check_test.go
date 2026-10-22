@@ -46,9 +46,13 @@ func newPermFixture(t *testing.T) *permFixture {
 	db := sqlitetest.New(t)
 	f := &permFixture{cf: cftest.New(t), certs: reposqlite.NewOriginCerts(db, testCipherFor(t))}
 	f.cf.AddToken(sslToken)
+	// El Origin CA falso firma con la misma hora que el caso de uso, no con
+	// la del sistema: si no, el vencimiento depende del día en que corre.
+	clk := clock.NewManual(time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC))
+	f.cf.SetClock(clk.Now)
 	client := cloudflare.New(f.cf.URL())
 	f.uc = NewCheckOriginCAPermission(client, client, outservice.OriginKeys{}, f.certs,
-		clock.NewManual(time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)), slog.New(slog.NewTextHandler(io.Discard, nil)))
+		clk, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return f
 }
 
