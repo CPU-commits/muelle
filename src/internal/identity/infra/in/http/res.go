@@ -40,14 +40,16 @@ type inviteRes struct {
 }
 
 type tokenRes struct {
-	ID         int64      `json:"id"`
-	Name       string     `json:"name"`
-	Project    string     `json:"project"`
-	Stage      string     `json:"stage,omitempty"` // sin stage: todo el proyecto
-	CreatedBy  *string    `json:"created_by"`      // username; null si ese usuario se borró
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	ExpiresAt  *time.Time `json:"expires_at"`
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	Project     string     `json:"project,omitempty"` // falta solo con all_projects
+	Stage       string     `json:"stage,omitempty"`   // sin stage: todo el proyecto
+	ReadOnly    bool       `json:"read_only"`         // siempre va
+	AllProjects bool       `json:"all_projects"`      // siempre va
+	CreatedBy   *string    `json:"created_by"`        // username; null si ese usuario se borró
+	CreatedAt   time.Time  `json:"created_at"`
+	LastUsedAt  *time.Time `json:"last_used_at"`
+	ExpiresAt   *time.Time `json:"expires_at"`
 }
 
 // tokenCreatedRes lleva el token en claro, que se muestra una sola vez.
@@ -65,6 +67,7 @@ func toUserRes(u dto.UserOutput) userRes {
 }
 
 func toTokenRes(t dto.TokenOutput) tokenRes {
-	return tokenRes{ID: t.ID, Name: t.Name, Project: t.Project, Stage: t.Stage, CreatedBy: t.CreatedBy,
-		CreatedAt: t.CreatedAt, LastUsedAt: t.LastUsedAt, ExpiresAt: t.ExpiresAt}
+	return tokenRes{ID: t.ID, Name: t.Name, Project: t.Project, Stage: t.Stage, ReadOnly: t.ReadOnly,
+		AllProjects: t.AllProjects, CreatedBy: t.CreatedBy, CreatedAt: t.CreatedAt, LastUsedAt: t.LastUsedAt,
+		ExpiresAt: t.ExpiresAt}
 }

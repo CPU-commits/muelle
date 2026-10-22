@@ -174,6 +174,82 @@ func TestTokenCreatedByDeletedUser(t *testing.T) {
 	}
 }
 
+// Contrato §8.1: POST /tokens con read_only y all_projects, y GET /tokens
+// con las dos marcas siempre presentes y project ausente solo en uno de
+// todos los proyectos.
+func TestReadOnlyAndAllProjectsTokens(t *testing.T) {
+	e := newEnv(t)
+	s := httptestutil.WithSession(e.login())
+	auditfy := e.exec(`INSERT INTO projects (slug, name, created_at) VALUES ('auditfy', 'Auditfy', 0)`)
+	e.exec(`INSERT INTO stages (project_id, slug, created_at) VALUES (?, 'staging', 0)`, auditfy)
+
+	w := e.do("POST", "/api/v1/tokens", map[string]any{"name": "claude-debug", "all_projects": true, "read_only": true, "expires_in_days": 90}, s)
+	httptestutil.Expect(t, w, http.StatusCreated)
+	all := httptestutil.Decode[map[string]any](t, w)
+	if _, ok := all["project"]; ok || all["read_only"] != true || all["all_projects"] != true || all["expires_at"] == nil {
+		t.Fatalf("todos los proyectos: %v", all)
+	}
+	if _, ok := all["stage"]; ok {
+		t.Fatalf("todos los proyectos no trae stage: %v", all)
+	}
+	w = e.do("POST", "/api/v1/tokens", map[string]any{"name": "claude-staging", "project": "auditfy", "stage": "staging", "read_only": false}, s)
+	httptestutil.Expect(t, w, http.StatusCreated)
+	staging := httptestutil.Decode[map[string]any](t, w)
+	if staging["project"] != "auditfy" || staging["stage"] != "staging" || staging["read_only"] != false || staging["all_projects"] != false {
+		t.Fatalf("de stage: %v", staging)
+	}
+	// Sin las marcas nuevas, como hoy.
+	w = e.do("POST", "/api/v1/tokens", map[string]any{"name": "ci", "project": "auditfy"}, s)
+	httptestutil.Expect(t, w, http.StatusCreated)
+	ci := httptestutil.Decode[map[string]any](t, w)
+	if ci["read_only"] != false || ci["all_projects"] != false || ci["project"] != "auditfy" {
+		t.Fatalf("sin marcas: %v", ci)
+	}
+
+	w = e.do("GET", "/api/v1/tokens", nil, s)
+	httptestutil.Expect(t, w, http.StatusOK)
+	list := httptestutil.Decode[[]map[string]any](t, w)
+	if len(list) != 3 {
+		t.Fatalf("list=%v", list)
+	}
+	for _, tok := range list {
+		if _, ok := tok["read_only"]; !ok {
+			t.Errorf("read_only siempre va: %v", tok)
+		}
+		if _, ok := tok["all_projects"]; !ok {
+			t.Errorf("all_projects siempre va: %v", tok)
+		}
+	}
+	if _, ok := list[0]["project"]; ok || list[0]["all_projects"] != true || list[1]["project"] != "auditfy" {
+		t.Fatalf("list=%v", list)
+	}
+
+	if _, err := e.mod.Authenticator().AuthenticateToken(t.Context(), all["token"].(string)); err != nil {
+		t.Fatalf("el token de todos los proyectos autentica: %v", err)
+	}
+}
+
+// Los dos 422 de all_projects (contrato §8.1), y un tipo equivocado es 400.
+func TestCreateAllProjectsTokenErrors(t *testing.T) {
+	e := newEnv(t)
+	s := httptestutil.WithSession(e.login())
+	e.exec(`INSERT INTO projects (slug, name, created_at) VALUES ('auditfy', 'Auditfy', 0)`)
+
+	w := e.do("POST", "/api/v1/tokens", map[string]any{"name": "x", "all_projects": true, "read_only": true, "project": "auditfy"}, s)
+	expectCode(t, w, http.StatusUnprocessableEntity, "invalid")
+	if msg := httptestutil.Decode[map[string]map[string]string](t, w)["error"]["message"]; msg != "project: un token de todos los proyectos no lleva proyecto ni stage" {
+		t.Fatalf("message=%q", msg)
+	}
+	w = e.do("POST", "/api/v1/tokens", map[string]any{"name": "x", "all_projects": true}, s)
+	expectCode(t, w, http.StatusUnprocessableEntity, "invalid")
+	if msg := httptestutil.Decode[map[string]map[string]string](t, w)["error"]["message"]; msg != "read_only: un token de todos los proyectos es de solo lectura" {
+		t.Fatalf("message=%q", msg)
+	}
+	expectCode(t, e.do("POST", "/api/v1/tokens", map[string]any{"name": "x", "all_projects": true, "read_only": "sí"}, s), http.StatusBadRequest, "invalid_json")
+	// Sin all_projects, un proyecto vacío sigue siendo 404 (como hoy).
+	expectCode(t, e.do("POST", "/api/v1/tokens", map[string]any{"name": "x", "read_only": true}, s), http.StatusNotFound, "not_found")
+}
+
 func TestCreateTokenErrors(t *testing.T) {
 	e := newEnv(t)
 	s := httptestutil.WithSession(e.login())

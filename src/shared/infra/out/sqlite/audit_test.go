@@ -115,6 +115,49 @@ func TestAuditDetails(t *testing.T) {
 	}
 }
 
+// Lo que se hace por MCP (entity.WithVia) suma "via": "mcp" a details
+// (contrato §8.6), con cualquier tipo de details, sin pisar un via que ya
+// venga, y con las claves en orden.
+func TestAuditVia(t *testing.T) {
+	d, rec, _ := newTestRecorder(t)
+	mcp := entity.WithVia(context.Background(), entity.ViaMCP)
+	type deployDetails struct {
+		Deploy  int64             `json:"deploy"`
+		Trigger string            `json:"trigger"`
+		Images  map[string]string `json:"images"`
+	}
+	var nilMap map[string]string
+	cases := []struct {
+		name    string
+		ctx     context.Context
+		details any
+		want    string
+	}{
+		{"nil", mcp, nil, `{"via":"mcp"}`},
+		{"map nil", mcp, nilMap, `{"via":"mcp"}`},
+		{"map vacío", mcp, map[string]any{}, `{"via":"mcp"}`},
+		{"map", mcp, map[string]any{"set": []string{"A"}, "zeta": 1, "app": "x"}, `{"app":"x","set":["A"],"via":"mcp","zeta":1}`},
+		{"struct", mcp, deployDetails{Deploy: 145, Trigger: "api", Images: map[string]string{}}, `{"deploy":145,"images":{},"trigger":"api","via":"mcp"}`},
+		{"puntero a struct", mcp, &deployDetails{Deploy: 1, Trigger: "rollback"}, `{"deploy":1,"images":{},"trigger":"rollback","via":"mcp"}`},
+		{"ya trae via", mcp, map[string]string{"via": "cli", "a": "b"}, `{"a":"b","via":"cli"}`},
+		{"no es un objeto", mcp, []string{"a"}, `["a"]`},
+		{"sin via", context.Background(), map[string]any{"b": 1, "a": 2}, `{"a":2,"b":1}`},
+		{"sin via, nil", context.Background(), nil, `{}`},
+	}
+	for _, c := range cases {
+		rec.Record(c.ctx, "deploy.create", "app:a/s/x", c.details)
+		if r := lastAudit(t, d); r.Details != c.want {
+			t.Errorf("%s: details=%s, esperaba %s", c.name, r.Details, c.want)
+		}
+	}
+	// El actor sigue saliendo del Principal.
+	ctx := entity.WithPrincipal(mcp, entity.Principal{Token: &entity.TokenScope{ID: 9, Name: "claude"}})
+	rec.Record(ctx, "env.patch", "stage:a/s", map[string][]string{"set": {"A"}})
+	if r := lastAudit(t, d); r.ActorType != "token" || r.ActorName != "claude" || r.Details != `{"set":["A"],"via":"mcp"}` {
+		t.Fatalf("r=%+v", r)
+	}
+}
+
 // Un string con UTF-8 inválido (ej. un nombre que vino de Docker) no se pierde
 // como {}: los bytes inválidos se guardan como U+FFFD.
 func TestAuditDetailsInvalidUTF8(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/CPU-commits/muelle/src/internal/catalog/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/entity"
+	sharedentity "github.com/CPU-commits/muelle/src/shared/domain/entity"
 	srepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
 )
 
@@ -28,13 +29,21 @@ type ListProjects struct{ d Deps }
 
 func NewListProjects(d Deps) *ListProjects { return &ListProjects{d} }
 
+// Execute lista los proyectos, ordenados por slug, que el Principal del ctx
+// puede leer (Principal.Allows, como ListStages): una sesión los ve todos, un
+// token el suyo, y uno de todos los proyectos, todos (contrato §8.3 #1). Para
+// REST no cambia nada: GET /projects es solo de sesión.
 func (uc *ListProjects) Execute(ctx context.Context) ([]dto.ProjectOutput, error) {
 	ps, err := uc.d.Projects.List(ctx)
 	if err != nil {
 		return nil, err
 	}
+	pr, hasPrincipal := sharedentity.PrincipalFrom(ctx)
 	out := make([]dto.ProjectOutput, 0, len(ps))
 	for _, p := range ps {
+		if hasPrincipal && !pr.Allows(p.Slug, "", false) {
+			continue
+		}
 		out = append(out, dto.ProjectFrom(p))
 	}
 	return out, nil

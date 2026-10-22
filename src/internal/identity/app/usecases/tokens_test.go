@@ -9,6 +9,7 @@ import (
 
 	"github.com/CPU-commits/muelle/src/internal/identity/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/identity/domain/service"
+	outservice "github.com/CPU-commits/muelle/src/internal/identity/infra/out/service"
 	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 	sharedrepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
@@ -142,7 +143,7 @@ func TestTokenAuditAndDelete(t *testing.T) {
 	rows := f.auditRows(t)
 	target := "token:" + itoa(tok.ID)
 	if len(rows) != 2 ||
-		rows[0].Action != "token.create" || rows[0].Target != target || rows[0].Details != `{"project":"auditfy","stage":"staging"}` ||
+		rows[0].Action != "token.create" || rows[0].Target != target || rows[0].Details != `{"project":"auditfy","read_only":false,"stage":"staging"}` ||
 		rows[1].Action != "token.delete" || rows[1].Target != target || *rows[1].ActorID != u.ID {
 		t.Fatalf("audit=%+v", rows)
 	}
@@ -247,5 +248,116 @@ func TestAuthenticateTokenWithOrphanedStage(t *testing.T) {
 	f.rawExec(t, "DELETE FROM stages WHERE id = ?", staging)
 	if p, err := f.authToken.Execute(ctx, tok.Plain); !errors.Is(err, shared.ErrUnauthenticated) {
 		t.Fatalf("esperaba ErrUnauthenticated, got p=%+v err=%v", p, err)
+	}
+}
+
+// countingResolver cuenta las llamadas a Resolve: un token de todos los
+// proyectos no busca ningún proyecto.
+type countingResolver struct {
+	next  service.ScopeResolver
+	calls int
+}
+
+func (r *countingResolver) Resolve(ctx context.Context, project, stage string) (int64, *int64, error) {
+	r.calls++
+	return r.next.Resolve(ctx, project, stage)
+}
+
+// Contrato §8.1: con all_projects, primero el nombre, después
+// expires_in_days, después project/stage (vacíos) y read_only (true), sin
+// buscar ningún proyecto.
+func TestCreateTokenAllProjects(t *testing.T) {
+	f := newFixture(t)
+	u := f.user(t, "felipe")
+	ctx := withUser(u)
+	auditfy := f.project(t, "auditfy")
+	f.stage(t, auditfy, "staging")
+	resolver := &countingResolver{next: outservice.NewScopeResolver(f.db)}
+	create := NewCreateToken(f.db, f.users, f.tokens, resolver, f.rec, f.clock)
+
+	all := func(name, project, stage string, readOnly bool, days int) dto.CreateTokenInput {
+		return dto.CreateTokenInput{Name: name, Project: project, Stage: stage, ReadOnly: readOnly, AllProjects: true,
+			ExpiresInDays: days, CreatedBy: u.ID}
+	}
+	cases := []struct {
+		name  string
+		in    dto.CreateTokenInput
+		field string
+		msg   string
+	}{
+		{"sin nombre, antes que todo", all("", "auditfy", "", false, -1), "name", ""},
+		{"días fuera de rango, antes que el alcance", all("ci", "auditfy", "", false, -1), "expires_in_days", ""},
+		{"con proyecto", all("ci", "auditfy", "", true, 0), "project", "project: un token de todos los proyectos no lleva proyecto ni stage"},
+		{"con stage", all("ci", "", "staging", true, 0), "project", "project: un token de todos los proyectos no lleva proyecto ni stage"},
+		{"proyecto antes que read_only", all("ci", "auditfy", "staging", false, 0), "project", ""},
+		{"sin solo lectura", all("ci", "", "", false, 0), "read_only", "read_only: un token de todos los proyectos es de solo lectura"},
+	}
+	for _, c := range cases {
+		_, err := create.Execute(ctx, c.in)
+		ve, ok := errors.AsType[*validate.Error](err)
+		if !ok || ve.Field != c.field || (c.msg != "" && ve.Error() != c.msg) {
+			t.Errorf("%s: esperaba un error de %s %q, got %v", c.name, c.field, c.msg, err)
+		}
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("un token de todos los proyectos llamó %d veces a ScopeResolver", resolver.calls)
+	}
+
+	tok, err := create.Execute(ctx, all("claude", "", "", true, 90))
+	if err != nil || !tok.ReadOnly || !tok.AllProjects || tok.Project != "" || tok.Stage != "" || tok.ExpiresAt == nil ||
+		!tok.ExpiresAt.Equal(f.now().AddDate(0, 0, 90)) {
+		t.Fatalf("tok=%+v err=%v", tok, err)
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("crear un token de todos los proyectos llamó %d veces a ScopeResolver", resolver.calls)
+	}
+	p, err := f.authToken.Execute(ctx, tok.Plain)
+	if err != nil || !p.Token.ReadOnly || !p.Token.AllProjects || p.Token.ProjectSlug != "" || p.Token.StageSlug != "" || p.Token.Name != "claude" {
+		t.Fatalf("p=%+v err=%v", p, err)
+	}
+	if !p.Allows("auditfy", "staging", false) || p.Allows("auditfy", "staging", true) || !p.Allows("cualquiera", "", false) {
+		t.Fatalf("alcance de todos los proyectos: %+v", p.Token)
+	}
+
+	list, err := f.listTokens.Execute(ctx)
+	if err != nil || len(list) != 1 || !list[0].AllProjects || !list[0].ReadOnly || list[0].Project != "" {
+		t.Fatalf("list=%+v err=%v", list, err)
+	}
+	rows := f.auditRows(t)
+	if len(rows) != 1 || rows[0].Action != "token.create" || rows[0].Details != `{"all_projects":true,"read_only":true}` {
+		t.Fatalf("audit=%+v", rows)
+	}
+}
+
+// Un token de proyecto o de stage puede ser de solo lectura: el Principal
+// lo trae, y la auditoría lo dice.
+func TestCreateReadOnlyToken(t *testing.T) {
+	f := newFixture(t)
+	u := f.user(t, "felipe")
+	ctx := withUser(u)
+	auditfy := f.project(t, "auditfy")
+	f.stage(t, auditfy, "staging")
+
+	in := newToken("ro", "auditfy", "staging", u.ID, 0)
+	in.ReadOnly = true
+	tok, err := f.createToken.Execute(ctx, in)
+	if err != nil || !tok.ReadOnly || tok.AllProjects || tok.Project != "auditfy" || tok.Stage != "staging" {
+		t.Fatalf("tok=%+v err=%v", tok, err)
+	}
+	p, err := f.authToken.Execute(ctx, tok.Plain)
+	if err != nil || !p.Token.ReadOnly || p.Token.AllProjects || p.Token.ProjectSlug != "auditfy" || p.Token.StageSlug != "staging" {
+		t.Fatalf("p=%+v err=%v", p, err)
+	}
+	if !p.ReadOnly() || p.Allows("auditfy", "staging", true) || !p.Allows("auditfy", "staging", false) {
+		t.Fatalf("un token de solo lectura no escribe: %+v", p.Token)
+	}
+	write, err := f.createToken.Execute(ctx, newToken("rw", "auditfy", "", u.ID, 0))
+	if err != nil || write.ReadOnly || write.AllProjects {
+		t.Fatalf("write=%+v err=%v", write, err)
+	}
+	rows := f.auditRows(t)
+	if len(rows) != 2 || rows[0].Details != `{"project":"auditfy","read_only":true,"stage":"staging"}` ||
+		rows[1].Details != `{"project":"auditfy","read_only":false,"stage":""}` {
+		t.Fatalf("audit=%+v", rows)
 	}
 }

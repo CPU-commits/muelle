@@ -28,7 +28,16 @@ const (
 	AccessToken                    // sesión completa, o token de API dentro de su alcance (Principal.Allows)
 	AccessSetup                    // sesión completa, incluida la que todavía debe configurar 2FA
 	AccessMFAPending               // solo la sesión que espera el código TOTP
+	// AccessBearer es solo un token de API, sin la cookie: el servidor MCP
+	// (contrato §8.2). El Kit no revisa el alcance (la ruta no lo dice): lo
+	// revisa cada herramienta con Principal.Allows. Sin Bearer, o con uno que
+	// no vale, 401 con WWW-Authenticate (RFC 6750).
+	AccessBearer
 )
+
+// MCPPath es la ruta del servidor MCP (contrato §8.2). cmd/http revisa ahí el
+// Origin aunque la petición traiga Bearer.
+const MCPPath = "/api/v1/mcp"
 
 // Authenticator lo implementa identity.
 type Authenticator interface {
@@ -67,11 +76,37 @@ func NewKit(mux *http.ServeMux, auth Authenticator, secureCookies bool, log *slo
 // El alcance de un token se verifica con los comodines {p}, {s} y {a} de la
 // ruta, así que una ruta AccessToken tiene que tenerlos en su lugar. Si no, hace
 // panic al registrarla (ver checkTokenPattern).
+//
+// Una ruta AccessBearer no puede tener comodines ni ir debajo de
+// /api/v1/projects: el Kit no revisa su alcance (ver checkBearerPattern).
 func (k *Kit) Handle(pattern string, a Access, h http.HandlerFunc) {
-	if a == AccessToken {
+	switch a {
+	case AccessToken:
 		checkTokenPattern(pattern)
+	case AccessBearer:
+		checkBearerPattern(pattern)
 	}
 	k.mux.Handle(pattern, k.authenticate(a, h))
+}
+
+// checkBearerPattern hace panic si una ruta AccessBearer tiene comodines o va
+// debajo de /api/v1/projects: ahí un token de otro proyecto pasaría sin
+// Principal.Allows, porque AccessBearer no lo revisa.
+func checkBearerPattern(pattern string) {
+	rest := pattern
+	if i := strings.IndexAny(pattern, " \t"); i >= 0 {
+		rest = strings.TrimLeft(pattern[i+1:], " \t")
+	}
+	path := rest
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		path = rest[i:]
+	}
+	if u, err := url.PathUnescape(path); err == nil {
+		path = u
+	}
+	if strings.Contains(path, "{") || path == "/api/v1/projects" || strings.HasPrefix(path, "/api/v1/projects/") {
+		panic(fmt.Sprintf("utils: la ruta %q usa AccessBearer, que no revisa el alcance del token: no puede tener comodines ni ir debajo de /api/v1/projects", pattern))
+	}
 }
 
 // scopeWildcards asocia cada comodín de alcance al literal que va justo antes,
@@ -175,6 +210,9 @@ func (k *Kit) HandlePublic(pattern string, h http.HandlerFunc) {
 var errTokenWithoutScope = errors.New("utils: AuthenticateToken devolvió un Principal sin TokenScope")
 
 func (k *Kit) authenticate(a Access, next http.HandlerFunc) http.Handler {
+	if a == AccessBearer {
+		return k.authenticateBearer(next)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		if bearer, ok := BearerToken(r); ok {
@@ -192,6 +230,11 @@ func (k *Kit) authenticate(a Access, next http.HandlerFunc) http.Handler {
 				return
 			}
 			write := r.Method != http.MethodGet && r.Method != http.MethodHead
+			// Antes que el alcance: no dice si el recurso existe (contrato §8.1).
+			if write && p.ReadOnly() {
+				k.writeError(w, http.StatusForbidden, "read_only_token", "el token es de solo lectura")
+				return
+			}
 			if !p.Allows(r.PathValue("p"), r.PathValue("s"), write) {
 				k.writeError(w, http.StatusForbidden, "out_of_scope", "el token no tiene acceso a este recurso")
 				return
@@ -225,6 +268,43 @@ func (k *Kit) authenticate(a Access, next http.HandlerFunc) http.Handler {
 			return
 		case p.NeedsTOTPSetup && a != AccessSetup:
 			k.writeError(w, http.StatusForbidden, "totp_setup_required", "configura 2FA para continuar")
+			return
+		}
+		next(w, r.WithContext(entity.WithPrincipal(ctx, p)))
+	})
+}
+
+// Los WWW-Authenticate de los 401 de AccessBearer (RFC 6750): sin token, y
+// con uno que no existe, se revocó o venció.
+const (
+	bearerChallenge       = `Bearer realm="muelle"`
+	invalidTokenChallenge = `Bearer realm="muelle", error="invalid_token"`
+)
+
+// authenticateBearer es AccessBearer (contrato §8.2): solo el Bearer, también
+// si viene la cookie de sesión. El Principal del token queda en el ctx; el
+// alcance lo revisa cada herramienta.
+func (k *Kit) authenticateBearer(next http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		bearer, ok := BearerToken(r)
+		if !ok {
+			w.Header().Set("WWW-Authenticate", bearerChallenge)
+			k.writeError(w, http.StatusUnauthorized, "unauthenticated", "usa un token de API: Authorization: Bearer mk_…")
+			return
+		}
+		p, err := k.auth.AuthenticateToken(ctx, bearer)
+		if errors.Is(err, entity.ErrUnauthenticated) {
+			w.Header().Set("WWW-Authenticate", invalidTokenChallenge)
+			k.writeError(w, http.StatusUnauthorized, "unauthenticated", "el token no existe, se revocó o venció")
+			return
+		}
+		if err != nil {
+			k.Fail(w, r, err)
+			return
+		}
+		if p.Token == nil {
+			k.Fail(w, r, errTokenWithoutScope)
 			return
 		}
 		next(w, r.WithContext(entity.WithPrincipal(ctx, p)))

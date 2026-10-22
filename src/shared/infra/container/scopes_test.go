@@ -271,3 +271,187 @@ func TestTokenScopes(t *testing.T) {
 
 	expect(t, "token inventado", e.bearer("mk_inventado", "GET", P, nil), 401, "unauthenticated")
 }
+
+// newTokenWith crea un token con el cuerpo body (contrato §8.1) y devuelve el
+// token en claro.
+func (a api) newTokenWith(s httptestutil.Opt, body map[string]any) string {
+	a.t.Helper()
+	w := a.do("POST", "/api/v1/tokens", body, s)
+	httptestutil.Expect(a.t, w, http.StatusCreated)
+	token, _ := httptestutil.Decode[map[string]any](a.t, w)["token"].(string)
+	if !strings.HasPrefix(token, "mk_") {
+		a.t.Fatalf("token=%q", token)
+	}
+	return token
+}
+
+// scopeFixture deja p1 (stages s1 y s2) y p2 (stage s1), cada stage con la
+// app de formulario "a", y los cinco tipos de token de la matriz del
+// contrato §8.1: P (p1), PS (p1/s1), P·L, PS·L (los mismos, de solo lectura) y
+// T·L (todos los proyectos, solo lectura).
+type scopeFixture struct {
+	api
+	s                  httptestutil.Opt
+	p, ps, pl, psl, tl string
+}
+
+func newScopeFixture(t *testing.T) scopeFixture {
+	t.Helper()
+	e := api{t: t, c: newTestContainer(t)}
+	s := e.setup()
+	app := map[string]any{"slug": "a", "kind": "service", "spec": map[string]any{"image": "nginx:alpine", "port": 80}}
+	for _, req := range []struct {
+		path string
+		body any
+	}{
+		{"/api/v1/projects", map[string]string{"slug": "p1", "name": "P1"}},
+		{"/api/v1/projects/p1/stages", map[string]string{"slug": "s1"}},
+		{"/api/v1/projects/p1/stages", map[string]string{"slug": "s2"}},
+		{"/api/v1/projects", map[string]string{"slug": "p2", "name": "P2"}},
+		{"/api/v1/projects/p2/stages", map[string]string{"slug": "s1"}},
+		{"/api/v1/projects/p1/stages/s1/apps", app},
+		{"/api/v1/projects/p1/stages/s2/apps", app},
+		{"/api/v1/projects/p2/stages/s1/apps", app},
+	} {
+		httptestutil.Expect(t, e.do("POST", req.path, req.body, s), http.StatusCreated)
+	}
+	return scopeFixture{
+		api: e, s: s,
+		p:   e.newTokenWith(s, map[string]any{"name": "p", "project": "p1"}),
+		ps:  e.newTokenWith(s, map[string]any{"name": "ps", "project": "p1", "stage": "s1"}),
+		pl:  e.newTokenWith(s, map[string]any{"name": "pl", "project": "p1", "read_only": true}),
+		psl: e.newTokenWith(s, map[string]any{"name": "psl", "project": "p1", "stage": "s1", "read_only": true}),
+		tl:  e.newTokenWith(s, map[string]any{"name": "tl", "all_projects": true, "read_only": true}),
+	}
+}
+
+// La matriz REST del contrato §8.1 con el servidor real: cada ruta · token de
+// lectura y de escritura (catalog, secrets y deploy) en p1/s1, p1/s2 y p2/s1,
+// con los cinco tipos de token. Un token de solo lectura en una escritura es
+// read_only_token antes que el alcance (en p2 también); uno de todos los
+// proyectos lee cualquier proyecto; las rutas de sesión siguen siendo
+// token_not_allowed para todos.
+func TestReadOnlyTokenScopes(t *testing.T) {
+	e := newScopeFixture(t)
+
+	type route struct {
+		method, path string // path va después de /api/v1/projects/{p}, o de …/stages/{s}
+		body         any
+		status       int // con permiso
+		code         string
+	}
+	projectRoutes := []route{
+		{"GET", "", nil, 200, ""},
+		{"GET", "/stages", nil, 200, ""},
+	}
+	put := map[string]any{"vars": map[string]string{"A": "1"}}
+	patch := map[string]any{"set": map[string]string{"B": "2"}}
+	stageRoutes := []route{
+		{"GET", "", nil, 200, ""},
+		{"GET", "/apps", nil, 200, ""},
+		{"GET", "/apps/a", nil, 200, ""},
+		{"GET", "/env", nil, 200, ""},
+		{"GET", "/apps/a/env", nil, 200, ""},
+		{"GET", "/apps/a/deploys", nil, 200, ""},
+		{"GET", "/apps/a/status", nil, 200, ""},
+		{"GET", "/apps/a/domains", nil, 200, ""}, // D12: un token lee los dominios de sus apps
+		{"PUT", "/env", put, 204, ""},
+		{"PATCH", "/env", patch, 204, ""},
+		{"PUT", "/apps/a/env", put, 204, ""},
+		{"PATCH", "/apps/a/env", patch, 204, ""},
+		{"POST", "/apps/a/deploys", map[string]any{}, 202, ""},
+		{"POST", "/apps/a/rollback", nil, 409, "no_previous_deploy"},
+	}
+
+	// where es "p1", "p1/s1", "p1/s2" o "p2/s1".
+	type kind struct {
+		name, token string
+		reads       func(where string) bool
+		writes      func(where string) bool // solo para los de escritura
+		readOnly    bool
+	}
+	in := func(places ...string) func(string) bool {
+		return func(where string) bool { return slices.Contains(places, where) }
+	}
+	kinds := []kind{
+		{"P·L", e.pl, in("p1", "p1/s1", "p1/s2"), nil, true},
+		{"PS·L", e.psl, in("p1", "p1/s1"), nil, true},
+		{"T·L", e.tl, in("p1", "p1/s1", "p1/s2", "p2", "p2/s1"), nil, true},
+		{"P", e.p, in("p1", "p1/s1", "p1/s2"), in("p1/s1", "p1/s2"), false},
+		{"PS", e.ps, in("p1", "p1/s1"), in("p1/s1"), false},
+	}
+	rows := 0
+	for _, k := range kinds {
+		check := func(where, base string, r route) {
+			write := r.method != "GET"
+			status, code := r.status, r.code
+			switch {
+			case write && k.readOnly:
+				status, code = 403, "read_only_token"
+			case write && !k.writes(where), !write && !k.reads(where):
+				status, code = 403, "out_of_scope"
+			}
+			name := fmt.Sprintf("%s: %s %s", k.name, r.method, base+r.path)
+			expect(t, name, e.bearer(k.token, r.method, base+r.path, r.body), status, code)
+			rows++
+		}
+		for _, p := range []string{"p1", "p2"} {
+			for _, r := range projectRoutes {
+				check(p, "/api/v1/projects/"+p, r)
+			}
+		}
+		for _, where := range []string{"p1/s1", "p1/s2", "p2/s1"} {
+			p, s, _ := strings.Cut(where, "/")
+			for _, r := range stageRoutes {
+				check(where, "/api/v1/projects/"+p+"/stages/"+s, r)
+			}
+		}
+	}
+	if want := len(kinds) * (2*len(projectRoutes) + 3*len(stageRoutes)); rows != want {
+		t.Fatalf("la matriz tiene %d filas, esperaba %d", rows, want)
+	}
+
+	// Los tokens de stage listan solo su stage; los demás, los dos.
+	stages := func(token string) []string {
+		t.Helper()
+		w := e.bearer(token, "GET", "/api/v1/projects/p1/stages", nil)
+		httptestutil.Expect(t, w, http.StatusOK)
+		var out []string
+		for _, st := range httptestutil.Decode[[]map[string]any](t, w) {
+			out = append(out, fmt.Sprint(st["slug"]))
+		}
+		slices.Sort(out)
+		return out
+	}
+	for token, want := range map[string][]string{e.p: {"s1", "s2"}, e.ps: {"s1"}, e.pl: {"s1", "s2"}, e.psl: {"s1"}, e.tl: {"s1", "s2"}} {
+		if got := stages(token); !slices.Equal(got, want) {
+			t.Errorf("GET /projects/p1/stages: %v, esperaba %v", got, want)
+		}
+	}
+
+	// Lo que es de sesión sigue siéndolo para todo token, también para uno
+	// de todos los proyectos (GET /projects incluido).
+	for _, k := range kinds {
+		for _, c := range []struct {
+			method, path string
+			body         any
+		}{
+			{"GET", "/api/v1/projects", nil},
+			{"GET", "/api/v1/tokens", nil},
+			{"POST", "/api/v1/tokens", map[string]any{"name": "x", "all_projects": true, "read_only": true}},
+			{"GET", "/api/v1/registries", nil},
+			{"GET", "/api/v1/settings", nil},
+			{"GET", "/api/v1/audit", nil},
+			{"GET", "/api/v1/proxy", nil},
+			{"POST", "/api/v1/projects/p1/stages/s1/apps", map[string]any{"slug": "x"}},
+			// De los dominios, un token solo lee la lista (D12).
+			{"POST", "/api/v1/projects/p1/stages/s1/apps/a/domains", map[string]any{"hostname": "a.p1.cl", "target_service": "a", "target_port": 80}},
+			{"PATCH", "/api/v1/projects/p1/stages/s1/apps/a/domains/a.p1.cl", map[string]any{"proxied": true}},
+			{"DELETE", "/api/v1/projects/p1/stages/s1/apps/a/domains/a.p1.cl", nil},
+			{"POST", "/api/v1/projects/p1/stages/s1/apps/a/domains/a.p1.cl/adopt", nil},
+			{"POST", "/api/v1/projects/p1/stages/s1/apps/a/domains/a.p1.cl/retry", nil},
+		} {
+			expect(t, fmt.Sprintf("%s: %s %s", k.name, c.method, c.path), e.bearer(k.token, c.method, c.path, c.body), 403, "token_not_allowed")
+		}
+	}
+}

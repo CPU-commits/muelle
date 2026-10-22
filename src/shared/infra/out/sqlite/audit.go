@@ -33,7 +33,9 @@ func NewAuditRecorder(db *DB, c clock.Clock, log *slog.Logger) *AuditRecorder {
 // (Principal.ActorName): el evento lo conserva aunque se borre el usuario o el
 // token. details se guarda como JSON con las claves de los map ordenadas; nil
 // (o un valor que da null) se guarda como {}. Los bytes de UTF-8 inválido en
-// un string se guardan como U+FFFD.
+// un string se guardan como U+FFFD. Si el ctx trae un via (entity.WithVia: lo
+// que se hace por MCP) y details es un objeto sin "via", se le suma (contrato
+// §8.6), con las claves en orden.
 func (r *AuditRecorder) Record(ctx context.Context, action, target string, details any) {
 	actorType, actorID, actorName := entity.ActorSystem, (*int64)(nil), entity.ActorSystemName
 	if p, ok := entity.PrincipalFrom(ctx); ok {
@@ -52,6 +54,10 @@ func (r *AuditRecorder) Record(ctx context.Context, action, target string, detai
 		}
 	}
 
+	if via, ok := entity.ViaFrom(ctx); ok {
+		raw = withVia(r.log, action, raw, via)
+	}
+
 	var id sql.NullInt64
 	if actorID != nil {
 		id = sql.NullInt64{Int64: *actorID, Valid: true}
@@ -65,4 +71,31 @@ func (r *AuditRecorder) Record(ctx context.Context, action, target string, detai
 	if err != nil {
 		r.log.Error("auditoría", "action", action, "err", err)
 	}
+}
+
+// withVia suma "via" al objeto JSON raw si no trae uno. Trabaja sobre los
+// bytes, así vale con cualquier tipo de details (un map, un struct); las
+// claves salen ordenadas. Un details que no es un objeto queda igual.
+func withVia(log *slog.Logger, action, raw, via string) string {
+	var obj map[string]jsontext.Value
+	if err := jsonv2.Unmarshal([]byte(raw), &obj); err != nil {
+		return raw // no es un objeto: no hay dónde ponerlo
+	}
+	if _, ok := obj["via"]; ok {
+		return raw
+	}
+	v, err := jsonv2.Marshal(via)
+	if err != nil {
+		return raw
+	}
+	if obj == nil {
+		obj = map[string]jsontext.Value{}
+	}
+	obj["via"] = v
+	b, err := jsonv2.Marshal(obj, jsonv2.Deterministic(true))
+	if err != nil {
+		log.Error("auditoría: sumando via", "action", action, "err", err)
+		return raw
+	}
+	return string(b)
 }

@@ -19,10 +19,12 @@ import (
 
 	"github.com/CPU-commits/muelle/src/cmd/cron"
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	"github.com/CPU-commits/muelle/src/cmd/mcp/tools"
 	"github.com/CPU-commits/muelle/src/internal/deploy/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/deploy/app/usecases"
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/service"
 	dephttp "github.com/CPU-commits/muelle/src/internal/deploy/infra/in/http"
+	depmcp "github.com/CPU-commits/muelle/src/internal/deploy/infra/in/mcp"
 	depsqlite "github.com/CPU-commits/muelle/src/internal/deploy/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/deploy/infra/out/service"
 	"github.com/CPU-commits/muelle/src/package/audit"
@@ -57,6 +59,7 @@ type Module struct {
 	seed         *usecases.SeedInitRegistry
 	initRegistry *InitRegistry
 	uc           dephttp.UseCases
+	tailLog      *usecases.TailLog // solo MCP (get_deploy)
 	log          *slog.Logger
 
 	deploys      *depsqlite.DeployRepository
@@ -71,6 +74,12 @@ type Module struct {
 	streamCtx   context.Context
 	stopStreams context.CancelFunc
 	sse         dephttp.SSEConfig
+	// slots cuenta los streams por principal: los SSE y, por MCP,
+	// get_app_logs y get_deploy con wait_s (contrato §8.5).
+	slots *usecases.StreamSlots
+	// mcp son los límites de las herramientas MCP, que los tests acortan
+	// antes de RegisterTools.
+	mcp depmcp.Config
 }
 
 // New arma el módulo. DB, Cipher, Audit, Docker, Env e Ingress son
@@ -122,17 +131,21 @@ func New(d Deps) *Module {
 		Audit:   d.Audit,
 	}
 	streamCtx, stopStreams := context.WithCancel(context.Background())
+	slots := usecases.NewStreamSlots(dephttp.DefaultSSEConfig().MaxPerPrincipal)
 	return &Module{
 		hub:          hub,
 		streamCtx:    streamCtx,
 		stopStreams:  stopStreams,
 		sse:          dephttp.DefaultSSEConfig(),
+		slots:        slots,
+		mcp:          depmcp.DefaultConfig(slots, d.Clock),
 		deploys:      deploys,
 		dispatcher:   dispatcher,
 		storeManager: usecases.NewStoreManagerNode(dk, settings, d.Log),
 		removeApp:    usecases.NewRemoveApp(apps, deploys, stacks, dispatcher, hub, d.Clock),
 		seed:         usecases.NewSeedInitRegistry(d.DB, settings, regs, d.Clock, d.Audit),
 		initRegistry: d.InitRegistry,
+		tailLog:      usecases.NewTailLog(ud),
 		uc: dephttp.UseCases{
 			ListRegistries: usecases.NewListRegistries(regs),
 			CreateRegistry: usecases.NewCreateRegistry(d.DB, regs, d.Clock, d.Audit),
@@ -157,7 +170,19 @@ func New(d Deps) *Module {
 // y …/log/stream, POST …/apps/{a}/rollback, GET …/apps/{a}/status y
 // …/logs (AccessToken), y /api/v1/registries (AccessSession).
 func (m *Module) RegisterRoutes(k *utils.Kit) {
-	dephttp.Register(k, m.uc, dephttp.Streams{Ctx: m.streamCtx, Config: m.sse})
+	dephttp.Register(k, m.uc, dephttp.Streams{Ctx: m.streamCtx, Config: m.sse, Slots: m.slots})
+}
+
+// RegisterTools registra las herramientas MCP de deploy (contrato §8.3):
+// get_app_status, get_app_logs, list_deploys, get_deploy, read_deploy_log,
+// deploy y rollback, con los mismos casos de uso que REST y el mismo contador
+// de streams.
+func (m *Module) RegisterTools(k *tools.Kit) {
+	depmcp.Register(k, depmcp.UseCases{
+		CheckApp: m.uc.CreateDeploy.CheckApp, GetStatus: m.uc.GetStatus, AppLogs: m.uc.AppLogs,
+		ListDeploys: m.uc.ListDeploys, GetDeploy: m.uc.GetDeploy, TailLog: m.tailLog, ReadLog: m.uc.ReadLog,
+		FollowLog: m.uc.FollowLog, CreateDeploy: m.uc.CreateDeploy, Rollback: m.uc.Rollback,
+	}, m.mcp)
 }
 
 // SeedInitRegistry guarda Deps.InitRegistry como un registry solo en el

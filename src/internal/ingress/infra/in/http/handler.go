@@ -24,13 +24,15 @@ type handler struct {
 // appPath es {app} (contrato §0).
 const appPath = "/api/v1/projects/{p}/stages/{s}/apps/{a}"
 
-// Register registra los errores y las rutas de ingress, todas solo con
-// sesión (contrato §3): GET /api/v1/proxy y los dominios de una app (§3.2).
+// Register registra los errores y las rutas de ingress (contrato §3): GET
+// /api/v1/proxy y los dominios de una app (§3.2), solo con sesión, salvo
+// GET {app}/domains, que también lee un token en su alcance (§8.1, D12 del
+// diseño del MCP).
 func Register(k *utils.Kit, uc UseCases) {
 	RegisterErrors(k)
 	h := &handler{k: k, uc: uc}
 	k.Handle("GET /api/v1/proxy", utils.AccessSession, h.proxy)
-	k.Handle("GET "+appPath+"/domains", utils.AccessSession, h.listDomains)
+	k.Handle("GET "+appPath+"/domains", utils.AccessToken, h.listDomains)
 	k.Handle("POST "+appPath+"/domains", utils.AccessSession, h.createDomain)
 	k.Handle("PATCH "+appPath+"/domains/{hostname}", utils.AccessSession, h.updateDomain)
 	k.Handle("DELETE "+appPath+"/domains/{hostname}", utils.AccessSession, h.deleteDomain)

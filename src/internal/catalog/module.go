@@ -6,9 +6,11 @@ import (
 	"log/slog"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	"github.com/CPU-commits/muelle/src/cmd/mcp/tools"
 	"github.com/CPU-commits/muelle/src/internal/catalog/app/usecases"
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/service"
 	cathttp "github.com/CPU-commits/muelle/src/internal/catalog/infra/in/http"
+	catmcp "github.com/CPU-commits/muelle/src/internal/catalog/infra/in/mcp"
 	catsqlite "github.com/CPU-commits/muelle/src/internal/catalog/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/catalog/infra/out/service"
 	"github.com/CPU-commits/muelle/src/package/audit"
@@ -69,3 +71,12 @@ func New(d Deps) *Module {
 
 // RegisterRoutes registra los endpoints de proyectos, stages y apps.
 func (m *Module) RegisterRoutes(k *utils.Kit) { cathttp.Register(k, m.uc) }
+
+// RegisterTools registra las herramientas MCP de catalog (contrato §8.3):
+// list_projects, list_stages, list_apps y get_app.
+func (m *Module) RegisterTools(k *tools.Kit) {
+	catmcp.Register(k, catmcp.UseCases{
+		ListProjects: m.uc.ListProjects, ListStages: m.uc.ListStages,
+		ListApps: m.uc.ListApps, GetApp: m.uc.GetApp,
+	})
+}

@@ -27,11 +27,19 @@ func Errorf(field, format string, args ...any) error {
 	return &Error{Field: field, Message: fmt.Sprintf(format, args...)}
 }
 
+// Las regex de los slugs (§5.2 del spec): de un proyecto, una app, un
+// servicio o un volumen (hasta 16), y de un stage (hasta 12). Empiezan con
+// letra, terminan con letra o número, solo [a-z0-9-]. El "_" queda libre
+// como separador en los nombres de Swarm. El servidor MCP las pone en el
+// esquema de sus herramientas (contrato §8.3).
+const (
+	Slug16Pattern = `^[a-z]([a-z0-9-]{0,14}[a-z0-9])?$`
+	Slug12Pattern = `^[a-z]([a-z0-9-]{0,10}[a-z0-9])?$`
+)
+
 var (
-	// Empiezan con letra, terminan con letra o número, solo [a-z0-9-].
-	// El "_" queda libre como separador en los nombres de Swarm (§5.2 del spec).
-	slug16Re   = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,14}[a-z0-9])?$`)
-	slug12Re   = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,10}[a-z0-9])?$`)
+	slug16Re   = regexp.MustCompile(Slug16Pattern)
+	slug12Re   = regexp.MustCompile(Slug12Pattern)
 	usernameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,31}$`)
 	envKeyRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 )

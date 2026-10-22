@@ -618,6 +618,52 @@ func TestListStagesFiltersStageScopedTokens(t *testing.T) {
 	}
 }
 
+// ListProjects filtra por el Principal (contrato §8.3 #1), como ListStages:
+// un token ve su proyecto, uno de todos los proyectos los ve todos, y una
+// sesión, como siempre, todos.
+func TestListProjectsFiltersByPrincipal(t *testing.T) {
+	e := newEnv(t)
+	for _, slug := range []string{"zeta", "auditfy", "otro"} {
+		if _, err := NewCreateProject(e.d).Execute(e.ctx(), dto.CreateProjectInput{Slug: slug, Name: slug}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	slugs := func(ctx context.Context) []string {
+		t.Helper()
+		list, err := NewListProjects(e.d).Execute(ctx)
+		if err != nil || list == nil {
+			t.Fatalf("list=%#v err=%v", list, err)
+		}
+		out := []string{}
+		for _, p := range list {
+			out = append(out, p.Slug)
+		}
+		return out
+	}
+	as := func(scope entity.TokenScope) context.Context {
+		return entity.WithPrincipal(context.Background(), entity.Principal{Token: &scope})
+	}
+	cases := []struct {
+		name string
+		ctx  context.Context
+		want string
+	}{
+		{"sesión", e.ctx(), "auditfy,otro,zeta"},
+		{"sin Principal", context.Background(), "auditfy,otro,zeta"},
+		{"token de proyecto", as(entity.TokenScope{ID: 1, ProjectSlug: "auditfy"}), "auditfy"},
+		{"token de stage", as(entity.TokenScope{ID: 2, ProjectSlug: "otro", StageSlug: "staging"}), "otro"},
+		{"token de solo lectura", as(entity.TokenScope{ID: 3, ProjectSlug: "zeta", ReadOnly: true}), "zeta"},
+		{"todos los proyectos", as(entity.TokenScope{ID: 4, ReadOnly: true, AllProjects: true}), "auditfy,otro,zeta"},
+		{"todos sin solo lectura", as(entity.TokenScope{ID: 5, AllProjects: true}), ""},
+		{"de un proyecto que no existe", as(entity.TokenScope{ID: 6, ProjectSlug: "nope"}), ""},
+	}
+	for _, c := range cases {
+		if got := strings.Join(slugs(c.ctx), ","); got != c.want {
+			t.Errorf("%s: %q, esperaba %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestAuditTrail(t *testing.T) {
 	e := newEnv(t)
 	ctx := e.ctx()

@@ -3,10 +3,12 @@ package usecases
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/CPU-commits/muelle/src/internal/deploy/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/service"
+	srepo "github.com/CPU-commits/muelle/src/shared/domain/repository"
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
 
@@ -65,8 +67,14 @@ func (u *ReadLog) Execute(ctx context.Context, in dto.ReadLog) (dto.LogPage, err
 	if err != nil {
 		return dto.LogPage{}, err
 	}
-	return dto.LogPage{Chunk: string(c.Chunk), NextOffset: in.Offset + len(c.Chunk), Status: c.Status, SupersededBy: c.SupersededBy}, nil
+	return dto.LogPage{Chunk: string(c.Chunk), NextOffset: in.Offset + len(c.Chunk), Length: c.Length,
+		Status: c.Status, SupersededBy: c.SupersededBy}, nil
 }
+
+// ErrLogServiceNotFound es el not_found de get_app_logs por MCP cuando la app
+// existe pero el servicio no (contrato §8.3 #7): su mensaje dice que en una
+// app compose service es obligatorio. Envuelve repository.ErrNotFound.
+var ErrLogServiceNotFound = fmt.Errorf("%w: el servicio no existe en la app", srepo.ErrNotFound)
 
 // ErrBadOffset es el 422 de un offset que no es un entero ≥ 0 (contrato
 // §2.5): lo usan el polling y el stream.

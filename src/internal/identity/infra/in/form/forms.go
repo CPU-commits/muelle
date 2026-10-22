@@ -36,14 +36,19 @@ type Code struct {
 }
 
 // CreateToken es el cuerpo de POST /tokens. Sin stage, el token es de todo
-// el proyecto; expires_in_days 0 u omitido, no vence.
+// el proyecto; expires_in_days 0 u omitido, no vence. read_only y
+// all_projects son opcionales (contrato §8.1): un cliente que no los manda
+// crea un token de escritura de un proyecto, como antes.
 type CreateToken struct {
 	Name          string `json:"name"`
 	Project       string `json:"project"`
 	Stage         string `json:"stage"`
+	ReadOnly      bool   `json:"read_only"`
+	AllProjects   bool   `json:"all_projects"`
 	ExpiresInDays int    `json:"expires_in_days"`
 }
 
 func (f CreateToken) DTO(createdBy int64) dto.CreateTokenInput {
-	return dto.CreateTokenInput{Name: f.Name, Project: f.Project, Stage: f.Stage, ExpiresInDays: f.ExpiresInDays, CreatedBy: createdBy}
+	return dto.CreateTokenInput{Name: f.Name, Project: f.Project, Stage: f.Stage, ReadOnly: f.ReadOnly,
+		AllProjects: f.AllProjects, ExpiresInDays: f.ExpiresInDays, CreatedBy: createdBy}
 }

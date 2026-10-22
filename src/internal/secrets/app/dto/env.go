@@ -21,6 +21,11 @@ type PatchEnv struct {
 	Set    map[string]string
 	Unset  []string
 	Secret *bool // aplica a las de Set; nil es true
+	// KeepSecrets (set_env por MCP, contrato §8.3 #14) rechaza, sin escribir
+	// nada, una clave de Set que ya es secreta en el dueño o, si el dueño es
+	// una app, en su stage: así un PATCH nunca cambia el valor que recibe una
+	// app de una variable secreta. No toca Unset.
+	KeepSecrets bool
 }
 
 // ResolveEnv pide las variables que recibe una app al desplegarse (Fase 2).

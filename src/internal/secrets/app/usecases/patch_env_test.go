@@ -364,3 +364,84 @@ func TestPatchEnvAuditsKeysOnly(t *testing.T) {
 		}
 	}
 }
+
+// KeepSecrets (set_env por MCP, contrato §8.3 #14): un PATCH nunca cambia el
+// valor que recibe una app de una variable secreta. No escribe nada si una
+// clave de set ya es secreta en el dueño, o, con una app, si es secreta en
+// su stage (la de la app la taparía). Al revés sí se puede.
+func TestPatchEnvKeepSecrets(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	app, stage := entity.AppOwner(f.appID), entity.StageOwner(f.stageID)
+	if err := f.replace.Execute(ctx, dto.ReplaceEnv{Target: stageTarget, Vars: map[string]string{"STAGE_SECRET": "s3cr3t-del-stage"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: stageTarget, Set: map[string]string{"LOG_LEVEL": "info"}, Secret: ptr(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.replace.Execute(ctx, dto.ReplaceEnv{Target: appTarget, Vars: map[string]string{"APP_SECRET": "s3cr3t-de-la-app"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"PUBLIC": "1"}, Secret: ptr(false)}); err != nil {
+		t.Fatal(err)
+	}
+	stageBefore, appBefore, auditBefore := f.plain(t, stage), f.plain(t, app), len(f.auditEvents(t))
+
+	keep := func(target dto.EnvTarget, set map[string]string) error {
+		return f.patch.Execute(ctx, dto.PatchEnv{Target: target, Set: set, Secret: ptr(false), KeepSecrets: true})
+	}
+	for _, c := range []struct {
+		name   string
+		target dto.EnvTarget
+		set    map[string]string
+		msg    string
+	}{
+		{"secreta en la app", appTarget, map[string]string{"APP_SECRET": "x", "NEW": "y"},
+			`set: "APP_SECRET" es secreta: cámbiala desde el panel o la GitHub Action`},
+		{"secreta en el stage", stageTarget, map[string]string{"STAGE_SECRET": "x"},
+			`set: "STAGE_SECRET" es secreta: cámbiala desde el panel o la GitHub Action`},
+		{"secreta en el stage, desde la app", appTarget, map[string]string{"A": "1", "STAGE_SECRET": "x"},
+			`set: "STAGE_SECRET" es secreta en el stage, y la de la app la taparía: cámbiala desde el panel o la GitHub Action`},
+	} {
+		err := keep(c.target, c.set)
+		if err == nil || err.Error() != c.msg || validationField(t, err) != "set" {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+	if !maps.Equal(f.plain(t, stage), stageBefore) || !maps.Equal(f.plain(t, app), appBefore) || len(f.auditEvents(t)) != auditBefore {
+		t.Fatalf("un set rechazado escribió algo: stage=%v app=%v", f.plain(t, stage), f.plain(t, app))
+	}
+
+	// Una no secreta se pisa; una nueva se crea; una del stage con la clave
+	// de una secreta de la app no cambia lo que recibe la app: se guarda.
+	if err := keep(appTarget, map[string]string{"PUBLIC": "2", "LOG_LEVEL": "debug"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := keep(stageTarget, map[string]string{"APP_SECRET": "del-stage", "LOG_LEVEL": "warn"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.plain(t, app); got["PUBLIC"] != "2" || got["LOG_LEVEL"] != "debug" || got["APP_SECRET"] != "s3cr3t-de-la-app" {
+		t.Fatalf("app=%v", got)
+	}
+	if got := f.plain(t, stage); got["APP_SECRET"] != "del-stage" || got["LOG_LEVEL"] != "warn" || got["STAGE_SECRET"] != "s3cr3t-del-stage" {
+		t.Fatalf("stage=%v", got)
+	}
+	vars, _ := f.get.Execute(ctx, stageTarget)
+	for _, v := range vars {
+		if v.Key == "APP_SECRET" && v.Secret {
+			t.Fatal("set_env guarda variables no secretas")
+		}
+	}
+
+	// Sin KeepSecrets, el PATCH de siempre pisa una secreta.
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: appTarget, Set: map[string]string{"APP_SECRET": "otro"}, Secret: ptr(false)}); err != nil {
+		t.Fatal(err)
+	}
+	// Y unset borra una secreta también con KeepSecrets.
+	if err := f.patch.Execute(ctx, dto.PatchEnv{Target: stageTarget, Unset: []string{"STAGE_SECRET"}, KeepSecrets: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.plain(t, stage)["STAGE_SECRET"]; ok {
+		t.Fatal("unset con KeepSecrets no borró la secreta")
+	}
+}

@@ -29,7 +29,7 @@ type UseCases struct {
 type Handler struct {
 	uc    UseCases
 	k     *utils.Kit
-	limit *streamLimit
+	limit *usecases.StreamSlots
 	cfg   SSEConfig
 	base  context.Context
 }
@@ -41,7 +41,10 @@ func Register(k *utils.Kit, uc UseCases, s Streams) {
 	if s.Ctx == nil {
 		s.Ctx = context.Background()
 	}
-	h := &Handler{uc: uc, k: k, limit: newStreamLimit(s.Config.MaxPerPrincipal), cfg: s.Config, base: s.Ctx}
+	if s.Slots == nil {
+		s.Slots = usecases.NewStreamSlots(s.Config.MaxPerPrincipal)
+	}
+	h := &Handler{uc: uc, k: k, limit: s.Slots, cfg: s.Config, base: s.Ctx}
 
 	k.Handle("GET /api/v1/registries", utils.AccessSession, h.listRegistries)
 	k.Handle("POST /api/v1/registries", utils.AccessSession, h.createRegistry)

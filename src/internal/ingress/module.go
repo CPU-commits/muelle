@@ -21,10 +21,12 @@ import (
 
 	"github.com/CPU-commits/muelle/src/cmd/cron"
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	"github.com/CPU-commits/muelle/src/cmd/mcp/tools"
 	"github.com/CPU-commits/muelle/src/internal/ingress/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/ingress/app/usecases"
 	incron "github.com/CPU-commits/muelle/src/internal/ingress/infra/in/cron"
 	inhttp "github.com/CPU-commits/muelle/src/internal/ingress/infra/in/http"
+	ingmcp "github.com/CPU-commits/muelle/src/internal/ingress/infra/in/mcp"
 	reposqlite "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy"
@@ -156,11 +158,17 @@ func New(d Deps) *Module {
 	return m
 }
 
-// RegisterRoutes registra los errores y las rutas del módulo, todas solo con
-// sesión (contrato §3): GET /api/v1/proxy y los dominios (GET/POST
-// …/apps/{a}/domains, PATCH/DELETE …/domains/{hostname}, POST …/adopt y
-// …/retry).
+// RegisterRoutes registra los errores y las rutas del módulo (contrato §3):
+// GET /api/v1/proxy y los dominios (GET/POST …/apps/{a}/domains, PATCH/DELETE
+// …/domains/{hostname}, POST …/adopt y …/retry), solo con sesión, salvo GET
+// …/apps/{a}/domains, que también lee un token en su alcance (§8.1).
 func (m *Module) RegisterRoutes(k *utils.Kit) { inhttp.Register(k, m.httpUC) }
+
+// RegisterTools registra la herramienta MCP de ingress (contrato §8.3):
+// list_domains.
+func (m *Module) RegisterTools(k *tools.Kit) {
+	ingmcp.Register(k, ingmcp.UseCases{ListDomains: m.httpUC.ListDomains})
+}
 
 // Jobs son las tareas periódicas: "proxy" cada 5 min (cron.Run lo corre
 // también al arrancar: asegura muelle-caddy y las redes de todos los

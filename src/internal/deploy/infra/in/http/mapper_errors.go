@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	"github.com/CPU-commits/muelle/src/internal/deploy/app/usecases"
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/service"
 )
 
@@ -18,7 +19,10 @@ func RegisterErrors(k *utils.Kit) {
 	// (catalog): el Kit es uno solo (contrato §1.1).
 	k.RegisterError(service.ErrWorkerBusy, http.StatusConflict, "conflict",
 		"un deploy de la app todavía no se detiene; vuelve a intentar en unos segundos")
+	// Solo lo devuelve get_app_logs por MCP (contrato §8.3 #7).
+	k.RegisterError(usecases.ErrLogServiceNotFound, http.StatusNotFound, "not_found",
+		"el servicio no existe en la app; en una app compose, service es obligatorio (los servicios están en get_app)")
 	// El Kit pone Retry-After en todo 429 (contrato §0.3).
-	k.RegisterError(ErrTooManyStreams, http.StatusTooManyRequests, "rate_limited",
+	k.RegisterError(usecases.ErrTooManyStreams, http.StatusTooManyRequests, "rate_limited",
 		"demasiados streams abiertos a la vez; cierra alguno (el panel en otra pestaña) y vuelve a intentar")
 }

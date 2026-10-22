@@ -16,8 +16,10 @@ import (
 	"github.com/CPU-commits/muelle/src/shared/domain/validate"
 )
 
-// CreateToken crea un token de API con alcance de proyecto o de proyecto +
-// stage. El token en claro se devuelve una sola vez; solo se guarda su hash.
+// CreateToken crea un token de API con alcance de proyecto, de proyecto +
+// stage, o de todos los proyectos (solo de lectura), y de escritura o de
+// solo lectura (contrato §8.1). El token en claro se devuelve una sola vez;
+// solo se guarda su hash.
 // Si quien lo pide fue borrado mientras su petición estaba en curso, responde
 // ErrUnauthenticated (no ErrNotFound, que haría pensar que falta el proyecto).
 type CreateToken struct {
@@ -37,12 +39,20 @@ func NewCreateToken(tx sharedrepo.Transactor, users repository.UserRepository, t
 func (uc *CreateToken) Execute(ctx context.Context, in dto.CreateTokenInput) (dto.CreatedTokenOutput, error) {
 	now := uc.clock.Now()
 	plain, hash := service.RandomToken(service.APITokenPrefix)
-	tok, err := entity.NewAPIToken(in.Name, hash, 0, nil, &in.CreatedBy, now, nil)
+	tok, err := entity.NewAPIToken(in.Name, hash, 0, nil, &in.CreatedBy, now, nil, in.ReadOnly, in.AllProjects)
 	if err != nil {
 		return dto.CreatedTokenOutput{}, err
 	}
 	if in.ExpiresInDays < 0 || in.ExpiresInDays > service.MaxTokenDays {
 		return dto.CreatedTokenOutput{}, validate.Errorf("expires_in_days", "debe estar entre 0 y %d", service.MaxTokenDays)
+	}
+	if in.AllProjects {
+		if in.Project != "" || in.Stage != "" {
+			return dto.CreatedTokenOutput{}, validate.Errorf("project", "un token de todos los proyectos no lleva proyecto ni stage")
+		}
+		if !in.ReadOnly {
+			return dto.CreatedTokenOutput{}, validate.Errorf("read_only", "un token de todos los proyectos es de solo lectura")
+		}
 	}
 	if in.ExpiresInDays > 0 { // 0: no vence
 		t := now.AddDate(0, 0, in.ExpiresInDays)
@@ -58,16 +68,18 @@ func (uc *CreateToken) Execute(ctx context.Context, in dto.CreateTokenInput) (dt
 			}
 			return err
 		}
-		projectID, stageID, err := uc.scopes.Resolve(ctx, in.Project, in.Stage)
-		if err != nil {
-			return err
+		// Un token de todos los proyectos no busca ningún proyecto.
+		if !in.AllProjects {
+			projectID, stageID, err := uc.scopes.Resolve(ctx, in.Project, in.Stage)
+			if err != nil {
+				return err
+			}
+			tok.ProjectID, tok.StageID = projectID, stageID
 		}
-		tok.ProjectID, tok.StageID = projectID, stageID
 		if tok, err = uc.tokens.Create(ctx, tok); err != nil {
 			return err
 		}
-		uc.audit.Record(ctx, "token.create", "token:"+strconv.FormatInt(tok.ID, 10),
-			map[string]string{"project": tok.ProjectSlug, "stage": tok.StageSlug})
+		uc.audit.Record(ctx, "token.create", "token:"+strconv.FormatInt(tok.ID, 10), tokenAuditDetails(tok))
 		return nil
 	})
 	if err != nil {
@@ -76,9 +88,19 @@ func (uc *CreateToken) Execute(ctx context.Context, in dto.CreateTokenInput) (dt
 	return dto.CreatedTokenOutput{TokenOutput: toTokenOutput(tok), Plain: plain}, nil
 }
 
+// tokenAuditDetails son los details de token.create (contrato §8.1): el
+// alcance y si es de solo lectura. stage va en "" si es de todo el proyecto.
+func tokenAuditDetails(t entity.APIToken) map[string]any {
+	if t.AllProjects {
+		return map[string]any{"all_projects": true, "read_only": t.ReadOnly}
+	}
+	return map[string]any{"project": t.ProjectSlug, "stage": t.StageSlug, "read_only": t.ReadOnly}
+}
+
 func toTokenOutput(t entity.APIToken) dto.TokenOutput {
 	out := dto.TokenOutput{
 		ID: t.ID, Name: t.Name, Project: t.ProjectSlug, Stage: t.StageSlug,
+		ReadOnly: t.ReadOnly, AllProjects: t.AllProjects,
 		CreatedAt: t.CreatedAt, LastUsedAt: t.LastUsedAt, ExpiresAt: t.ExpiresAt,
 	}
 	if t.CreatedByName != "" {

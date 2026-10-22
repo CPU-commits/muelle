@@ -117,13 +117,18 @@ func TestInvite(t *testing.T) {
 func TestNewAPIToken(t *testing.T) {
 	stage, creator := int64(4), int64(1)
 	exp := t0.Add(24 * time.Hour)
-	tok, err := NewAPIToken("ci", "h", 2, &stage, &creator, t0, &exp)
+	tok, err := NewAPIToken("ci", "h", 2, &stage, &creator, t0, &exp, true, false)
 	if err != nil || tok.Name != "ci" || tok.TokenHash != "h" || tok.ProjectID != 2 || *tok.StageID != 4 ||
-		*tok.CreatedBy != 1 || !tok.CreatedAt.Equal(t0) || !tok.ExpiresAt.Equal(exp) || tok.LastUsedAt != nil {
+		*tok.CreatedBy != 1 || !tok.CreatedAt.Equal(t0) || !tok.ExpiresAt.Equal(exp) || tok.LastUsedAt != nil ||
+		!tok.ReadOnly || tok.AllProjects {
 		t.Fatalf("tok=%+v err=%v", tok, err)
 	}
+	all, err := NewAPIToken("claude", "h", 0, nil, &creator, t0, nil, true, true)
+	if err != nil || !all.ReadOnly || !all.AllProjects || all.ProjectID != 0 || all.StageID != nil {
+		t.Fatalf("all=%+v err=%v", all, err)
+	}
 	for _, bad := range []string{"", "   ", strings.Repeat("a", MaxTokenName+1), "a\nb", "​", "ci\xff"} {
-		_, err := NewAPIToken(bad, "h", 2, nil, nil, t0, nil)
+		_, err := NewAPIToken(bad, "h", 2, nil, nil, t0, nil, false, false)
 		if ve, ok := errors.AsType[*validate.Error](err); !ok || ve.Field != "name" {
 			t.Errorf("%q: esperaba un error de validación de name, got %v", bad, err)
 		}
@@ -144,6 +149,15 @@ func TestAPITokenScopeValid(t *testing.T) {
 		{"sin proyecto", APIToken{}, false},
 		{"stage sin slug", APIToken{ProjectSlug: "auditfy", StageID: &stage}, false},
 		{"slug sin stage", APIToken{ProjectSlug: "auditfy", StageSlug: "staging"}, false},
+		{"proyecto de solo lectura", APIToken{ProjectSlug: "auditfy", ReadOnly: true}, true},
+		{"stage de solo lectura", APIToken{ProjectSlug: "auditfy", StageID: &stage, StageSlug: "staging", ReadOnly: true}, true},
+		{"todos los proyectos", APIToken{ReadOnly: true, AllProjects: true}, true},
+		// Todos los proyectos va sin proyecto ni stage, y de solo lectura.
+		{"todos sin solo lectura", APIToken{AllProjects: true}, false},
+		{"todos con id de proyecto", APIToken{ProjectID: 2, ReadOnly: true, AllProjects: true}, false},
+		{"todos con slug de proyecto", APIToken{ProjectSlug: "auditfy", ReadOnly: true, AllProjects: true}, false},
+		{"todos con stage", APIToken{StageID: &stage, ReadOnly: true, AllProjects: true}, false},
+		{"todos con slug de stage", APIToken{StageSlug: "staging", ReadOnly: true, AllProjects: true}, false},
 	}
 	for _, c := range cases {
 		if got := c.tok.ScopeValid(); got != c.want {
@@ -162,7 +176,11 @@ func TestAPITokenExpiredAndScope(t *testing.T) {
 		t.Fatal("sin expires_at no vence")
 	}
 	s := tok.Scope()
-	if s.ID != 9 || s.Name != "ci" || s.ProjectSlug != "auditfy" || s.StageSlug != "staging" {
+	if s.ID != 9 || s.Name != "ci" || s.ProjectSlug != "auditfy" || s.StageSlug != "staging" || s.ReadOnly || s.AllProjects {
 		t.Fatalf("scope=%+v", s)
+	}
+	all := APIToken{ID: 10, Name: "claude", ReadOnly: true, AllProjects: true}.Scope()
+	if all.ID != 10 || all.Name != "claude" || all.ProjectSlug != "" || all.StageSlug != "" || !all.ReadOnly || !all.AllProjects {
+		t.Fatalf("scope de todos los proyectos=%+v", all)
 	}
 }

@@ -8,11 +8,14 @@ import (
 )
 
 // TokenRepository guarda los tokens de API. Los tokens que devuelve traen
-// los slugs de su proyecto y stage. Un token se borra en cascada con su
-// proyecto o su stage.
+// los slugs de su proyecto y stage, y siempre tienen el alcance completo
+// (APIToken.ScopeValid): uno roto no se devuelve. Un token se borra en
+// cascada con su proyecto o su stage; uno de todos los proyectos no tiene
+// ninguno de los dos.
 type TokenRepository interface {
-	// Create guarda t (sin id, con ProjectID y StageID) y devuelve el token
-	// guardado. Si el proyecto o el stage ya no existen devuelve ErrNotFound.
+	// Create guarda t (sin id, con ProjectID y StageID, o con AllProjects) y
+	// devuelve el token guardado. Si el proyecto o el stage ya no existen
+	// devuelve ErrNotFound.
 	Create(ctx context.Context, t entity.APIToken) (entity.APIToken, error)
 	GetByHash(ctx context.Context, tokenHash string) (entity.APIToken, error)
 	// List devuelve todos los tokens en orden de creación.

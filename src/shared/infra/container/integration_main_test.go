@@ -26,7 +26,8 @@ const e2eStaleAfter = 30 * time.Minute
 // TestMain toma el candado del Swarm (swarmlock): los paquetes de
 // integración que usan el Swarm corren de a uno. Después barre lo que dejó
 // una corrida anterior cortada por un -timeout (un panic que no corre los
-// t.Cleanup), y solo lo de esta línea (it9) con más de 30 min:
+// t.Cleanup), y solo lo de las pruebas de este paquete (it9, la de punta a
+// punta, e it8, la del MCP) con más de 30 min. Para cada prefijo (acá, it9):
 //   - los stacks cuyos servicios se llaman it9… y llevan muelle.project = it9…;
 //   - los contenedores it9-… (muelle-caddy, su prueba de puertos y el puente
 //     de la admin API de la prueba);
@@ -35,13 +36,16 @@ const e2eStaleAfter = 30 * time.Minute
 // Si Docker no está, no hace nada (la prueba se salta sola).
 func TestMain(m *testing.M) {
 	unlock := swarmlock.Lock()
-	e2eSweepStale()
+	for _, prefix := range []string{e2ePrefix, it8Prefix} {
+		sweepStale(prefix)
+	}
 	code := m.Run()
 	unlock()
 	os.Exit(code)
 }
 
-func e2eSweepStale() {
+// sweepStale barre lo de prefix (it9 o it8) con más de e2eStaleAfter.
+func sweepStale(prefix string) {
 	c, err := docker.New(docker.Options{})
 	if err != nil {
 		return
@@ -63,47 +67,47 @@ func e2eSweepStale() {
 		stacks := map[string]bool{}
 		for _, s := range services {
 			stack := s.Labels[naming.LabelStackNamespace]
-			if strings.HasPrefix(s.Name, e2ePrefix) && strings.HasPrefix(s.Labels[naming.LabelProject], e2ePrefix) &&
-				strings.HasPrefix(stack, e2ePrefix) && s.CreatedAt.Before(old) {
+			if strings.HasPrefix(s.Name, prefix) && strings.HasPrefix(s.Labels[naming.LabelProject], prefix) &&
+				strings.HasPrefix(stack, prefix) && s.CreatedAt.Before(old) {
 				stacks[stack] = true
 			}
 		}
 		for stack := range stacks {
-			fmt.Fprintf(os.Stderr, "it9: borrando el stack %s de una corrida anterior\n", stack)
+			fmt.Fprintf(os.Stderr, "%s: borrando el stack %s de una corrida anterior\n", prefix, stack)
 			_, _ = c.RemoveStack(ctx, stack)
 		}
 	}
 
 	if out, err := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", "{{.Names}}").Output(); err == nil {
 		for _, name := range strings.Fields(string(out)) {
-			if !strings.HasPrefix(name, e2ePrefix+"-") || !stale("container", name, "{{json .Created}}") {
+			if !strings.HasPrefix(name, prefix+"-") || !stale("container", name, "{{json .Created}}") {
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "it9: borrando el contenedor %s de una corrida anterior\n", name)
+			fmt.Fprintf(os.Stderr, "%s: borrando el contenedor %s de una corrida anterior\n", prefix, name)
 			_ = c.RemoveContainer(ctx, name, true)
 		}
 	}
 
 	if nets, err := c.ListNetworks(ctx, nil); err == nil {
 		for _, n := range nets {
-			if !strings.HasPrefix(n.Name, e2ePrefix) || !stale("network", n.Name, "{{json .Created}}") {
+			if !strings.HasPrefix(n.Name, prefix) || !stale("network", n.Name, "{{json .Created}}") {
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "it9: borrando la red %s de una corrida anterior\n", n.Name)
+			fmt.Fprintf(os.Stderr, "%s: borrando la red %s de una corrida anterior\n", prefix, n.Name)
 			if err := c.RemoveNetwork(ctx, n.Name); err != nil {
-				fmt.Fprintf(os.Stderr, "it9: no se pudo borrar la red %s: %v\n", n.Name, err)
+				fmt.Fprintf(os.Stderr, "%s: no se pudo borrar la red %s: %v\n", prefix, n.Name, err)
 			}
 		}
 	}
 
 	if vols, err := c.ListVolumes(ctx, nil); err == nil {
 		for _, v := range vols {
-			if !strings.HasPrefix(v.Name, e2ePrefix) || !stale("volume", v.Name, "{{.CreatedAt}}") {
+			if !strings.HasPrefix(v.Name, prefix) || !stale("volume", v.Name, "{{.CreatedAt}}") {
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "it9: borrando el volumen %s de una corrida anterior\n", v.Name)
+			fmt.Fprintf(os.Stderr, "%s: borrando el volumen %s de una corrida anterior\n", prefix, v.Name)
 			if err := c.RemoveVolume(ctx, v.Name, true); err != nil {
-				fmt.Fprintf(os.Stderr, "it9: no se pudo borrar el volumen %s: %v\n", v.Name, err)
+				fmt.Fprintf(os.Stderr, "%s: no se pudo borrar el volumen %s: %v\n", prefix, v.Name, err)
 			}
 		}
 	}
