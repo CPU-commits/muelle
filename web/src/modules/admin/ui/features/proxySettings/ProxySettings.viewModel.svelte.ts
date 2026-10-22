@@ -250,6 +250,23 @@ export class ProxySettingsViewModel {
 		return zones === 1 ? m.admin_cf_zones_one() : m.admin_cf_zones({ count: zones })
 	}
 
+	/**
+	 * La descripción del modal del token: con los certificados de Cloudflare encendidos, el
+	 * token nuevo también necesita su permiso (si no, el backend lo rechaza en el campo).
+	 */
+	get cloudflareModalDescription(): string {
+		return this.proxy.cloudflare.originCa
+			? `${m.admin_cf_modal_description()} ${m.admin_cf_modal_origin_ca()}`
+			: m.admin_cf_modal_description()
+	}
+
+	/** La confirmación de quitar el token: con los certificados de Cloudflare, también se apagan. */
+	get removeCloudflareBody(): string {
+		return this.proxy.cloudflare.originCa
+			? `${m.admin_cf_remove_body()} ${m.admin_cf_remove_body_origin_ca()}`
+			: m.admin_cf_remove_body()
+	}
+
 	get isIpDirty(): boolean {
 		return (
 			this.ipv4.trim() !== this.proxy.publicIpv4 ||

@@ -310,7 +310,7 @@
 <Modal
 	open={vm.cloudflareOpen}
 	title={m.admin_cf_modal_title()}
-	description={m.admin_cf_modal_description()}
+	description={vm.cloudflareModalDescription}
 	onClose={vm.closeCloudflare}
 >
 	{#if vm.cloudflareError}
@@ -400,7 +400,7 @@
 	open={vm.confirmingRemoveCloudflare}
 	tone="danger"
 	title={m.admin_cf_remove_title()}
-	body={m.admin_cf_remove_body()}
+	body={vm.removeCloudflareBody}
 	confirmLabel={m.admin_cf_remove()}
 	cancelLabel={m.common_cancel()}
 	loading={vm.isRemovingCloudflare}

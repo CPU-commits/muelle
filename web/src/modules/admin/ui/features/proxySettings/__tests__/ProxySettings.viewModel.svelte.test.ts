@@ -1253,6 +1253,33 @@ describe('ProxySettingsViewModel', () => {
 			expect(vm.originCaError).toBeNull()
 		})
 
+		it('con ellos encendidos, el modal del token pide también su permiso y quitar el token avisa que se apagan', async () => {
+			const off = await mountViewModel(WITH_TOKEN)
+			expect(off.cloudflareModalDescription).toBe(m.admin_cf_modal_description())
+			expect(off.removeCloudflareBody).toBe(m.admin_cf_remove_body())
+
+			const on = await mountViewModel(ON)
+			expect(on.cloudflareModalDescription).toBe(
+				`${m.admin_cf_modal_description()} ${m.admin_cf_modal_origin_ca()}`,
+			)
+			expect(on.removeCloudflareBody).toBe(
+				`${m.admin_cf_remove_body()} ${m.admin_cf_remove_body_origin_ca()}`,
+			)
+			expect(m.admin_cf_modal_origin_ca()).toMatch(/SSL and Certificates → Edit/)
+		})
+
+		it('quitar el token con ellos encendidos pasa lo que se ve: el caso de uso los apaga también', async () => {
+			mocks.removeCloudflareToken.mockResolvedValueOnce(
+				saved({ cloudflare: { tokenSet: false, zones: null, originCa: false } }),
+			)
+			const vm = await mountViewModel(ON)
+
+			vm.askRemoveCloudflare()
+			await vm.removeCloudflare()
+
+			expect(mocks.removeCloudflareToken).toHaveBeenCalledExactlyOnceWith(ON.cloudflare)
+		})
+
 		it('Cloudflare caído (502): el aviso dice que no se cambió nada; apagarlos también cierra la confirmación', async () => {
 			mocks.setCloudflareOriginCa.mockRejectedValueOnce(new CloudflareUnavailable())
 			const vm = await mountViewModel(ON)
