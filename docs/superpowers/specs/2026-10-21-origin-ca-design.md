@@ -480,6 +480,8 @@ Una pasada:
 1. `retired_at < syncer.LastGoodBuild()`. `LastGoodBuild` es un valor nuevo del `Syncer`: el momento en que **empezó a leer la base** el último `Sync` cuyo `POST /load` salió bien.
    - Se toma antes de leer los ajustes, con el mutex tomado.
    - No sirve `synced_at` (el fin del `Load`): un Sync que leyó la base antes del retiro y terminó después mandó una configuración que todavía lo trae.
+   - `retired_at` es la hora en que **se escribe** el retiro, no la del comienzo de la pasada (que pudo ser minutos antes, con las llamadas a Cloudflare del paso 3): un Sync que empezó en el medio todavía lo mandó. Vale para el paso 4 y para el viejo de una renovación (el `created_at` del nuevo).
+   - El retiro se escribe con el mutex del `Syncer` tomado (`Syncer.Retiring`): ningún Sync lee la base mientras tanto. La hora sale de la misma marca que el comienzo de un Sync, que nunca va hacia atrás aunque el reloj lo haga.
 2. Además, pasó `Timing.OriginRevokeGrace` (1 min) desde `retired_at`. Cubre el instante en que conviven la configuración vieja y la nueva en el caché de Caddy (§1.2), y los handshakes en curso.
 
 **Resultado de `DELETE /certificates/{id}`:**
@@ -606,13 +608,15 @@ Los structs, en el orden de su JSON, en `caddy/config.go`:
 
 ## 8. Verificación de certificados
 
-- El puerto cambia: `CertProbe.Probe(ctx, hostname string, pinned []byte)`. `pinned` es el DER de la hoja que se espera, o nil.
-- `TLSProbe` (`infra/out/service/certs.go`): con `pinned`, una hoja servida que es **idéntica** a `pinned`, para ese hostname (`VerifyHostname`) y vigente, es `Valid`, sin verificar la cadena contra `Roots`.
+- El puerto cambia: `CertProbe.Probe(ctx, hostname string, pinned [][]byte)`. `pinned` son los DER de las hojas de Origin CA que Caddy puede estar sirviendo para ese host: ninguna, una, o dos en una renovación.
+- `TLSProbe` (`infra/out/service/certs.go`): con `pinned`, una hoja servida que es **idéntica** a una de `pinned`, para ese hostname (`VerifyHostname`) y vigente, es `Valid`, sin verificar la cadena contra `Roots`.
 - Una hoja que verifica contra `Roots` sigue siendo `Valid`, con o sin `pinned`. Así, durante un cambio de origen (Let's Encrypt ↔ Origin CA), los dos son buenos, y un `active` no pasa a `error` por una carrera entre la sonda y la recarga.
 - `Issuer` y `NotAfter` salen de la hoja, igual que hoy.
   - En uno de Origin CA, `cert_issuer` es la organización de la raíz de Cloudflare (probablemente `CloudFlare, Inc.`; NO VERIFICADO).
   - El panel no depende de ese texto: usa `cert_source`.
-- `CertChecker.check` y `checkLocked` pasan `pinned` cuando, con los datos de ese momento, el host se sirve con Origin CA. Usan la misma función de §4.1, con el `active` de `origin_ca_certs`.
+- `CertChecker.check` y `checkLocked` pasan en `pinned`:
+  - la hoja del `active` cuando, con los datos de ese momento, el host se sirve con Origin CA. Usan la misma función de §4.1;
+  - y las de sus `retired` que ningún Sync bueno dejó afuera todavía (`retired_at >= LastGoodBuild`, la regla de §6). En una renovación, `Insert` deja `active` la nueva en el paso 3, pero Caddy sirve la vieja hasta el Sync del paso 5: sin esto, el job "certificados" dejaría el dominio en `error` en ese rato.
 - No se embeben las raíces de Origin CA: fijar la hoja es más estricto y no depende de que Cloudflare rote sus raíces (vencen en 2029).
 - La regla de `ApplyCert` no cambia: 14 días y 10 min.
 - El panel no tiene fila en `domains`, así que no se verifica (igual que hoy). Lo que se sabe de él lo dice `panel_certificate` (§10.3).
@@ -913,7 +917,7 @@ Los campos nuevos son **obligatorios** en los DTOs, como los demás que sumaron 
   - un PEM con `{` da `ErrPlaceholderInSettings`;
   - `Admin.Load` oculta la clave (el PEM entero, y una línea base64 suelta) en un rechazo de `caddytest`.
 - **`TLSProbe`** (`certs_test.go`, con un servidor TLS de `httptest`):
-  - con `pinned` igual a la hoja, `Valid` sin raíces;
+  - con `pinned` igual a la hoja, `Valid` sin raíces; también si es una de dos;
   - con `pinned` distinto, y una hoja que no verifica, es inválido;
   - un `pinned` vencido, o de otro hostname, es inválido;
   - una hoja que verifica contra `Roots` vale aunque `pinned` sea otro.
@@ -935,6 +939,7 @@ Los campos nuevos son **obligatorios** en los DTOs, como los demás que sumaron 
   - una falla registra el código, el mensaje y el backoff (1, 2, 4… min; 6 h);
   - un 429 corta la pasada;
   - **no revoca** si el Sync falló, ni si `retired_at >= LastGoodBuild`, ni antes del margen (carrera: un Sync que empezó antes del retiro y terminó después);
+  - `retired_at` es la hora en que se escribe el retiro (DNS only y renovación): un Sync que empieza durante la pasada, antes del retiro, y sale bien, seguido de rechazos de Caddy, no deja revocarlo;
   - revocar con 404 o 1014 borra la fila;
   - sin token, conserva los retirados y los borra al vencer;
   - un dominio borrado se revoca;
@@ -942,7 +947,8 @@ Los campos nuevos son **obligatorios** en los DTOs, como los demás que sumaron 
   - el panel con un registro ajeno con proxy emite, y con DNS only no;
   - otro `panel_domain` revoca el viejo;
   - `ResetBackoff`.
-- **`Syncer`:** `LastGoodBuild` es el momento de la lectura, no el del fin, y no avanza si falla el Load.
+- **`Syncer`:** `LastGoodBuild` es el momento de la lectura, no el del fin, y no avanza si falla el Load. `Retiring` espera al Sync en curso, y su hora no queda antes del comienzo de un Sync anterior con el reloj hacia atrás.
+- **`CertChecker`:** en una renovación fija la nueva y la vieja hasta un Sync bueno que empezó después del retiro.
 - **`ProxySettingsChanged`:** `cloudflare_origin_ca` hace Sync y Kick; el token con la opción encendida hace Kick; apagarla hace `Forget` (las filas de `origin_ca_hosts`, no los `retired`).
 - **`UpdateDomain`:** cambiar `proxied` vuelve `observed` a NULL y hace Kick.
 - **`RetryDomain`:** reinicia el backoff y hace Kick.
