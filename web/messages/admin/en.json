@@ -32,6 +32,8 @@
 	"admin_cf_saved": "Cloudflare token saved",
 	"admin_cf_unavailable_title": "Cloudflare didn't respond",
 	"admin_cf_unavailable_body": "The token wasn't saved. Paste it again and retry in a moment.",
+	"admin_cf_origin_ca_needs_token": "Set the Cloudflare token to turn them on.",
+	"admin_cf_origin_ca_unavailable": "Cloudflare didn't respond: nothing changed. Try again in a moment.",
 	"admin_error_cf_token_length": "A Cloudflare token has between {min} and {max} characters.",
 	"admin_error_cf_token_spaces": "No spaces: paste just the token.",
 
