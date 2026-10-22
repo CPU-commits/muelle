@@ -520,9 +520,11 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
       puertos anteriores). El freno es de la página, no del viewModel que lo puso:
       `heldWritesOrigin()` dice a dónde se mudó, y Ajustes lo suelta al ver la vuelta atrás
       de esa dirección aunque sea otra visita a la pantalla. Fuera de Ajustes nadie lo
-      suelta: las otras pantallas no siguen `GET /proxy` (Dominios y Deploys lo piden, pero
-      `GET /proxy` no trae el dominio del panel para armar la dirección que falló), y por eso
-      el texto pide recargar, que suelta el freno.
+      suelta. Se podría (alcanza con que el puerto de `heldWritesOrigin()` sea
+      `ports_rollback.attempted.httpsPort`), pero solo Dominios y Deploys (con un
+      `routes_warning`) leen `GET /proxy`: soltarlo desde ahí cubriría pocas pantallas y
+      ataría `ingress` al freno del cliente. Por eso el texto pide recargar, que suelta el
+      freno.
     - Sin mapa: 401 `UnauthorizedError`, 403 `ForbiddenError`, 404 `NotFoundError`,
       409 `ConflictError`, 423/429 `RateLimitedError`, 5xx, red y timeout `UnavailableError`,
       el resto `UnexpectedError`. Una respuesta con otra forma es `ContractError`
