@@ -283,7 +283,9 @@ func wait(ctx context.Context, uc UseCases, cfg Config, in deployIn, d entity.De
 }
 
 // tailLines deja las líneas más nuevas cuyo JSON (la lista) mide a lo más
-// max; si la última sola no entra, sale cortada.
+// max; si la última sola no entra, sale cortada. Con un max menor que
+// ["…"] (7 bytes), ni cortada entra: la lista sale vacía, con from_offset
+// en next_offset y earlier, como cuando dropOldest saca la última.
 func tailLines(t dto.LogTail, max int) *logOut {
 	out := &logOut{Lines: []string{}, FromOffset: t.FromOffset, NextOffset: t.FromOffset, Length: t.Length}
 	if n := len(t.Lines); n > 0 {
@@ -302,6 +304,9 @@ func tailLines(t dto.LogTail, max int) *logOut {
 		for _, l := range t.Lines[first:] {
 			out.Lines = append(out.Lines, l.Text)
 		}
+	case len(t.Lines) > 0 && max < 2+tools.QuoteSize(tools.Ellipsis):
+		out.FromOffset, out.Earlier = out.NextOffset, true
+		return out
 	case len(t.Lines) > 0:
 		// La última sola no entra: cortada con …, para que entre.
 		first = len(t.Lines) - 1

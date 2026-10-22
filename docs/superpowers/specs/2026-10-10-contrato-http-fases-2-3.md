@@ -1639,7 +1639,7 @@ No hay herramientas de proyectos, stages o apps (escritura), dominios (escritura
 | `wait_s?` | integer | 0 a 45 | 0 |
 
 - **Qué hace:** el deploy (§2.4) y el final de su log.
-  - El final del log son las líneas más nuevas cuyo JSON (cada una con sus comillas y su coma) suma a lo más `log_tail_bytes`, en líneas completas. Si la última línea sola no entra, sale cortada con `…` para que entre. Con `log_tail_bytes: 0`, `log` es `null`.
+  - El final del log son las líneas más nuevas cuyo JSON (cada una con sus comillas y su coma) suma a lo más `log_tail_bytes`, en líneas completas. Si la última línea sola no entra, sale cortada con `…` para que entre. Con un `log_tail_bytes` de 1 a 6, ni cortada entra (`["…"]` mide 7): `lines` sale vacía, con `from_offset` igual a `next_offset` y `earlier: true`. Con `log_tail_bytes: 0`, `log` es `null`.
   - Con `wait_s > 0` y el deploy sin terminar, espera hasta un estado final o `wait_s` segundos, y responde con el estado de ese momento. La espera toma un lugar de los 8 streams del principal.
 - **Salida:** el deploy completo de §2.1 (sin cortar su `error`; `requested_images` puede faltar, abajo), más:
 

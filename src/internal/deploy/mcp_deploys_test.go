@@ -326,6 +326,42 @@ func TestMCPGetDeployWorstCase(t *testing.T) {
 	}
 }
 
+// Con un log_tail_bytes menor que ["…"] (7 bytes), ni la última línea
+// cortada entra: log.lines sale vacía ([], que mide 2), con from_offset en
+// next_offset (como cuando se va la última por el tope) y earlier. Desde 7,
+// sale "…".
+func TestMCPGetDeployTinyTail(t *testing.T) {
+	h := newMCPTest(t, fakeEnv{}, nil)
+	h.seed(t)
+	s := h.session(t)
+	id := h.enqueue(t, s, "api")
+	log := h.logWriter(id)
+	for i := range 3 {
+		if err := log.Line("paso %d", i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for n := 1; n <= 7; n++ {
+		text := mustCall(t, s, "get_deploy", args(map[string]any{"id": id, "log_tail_bytes": n}))
+		out := toolstest.Decode[deployResult](t, text)
+		raw := toolstest.Decode[struct {
+			Log struct {
+				Lines jsontext.Value `json:"lines"`
+			} `json:"log"`
+		}](t, text)
+		l := out.Log
+		if l == nil || len(raw.Log.Lines) > max(n, 2) || l.NextOffset != l.Length || !l.Earlier {
+			t.Fatalf("log_tail_bytes %d: %s", n, text)
+		}
+		switch {
+		case n < 7 && (len(l.Lines) != 0 || l.FromOffset != l.NextOffset):
+			t.Fatalf("log_tail_bytes %d: %+v", n, l)
+		case n == 7 && (len(l.Lines) != 1 || l.Lines[0] != "…" || l.FromOffset >= l.NextOffset):
+			t.Fatalf("log_tail_bytes 7: %+v", l)
+		}
+	}
+}
+
 type readLogResult struct {
 	Lines      []string `json:"lines"`
 	Offset     int      `json:"offset"`

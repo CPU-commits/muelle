@@ -538,7 +538,7 @@ Cada fila dice qué módulo la registra (en su `infra/in/mcp`), qué caso de uso
   - `"requested_images_omitted": false` (abajo);
   - `"waited_s"` y `"timed_out"` si se pidió `wait_s`;
   - `warning`.
-- `TailLog`: con el largo `L` del log, lee desde `max(0, L − log_tail_bytes)` y avanza hasta el primer comienzo de línea. Alcanza con leer `log_tail_bytes` bytes del log: el JSON de una línea nunca mide menos que su texto. El adaptador descarta las más viejas hasta que el JSON de `log.lines` entra en `log_tail_bytes`. Si la última línea sola no entra, sale cortada con `…`.
+- `TailLog`: con el largo `L` del log, lee desde `max(0, L − log_tail_bytes)` y avanza hasta el primer comienzo de línea. Alcanza con leer `log_tail_bytes` bytes del log: el JSON de una línea nunca mide menos que su texto. El adaptador descarta las más viejas hasta que el JSON de `log.lines` entra en `log_tail_bytes`. Si la última línea sola no entra, sale cortada con `…`. Con un `log_tail_bytes` de 1 a 6, ni cortada entra (`["…"]` mide 7): `lines` sale vacía, con `from_offset` en `next_offset` y `earlier: true`.
 - El deploy completo puede medir mucho: 32 servicios con refs de 512 caracteres, en `images` y en `requested_images`, son unos 40 KiB. Si el resultado no entra en el tope, primero falta `requested_images` (`requested_images_omitted: true`) y después se van las líneas más viejas de `log` (`earlier: true`). Se quita primero `requested_images` porque la cola del log es lo que sirve para depurar.
 - `wait_s` llega a 45 y no más: el plazo de la llamada es `wait_s` + 10 s, y los de lectura y escritura son de 60 s (§3.2).
 
