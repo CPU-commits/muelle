@@ -27,12 +27,14 @@ const firstQueue = 64
 // Sondea fuera del lock de Ops y aplica la regla (service.ApplyCert) dentro.
 // Con el proxy sin synced (deshabilitado, arrancando o recreándose) no hace
 // nada: no se sabe. A un host que se sirve con Origin CA le fija la hoja que
-// guardó muelle (§8 del diseño de Origin CA).
+// guardó muelle (§8 del diseño de Origin CA), y también la que Caddy puede
+// seguir sirviendo mientras no carga la nueva.
 type CertChecker struct {
 	probe    service.CertProbe
 	repo     repository.Domains
 	settings service.Settings
 	origin   OriginRepos
+	syncer   *Syncer
 	state    *ProxyState
 	ops      *Ops
 	clock    clock.Clock
@@ -43,15 +45,17 @@ type CertChecker struct {
 	log                        *slog.Logger
 }
 
-// NewCertChecker recibe los ajustes y las tablas de Origin CA (para fijar
-// la hoja) y los plazos de Timing: FirstCheck, PendingEvery y DomainOp.
+// NewCertChecker recibe los ajustes, las tablas de Origin CA y el Syncer
+// (para fijar las hojas, con su LastGoodBuild) y los plazos de Timing:
+// FirstCheck, PendingEvery y DomainOp.
 func NewCertChecker(probe service.CertProbe, repo repository.Domains, settings service.Settings, origin OriginRepos,
-	state *ProxyState, ops *Ops, clk clock.Clock, firstDelay, every, opLimit time.Duration, log *slog.Logger) *CertChecker {
+	syncer *Syncer, state *ProxyState, ops *Ops, clk clock.Clock, firstDelay, every, opLimit time.Duration,
+	log *slog.Logger) *CertChecker {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &CertChecker{
-		probe: probe, repo: repo, settings: settings, origin: origin, state: state, ops: ops, clock: clk,
+		probe: probe, repo: repo, settings: settings, origin: origin, syncer: syncer, state: state, ops: ops, clock: clk,
 		first:      make(chan string, firstQueue),
 		firstDelay: firstDelay, every: every, opLimit: opLimit, log: log,
 	}
@@ -117,10 +121,17 @@ func (c *CertChecker) CheckAll(ctx context.Context, include func(entity.Domain) 
 	return errors.Join(errs...)
 }
 
-// pinned son los DER de las hojas de Origin CA que se esperan para d: la
-// del active de su hostname si, con los datos de ahora, el host se sirve con
-// Origin CA (service.OriginServes, la misma regla que la configuración de
-// Caddy); si no, ninguna. El proxy está synced (habilitado).
+// pinned son los DER de las hojas de Origin CA que Caddy puede estar
+// sirviendo para d, y que valen para Full (strict):
+//   - la del active de su hostname si, con los datos de ahora, el host se
+//     sirve con Origin CA (service.OriginServes, la misma regla que la
+//     configuración de Caddy);
+//   - las de sus retirados que ningún Sync bueno dejó afuera todavía
+//     (retired_at no es anterior a Syncer.LastGoodBuild, la regla de la
+//     revocación): en una renovación, la vieja, que Caddy sirve hasta el
+//     Sync del final de la pasada. Uno que no es un PEM no se fija.
+//
+// El proxy está synced (habilitado).
 func (c *CertChecker) pinned(ctx context.Context, d entity.Domain) ([][]byte, error) {
 	if !c.origin.set() {
 		return nil, nil
@@ -129,25 +140,40 @@ func (c *CertChecker) pinned(ctx context.Context, d entity.Domain) ([][]byte, er
 	if err != nil {
 		return nil, fmt.Errorf("ingress: leyendo los ajustes del proxy: %w", err)
 	}
-	if !service.OriginOn(p, true) {
-		return nil, nil
+	var out [][]byte
+	if service.OriginOn(p, true) {
+		active, err := c.origin.Certs.ActiveFor(ctx, d.Hostname)
+		if err != nil {
+			return nil, err
+		}
+		if active != nil {
+			h, err := c.origin.Hosts.Get(ctx, d.Hostname)
+			if err != nil {
+				return nil, err
+			}
+			if service.OriginServes(service.DomainOriginTarget(d), h, active, c.clock.Now()) {
+				block, _ := pem.Decode([]byte(active.CertPEM))
+				if block == nil {
+					return nil, fmt.Errorf("ingress: el certificado de Origin CA de %s no es un PEM", d.Hostname)
+				}
+				out = append(out, block.Bytes)
+			}
+		}
 	}
-	active, err := c.origin.Certs.ActiveFor(ctx, d.Hostname)
-	if err != nil || active == nil {
-		return nil, err
-	}
-	h, err := c.origin.Hosts.Get(ctx, d.Hostname)
+	retired, err := c.origin.Certs.Retired(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !service.OriginServes(service.DomainOriginTarget(d), h, active, c.clock.Now()) {
-		return nil, nil
+	built := c.syncer.LastGoodBuild()
+	for _, r := range retired {
+		if r.Hostname != d.Hostname || r.RetiredAt == nil || r.RetiredAt.Before(built) {
+			continue
+		}
+		if block, _ := pem.Decode([]byte(r.CertPEM)); block != nil {
+			out = append(out, block.Bytes)
+		}
 	}
-	block, _ := pem.Decode([]byte(active.CertPEM))
-	if block == nil {
-		return nil, fmt.Errorf("ingress: el certificado de Origin CA de %s no es un PEM", d.Hostname)
-	}
-	return [][]byte{block.Bytes}, nil
+	return out, nil
 }
 
 // check sondea d fuera del lock y, con el lock tomado, aplica la regla solo

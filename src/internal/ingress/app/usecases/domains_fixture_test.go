@@ -142,7 +142,7 @@ func newUCFixture(t *testing.T) *ucFixture {
 	settings := outservice.NewProxySettingsReader(db, c)
 	catalog := outservice.NewCatalogReader(db)
 	f.syncer = NewSyncer(settings, f.repo, catalog, f.origin, caddy.NewAdmin(f.caddy.Dial), f.state, f.clock, "", false, nil, log)
-	f.certs = NewCertChecker(f.probe, f.repo, settings, f.origin, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, log)
+	f.certs = NewCertChecker(f.probe, f.repo, settings, f.origin, f.syncer, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, log)
 	client := cloudflare.New(f.cf.URL())
 	f.deps = DomainDeps{
 		Repo: f.repo, Catalog: catalog, Settings: settings, DNS: client, Syncer: f.syncer,

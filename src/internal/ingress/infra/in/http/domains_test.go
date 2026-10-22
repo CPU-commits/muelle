@@ -85,7 +85,7 @@ func newDomainsFixture(t *testing.T) *domainsFixture {
 			Settings: settings, Domains: repo, Repos: f.origin, DNS: client, CA: client, Keys: outservice.OriginKeys{},
 			Syncer: syncer, Clock: clk, Pass: 5 * time.Minute, Grace: time.Minute, Log: log,
 		}),
-		Certs: usecases.NewCertChecker(unreachableProbe{}, repo, settings, usecases.OriginRepos{}, state, ops, clk, time.Second, time.Second, time.Second, log),
+		Certs: usecases.NewCertChecker(unreachableProbe{}, repo, settings, usecases.OriginRepos{}, syncer, state, ops, clk, time.Second, time.Second, time.Second, log),
 		Ops:   ops, Clock: clk, Audit: sqlite.NewAuditRecorder(db, clk, log), Log: log,
 		DomainOp: 30 * time.Second, DomainRetry: 20 * time.Second,
 	}

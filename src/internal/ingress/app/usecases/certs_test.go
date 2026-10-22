@@ -26,7 +26,7 @@ import (
 func TestCheckNotSynced(t *testing.T) {
 	f := newUCFixture(t)
 	f.state = NewProxyState()
-	f.certs = NewCertChecker(f.probe, f.repo, f.deps.Settings, f.origin, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, nil)
+	f.certs = NewCertChecker(f.probe, f.repo, f.deps.Settings, f.origin, f.syncer, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, nil)
 	d := f.put(t, nil)
 	f.probe.def = f.goodCert()
 	if err := f.certs.Check(context.Background(), dnsHost); err != nil {
@@ -176,7 +176,7 @@ func TestCheckAll(t *testing.T) {
 func TestCertRun(t *testing.T) {
 	f := newUCFixture(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	f.certs = NewCertChecker(f.probe, f.repo, f.deps.Settings, f.origin, f.state, f.ops, f.clock, 10*time.Millisecond, time.Hour, time.Second, log)
+	f.certs = NewCertChecker(f.probe, f.repo, f.deps.Settings, f.origin, f.syncer, f.state, f.ops, f.clock, 10*time.Millisecond, time.Hour, time.Second, log)
 	d, err := entity.NewDomain(f.apiID, "x.tudominio.cl", "api", 3000, false, f.clock.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +196,7 @@ func TestCertRun(t *testing.T) {
 
 	// El barrido de los pending.
 	g := newUCFixture(t)
-	g.certs = NewCertChecker(g.probe, g.repo, g.deps.Settings, g.origin, g.state, g.ops, g.clock, time.Hour, 30*time.Millisecond, time.Second, log)
+	g.certs = NewCertChecker(g.probe, g.repo, g.deps.Settings, g.origin, g.syncer, g.state, g.ops, g.clock, time.Hour, 30*time.Millisecond, time.Second, log)
 	g.put(t, nil)
 	g.probe.set(dnsHost, g.goodCert())
 	runInBackground(t, g.certs.Run)
@@ -300,5 +300,51 @@ func TestCheckPinsOriginCA(t *testing.T) {
 	}
 	if got := f.probe.pinned(dnsHost); len(got) != 0 {
 		t.Fatalf("apagada: %x", got)
+	}
+}
+
+// En una renovación, Insert deja active la hoja nueva, pero Caddy sirve la
+// vieja hasta el Sync del final de la pasada. Mientras ningún Sync bueno
+// empezó después del retiro de la vieja, la verificación fija las dos: la
+// que Caddy todavía sirve no deja el dominio en error.
+func TestCheckPinsRenewal(t *testing.T) {
+	f := newUCFixture(t)
+	ctx := context.Background()
+	old := f.originServed(t)
+	f.probe.set(dnsHost, f.goodCert())
+	if err := f.syncer.Sync(ctx, false); err != nil { // Caddy sirve la vieja
+		t.Fatal(err)
+	}
+	f.clock.Advance(time.Minute)
+	certPEM, renewed := testLeaf(t, dnsHost, f.clock.Now().Add(90*24*time.Hour))
+	c := entity.OriginCert{Hostname: dnsHost, ZoneID: "z1", CFCertID: "101", CertPEM: certPEM, KeyPEM: "KEY",
+		ExpiresAt: f.clock.Now().Add(90 * 24 * time.Hour), CreatedAt: f.clock.Now()}
+	if err := f.origin.Certs.Insert(ctx, &c); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.certs.Check(ctx, dnsHost); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.probe.pinned(dnsHost); !samePins(got, renewed, old) {
+		t.Fatalf("antes de la carga: %d hojas", len(got))
+	}
+	// Un Sync bueno que empezó después del retiro: Caddy ya sirve la nueva.
+	f.clock.Advance(time.Second)
+	if err := f.syncer.Sync(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.certs.CheckAll(ctx, EligibleHourly); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.probe.pinned(dnsHost); !samePins(got, renewed) {
+		t.Fatalf("después de la carga: %d hojas", len(got))
+	}
+	// La opción apagada: la nueva no se sirve, y la vieja ya no está en Caddy.
+	f.settings(t, nil)
+	if err := f.certs.Check(ctx, dnsHost); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.probe.pinned(dnsHost); len(got) != 0 {
+		t.Fatalf("apagada: %d hojas", len(got))
 	}
 }
