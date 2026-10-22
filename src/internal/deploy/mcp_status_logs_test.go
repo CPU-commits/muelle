@@ -167,6 +167,27 @@ func TestMCPGetAppStatusWorstCase(t *testing.T) {
 	if len(out.Services) != 32 || tasks == 0 || tasks+omitted != 32*50 || tasks >= 32*20 {
 		t.Fatalf("%d servicios, %d tareas, %d omitidas", len(out.Services), tasks, omitted)
 	}
+	// Las vigentes se van de a una por servicio en cada vuelta, desde el
+	// último servicio y, en cada uno, desde el final del orden de §2.8 (acá,
+	// por slot): cada servicio conserva sus primeras k o k+1, y las k+1 son
+	// de los primeros servicios.
+	first, last := len(out.Services[0].Tasks), len(out.Services[31].Tasks)
+	for svc, s := range out.Services {
+		for i, task := range s.Tasks {
+			if want := fmt.Sprintf("t%02d-%02d-", svc, i); !strings.HasPrefix(task.ID, want) {
+				t.Fatalf("servicio %d, tarea %d: %s, esperaba %s…", svc, i, task.ID, want)
+			}
+		}
+		if s.TasksOmitted != 50-len(s.Tasks) {
+			t.Fatalf("servicio %d: %d tareas y %d omitidas", svc, len(s.Tasks), s.TasksOmitted)
+		}
+		if svc > 0 && len(s.Tasks) > len(out.Services[svc-1].Tasks) {
+			t.Fatalf("el servicio %d tiene más tareas (%d) que el anterior (%d)", svc, len(s.Tasks), len(out.Services[svc-1].Tasks))
+		}
+	}
+	if first == 0 || first-last > 1 {
+		t.Fatalf("de %d a %d tareas por servicio", first, last)
+	}
 }
 
 func (h *mcpTest) putAPIService() {

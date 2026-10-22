@@ -1584,7 +1584,7 @@ No hay herramientas de proyectos, stages o apps (escritura), dominios (escritura
   - de cada servicio, las tareas con `desired_state: running` y, de las demás, las `history` más nuevas. `tasks_omitted` (int, en cada servicio) cuenta las que no salieron;
   - el `error` de una tarea, ya enmascarado (§2.8), cortado a 300 caracteres;
   - suma `warning`.
-- **Si no entra en el tope** (muchos servicios con muchas tareas), se van primero las tareas históricas, de las más viejas a las más nuevas, y después, si hace falta, las vigentes, desde el final del orden de §2.8. Cada una suma a `tasks_omitted` de su servicio. Los servicios, con sus réplicas y sus sumas, salen siempre: 32 servicios sin tareas entran.
+- **Si no entra en el tope** (muchos servicios con muchas tareas), se van primero las tareas históricas, de las más viejas a las más nuevas, y después, si hace falta, las vigentes, de a una por servicio en cada vuelta: desde el último servicio hacia el primero y, en cada uno, desde el final del orden de §2.8. Así cada servicio conserva sus primeras vigentes, y ninguno queda sin tareas mientras otro tenga más de una. Cada una suma a `tasks_omitted` de su servicio. Los servicios, con sus réplicas y sus sumas, salen siempre: 32 servicios sin tareas entran.
 - **Errores:** `not_found` (la app), `docker_unavailable`.
 
 #### 7. `get_app_logs`

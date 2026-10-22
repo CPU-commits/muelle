@@ -79,8 +79,9 @@ type taskRef struct {
 // appStatus arma la salida (contrato §8.3 #6): de cada servicio, las tareas
 // vigentes (desired_state running) y las history históricas más nuevas, en
 // el orden de §2.8. Si no entra en el tope, se van primero las históricas, de
-// las más viejas a las más nuevas, y después las vigentes, desde el final de
-// cada servicio y empezando por el último. Los servicios salen siempre.
+// las más viejas a las más nuevas, y después las vigentes, de a una por
+// servicio en cada vuelta, desde el último servicio y desde el final de cada
+// uno: cada servicio conserva sus primeras. Los servicios salen siempre.
 func appStatus(st dto.AppStatus, history int) statusOut {
 	out := statusOut{Services: make([]serviceOut, 0, len(st.Services))}
 	var historical []taskRef

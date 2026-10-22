@@ -484,7 +484,7 @@ Cada fila dice qué módulo la registra (en su `infra/in/mcp`), qué caso de uso
   - las tareas vigentes, más `history` históricas por servicio (las más nuevas), con `tasks_omitted`;
   - el `error` de la tarea, ya enmascarado, cortado a 300 caracteres.
   - Suma `warning`.
-- Si no entra en el tope, se van primero las históricas (de las más viejas a las más nuevas) y después, si hace falta, las vigentes desde el final del orden del contrato §2.8, contadas en `tasks_omitted`. Los servicios salen siempre: 32 sin tareas miden menos de 30 KiB.
+- Si no entra en el tope, se van primero las históricas (de las más viejas a las más nuevas) y después, si hace falta, las vigentes, de a una por servicio en cada vuelta (desde el último servicio y, en cada uno, desde el final del orden del contrato §2.8), contadas en `tasks_omitted`. Así cada servicio conserva sus primeras vigentes: recortar todo desde el final del orden general dejaría sin tareas a los últimos servicios mientras los primeros conservan todas. Los servicios salen siempre: 32 sin tareas miden menos de 30 KiB.
 
 **7. `get_app_logs`** · deploy · "Leer los logs de un servicio"
 - Entrada:
