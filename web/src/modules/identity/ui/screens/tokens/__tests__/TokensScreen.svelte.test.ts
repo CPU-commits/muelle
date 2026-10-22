@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-svelte'
 import { createQueryClient } from '@/shared/data/query'
-import type { ApiToken, CreatedApiToken, TokenId } from '../../../../domain'
+import {
+	ALL_PROJECTS,
+	ALL_PROJECTS_EXPIRY_DAYS,
+	type ApiToken,
+	type CreatedApiToken,
+	expiryInputInDays,
+	type TokenId,
+} from '../../../../domain'
 import TokensScreenView from './TokensScreenView.svelte'
 
 const mocks = vi.hoisted(() => ({
@@ -76,5 +83,44 @@ describe('TokensScreen', () => {
 
 		await screen.getByRole('button', { name: 'Listo' }).click()
 		await expect.element(card).not.toBeInTheDocument()
+	})
+
+	it('el modal ofrece "Solo lectura" y "Todos los proyectos (solo lectura)", sin stage y a 90 días', async () => {
+		const screen = await render(TokensScreenView, {
+			client: createQueryClient({ retry: false }),
+		})
+
+		await screen.getByRole('button', { name: 'Crear token' }).click()
+		const form = screen.getByRole('dialog', { name: 'Crear token' })
+		const readOnly = form.getByRole('checkbox', { name: 'Solo lectura' })
+		await expect.element(readOnly).not.toBeChecked()
+		await expect.element(readOnly).toBeEnabled()
+		await expect.element(form.getByText(/Recomendado para Claude Code/)).toBeVisible()
+		await expect.element(form.getByRole('option', { name: 'auditfy' })).toBeInTheDocument()
+
+		await form.getByLabelText('Proyecto').selectOptions('Todos los proyectos (solo lectura)')
+
+		const stage = form.getByLabelText('Stage')
+		await expect.element(stage).toBeDisabled()
+		await expect.element(stage).toHaveDisplayValue('—')
+		await expect.element(readOnly).toBeChecked()
+		await expect.element(readOnly).toBeDisabled()
+		const in90Days = expiryInputInDays(ALL_PROJECTS_EXPIRY_DAYS)
+		await expect.element(form.getByLabelText('Vence')).toHaveValue(in90Days)
+		await expect
+			.element(form.getByText(/siempre es de solo lectura\. Vence en 90 días/))
+			.toBeVisible()
+
+		await form.getByLabelText('Nombre').fill('claude-debug')
+		await form.getByRole('button', { name: 'Crear token' }).click()
+
+		await expect.poll(() => mocks.createToken.mock.calls.length).toBe(1)
+		expect(mocks.createToken).toHaveBeenCalledWith({
+			name: 'claude-debug',
+			project: ALL_PROJECTS,
+			stage: '',
+			readOnly: true,
+			expiresOn: in90Days,
+		})
 	})
 })
