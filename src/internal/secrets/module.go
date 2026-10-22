@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	"github.com/CPU-commits/muelle/src/cmd/mcp/tools"
 	"github.com/CPU-commits/muelle/src/internal/secrets/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/secrets/app/usecases"
 	"github.com/CPU-commits/muelle/src/internal/secrets/domain/service"
@@ -66,3 +67,6 @@ func (m *Module) ResolveEnv(ctx context.Context, appID int64) (vars map[string]s
 func (m *Module) RegisterRoutes(k *utils.Kit) {
 	m.env.Register(k)
 }
+
+// RegisterTools registra las herramientas MCP de secrets (contrato §8.3).
+func (m *Module) RegisterTools(k *tools.Kit) {}

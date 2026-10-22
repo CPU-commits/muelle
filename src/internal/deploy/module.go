@@ -19,6 +19,7 @@ import (
 
 	"github.com/CPU-commits/muelle/src/cmd/cron"
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	"github.com/CPU-commits/muelle/src/cmd/mcp/tools"
 	"github.com/CPU-commits/muelle/src/internal/deploy/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/deploy/app/usecases"
 	"github.com/CPU-commits/muelle/src/internal/deploy/domain/service"
@@ -159,6 +160,9 @@ func New(d Deps) *Module {
 func (m *Module) RegisterRoutes(k *utils.Kit) {
 	dephttp.Register(k, m.uc, dephttp.Streams{Ctx: m.streamCtx, Config: m.sse})
 }
+
+// RegisterTools registra las herramientas MCP de deploy (contrato §8.3).
+func (m *Module) RegisterTools(k *tools.Kit) {}
 
 // SeedInitRegistry guarda Deps.InitRegistry como un registry solo en el
 // primer arranque de la base (contrato §1.2 y §2.10), con la marca

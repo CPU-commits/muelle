@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	"github.com/CPU-commits/muelle/src/cmd/mcp/tools"
 	"github.com/CPU-commits/muelle/src/internal/catalog/app/usecases"
 	"github.com/CPU-commits/muelle/src/internal/catalog/domain/service"
 	cathttp "github.com/CPU-commits/muelle/src/internal/catalog/infra/in/http"
@@ -69,3 +70,6 @@ func New(d Deps) *Module {
 
 // RegisterRoutes registra los endpoints de proyectos, stages y apps.
 func (m *Module) RegisterRoutes(k *utils.Kit) { cathttp.Register(k, m.uc) }
+
+// RegisterTools registra las herramientas MCP de catalog (contrato §8.3).
+func (m *Module) RegisterTools(k *tools.Kit) {}

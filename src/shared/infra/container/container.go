@@ -34,6 +34,9 @@ import (
 	"github.com/CPU-commits/muelle/src/cmd/cron"
 	httpserver "github.com/CPU-commits/muelle/src/cmd/http"
 	"github.com/CPU-commits/muelle/src/cmd/http/panel"
+	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	"github.com/CPU-commits/muelle/src/cmd/mcp"
+	"github.com/CPU-commits/muelle/src/cmd/mcp/tools"
 	"github.com/CPU-commits/muelle/src/internal/admin"
 	"github.com/CPU-commits/muelle/src/internal/catalog"
 	"github.com/CPU-commits/muelle/src/internal/deploy"
@@ -57,7 +60,10 @@ type Container struct {
 	Deploy   *deploy.Module
 	Ingress  *ingress.Module
 	Server   *httpserver.Server
-	Jobs     []cron.Job // las tareas periódicas de los módulos, para cron.Run
+	// Tools es el kit del servidor MCP (POST /api/v1/mcp), con las
+	// herramientas de catalog, secrets, deploy e ingress.
+	Tools *tools.Kit
+	Jobs  []cron.Job // las tareas periódicas de los módulos, para cron.Run
 
 	closeDocker func() error // nil si el Docker vino de WithDocker
 	panelOrigin string       // MUELLE_PANEL_ORIGIN, o ""
@@ -239,6 +245,15 @@ func build(ctx context.Context, db *sqlite.DB, ciph *crypto.Cipher, engine docke
 	c.Admin.RegisterRoutes(k)
 	c.Deploy.RegisterRoutes(k)
 	c.Ingress.RegisterRoutes(k)
+
+	// El servidor MCP: las herramientas de cada módulo responden los mismos
+	// errores que REST (Kit.Classify), y el endpoint acepta solo tokens.
+	c.Tools = tools.NewKit(tools.Config{Classify: k.Classify, Log: log, Version: s.Version, Instructions: mcp.Instructions})
+	c.Catalog.RegisterTools(c.Tools)
+	c.Secrets.RegisterTools(c.Tools)
+	c.Deploy.RegisterTools(c.Tools)
+	c.Ingress.RegisterTools(c.Tools)
+	k.Handle("POST "+utils.MCPPath, utils.AccessBearer, mcp.NewHandler(c.Tools).ServeHTTP)
 
 	c.Jobs = slices.Concat(c.Identity.Jobs(), c.Admin.Jobs(), c.Ingress.Jobs(), c.Deploy.Jobs())
 	return c, nil
