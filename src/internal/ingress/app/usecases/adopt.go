@@ -52,5 +52,5 @@ func (uc *AdoptDomain) Execute(ctx context.Context, ref dto.DomainRef) (dto.Doma
 	uc.d.syncAndKick(ctx, false)
 	uc.d.Certs.ScheduleFirst(dom.Hostname)
 	uc.d.audit(ctx, "domain.adopt", app, dom.Hostname, nil)
-	return toOutput(dom, p), nil
+	return uc.d.output(ctx, dom, p)
 }

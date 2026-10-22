@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/CPU-commits/muelle/src/internal/ingress/app/dto"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/repository"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
@@ -120,6 +121,61 @@ func (u *EnsureOriginCA) Forget(ctx context.Context) error {
 		return nil
 	}
 	return u.d.Repos.Hosts.DeleteAll(ctx)
+}
+
+// Snapshot son los active (sin la clave) y lo observado de todos los hosts,
+// para la API. Con u nil, vacíos.
+func (u *EnsureOriginCA) Snapshot(ctx context.Context) (map[string]entity.OriginCert, map[string]entity.OriginHost, error) {
+	if u == nil || !u.d.Repos.set() {
+		return map[string]entity.OriginCert{}, map[string]entity.OriginHost{}, nil
+	}
+	active, err := u.d.Repos.Certs.Active(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ingress: leyendo los certificados de Origin CA: %w", err)
+	}
+	hosts, err := u.d.Repos.Hosts.All(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ingress: leyendo lo observado en Cloudflare: %w", err)
+	}
+	return active, hosts, nil
+}
+
+// SnapshotFor es Snapshot de un solo hostname: su active (nil si no hay) y
+// su fila (vacía si no hay).
+func (u *EnsureOriginCA) SnapshotFor(ctx context.Context, hostname string) (*entity.OriginCert, entity.OriginHost, error) {
+	if u == nil || !u.d.Repos.set() {
+		return nil, entity.OriginHost{Hostname: hostname}, nil
+	}
+	active, err := u.d.Repos.Certs.ActiveFor(ctx, hostname)
+	if err != nil {
+		return nil, entity.OriginHost{}, fmt.Errorf("ingress: leyendo el certificado de Origin CA de %s: %w", hostname, err)
+	}
+	h, err := u.d.Repos.Hosts.Get(ctx, hostname)
+	if err != nil {
+		return nil, entity.OriginHost{}, fmt.Errorf("ingress: leyendo lo observado de %s: %w", hostname, err)
+	}
+	return active, h, nil
+}
+
+// originOutput es origin_ca de la API desde la vista (nil es null), con las
+// horas en UTC y a ms.
+func originOutput(v *service.OriginView) *dto.OriginCAOutput {
+	if v == nil {
+		return nil
+	}
+	at := func(t *time.Time) *time.Time {
+		if t == nil {
+			return nil
+		}
+		u := t.UTC().Truncate(time.Millisecond)
+		return &u
+	}
+	out := &dto.OriginCAOutput{Status: string(v.Status), RetryAt: at(v.RetryAt), ExpiresAt: at(v.ExpiresAt)}
+	if v.ErrorCode != "" {
+		code, msg := string(v.ErrorCode), v.Error
+		out.ErrorCode, out.Error = &code, &msg
+	}
+	return out
 }
 
 // pass es el estado de una pasada.

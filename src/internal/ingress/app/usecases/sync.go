@@ -77,6 +77,10 @@ func NewSyncer(settings service.Settings, domains repository.Domains, catalog se
 	}
 }
 
+// Enabled dice si el proxy está habilitado con los ajustes p (la imagen por
+// defecto es la de esta versión).
+func (s *Syncer) Enabled(p shared.ProxySettings) bool { return p.Enabled(s.defImage) }
+
 // LastGoodBuild es el momento en que empezó a leer la base el último Sync
 // cuyo POST /load salió bien (cero si no hubo uno desde que arrancó). Un
 // certificado de Origin CA retirado antes de ese momento ya no está en lo

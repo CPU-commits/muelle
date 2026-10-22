@@ -74,5 +74,5 @@ func (uc *RetryDomain) Execute(ctx context.Context, ref dto.DomainRef) (dto.Doma
 		uc.d.Certs.ScheduleFirst(dom.Hostname)
 	}
 	uc.d.audit(ctx, "domain.retry", app, dom.Hostname, nil)
-	return toOutput(dom, p), nil
+	return uc.d.output(ctx, dom, p)
 }

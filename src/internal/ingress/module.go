@@ -148,7 +148,7 @@ func New(d Deps) *Module {
 	m.settingsHook = usecases.NewProxySettingsChanged(m.recreator, usecases.NewUpdateManagedRecords(dd), m.panelDNS, m.syncer,
 		m.origin, m.state, o.Timing.Hook, d.Log)
 	m.httpUC = inhttp.UseCases{
-		ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage),
+		ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, m.origin, d.Clock, defImage),
 		ListDomains: usecases.NewListDomains(dd), CreateDomain: usecases.NewCreateDomain(dd),
 		UpdateDomain: usecases.NewUpdateDomain(dd), DeleteDomain: usecases.NewDeleteDomain(dd),
 		AdoptDomain: usecases.NewAdoptDomain(dd), RetryDomain: usecases.NewRetryDomain(dd),
