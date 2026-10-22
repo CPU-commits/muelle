@@ -29,10 +29,12 @@ type ReadLog struct {
 	Offset int
 }
 
-// LogPage es un pedazo del log (contrato §2.5).
+// LogPage es un pedazo del log (contrato §2.5). Length es el largo del log
+// al leerlo (read_deploy_log por MCP, contrato §8.3 #10; REST no lo manda).
 type LogPage struct {
 	Chunk        string
 	NextOffset   int
+	Length       int
 	Status       entity.Status
 	SupersededBy *int64
 }
