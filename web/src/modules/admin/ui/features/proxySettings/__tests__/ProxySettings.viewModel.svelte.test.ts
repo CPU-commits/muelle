@@ -52,6 +52,7 @@ function proxyStatus(overrides: Partial<ProxyStatus> = {}): ProxyStatus {
 			httpsPort: 443,
 		},
 		portsRollback: null,
+		panelCertificate: null,
 		...overrides,
 	}
 }

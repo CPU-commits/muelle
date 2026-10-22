@@ -68,6 +68,16 @@ const proxyPortsDtoSchema = z.object({
 	https_port: z.number().int(),
 })
 
+/**
+ * El certificado del panel (contrato §3.3): `cert_source` y `origin_ca` con las reglas de los
+ * de un dominio.
+ */
+export const panelCertificateDtoSchema = z.object({
+	hostname: z.string().min(1),
+	cert_source: z.enum(CERT_SOURCES),
+	origin_ca: originCaDtoSchema.nullable(),
+})
+
 /** `GET /proxy` (contrato §3.3): el estado de muelle-caddy. */
 export const proxyDtoSchema = z.object({
 	status: z.enum(PROXY_SYNC_STATUSES),
@@ -88,6 +98,8 @@ export const proxyDtoSchema = z.object({
 			at: timestamp,
 		})
 		.nullable(),
+	// El certificado del panel; null sin dominio del panel. Obligatorio, como `ports_rollback`.
+	panel_certificate: panelCertificateDtoSchema.nullable(),
 })
 
 export type OriginCaDto = z.infer<typeof originCaDtoSchema>

@@ -54,6 +54,7 @@ function proxyStatus(overrides: Partial<ProxyStatus> = {}): ProxyStatus {
 		syncedAt: new Date(),
 		caddy: CADDY,
 		portsRollback: null,
+		panelCertificate: null,
 		...overrides,
 	}
 }

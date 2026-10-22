@@ -202,6 +202,7 @@ describe('proxyFromDto', () => {
 				https_port: 443,
 			},
 			ports_rollback: null,
+			panel_certificate: null,
 		})
 		expect(proxyFromDto(dto)).toEqual({
 			status: 'out_of_sync',
@@ -214,6 +215,7 @@ describe('proxyFromDto', () => {
 				httpsPort: 443,
 			},
 			portsRollback: null,
+			panelCertificate: null,
 		})
 	})
 
@@ -234,6 +236,7 @@ describe('proxyFromDto', () => {
 				error: 'los puertos 8080 o 8443 del host ya están en uso, y muelle-caddy no pudo arrancar con ellos',
 				at: '2026-10-16T20:41:07.12Z',
 			},
+			panel_certificate: null,
 		})
 		expect(proxyFromDto(dto).portsRollback).toEqual({
 			attempted: { httpPort: 8080, httpsPort: 8443 },
@@ -250,6 +253,7 @@ describe('proxyFromDto', () => {
 			synced_at: null,
 			caddy: { image: null, running: false, http_port: 80, https_port: 443 },
 			ports_rollback: null,
+			panel_certificate: null,
 		}
 		expect(proxyFromDto(proxyDtoSchema.parse(dto)).portsRollback).toBeNull()
 		const { ports_rollback: _rollback, ...missing } = dto
@@ -261,5 +265,53 @@ describe('proxyFromDto', () => {
 		expect(proxyDtoSchema.safeParse({ status: 'roto', caddy: { running: true } }).success).toBe(
 			false,
 		)
+	})
+
+	it('trae el certificado del panel (panel_certificate, contrato §3.3), con su origin_ca', () => {
+		const base = {
+			status: 'synced',
+			error: null,
+			synced_at: '2026-10-21T12:00:00Z',
+			caddy: { image: null, running: true, http_port: 80, https_port: 443 },
+			ports_rollback: null,
+		}
+		const dto = proxyDtoSchema.parse({
+			...base,
+			panel_certificate: {
+				hostname: 'panel.tudominio.cl',
+				cert_source: 'letsencrypt',
+				origin_ca: {
+					status: 'dns_only',
+					error_code: null,
+					error: null,
+					retry_at: null,
+					expires_at: null,
+				},
+			},
+		})
+		expect(proxyFromDto(dto).panelCertificate).toEqual({
+			hostname: 'panel.tudominio.cl',
+			certSource: 'letsencrypt',
+			originCa: {
+				status: 'dns_only',
+				errorCode: null,
+				error: null,
+				retryAt: null,
+				expiresAt: null,
+			},
+		})
+		// Sin dominio del panel es null; con la opción apagada, origin_ca es null.
+		const off = { hostname: 'panel.tudominio.cl', cert_source: 'letsencrypt', origin_ca: null }
+		expect(
+			proxyFromDto(proxyDtoSchema.parse({ ...base, panel_certificate: off })),
+		).toMatchObject({
+			panelCertificate: {
+				hostname: 'panel.tudominio.cl',
+				certSource: 'letsencrypt',
+				originCa: null,
+			},
+		})
+		// Obligatorio: una respuesta sin la clave no es del contrato.
+		expect(proxyDtoSchema.safeParse(base).success).toBe(false)
 	})
 })

@@ -509,7 +509,17 @@ export const ingressDb = {
 	 */
 	proxy(now = Date.now()) {
 		this.settle(now)
-		return { ...proxyState(now), ports_rollback: state.portsRollback ?? null }
+		const panelDomain = adminDb.state.panelDomain
+		return {
+			...proxyState(now),
+			ports_rollback: state.portsRollback ?? null,
+			// El certificado del panel (contrato §3.3): con los certificados de Cloudflare
+			// apagados, Let's Encrypt y sin `origin_ca`; null sin dominio del panel.
+			panel_certificate:
+				panelDomain === ''
+					? null
+					: { hostname: panelDomain, cert_source: 'letsencrypt', origin_ca: null },
+		}
 	},
 
 	/** Cloudflare falla al escribir (`cf-intermitente`): el dominio queda en error. */

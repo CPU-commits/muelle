@@ -91,6 +91,13 @@ export function proxyFromDto(dto: ProxyDto): ProxyStatus {
 					at: new Date(dto.ports_rollback.at),
 				}
 			: null,
+		panelCertificate: dto.panel_certificate
+			? {
+					hostname: dto.panel_certificate.hostname,
+					certSource: dto.panel_certificate.cert_source,
+					originCa: originCaFromDto(dto.panel_certificate.origin_ca),
+				}
+			: null,
 	}
 }
 

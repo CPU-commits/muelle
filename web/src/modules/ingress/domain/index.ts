@@ -33,6 +33,7 @@ export {
 } from './errors/ingressErrors'
 export type {
 	CaddyState,
+	PanelCertificate,
 	PortsRollback,
 	ProxyNotice,
 	ProxyPorts,

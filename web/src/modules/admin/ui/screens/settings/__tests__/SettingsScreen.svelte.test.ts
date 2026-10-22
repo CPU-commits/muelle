@@ -87,6 +87,7 @@ describe('SettingsScreen', () => {
 			syncedAt: new Date('2026-10-16T12:00:00Z'),
 			caddy: { image: null, running: true, httpPort: 80, httpsPort: 443 },
 			portsRollback: null,
+			panelCertificate: null,
 		})
 		mocks.listAudit.mockResolvedValue({ items: [], nextCursor: null })
 		mocks.listUsers.mockResolvedValue([

@@ -3,13 +3,16 @@
 // El estado del proxy para otros módulos: Deploys (la advertencia del paso 7) usa
 // `proxyQuery` y `proxyNotice` (null si anda bien, o si `GET /proxy` falló); Ajustes,
 // `proxyFollowQuery`, que después de cambiar los puertos sigue preguntando aunque
-// `GET /proxy` falle, y `portsRollback` (muelle volvió a los puertos anteriores).
+// `GET /proxy` falle, `portsRollback` (muelle volvió a los puertos anteriores) y
+// `panelCertificate` (el certificado del panel, con los de Cloudflare Origin CA).
 export { ingressUseCases } from './container'
 export { domainsQuery, ingressKeys, proxyFollowQuery, proxyQuery } from './data'
 export type {
 	AppDomain,
 	DomainState,
 	Hostname,
+	OriginCaState,
+	PanelCertificate,
 	PortsRollback,
 	ProxyNotice,
 	ProxyPorts,

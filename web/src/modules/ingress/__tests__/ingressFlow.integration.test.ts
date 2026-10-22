@@ -429,6 +429,17 @@ describe('GET /proxy', () => {
 		expect(proxy.status).toBe('disabled')
 		expect(proxy.caddy).toMatchObject({ image: null, running: false })
 		expect(proxy.error).toBeNull()
+		// Sin dominio del panel no hay certificado del panel (contrato §3.3).
+		expect(proxy.panelCertificate).toBeNull()
+	})
+
+	it("trae el certificado del panel: con los de Cloudflare apagados, Let's Encrypt", async () => {
+		const proxy = await ingressUseCases.getProxyStatus()
+		expect(proxy.panelCertificate).toEqual({
+			hostname: 'panel.tudominio.cl',
+			certSource: 'letsencrypt',
+			originCa: null,
+		})
 	})
 
 	it('sincronizado, con muelle-caddy corriendo', async () => {
