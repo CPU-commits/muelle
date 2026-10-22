@@ -26,10 +26,14 @@ type DomainDeps struct {
 	DNS      service.DNS
 	Syncer   *Syncer
 	Certs    *CertChecker
-	Ops      *Ops
-	Clock    clock.Clock
-	Audit    audit.Recorder
-	Log      *slog.Logger
+	// Origin es el reconciliador de Origin CA (contrato §3.7): crear,
+	// editar, adoptar, reintentar y borrar un dominio lo despiertan después
+	// de su Sync. nil: sin Origin CA (los tests que no lo usan).
+	Origin *EnsureOriginCA
+	Ops    *Ops
+	Clock  clock.Clock
+	Audit  audit.Recorder
+	Log    *slog.Logger
 	// DomainOp es el plazo de crear, editar, borrar y adoptar (30 s), y
 	// DomainRetry el de retry (20 s), desde antes de esperar el lock (D6).
 	DomainOp, DomainRetry time.Duration
@@ -74,6 +78,13 @@ func (d DomainDeps) settings(ctx context.Context) (shared.ProxySettings, error) 
 // reintenta el Retrier: la petición no falla por Caddy (contrato §3.2).
 func (d DomainDeps) sync(ctx context.Context, force bool) {
 	_ = d.Syncer.Sync(context.WithoutCancel(ctx), force)
+}
+
+// syncAndKick es sync y, después, despierta al reconciliador de Origin CA
+// sin esperarlo (contrato §3.2).
+func (d DomainDeps) syncAndKick(ctx context.Context, force bool) {
+	d.sync(ctx, force)
+	d.Origin.Kick()
 }
 
 // audit registra la acción sobre el dominio, con la app en details.
@@ -204,7 +215,7 @@ func (uc *CreateDomain) Execute(ctx context.Context, in dto.CreateDomainInput) (
 		return dto.DomainOutput{}, err
 	}
 	uc.d.logResult("domain.create", dom)
-	uc.d.sync(ctx, false)
+	uc.d.syncAndKick(ctx, false)
 	uc.d.Certs.ScheduleFirst(dom.Hostname)
 	uc.d.audit(ctx, "domain.create", app, dom.Hostname, nil)
 	return toOutput(dom, p), nil
@@ -219,8 +230,10 @@ func NewUpdateDomain(d DomainDeps) *UpdateDomain { return &UpdateDomain{d: d} }
 // dentro: el destino (422 si no es válido, o si en una app de formulario no
 // es su servicio) y proxied (422 sin registro propio, D22; si no, cambia los
 // registros: setProxied). Lo que no cambia nada (como {}) no guarda, no
-// audita y no mueve updated_at. Si algo cambió, guarda, manda la
-// configuración a Caddy fuera del lock y audita.
+// audita y no mueve updated_at. Si algo cambió, guarda; si cambió proxied,
+// olvida lo que se vio en Cloudflare de ese hostname (Origin CA, contrato
+// §3.7: la falla queda); después manda la configuración a Caddy fuera del
+// lock, despierta al reconciliador de Origin CA y audita.
 func (uc *UpdateDomain) Execute(ctx context.Context, in dto.UpdateDomainInput) (dto.DomainOutput, error) {
 	app, err := uc.d.app(ctx, in.AppRef)
 	if err != nil {
@@ -228,7 +241,7 @@ func (uc *UpdateDomain) Execute(ctx context.Context, in dto.UpdateDomainInput) (
 	}
 	var dom entity.Domain
 	var p shared.ProxySettings
-	changed := false
+	changed, proxiedChanged := false, false
 	err = uc.d.Ops.Do(ctx, uc.d.DomainOp, func(opCtx, dbCtx context.Context) error {
 		var err error
 		if dom, err = uc.d.domain(dbCtx, app, in.Hostname); err != nil {
@@ -266,7 +279,7 @@ func (uc *UpdateDomain) Execute(ctx context.Context, in dto.UpdateDomainInput) (
 		}
 		if in.Proxied != nil && *in.Proxied != dom.Proxied {
 			uc.d.dnsOps().setProxied(opCtx, &dom, p, *in.Proxied)
-			changed = true
+			changed, proxiedChanged = true, true
 		}
 		if !changed {
 			return nil
@@ -280,9 +293,14 @@ func (uc *UpdateDomain) Execute(ctx context.Context, in dto.UpdateDomainInput) (
 	if err != nil {
 		return dto.DomainOutput{}, err
 	}
+	if proxiedChanged {
+		if err := uc.d.Origin.ForgetObserved(context.WithoutCancel(ctx), dom.Hostname); err != nil {
+			uc.d.Log.Warn("ingress: olvidando lo que se vio en Cloudflare", "hostname", dom.Hostname, "error", err)
+		}
+	}
 	if changed {
 		uc.d.logResult("domain.update", dom)
-		uc.d.sync(ctx, false)
+		uc.d.syncAndKick(ctx, false)
 		uc.d.audit(ctx, "domain.update", app, dom.Hostname, nil)
 	}
 	return toOutput(dom, p), nil
@@ -324,7 +342,7 @@ func (uc *DeleteDomain) Execute(ctx context.Context, ref dto.DomainRef) error {
 	if err != nil {
 		return err
 	}
-	uc.d.sync(ctx, false)
+	uc.d.syncAndKick(ctx, false)
 	var extra map[string]string
 	if kept {
 		extra = map[string]string{"dns": "kept"}

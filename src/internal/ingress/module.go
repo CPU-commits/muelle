@@ -7,8 +7,10 @@
 // manda la configuración a muelle-caddy por su admin API, el ciclo de vida
 // de muelle-caddy (el job "proxy", los reintentos y la recreación), GET
 // /api/v1/proxy, los dominios con su DNS en Cloudflare (…/domains), el
-// registro DNS del panel, la verificación de los certificados y los hooks de
-// admin (el token de Cloudflare y los ajustes del proxy). El contrato está en
+// registro DNS del panel, la verificación de los certificados, los
+// certificados de Cloudflare (Origin CA, opcionales: emitirlos, renovarlos y
+// revocarlos) y los hooks de admin (el token de Cloudflare, el permiso de
+// Origin CA y los ajustes del proxy). El contrato está en
 // docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md.
 package ingress
 
@@ -73,6 +75,7 @@ type Module struct {
 	checkPorts    *usecases.CheckProxyPorts
 	settingsHook  *usecases.ProxySettingsChanged
 	certs         *usecases.CertChecker
+	origin        *usecases.EnsureOriginCA
 	jobs          []cron.Job
 	httpUC        inhttp.UseCases
 }
@@ -123,8 +126,12 @@ func New(d Deps) *Module {
 	m.ops = &usecases.Ops{}
 	dns := cloudflare.New(o.CloudflareURL)
 	m.panelDNS = usecases.NewEnsurePanelDNS(settings, dns, m.ops, o.Timing.DomainOp, d.Log)
-	m.proxyJob = usecases.NewProxyJob(settings, catalog, m.ensureNetwork, m.caddy, m.orphans, m.syncer, m.panelDNS, m.state,
-		defImage, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
+	m.origin = usecases.NewEnsureOriginCA(usecases.OriginDeps{
+		Settings: settings, Domains: domains, Repos: origin, DNS: dns, CA: dns, Keys: outservice.OriginKeys{},
+		Syncer: m.syncer, Clock: d.Clock, DefImage: defImage, Pass: o.Timing.OriginPass, Grace: o.Timing.OriginRevokeGrace, Log: d.Log,
+	})
+	m.proxyJob = usecases.NewProxyJob(settings, catalog, m.ensureNetwork, m.caddy, m.orphans, m.syncer, m.panelDNS, m.origin,
+		m.state, defImage, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	m.recreator = usecases.NewRecreator(m.caddy, m.syncer, m.state, o.Timing.RecreateDelay, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	probe := outservice.TLSProbe{Addr: o.CaddyTLSAddr, Roots: o.TLSRoots, Timeout: outservice.DefaultProbeTimeout}
 	m.certs = usecases.NewCertChecker(probe, domains, settings, origin, m.state, m.ops, d.Clock, o.Timing.FirstCheck, o.Timing.PendingEvery,
@@ -132,14 +139,14 @@ func New(d Deps) *Module {
 	m.jobs = incron.Jobs(m.proxyJob.Run, func(ctx context.Context) error { return m.certs.CheckAll(ctx, usecases.EligibleHourly) })
 	dd := usecases.DomainDeps{
 		Repo: domains, Catalog: catalog, Settings: settings, DNS: dns, Syncer: m.syncer,
-		Certs: m.certs, Ops: m.ops, Clock: d.Clock, Audit: d.Audit, Log: d.Log,
+		Certs: m.certs, Origin: m.origin, Ops: m.ops, Clock: d.Clock, Audit: d.Audit, Log: d.Log,
 		DomainOp: o.Timing.DomainOp, DomainRetry: o.Timing.DomainRetry,
 	}
 	m.checkToken = usecases.NewCheckCloudflareToken(dns)
 	m.checkOrigin = usecases.NewCheckOriginCAPermission(dns, dns, outservice.OriginKeys{}, origin.Certs, d.Clock, d.Log)
 	m.checkPorts = usecases.NewCheckProxyPorts(runtime, defImage, d.Log)
 	m.settingsHook = usecases.NewProxySettingsChanged(m.recreator, usecases.NewUpdateManagedRecords(dd), m.panelDNS, m.syncer,
-		m.state, o.Timing.Hook, d.Log)
+		m.origin, m.state, o.Timing.Hook, d.Log)
 	m.httpUC = inhttp.UseCases{
 		ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage),
 		ListDomains: usecases.NewListDomains(dd), CreateDomain: usecases.NewCreateDomain(dd),
@@ -168,13 +175,16 @@ func (m *Module) Jobs() []cron.Job { return m.jobs }
 // configuración que Caddy no aceptó, la recreación de muelle-caddy que
 // agenda ProxySettingsChanged (si no arranca con los puertos nuevos, vuelve
 // a los anteriores: contrato §3.5), la verificación de un dominio 30 s
-// después de crearlo, adoptarlo o reintentarlo, y la de los pending cada
-// minuto (§8).
+// después de crearlo, adoptarlo o reintentarlo, la de los pending cada
+// minuto (§8) y la reconciliación de los certificados de Cloudflare (Origin
+// CA, contrato §3.7): una pasada a la vez, cada vez que la despierta el job
+// "proxy", un PATCH /settings o un cambio de un dominio.
 func (m *Module) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Go(func() { m.retrier.Run(ctx) })
 	wg.Go(func() { m.recreator.Run(ctx) })
 	wg.Go(func() { m.certs.Run(ctx) })
+	wg.Go(func() { m.origin.Run(ctx) })
 	wg.Wait()
 }
 

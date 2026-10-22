@@ -62,8 +62,12 @@ func NewEnsureOriginCA(d OriginDeps) *EnsureOriginCA {
 }
 
 // Kick despierta al reconciliador (Run) sin esperarlo; si ya hay uno
-// pendiente, no agrega otro.
+// pendiente, no agrega otro. Con u nil (los tests sin Origin CA) no hace
+// nada, como ResetBackoff, ForgetObserved y Forget.
 func (u *EnsureOriginCA) Kick() {
+	if u == nil {
+		return
+	}
 	select {
 	case u.kick <- struct{}{}:
 	default:
@@ -92,7 +96,7 @@ func (u *EnsureOriginCA) Run(ctx context.Context) {
 // pasada emite o vuelve a fallar (§9.2 del diseño de Origin CA). No
 // despierta al reconciliador: eso es Kick.
 func (u *EnsureOriginCA) ResetBackoff(ctx context.Context, hostname string) error {
-	if !u.d.Repos.set() {
+	if u == nil || !u.d.Repos.set() {
 		return nil
 	}
 	return u.d.Repos.Hosts.ResetBackoff(ctx, hostname, u.d.Clock.Now())
@@ -102,7 +106,7 @@ func (u *EnsureOriginCA) ResetBackoff(ctx context.Context, hostname string) erro
 // que cambia su proxied): la API dice issuing hasta la próxima lectura. La
 // falla queda.
 func (u *EnsureOriginCA) ForgetObserved(ctx context.Context, hostname string) error {
-	if !u.d.Repos.set() {
+	if u == nil || !u.d.Repos.set() {
 		return nil
 	}
 	return u.d.Repos.Hosts.ForgetObserved(ctx, hostname, u.d.Clock.Now())
@@ -112,7 +116,7 @@ func (u *EnsureOriginCA) ForgetObserved(ctx context.Context, hostname string) er
 // opción), sin el mutex de la pasada: no espera una pasada en curso. Los
 // certificados retirados no se tocan: se revocan igual.
 func (u *EnsureOriginCA) Forget(ctx context.Context) error {
-	if !u.d.Repos.set() {
+	if u == nil || !u.d.Repos.set() {
 		return nil
 	}
 	return u.d.Repos.Hosts.DeleteAll(ctx)

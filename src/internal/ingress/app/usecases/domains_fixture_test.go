@@ -143,8 +143,13 @@ func newUCFixture(t *testing.T) *ucFixture {
 	catalog := outservice.NewCatalogReader(db)
 	f.syncer = NewSyncer(settings, f.repo, catalog, f.origin, caddy.NewAdmin(f.caddy.Dial), f.state, f.clock, "", false, nil, log)
 	f.certs = NewCertChecker(f.probe, f.repo, settings, f.origin, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, log)
+	client := cloudflare.New(f.cf.URL())
 	f.deps = DomainDeps{
-		Repo: f.repo, Catalog: catalog, Settings: settings, DNS: cloudflare.New(f.cf.URL()), Syncer: f.syncer,
+		Repo: f.repo, Catalog: catalog, Settings: settings, DNS: client, Syncer: f.syncer,
+		Origin: NewEnsureOriginCA(OriginDeps{
+			Settings: settings, Domains: f.repo, Repos: f.origin, DNS: client, CA: client, Keys: outservice.OriginKeys{},
+			Syncer: f.syncer, Clock: f.clock, Pass: 5 * time.Minute, Grace: time.Minute, Log: log,
+		}),
 		Certs: f.certs, Ops: f.ops, Clock: f.clock, Audit: sqlite.NewAuditRecorder(db, f.clock, log), Log: log,
 		DomainOp: 30 * time.Second, DomainRetry: 20 * time.Second,
 	}
