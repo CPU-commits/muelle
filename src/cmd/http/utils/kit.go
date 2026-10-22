@@ -192,6 +192,11 @@ func (k *Kit) authenticate(a Access, next http.HandlerFunc) http.Handler {
 				return
 			}
 			write := r.Method != http.MethodGet && r.Method != http.MethodHead
+			// Antes que el alcance: no dice si el recurso existe (contrato §8.1).
+			if write && p.ReadOnly() {
+				k.writeError(w, http.StatusForbidden, "read_only_token", "el token es de solo lectura")
+				return
+			}
 			if !p.Allows(r.PathValue("p"), r.PathValue("s"), write) {
 				k.writeError(w, http.StatusForbidden, "out_of_scope", "el token no tiene acceso a este recurso")
 				return
