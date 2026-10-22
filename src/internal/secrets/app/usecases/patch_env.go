@@ -74,6 +74,11 @@ func (u *PatchEnv) Execute(ctx context.Context, in dto.PatchEnv) error {
 		for _, r := range current {
 			stored[r.Key] = r
 		}
+		if in.KeepSecrets {
+			if err := u.keepSecrets(ctx, owner, stored, set); err != nil {
+				return err
+			}
+		}
 		// Una entrada de set con el mismo valor y el mismo secret que la
 		// guardada no es un cambio y no se reescribe. Solo se descifran las
 		// claves de set que ya existen; una que no descifra cuenta como cambiada.
@@ -116,6 +121,40 @@ func (u *PatchEnv) Execute(ctx context.Context, in dto.PatchEnv) error {
 		u.audit.Record(ctx, "env.patch", auditTarget(in.Target), map[string][]string{"set": keysOf(set), "unset": unset})
 		return nil
 	})
+}
+
+// keepSecrets rechaza una clave de set que ya es secreta en el dueño o, con
+// una app, en su stage (las variables del stage, leídas en la misma
+// transacción): la de la app la taparía en el próximo deploy. Al revés no
+// hace falta: una del stage no tapa una secreta de una app, porque la de la
+// app gana.
+func (u *PatchEnv) keepSecrets(ctx context.Context, owner entity.Owner, stored map[string]entity.EncryptedEnvVar, set []entity.EnvVar) error {
+	for _, v := range set {
+		if r, ok := stored[v.Key]; ok && r.Secret {
+			return validate.Errorf("set", "%q es secreta: cámbiala desde el panel o la GitHub Action", v.Key)
+		}
+	}
+	if owner.Kind != entity.OwnerApp || len(set) == 0 {
+		return nil
+	}
+	stage, err := u.owners.StageOfApp(ctx, owner.ID)
+	if err != nil {
+		return err
+	}
+	stageVars, err := u.repo.List(ctx, stage)
+	if err != nil {
+		return err
+	}
+	secret := make(map[string]bool, len(stageVars))
+	for _, r := range stageVars {
+		secret[r.Key] = r.Secret
+	}
+	for _, v := range set {
+		if secret[v.Key] {
+			return validate.Errorf("set", "%q es secreta en el stage, y la de la app la taparía: cámbiala desde el panel o la GitHub Action", v.Key)
+		}
+	}
+	return nil
 }
 
 // hasAnyKey dice si alguna de keys está guardada.
