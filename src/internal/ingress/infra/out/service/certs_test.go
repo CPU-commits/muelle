@@ -117,7 +117,7 @@ func TestProbeValid(t *testing.T) {
 		notAfter := time.Now().Add(20 * time.Hour)
 		cert, leaf := ca.leaf(t, probeHost, notAfter)
 		p := TLSProbe{Addr: serveTLS(t, cert), Roots: ca.rootsPool, Timeout: 5 * time.Second}
-		o, err := p.Probe(context.Background(), probeHost)
+		o, err := p.Probe(context.Background(), probeHost, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,7 +132,7 @@ func TestProbeUnknownCA(t *testing.T) {
 	ca := newTestCA(t, "it3")
 	cert, _ := ca.leaf(t, probeHost, time.Now().Add(20*time.Hour))
 	p := TLSProbe{Addr: serveTLS(t, cert), Roots: x509.NewCertPool()}
-	o, err := p.Probe(context.Background(), probeHost)
+	o, err := p.Probe(context.Background(), probeHost, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestProbeWrongName(t *testing.T) {
 	ca := newTestCA(t, "it3")
 	cert, _ := ca.leaf(t, probeHost, time.Now().Add(20*time.Hour))
 	p := TLSProbe{Addr: serveTLS(t, cert), Roots: ca.rootsPool}
-	o, err := p.Probe(context.Background(), "b.it3.test")
+	o, err := p.Probe(context.Background(), "b.it3.test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestProbeExpired(t *testing.T) {
 	ca := newTestCA(t, "it3")
 	cert, _ := ca.leaf(t, probeHost, time.Now().Add(-time.Minute))
 	p := TLSProbe{Addr: serveTLS(t, cert), Roots: ca.rootsPool}
-	o, err := p.Probe(context.Background(), probeHost)
+	o, err := p.Probe(context.Background(), probeHost, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestProbeHandshakeFails(t *testing.T) {
 		}
 	}()
 	p := TLSProbe{Addr: l.Addr().String(), Roots: x509.NewCertPool()}
-	o, err := p.Probe(context.Background(), probeHost)
+	o, err := p.Probe(context.Background(), probeHost, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestProbeUnreachable(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 	p := TLSProbe{Addr: addr}
-	if _, err := p.Probe(context.Background(), probeHost); !errors.Is(err, service.ErrCaddyUnreachable) {
+	if _, err := p.Probe(context.Background(), probeHost, nil); !errors.Is(err, service.ErrCaddyUnreachable) {
 		t.Fatalf("err: %v", err)
 	}
 }
@@ -232,10 +232,50 @@ func TestProbeHandshakeTimeout(t *testing.T) {
 	}()
 	p := TLSProbe{Addr: l.Addr().String(), Timeout: 50 * time.Millisecond}
 	start := time.Now()
-	if _, err := p.Probe(context.Background(), probeHost); !errors.Is(err, service.ErrCaddyUnreachable) {
+	if _, err := p.Probe(context.Background(), probeHost, nil); !errors.Is(err, service.ErrCaddyUnreachable) {
 		t.Fatalf("err: %v", err)
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("tardó %s", d)
+	}
+}
+
+// Con pinned (§8 del diseño de Origin CA): una hoja servida idéntica a
+// pinned, para ese hostname y vigente, es válida sin verificar la cadena
+// contra Roots. Una que verifica contra Roots vale igual, con otro pinned.
+func TestProbePinned(t *testing.T) {
+	ca := newTestCA(t, "CloudFlare, Inc.")
+	cert, leaf := ca.leaf(t, probeHost, time.Now().Add(90*24*time.Hour))
+	addr := serveTLS(t, cert)
+	noRoots := TLSProbe{Addr: addr, Roots: x509.NewCertPool()}
+	ctx := context.Background()
+
+	o, err := noRoots.Probe(ctx, probeHost, leaf.Raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !o.Valid || o.Issuer != "CloudFlare, Inc." || !o.NotAfter.Equal(leaf.NotAfter.UTC().Truncate(time.Millisecond)) {
+		t.Fatalf("fijada: %+v", o)
+	}
+
+	// Otra hoja fijada: la servida no verifica contra Roots, inválida.
+	_, other := ca.leaf(t, probeHost, time.Now().Add(90*24*time.Hour))
+	if o, err := noRoots.Probe(ctx, probeHost, other.Raw); err != nil || o.Valid || !strings.Contains(o.Problem, "CA") {
+		t.Fatalf("otra fijada: %+v %v", o, err)
+	}
+	// Fijada pero para otro hostname, o vencida: inválida.
+	if o, err := noRoots.Probe(ctx, "b.it3.test", leaf.Raw); err != nil || o.Valid || !strings.Contains(o.Problem, "b.it3.test") {
+		t.Fatalf("otro hostname: %+v %v", o, err)
+	}
+	expiredCert, expired := ca.leaf(t, probeHost, time.Now().Add(-time.Minute))
+	p := TLSProbe{Addr: serveTLS(t, expiredCert), Roots: x509.NewCertPool()}
+	if o, err := p.Probe(ctx, probeHost, expired.Raw); err != nil || o.Valid || !strings.Contains(o.Problem, "venció") {
+		t.Fatalf("vencida: %+v %v", o, err)
+	}
+	// Una hoja que verifica contra Roots vale aunque pinned sea otra (el
+	// cambio entre Let's Encrypt y Origin CA).
+	withRoots := TLSProbe{Addr: addr, Roots: ca.rootsPool}
+	if o, err := withRoots.Probe(ctx, probeHost, other.Raw); err != nil || !o.Valid {
+		t.Fatalf("verifica contra Roots: %+v %v", o, err)
 	}
 }

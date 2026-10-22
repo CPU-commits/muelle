@@ -271,7 +271,7 @@ func TestIntegrationDomainsAndCertificates(t *testing.T) {
 	roots := e.internalRoots()
 	probe := outservice.TLSProbe{Addr: e.opts.CaddyTLSAddr, Roots: roots}
 	e.eventually(30*time.Second, "la sonda ve un certificado válido", func() (bool, error) {
-		o, err := probe.Probe(ctx, web)
+		o, err := probe.Probe(ctx, web, nil)
 		if err != nil {
 			return false, err
 		}
@@ -280,7 +280,7 @@ func TestIntegrationDomainsAndCertificates(t *testing.T) {
 		}
 		return true, nil
 	})
-	if o, err := (outservice.TLSProbe{Addr: e.opts.CaddyTLSAddr, Roots: x509.NewCertPool()}).Probe(ctx, web); err != nil || o.Valid || o.Problem == "" {
+	if o, err := (outservice.TLSProbe{Addr: e.opts.CaddyTLSAddr, Roots: x509.NewCertPool()}).Probe(ctx, web, nil); err != nil || o.Valid || o.Problem == "" {
 		t.Fatalf("sin las raíces: %+v %v", o, err)
 	}
 

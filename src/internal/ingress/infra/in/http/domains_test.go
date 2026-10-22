@@ -39,7 +39,7 @@ const (
 // cambia nada.
 type unreachableProbe struct{}
 
-func (unreachableProbe) Probe(context.Context, string) (service.CertObservation, error) {
+func (unreachableProbe) Probe(context.Context, string, []byte) (service.CertObservation, error) {
 	return service.CertObservation{}, service.ErrCaddyUnreachable
 }
 
@@ -75,7 +75,7 @@ func newDomainsFixture(t *testing.T) *domainsFixture {
 	ops := &usecases.Ops{}
 	d := usecases.DomainDeps{
 		Repo: repo, Catalog: catalog, Settings: settings, DNS: cloudflare.New(f.cf.URL()), Syncer: syncer,
-		Certs: usecases.NewCertChecker(unreachableProbe{}, repo, state, ops, clk, time.Second, time.Second, time.Second, log),
+		Certs: usecases.NewCertChecker(unreachableProbe{}, repo, settings, usecases.OriginRepos{}, state, ops, clk, time.Second, time.Second, time.Second, log),
 		Ops:   ops, Clock: clk, Audit: sqlite.NewAuditRecorder(db, clk, log), Log: log,
 		DomainOp: 30 * time.Second, DomainRetry: 20 * time.Second,
 	}

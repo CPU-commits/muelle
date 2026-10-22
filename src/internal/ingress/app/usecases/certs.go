@@ -2,6 +2,7 @@ package usecases
 
 import (
 	"context"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -25,28 +26,33 @@ const firstQueue = 64
 // cada hora todos los que corresponden (el job "certificados", CheckAll).
 // Sondea fuera del lock de Ops y aplica la regla (service.ApplyCert) dentro.
 // Con el proxy sin synced (deshabilitado, arrancando o recreándose) no hace
-// nada: no se sabe.
+// nada: no se sabe. A un host que se sirve con Origin CA le fija la hoja que
+// guardó muelle (§8 del diseño de Origin CA).
 type CertChecker struct {
-	probe service.CertProbe
-	repo  repository.Domains
-	state *ProxyState
-	ops   *Ops
-	clock clock.Clock
-	first chan string
+	probe    service.CertProbe
+	repo     repository.Domains
+	settings service.Settings
+	origin   OriginRepos
+	state    *ProxyState
+	ops      *Ops
+	clock    clock.Clock
+	first    chan string
 	// firstDelay es el plazo de ScheduleFirst (30 s), every el del barrido de
 	// los pending (1 min) y opLimit el de Ops.Do al aplicar (30 s).
 	firstDelay, every, opLimit time.Duration
 	log                        *slog.Logger
 }
 
-// NewCertChecker recibe los plazos de Timing: FirstCheck, PendingEvery y DomainOp.
-func NewCertChecker(probe service.CertProbe, repo repository.Domains, state *ProxyState, ops *Ops, clk clock.Clock,
-	firstDelay, every, opLimit time.Duration, log *slog.Logger) *CertChecker {
+// NewCertChecker recibe los ajustes y las tablas de Origin CA (para fijar
+// la hoja) y los plazos de Timing: FirstCheck, PendingEvery y DomainOp.
+func NewCertChecker(probe service.CertProbe, repo repository.Domains, settings service.Settings, origin OriginRepos,
+	state *ProxyState, ops *Ops, clk clock.Clock, firstDelay, every, opLimit time.Duration, log *slog.Logger) *CertChecker {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &CertChecker{
-		probe: probe, repo: repo, state: state, ops: ops, clock: clk, first: make(chan string, firstQueue),
+		probe: probe, repo: repo, settings: settings, origin: origin, state: state, ops: ops, clock: clk,
+		first:      make(chan string, firstQueue),
 		firstDelay: firstDelay, every: every, opLimit: opLimit, log: log,
 	}
 }
@@ -111,11 +117,48 @@ func (c *CertChecker) CheckAll(ctx context.Context, include func(entity.Domain) 
 	return errors.Join(errs...)
 }
 
+// pinned es el DER de la hoja de Origin CA que se espera para d: la del
+// active de su hostname si, con los datos de ahora, el host se sirve con
+// Origin CA (service.OriginServes, la misma regla que la configuración de
+// Caddy); si no, nil. El proxy está synced (habilitado).
+func (c *CertChecker) pinned(ctx context.Context, d entity.Domain) ([]byte, error) {
+	if !c.origin.set() {
+		return nil, nil
+	}
+	p, err := c.settings.ProxySettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ingress: leyendo los ajustes del proxy: %w", err)
+	}
+	if !service.OriginOn(p, true) {
+		return nil, nil
+	}
+	active, err := c.origin.Certs.ActiveFor(ctx, d.Hostname)
+	if err != nil || active == nil {
+		return nil, err
+	}
+	h, err := c.origin.Hosts.Get(ctx, d.Hostname)
+	if err != nil {
+		return nil, err
+	}
+	if !service.OriginServes(service.DomainOriginTarget(d), h, active, c.clock.Now()) {
+		return nil, nil
+	}
+	block, _ := pem.Decode([]byte(active.CertPEM))
+	if block == nil {
+		return nil, fmt.Errorf("ingress: el certificado de Origin CA de %s no es un PEM", d.Hostname)
+	}
+	return block.Bytes, nil
+}
+
 // check sondea d fuera del lock y, con el lock tomado, aplica la regla solo
 // si el dominio sigue igual (su UpdatedAt no cambió: un PATCH, un retry u
 // otra verificación lo habrían movido) y el proxy sigue synced.
 func (c *CertChecker) check(ctx context.Context, d entity.Domain) error {
-	o, err := c.probe.Probe(ctx, d.Hostname)
+	pin, err := c.pinned(ctx, d)
+	if err != nil {
+		return err
+	}
+	o, err := c.probe.Probe(ctx, d.Hostname, pin)
 	if errors.Is(err, service.ErrCaddyUnreachable) {
 		c.log.Debug("ingress: no se llegó a Caddy para verificar un certificado", "hostname", d.Hostname, "error", err)
 		return nil
@@ -154,7 +197,11 @@ func (c *CertChecker) checkLocked(opCtx, dbCtx context.Context, d *entity.Domain
 	if !c.state.Synced() {
 		return false, nil
 	}
-	o, err := c.probe.Probe(opCtx, d.Hostname)
+	pin, err := c.pinned(dbCtx, *d)
+	if err != nil {
+		return false, err
+	}
+	o, err := c.probe.Probe(opCtx, d.Hostname, pin)
 	if errors.Is(err, service.ErrCaddyUnreachable) {
 		return false, nil
 	}

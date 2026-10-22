@@ -126,7 +126,7 @@ func New(d Deps) *Module {
 		defImage, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	m.recreator = usecases.NewRecreator(m.caddy, m.syncer, m.state, o.Timing.RecreateDelay, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	probe := outservice.TLSProbe{Addr: o.CaddyTLSAddr, Roots: o.TLSRoots, Timeout: outservice.DefaultProbeTimeout}
-	m.certs = usecases.NewCertChecker(probe, domains, m.state, m.ops, d.Clock, o.Timing.FirstCheck, o.Timing.PendingEvery,
+	m.certs = usecases.NewCertChecker(probe, domains, settings, origin, m.state, m.ops, d.Clock, o.Timing.FirstCheck, o.Timing.PendingEvery,
 		o.Timing.DomainOp, d.Log)
 	m.jobs = incron.Jobs(m.proxyJob.Run, func(ctx context.Context) error { return m.certs.CheckAll(ctx, usecases.EligibleHourly) })
 	dd := usecases.DomainDeps{

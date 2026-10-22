@@ -1,23 +1,32 @@
 package usecases
 
 import (
+	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
+	shared "github.com/CPU-commits/muelle/src/shared/domain/entity"
 )
 
 // Antes del primer Load (el estado inicial) no se sabe nada: no se sondea.
 func TestCheckNotSynced(t *testing.T) {
 	f := newUCFixture(t)
 	f.state = NewProxyState()
-	f.certs = NewCertChecker(f.probe, f.repo, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, nil)
+	f.certs = NewCertChecker(f.probe, f.repo, f.deps.Settings, f.origin, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, nil)
 	d := f.put(t, nil)
 	f.probe.def = f.goodCert()
 	if err := f.certs.Check(context.Background(), dnsHost); err != nil {
@@ -167,7 +176,7 @@ func TestCheckAll(t *testing.T) {
 func TestCertRun(t *testing.T) {
 	f := newUCFixture(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	f.certs = NewCertChecker(f.probe, f.repo, f.state, f.ops, f.clock, 10*time.Millisecond, time.Hour, time.Second, log)
+	f.certs = NewCertChecker(f.probe, f.repo, f.deps.Settings, f.origin, f.state, f.ops, f.clock, 10*time.Millisecond, time.Hour, time.Second, log)
 	d, err := entity.NewDomain(f.apiID, "x.tudominio.cl", "api", 3000, false, f.clock.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +196,7 @@ func TestCertRun(t *testing.T) {
 
 	// El barrido de los pending.
 	g := newUCFixture(t)
-	g.certs = NewCertChecker(g.probe, g.repo, g.state, g.ops, g.clock, time.Hour, 30*time.Millisecond, time.Second, log)
+	g.certs = NewCertChecker(g.probe, g.repo, g.deps.Settings, g.origin, g.state, g.ops, g.clock, time.Hour, 30*time.Millisecond, time.Second, log)
 	g.put(t, nil)
 	g.probe.set(dnsHost, g.goodCert())
 	runInBackground(t, g.certs.Run)
@@ -200,5 +209,93 @@ func TestCertRun(t *testing.T) {
 	h := newUCFixture(t)
 	for range 200 {
 		h.certs.ScheduleFirst(dnsHost)
+	}
+}
+
+// testLeaf es una hoja autofirmada para host, en PEM y DER.
+func testLeaf(t *testing.T, host string, notAfter time.Time) (string, []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: host},
+		DNSNames: []string{host}, NotBefore: notAfter.Add(-90 * 24 * time.Hour), NotAfter: notAfter}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), der
+}
+
+// originServed deja dnsHost como un dominio que se sirve con Origin CA (la
+// opción encendida, manejado y proxied, visto con el proxy y con un active
+// de 90 días), y devuelve el DER de su hoja.
+func (f *ucFixture) originServed(t *testing.T) []byte {
+	t.Helper()
+	ctx := context.Background()
+	f.settings(t, func(p *shared.ProxySettings) { p.CloudflareOriginCA = true })
+	f.put(t, func(d *entity.Domain) {
+		d.Status, d.TLSMode, d.CFZoneID, d.CFRecordID, d.Proxied = entity.StatusActive, entity.TLSCloudflare, "z1", "rec-a", true
+	})
+	certPEM, der := testLeaf(t, dnsHost, f.clock.Now().Add(90*24*time.Hour))
+	c := entity.OriginCert{Hostname: dnsHost, ZoneID: "z1", CFCertID: "100", CertPEM: certPEM, KeyPEM: "KEY",
+		ExpiresAt: f.clock.Now().Add(90 * 24 * time.Hour), CreatedAt: f.clock.Now()}
+	if err := f.origin.Certs.Insert(ctx, &c); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.origin.Hosts.SetObserved(ctx, dnsHost, entity.ObservedProxied, f.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	return der
+}
+
+// La verificación fija la hoja de Origin CA cuando el host se sirve con ella
+// (§8 del diseño de Origin CA), con la misma regla que la configuración de
+// Caddy; si no, pinned es nil.
+func TestCheckPinsOriginCA(t *testing.T) {
+	f := newUCFixture(t)
+	der := f.originServed(t)
+	ctx := context.Background()
+	if err := f.certs.Check(ctx, dnsHost); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.probe.pinned(dnsHost); !bytes.Equal(got, der) {
+		t.Fatalf("pinned: %x", got)
+	}
+	// La de retry (checkLocked) también.
+	f.probe.pins = nil
+	err := f.ops.Do(ctx, time.Second, func(opCtx, dbCtx context.Context) error {
+		d, err := f.repo.Get(dbCtx, dnsHost)
+		if err != nil {
+			return err
+		}
+		_, err = f.certs.checkLocked(opCtx, dbCtx, &d)
+		return err
+	})
+	if err != nil || !bytes.Equal(f.probe.pinned(dnsHost), der) {
+		t.Fatalf("checkLocked: %v %x", err, f.probe.pinned(dnsHost))
+	}
+
+	// Visto en DNS only: Let's Encrypt, sin fijar.
+	if err := f.origin.Hosts.SetObserved(ctx, dnsHost, entity.ObservedDNSOnly, f.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.certs.CheckAll(ctx, EligibleHourly); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.probe.pinned(dnsHost); got != nil {
+		t.Fatalf("DNS only: %x", got)
+	}
+	// La opción apagada: tampoco.
+	if err := f.origin.Hosts.SetObserved(ctx, dnsHost, entity.ObservedProxied, f.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.settings(t, nil)
+	if err := f.certs.Check(ctx, dnsHost); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.probe.pinned(dnsHost); got != nil {
+		t.Fatalf("apagada: %x", got)
 	}
 }
