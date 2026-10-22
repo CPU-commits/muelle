@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
 )
@@ -135,6 +136,21 @@ type OriginCA interface {
 	// Uno desconocido es ErrDNSNotFound, y uno ya revocado un *DNSError con
 	// el código 1014.
 	RevokeOriginCert(ctx context.Context, token, id string) error
+}
+
+// OriginKeys genera la clave y el CSR de un certificado de Origin CA, y
+// revisa lo que devolvió Cloudflare antes de guardarlo (adaptador:
+// infra/out/service.OriginKeys; la aleatoriedad es infra, §5.1 del diseño
+// de Origin CA). La clave va en claro: nunca va a un log ni a un error.
+type OriginKeys interface {
+	// Generate es una clave ECDSA P-256 nueva, en PKCS#8 ("PRIVATE KEY"), y
+	// un CSR con CN y SAN = hostname, los dos en PEM.
+	Generate(hostname string) (keyPEM, csrPEM string, err error)
+	// Check revisa que certPEM vaya con keyPEM (como lo carga Caddy), que su
+	// hoja sea para hostname y que valga (NotBefore <= now+5 min < NotAfter).
+	// Devuelve la hoja sola, vuelta a codificar desde el DER, y su NotAfter.
+	// Un certificado que no sirve es un *OriginCertError.
+	Check(certPEM, keyPEM, hostname string, now time.Time) (leafPEM string, notAfter time.Time, err error)
 }
 
 // App es una app de catalog como la necesita ingress.

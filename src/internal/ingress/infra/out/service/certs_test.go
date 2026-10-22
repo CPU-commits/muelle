@@ -25,6 +25,7 @@ import (
 // testCA es una CA de prueba: raíz, intermedia y hojas firmadas por la intermedia.
 type testCA struct {
 	root      *x509.Certificate
+	rootKey   *ecdsa.PrivateKey
 	inter     *x509.Certificate
 	interKey  *ecdsa.PrivateKey
 	interDER  []byte
@@ -78,7 +79,7 @@ func newTestCA(t *testing.T, interOrg string) *testCA {
 	interDER, inter := sign(t, interTmpl, root, &interKey.PublicKey, rootKey)
 	pool := x509.NewCertPool()
 	pool.AddCert(root)
-	return &testCA{root: root, inter: inter, interKey: interKey, interDER: interDER, rootsPool: pool}
+	return &testCA{root: root, rootKey: rootKey, inter: inter, interKey: interKey, interDER: interDER, rootsPool: pool}
 }
 
 // leaf es una hoja para host que vence en notAfter, con la intermedia en la cadena.
