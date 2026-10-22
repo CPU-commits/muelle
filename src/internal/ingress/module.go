@@ -24,6 +24,7 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/ingress/app/usecases"
 	incron "github.com/CPU-commits/muelle/src/internal/ingress/infra/in/cron"
 	inhttp "github.com/CPU-commits/muelle/src/internal/ingress/infra/in/http"
+	ingmcp "github.com/CPU-commits/muelle/src/internal/ingress/infra/in/mcp"
 	reposqlite "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy"
@@ -153,8 +154,11 @@ func New(d Deps) *Module {
 // …/apps/{a}/domains, que también lee un token en su alcance (§8.1).
 func (m *Module) RegisterRoutes(k *utils.Kit) { inhttp.Register(k, m.httpUC) }
 
-// RegisterTools registra las herramientas MCP de ingress (contrato §8.3).
-func (m *Module) RegisterTools(k *tools.Kit) {}
+// RegisterTools registra la herramienta MCP de ingress (contrato §8.3):
+// list_domains.
+func (m *Module) RegisterTools(k *tools.Kit) {
+	ingmcp.Register(k, ingmcp.UseCases{ListDomains: m.httpUC.ListDomains})
+}
 
 // Jobs son las tareas periódicas: "proxy" cada 5 min (cron.Run lo corre
 // también al arrancar: asegura muelle-caddy y las redes de todos los
