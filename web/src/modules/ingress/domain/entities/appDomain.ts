@@ -1,11 +1,13 @@
 import { type DomainTarget, formatTarget } from '../value-objects/domainTarget'
 import type {
+	CertSource,
 	DnsRecordType,
 	DomainErrorKind,
 	DomainStatus,
 	TlsMode,
 } from '../value-objects/domainStatus'
 import type { Hostname } from '../value-objects/hostname'
+import type { OriginCaState } from './originCa'
 
 // Un dominio de una app (spec §5.1 `domains`, §8 y §9). Crearlo, editarlo o borrarlo
 // aplica al instante el DNS y la ruta de Caddy: no pasa por un deploy (§5.2 regla 4).
@@ -34,7 +36,15 @@ export interface AppDomain {
 	readonly status: DomainStatus
 	readonly lastError: string | null
 	readonly errorKind: DomainErrorKind | null
+	/** Lo último que vio la verificación de muelle en un certificado válido. */
 	readonly certificate: Certificate | null
+	/** Qué certificado le pide muelle a Caddy ahora (contrato §3.1). */
+	readonly certSource: CertSource
+	/**
+	 * El de Cloudflare Origin CA (§3.7); null con la opción apagada, sin token o con el proxy
+	 * deshabilitado.
+	 */
+	readonly originCa: OriginCaState | null
 	readonly records: readonly DnsRecord[]
 	readonly createdAt: Date | null
 	/** El último cambio del dominio (estado, destino, Proxied…). */

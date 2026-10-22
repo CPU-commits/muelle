@@ -3,15 +3,32 @@ import {
 	asHostname,
 	type DomainChanges,
 	type NewDomain,
+	type OriginCaState,
 	type ProxyPorts,
 	type ProxyStatus,
 } from '../../domain'
 import type {
 	CreateDomainPayload,
 	DomainDto,
+	OriginCaDto,
 	ProxyDto,
 	UpdateDomainPayload,
 } from '../dtos/domainDto'
+
+function dateOrNull(text: string | null): Date | null {
+	return text ? new Date(text) : null
+}
+
+export function originCaFromDto(dto: OriginCaDto | null): OriginCaState | null {
+	if (!dto) return null
+	return {
+		status: dto.status,
+		errorCode: dto.error_code,
+		error: dto.error || null,
+		retryAt: dateOrNull(dto.retry_at),
+		expiresAt: dateOrNull(dto.expires_at),
+	}
+}
 
 export function domainFromDto(dto: DomainDto): AppDomain {
 	const certificate =
@@ -29,6 +46,8 @@ export function domainFromDto(dto: DomainDto): AppDomain {
 		lastError: dto.last_error || null,
 		errorKind: dto.last_error_code ?? null,
 		certificate,
+		certSource: dto.cert_source,
+		originCa: originCaFromDto(dto.origin_ca),
 		records: dto.records.map((record) => ({ ...record })),
 		createdAt: dto.created_at ? new Date(dto.created_at) : null,
 		updatedAt: dto.updated_at ? new Date(dto.updated_at) : null,

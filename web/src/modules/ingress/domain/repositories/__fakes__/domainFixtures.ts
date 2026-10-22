@@ -17,6 +17,8 @@ export function makeDomain(hostname: string, overrides: Partial<AppDomain> = {})
 		lastError: null,
 		errorKind: null,
 		certificate: { issuer: "Let's Encrypt", expiresAt: new Date('2027-01-08T00:00:00Z') },
+		certSource: 'letsencrypt',
+		originCa: null,
 		records: [{ type: 'A', name: hostname, content: '203.0.113.24' }],
 		createdAt: new Date('2026-10-01T12:00:00Z'),
 		updatedAt: new Date('2026-10-01T12:00:00Z'),

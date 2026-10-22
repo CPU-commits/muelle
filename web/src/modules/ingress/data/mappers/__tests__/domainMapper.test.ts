@@ -21,6 +21,8 @@ const DTO = {
 	last_error_code: null,
 	cert_issuer: "Let's Encrypt",
 	cert_expires_at: '2027-01-08T00:00:00Z',
+	cert_source: 'letsencrypt',
+	origin_ca: null,
 	records: [
 		{ type: 'A', name: 'api-staging.tudominio.cl', content: '203.0.113.24' },
 		{ type: 'AAAA', name: 'api-staging.tudominio.cl', content: '2001:db8::24' },
@@ -42,6 +44,8 @@ describe('domainFromDto', () => {
 			lastError: null,
 			errorKind: null,
 			certificate: { issuer: "Let's Encrypt", expiresAt: new Date('2027-01-08T00:00:00Z') },
+			certSource: 'letsencrypt',
+			originCa: null,
 			records: [
 				{ type: 'A', name: 'api-staging.tudominio.cl', content: '203.0.113.24' },
 				{ type: 'AAAA', name: 'api-staging.tudominio.cl', content: '2001:db8::24' },
@@ -76,6 +80,87 @@ describe('domainFromDto', () => {
 
 	it('el schema rechaza un status que no es del spec', () => {
 		expect(domainDtoSchema.safeParse({ ...DTO, status: 'ok' }).success).toBe(false)
+	})
+})
+
+// Los certificados de Cloudflare (Origin CA, contrato §3.1 y §3.7).
+describe('cert_source y origin_ca', () => {
+	it('uno que se sirve con Origin CA trae su vencimiento', () => {
+		const dto = domainDtoSchema.parse({
+			...DTO,
+			cert_issuer: 'CloudFlare, Inc.',
+			cert_source: 'cloudflare_origin_ca',
+			origin_ca: {
+				status: 'active',
+				error_code: null,
+				error: null,
+				retry_at: null,
+				expires_at: '2027-01-19T12:00:00Z',
+			},
+		})
+		expect(domainFromDto(dto)).toMatchObject({
+			certSource: 'cloudflare_origin_ca',
+			originCa: {
+				status: 'active',
+				errorCode: null,
+				error: null,
+				retryAt: null,
+				expiresAt: new Date('2027-01-19T12:00:00Z'),
+			},
+		})
+	})
+
+	it('una emisión que falló trae el código, el mensaje y cuándo se reintenta', () => {
+		const error =
+			"muelle no pudo emitir el certificado de Cloudflare: el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de api.tudominio.cl (Cloudflare: Authentication error); agrégalo al token y pulsa Reintentar; mientras tanto usa Let's Encrypt"
+		const dto = domainDtoSchema.parse({
+			...DTO,
+			origin_ca: {
+				status: 'failed',
+				error_code: 'permission',
+				error,
+				retry_at: '2026-10-21T21:04:10.5Z',
+				expires_at: null,
+			},
+		})
+		expect(domainFromDto(dto).originCa).toEqual({
+			status: 'failed',
+			errorCode: 'permission',
+			error,
+			retryAt: new Date('2026-10-21T21:04:10.5Z'),
+			expiresAt: null,
+		})
+	})
+
+	it('un error_code que el panel no conoce es una falla cualquiera, con su mensaje', () => {
+		const dto = domainDtoSchema.parse({
+			...DTO,
+			origin_ca: {
+				status: 'failed',
+				error_code: 'otro',
+				error: 'muelle no pudo emitir el certificado de Cloudflare: algo nuevo',
+				retry_at: '2026-10-21T21:04:10Z',
+				expires_at: null,
+			},
+		})
+		expect(domainFromDto(dto).originCa).toMatchObject({
+			errorCode: null,
+			error: 'muelle no pudo emitir el certificado de Cloudflare: algo nuevo',
+		})
+	})
+
+	it('son obligatorios: un dominio sin cert_source o sin origin_ca no es del contrato', () => {
+		const { cert_source: _source, ...withoutSource } = DTO
+		const { origin_ca: _originCa, ...withoutOriginCa } = DTO
+		expect([_source, _originCa]).toEqual(['letsencrypt', null])
+		expect(domainDtoSchema.safeParse(withoutSource).success).toBe(false)
+		expect(domainDtoSchema.safeParse(withoutOriginCa).success).toBe(false)
+		expect(domainDtoSchema.safeParse({ ...DTO, cert_source: 'otro' }).success).toBe(false)
+		const originCa = { error_code: null, error: null, retry_at: null, expires_at: null }
+		expect(
+			domainDtoSchema.safeParse({ ...DTO, origin_ca: { ...originCa, status: 'otro' } })
+				.success,
+		).toBe(false)
 	})
 })
 

@@ -52,6 +52,10 @@ function domainDto(domain: MockDomain) {
 		last_error_code: domain.lastErrorCode,
 		cert_issuer: domain.certIssuer,
 		cert_expires_at: iso(domain.certExpiresAt),
+		// Los certificados de Cloudflare (contrato §3.7): con la opción apagada, que es lo que
+		// tiene el mock, Let's Encrypt y sin `origin_ca`.
+		cert_source: 'letsencrypt',
+		origin_ca: null,
 		records: records(domain.hostname),
 		created_at: iso(domain.createdAt),
 		updated_at: iso(domain.updatedAt ?? domain.createdAt),
