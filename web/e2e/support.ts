@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test'
 
-// Lo que comparten los e2e: el usuario demo del mock, el login y la vigilancia de la página.
+// El usuario demo del mock, el login y la vigilancia de la página, para `csp.e2e.ts`.
 
 /** El usuario demo de src/mocks/db/auth.ts (sin 2FA). */
 export const USERNAME = 'felipe'
@@ -49,24 +49,4 @@ export async function login(page: Page): Promise<void> {
 	await page.getByLabel('Contraseña').fill(PASSWORD)
 	await page.getByRole('button', { name: 'Continuar' }).click()
 	await expect(page.getByRole('heading', { name: 'Proyectos', level: 1 })).toBeVisible()
-}
-
-/**
- * Siembra el estado del mock antes de que arranque la página: cada db de src/mocks/db guarda
- * su estado en el sessionStorage de la pestaña (`muelle-mock:<db>`, persist.ts), y `auth` y
- * `deploy` completan lo guardado con su semilla, campo por campo. Solo la primera vez:
- * después manda lo que el mock fue guardando (una recarga no lo vuelve a sembrar).
- *
- *   await seedMock(page, { auth: { users: [] } })          // una instalación sin usuarios
- *   await seedMock(page, { deploy: { liveScale: 0.05 } })  // deploys de medio segundo
- */
-export async function seedMock(page: Page, dbs: Record<string, object>): Promise<void> {
-	await page.addInitScript((seeds) => {
-		for (const [db, seed] of Object.entries(seeds)) {
-			const key = `muelle-mock:${db}`
-			if (sessionStorage.getItem(key) === null) {
-				sessionStorage.setItem(key, JSON.stringify(seed))
-			}
-		}
-	}, dbs)
 }

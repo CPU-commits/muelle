@@ -126,8 +126,7 @@ function seed(overrides: Partial<DeployState> = {}): DeployState {
 	return { apps: {}, liveScale: 1, seedLive: true, ...overrides }
 }
 
-// Lo guardado completa la semilla campo por campo: un e2e siembra solo lo que le importa
-// (`e2e/mock.ts`, deploys más rápidos con `{ liveScale }`).
+// Lo guardado en sessionStorage completa la semilla campo por campo.
 let state: DeployState = seed(loadPersisted<Partial<DeployState>>(STORAGE_KEY) ?? {})
 
 function commit(): void {

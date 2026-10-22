@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 /** Las piezas fijas de muelle que un `muelle serve` de prueba podría tocar (ver realCaddy). */
 const REAL_CADDY = 'muelle-caddy'
 const STACK_LABEL = 'com.docker.stack.namespace'
-/** Lo de una corrida anterior que no limpió: más viejo que esto (el timeout del recorrido es de 15 min). */
+/** Lo de una corrida anterior que no limpió: más viejo que esto (el timeout del recorrido es de 10 min). */
 const STALE_AFTER_MS = 30 * 60_000
 const STALE_PROJECT = /^it7p[0-9a-f]{4}(?=_|$)/
 
@@ -48,32 +48,6 @@ export function realCaddy(): boolean {
 /** `name` es de `prefix` (it7p<id>): el mismo nombre, o uno que sigue con "_". */
 export function owned(name: string, prefix: string): boolean {
 	return name === prefix || name.startsWith(`${prefix}_`)
-}
-
-/** Los servicios de Swarm del stack (vacío cuando docker stack rm terminó). */
-export function stackServices(stack: string): string[] {
-	return lines(
-		docker([
-			'service',
-			'ls',
-			'--filter',
-			`label=${STACK_LABEL}=${stack}`,
-			'--format',
-			'{{.Name}}',
-		]),
-	)
-}
-
-/** El entorno (CLAVE=valor) con que Swarm corre el servicio. */
-export function serviceEnv(service: string): string[] {
-	const out = docker([
-		'service',
-		'inspect',
-		'--format',
-		'{{json .Spec.TaskTemplate.ContainerSpec.Env}}',
-		service,
-	])
-	return (JSON.parse(out) as string[] | null) ?? []
 }
 
 /** Si `nginx:alpine` (o la imagen que sea) ya está en el nodo. */

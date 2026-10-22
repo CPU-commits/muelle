@@ -1,9 +1,9 @@
-// Los puertos donde `pnpm test:e2e` sirve sus dos builds (playwright.config.ts). Adentro del
-// network namespace de `scripts/isolated-net.mjs` son de esa corrida. Con la red del host
-// (`MUELLE_TEST_HOST_NET=1`, o sin `unshare`) se cambian para correr varios a la vez, uno
+// El puerto donde `pnpm test:e2e` sirve su build (playwright.config.ts). Adentro del
+// network namespace de `scripts/isolated-net.mjs` es de esa corrida. Con la red del host
+// (`MUELLE_TEST_HOST_NET=1`, o sin `unshare`) se cambia para correr varios a la vez, uno
 // por worktree, sin chocar:
 //
-//   E2E_MOCK_PORT=4183 E2E_PROD_PORT=4184 pnpm test:e2e
+//   E2E_MOCK_PORT=4183 pnpm test:e2e
 
 function port(name: string, fallback: number): number {
 	const raw = process.env[name]
@@ -15,14 +15,7 @@ function port(name: string, fallback: number): number {
 	return value
 }
 
-/** El build con MSW: el `baseURL` de todos los tests. */
+/** El build con MSW: el `baseURL` del test. */
 export const MOCK_PORT = port('E2E_MOCK_PORT', 4173)
-/** El build sin MSW, igual al de `pnpm build`. */
-export const PROD_PORT = port('E2E_PROD_PORT', 4174)
-
-if (MOCK_PORT === PROD_PORT) {
-	throw new Error(`E2E_MOCK_PORT y E2E_PROD_PORT no pueden ser el mismo (${MOCK_PORT})`)
-}
 
 export const MOCK_URL = `http://127.0.0.1:${MOCK_PORT}`
-export const PROD_URL = `http://127.0.0.1:${PROD_PORT}`

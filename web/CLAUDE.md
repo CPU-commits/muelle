@@ -109,33 +109,27 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
   módulo, no la red. Ver
   `src/modules/auth/ui/screens/login/__tests__/` (también mockea `$app/navigation`: `goto`
   no existe fuera del runtime de SvelteKit).
-- **E2E: solo para los flujos críticos.** Son caros y puntuales: `e2e/*.e2e.ts` contra el
-  build con MSW servido con la CSP (`pnpm test:e2e`, ver [CSP](#csp)), y CI los corre en
-  cada cambio. Son tres, uno por flujo:
-    - `csp.e2e.ts`: el build de producción arranca bajo la CSP del header en un deep link
-      (rutas absolutas, `frame-ancestors`, sin el service worker de MSW), y cada pantalla
-      del panel una vez, en un teléfono, sin una violación de CSP ni scroll horizontal;
-    - `auth.e2e.ts`: el setup del primer usuario con el link (el token sale de la URL), el
-      2FA, salir desde el menú de la cuenta y entrar con la contraseña y el código;
-    - `deploy.e2e.ts`: un proyecto, un stage y una app nuevos, una variable secreta (su valor
-      no vuelve a la pantalla), un deploy seguido hasta "Exitoso", otro, el rollback al
-      primero y Proyectos con la app corriendo.
+- **E2E: solo lo que, si se rompe, deja a todos sin muelle, y que ningún otro test ve.** Son
+  dos, y no se les suman pasos:
+    - `e2e/csp.e2e.ts` (`pnpm test:e2e`, CI en cada cambio): cada pantalla del panel una vez,
+      en el build con MSW servido con el header de la CSP (ver [CSP](#csp)), sin una
+      violación ni un error;
+    - `e2e-real/journey.real.ts` (`pnpm test:e2e:real`, ver
+      [E2E contra muelle](#e2e-contra-muelle)): contra un `muelle serve` de verdad y el
+      Swarm local, entrar (el setup con el 2FA, salir y entrar con el código), crear una app,
+      desplegarla hasta que corre y hacer rollback.
 
     Una feature nueva prueba lo que hace con tests de dominio, de viewModel y de integración
     contra MSW (y de componente para lo que es del markup: el foco, el layout, un
-    `aria-current`), no con un e2e. Suma un e2e solo si crea un flujo crítico nuevo, del
-    tamaño de esos tres; si solo toca uno, a lo sumo un paso en ese recorrido. Una pantalla
-    nueva se suma a `SCREENS` de `csp.e2e.ts` (su ruta y su título), nada más. Lo compartido
-    (el usuario demo, `login`, `watch`, que junta las violaciones de CSP, los errores y los
-    pedidos a `/undefined`, y `seedMock`, que siembra el estado del mock antes de que arranque
-    la página) está en `e2e/support.ts`.
+    `aria-current`), nunca con un e2e: ni un archivo nuevo ni un paso en el recorrido. Una
+    pantalla nueva se suma a `SCREENS` de `csp.e2e.ts` (su ruta y su título), nada más. Sumar
+    un e2e o un paso lo decide el dueño. Lo que usa `csp.e2e.ts` (el usuario demo, `login` y
+    `watch`, que junta las violaciones de CSP, los errores y los pedidos a `/undefined`) está
+    en `e2e/support.ts`. Lo de node puro que usa el recorrido real (los códigos TOTP de
+    `totp.ts`, la carpeta de `runDir.ts` y la limpieza de `teardown.ts`) se prueba en
+    `e2e-real/*.test.ts`, que corre en el proyecto server de vitest con `pnpm test`, sin
+    muelle ni Swarm.
 
-- E2E contra el backend de verdad: `e2e-real/*.real.ts`, el panel embebido en un
-  `muelle serve` con el Swarm local (`pnpm test:e2e:real`, ver
-  [E2E contra muelle](#e2e-contra-muelle)). Lo de node puro que usa (los códigos TOTP de
-  `totp.ts`, la carpeta de `runDir.ts` y la limpieza de `teardown.ts`) se prueba en
-  `e2e-real/*.test.ts`, que corre en el proyecto server de vitest
-  con `pnpm test`, sin muelle ni Swarm.
 - Componentes: `__tests__/X.svelte.test.ts` junto al componente, en Chromium, con un
   harness cuando hace falta un contexto (ver `molecules/menu/__tests__/`). Un harness que
   mide posiciones importa `@/shared/ui/themes/global.css` (sin el `box-sizing` global las
@@ -263,9 +257,9 @@ pnpm install
 pnpm dev:mock     # sin backend: MSW contesta en el navegador
 pnpm dev          # con un `muelle serve` local (ver web/README.md)
 pnpm verify       # antes de decir que terminaste
-pnpm test:e2e     # los flujos críticos con playwright contra build-e2e/ (con y sin MSW, bajo
-                  # la CSP); no toca ./build. Aislado de la red como pnpm test (ver "Cosas
-                  # que conviene saber")
+pnpm test:e2e     # cada pantalla bajo la CSP, con playwright contra build-e2e/ (con MSW); no
+                  # toca ./build. Aislado de la red como pnpm test (ver "Cosas que conviene
+                  # saber")
 pnpm test:e2e:real  # el panel embebido en un muelle serve de verdad, con el Swarm local
                     # (ver "E2E contra muelle"): construye ./build y el binario con -tags panel
 pnpm build        # el ./build que embebe el binario (sin MSW ni mockServiceWorker.js)
@@ -386,8 +380,7 @@ cambiar `shared/`, `package.json` o una ruta ajena, se detiene y lo reporta.
     - `ShellHeader.svelte.test.ts` (con `RouteShellHarness.svelte`) prueba la salida de una
       app a `/` y a las variables del stage, y `LocationBreadcrumb.viewModel.svelte.test.ts`
       que sus selectores no piden nada con los params vacíos: si tu ruta tiene un
-      `<ShellHeader>` con algo nuevo, sumalo ahí. `e2e/deploy.e2e.ts` sale de una app a
-      Proyectos, y falla si sale un pedido a `/undefined`.
+      `<ShellHeader>` con algo nuevo, sumalo ahí.
 
 ### i18n: prefijo por módulo
 
@@ -862,9 +855,7 @@ http.post(api('/projects'), async ({ request }) => {
   `authDb.addInvite(token)`): el mock de `identity` los usa en vez de tener otra lista.
 - `server.use(…)` dentro de un test para un caso puntual (un 422, un 404, `HttpResponse.error()`).
 - En el navegador, `db/auth.ts` y `db/deploy.ts` completan lo guardado en `sessionStorage`
-  con su semilla, campo por campo: un e2e siembra solo lo que le importa, antes de que
-  arranque la página, con `seedMock` de `e2e/support.ts` (`{ auth: { users: [] } }`, una
-  instalación sin usuarios; `{ deploy: { liveScale: 0.05 } }`, deploys de medio segundo).
+  con su semilla, campo por campo.
 
 ### Cosas que conviene saber
 
@@ -873,18 +864,16 @@ http.post(api('/projects'), async ({ request }) => {
   en la consola de `pnpm dev`; es interno de la librería y no aparece en el build.
 - Chrome anota en la consola cada respuesta 4xx de `fetch` ("Failed to load resource"): un
   401 de `/auth/me` en `/login` es esperado, no un error de la app.
-- `pnpm test:e2e` construye en `build-e2e/` (ignorado): `mock` con MSW y `prod` igual al de
-  `pnpm build`, y los sirve con `scripts/serve-build.mjs` (una copia a mano de las reglas de
-  `panel.go`, sin `ETag` ni `Range`: ver [CSP](#csp)). `./build` no se toca.
-- **Puertos de los e2e:** `mock` en `E2E_MOCK_PORT` (4173, el `baseURL`) y `prod` en
-  `E2E_PROD_PORT` (4174). Salen de `e2e/ports.ts`: un test que necesite una URL la importa
-  de ahí (`PROD_URL`, `MOCK_URL`) o usa rutas relativas al `baseURL`, nunca un puerto
-  escrito a mano. Con el aislamiento de red (abajo), los puertos son del namespace de cada
-  corrida y varios worktrees no chocan. Sin él (`MUELLE_TEST_HOST_NET=1`, o donde
-  `unshare -rn` no anda), cada uno con los suyos:
-  `E2E_MOCK_PORT=4183 E2E_PROD_PORT=4184 pnpm test:e2e`. Si un puerto está ocupado,
-  Playwright corta con "already used" en vez de reusar lo que escucha ahí (que puede ser el
-  build de otro worktree): elegí otro par. `E2E_REUSE_SERVER=1` reusa un servidor propio
+- `pnpm test:e2e` construye en `build-e2e/mock` (ignorado) el panel con MSW y lo sirve con
+  `scripts/serve-build.mjs` (una copia a mano de las reglas de `panel.go`, sin `ETag` ni
+  `Range`: ver [CSP](#csp)). `./build` no se toca.
+- **Puerto del e2e:** `E2E_MOCK_PORT` (4173, el `baseURL`), de `e2e/ports.ts`: el test usa
+  rutas relativas al `baseURL`, nunca un puerto escrito a mano. Con el aislamiento de red
+  (abajo), el puerto es del namespace de cada corrida y varios worktrees no chocan. Sin él
+  (`MUELLE_TEST_HOST_NET=1`, o donde `unshare -rn` no anda), cada uno con el suyo:
+  `E2E_MOCK_PORT=4183 pnpm test:e2e`. Si el puerto está ocupado, Playwright corta con
+  "already used" en vez de reusar lo que escucha ahí (que puede ser el build de otro
+  worktree): elegí otro. `E2E_REUSE_SERVER=1` reusa un servidor propio
   que ya dejaste corriendo (y corre con la red del host, que es donde escucha).
 - `static/mockServiceWorker.js` solo queda en un build con `VITE_USE_MOCKS=1`: el adapter
   (`svelte.config.js`) lo borra de cualquier otro.
@@ -906,17 +895,14 @@ http.post(api('/projects'), async ({ request }) => {
 ### E2E contra muelle
 
 `e2e-real/` recorre el panel embebido en un `muelle serve` de verdad, con el Docker de
-verdad: los flujos de `e2e/auth.e2e.ts` y `e2e/deploy.e2e.ts`, y algo más, contra Go y Swarm
-en vez de MSW, bajo la CSP que manda Go. Es el único punta a punta del camino de siempre.
-Un solo recorrido, en orden (`journey.real.ts`): el setup del primer usuario con el link del
-log, el 2FA con un código calculado de la clave que muestra el panel (`totp.ts`, RFC 6238;
-cada código de un paso nuevo, como exige el backend; sus tests, `totp.test.ts`, corren con
-`pnpm test`), salir y entrar con el código, un
-proyecto, un stage y una app de formulario (`nginx:alpine`), una variable secreta (que
-llega al servicio de Swarm), un deploy seguido en Deploys hasta "Exitoso", el Resumen con el
-estado de Swarm, los Logs en vivo, un segundo deploy y el rollback al primero, la Auditoría
-con el nombre del usuario (`actor_name`) y borrar la app, el stage y el proyecto. Junta las
-violaciones de CSP y los errores de la consola, como los de `e2e/`.
+verdad, bajo la CSP que manda Go: el único punta a punta del camino de siempre, y solo eso
+(ver [Tests](#tests)). Un solo recorrido, en orden (`journey.real.ts`): el setup del primer
+usuario con el link del log, el 2FA con un código calculado de la clave que muestra el panel
+(`totp.ts`, RFC 6238; cada código de un paso nuevo, como exige el backend; sus tests,
+`totp.test.ts`, corren con `pnpm test`), salir y entrar con el código, un proyecto, un stage
+y una app de formulario (`nginx:alpine`), un deploy seguido en Deploys hasta "Exitoso", el
+Resumen con la app corriendo en Swarm, un segundo deploy y el rollback al primero. Junta las
+violaciones de CSP y los errores de la consola, como `e2e/csp.e2e.ts`.
 
 - **Necesita** un Docker que sea manager de un Swarm activo (`docker swarm init`: el script
   nunca lo crea; en CI lo hace el job), Go, el Chromium de Playwright y red para que el
@@ -958,9 +944,9 @@ interno`, que no es una respuesta), con un solo error que nombra eso y lo de Doc
   y lo suelta), así que no frena a los tests de Go; y si `unshare -rn` anduvo, escucha en el
   network namespace de su corrida y no choca con la próxima. Se mata con
   `pkill -f 'muelle-it7-bin-.*/muelle serve'` (o con la ruta de `E2E_REAL_BIN`).
-- Un test nuevo va en `e2e-real/*.real.ts`, con los mismos selectores que `e2e/` (roles y
-  textos en español). Lo que necesite de Docker, por `e2e-real/docker.ts` y solo con nombres
-  `it7p<id>`.
+- No se suman tests ni pasos (ver [Tests](#tests)). Si el dueño pide uno, va en
+  `e2e-real/*.real.ts`, con roles y textos en español como selectores, y lo que necesite de
+  Docker, por `e2e-real/docker.ts` y solo con nombres `it7p<id>`.
 
 ### CSP
 

@@ -2,7 +2,7 @@ node_modules
 
 # Output
 /build/*
-# Los builds de `pnpm test:e2e` (con y sin MSW), para no pisar ./build
+# El build de `pnpm test:e2e` (con MSW), para no pisar ./build
 /build-e2e
 /.svelte-kit
 

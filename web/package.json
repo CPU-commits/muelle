@@ -9,7 +9,7 @@
 		"dev": "vite dev",
 		"dev:mock": "VITE_USE_MOCKS=1 vite dev",
 		"build": "vite build",
-		"build:e2e": "BUILD_DIR=build-e2e/mock VITE_USE_MOCKS=1 vite build && BUILD_DIR=build-e2e/prod VITE_USE_MOCKS=0 vite build",
+		"build:e2e": "BUILD_DIR=build-e2e/mock VITE_USE_MOCKS=1 vite build",
 		"preview": "vite preview",
 		"check": "pnpm codegen && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "pnpm codegen && svelte-check --tsconfig ./tsconfig.json --watch",
