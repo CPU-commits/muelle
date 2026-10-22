@@ -30,7 +30,10 @@ export interface IdentityState {
 	nextUserId: number
 }
 
-const STORAGE_KEY = 'identity'
+// Con versión: una pestaña con el estado de antes (tokens sin `readOnly` ni `allProjects`,
+// que `GET /tokens` devolvería sin `read_only` y el panel tomaría por un ContractError)
+// empieza de cero.
+const STORAGE_KEY = 'identity-v2'
 const MINUTE_MS = 60_000
 const DAY_MS = 24 * 60 * MINUTE_MS
 
