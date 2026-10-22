@@ -2,13 +2,20 @@ package cloudflare
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json/v2"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -228,7 +235,7 @@ func TestZonesPaginates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(zones) != 120 || zones[0] != (service.Zone{ID: "z000", Name: "zona000.cl"}) || zones[119].ID != "z119" {
+	if len(zones) != 120 || zones[0].ID != "z000" || zones[0].Name != "zona000.cl" || zones[119].ID != "z119" {
 		t.Fatalf("%d zonas: %+v…", len(zones), zones[:min(3, len(zones))])
 	}
 	want := []string{"GET /zones?page=1&per_page=50", "GET /zones?page=2&per_page=50", "GET /zones?page=3&per_page=50"}
@@ -422,4 +429,141 @@ func TestErrorRedactsToken(t *testing.T) {
 	if !errors.As(err, &de) || de.Status != 403 || !strings.Contains(de.Message, "token *** sin permiso") {
 		t.Fatalf("403: %v", err)
 	}
+}
+
+// Zones trae el status y los permissions de cada zona (§3.3 del diseño de
+// Origin CA): permissions está deprecado y puede no venir.
+func TestZonesStatusAndPermissions(t *testing.T) {
+	cf := cftest.New(t)
+	cf.AddToken(token)
+	cf.AddZone("z1", "a.cl")
+	cf.AddZone("z2", "b.cl")
+	cf.GrantSSL(token, "z1")
+	cf.SetZoneStatus("z2", "pending")
+	zones, err := New(cf.URL()).Zones(context.Background(), token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(zones) != 2 || zones[0].Status != "active" || zones[1].Status != "pending" {
+		t.Fatalf("status: %+v", zones)
+	}
+	if !slices.Contains(zones[0].Permissions, "#ssl:edit") || slices.Contains(zones[1].Permissions, "#ssl:edit") ||
+		!slices.Contains(zones[1].Permissions, "#dns_records:edit") {
+		t.Fatalf("permissions: %+v", zones)
+	}
+	cf.OmitZonePermissions()
+	zones, err = New(cf.URL()).Zones(context.Background(), token)
+	if err != nil || len(zones) != 2 || zones[0].Permissions != nil {
+		t.Fatalf("sin permissions: %+v %v", zones, err)
+	}
+}
+
+// CreateOriginCert manda el cuerpo exacto de POST /certificates
+// (origin-ecc, un hostname, la validez y el CSR) y devuelve el id y el PEM.
+func TestCreateOriginCert(t *testing.T) {
+	cp, url := newCapture(t, 200, `{"success":true,"errors":[],"result":{"id":"328578533902268680212849205732770752308931942346","certificate":"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n","hostnames":["api.x.cl"],"request_type":"origin-ecc","requested_validity":90,"expires_on":"2027-01-19 12:00:00 +0000 UTC","csr":"CSR"}}`)
+	got, err := New(url).CreateOriginCert(context.Background(), token, "api.x.cl", "-----BEGIN CERTIFICATE REQUEST-----\nMIIB\n-----END CERTIFICATE REQUEST-----\n", 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "328578533902268680212849205732770752308931942346" || got.CertPEM != "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n" {
+		t.Fatalf("emitido: %+v", got)
+	}
+	want := map[string]any{
+		"hostnames": []any{"api.x.cl"}, "request_type": "origin-ecc", "requested_validity": float64(90),
+		"csr": "-----BEGIN CERTIFICATE REQUEST-----\nMIIB\n-----END CERTIFICATE REQUEST-----\n",
+	}
+	if body := cp.bodyMap(t); !reflect.DeepEqual(body, want) {
+		t.Fatalf("cuerpo: %v", body)
+	}
+	cp.mu.Lock()
+	if cp.method != "POST" || cp.uri != "/client/v4/certificates" || cp.header.Get("Authorization") != "Bearer "+token {
+		t.Errorf("petición: %s %s", cp.method, cp.uri)
+	}
+	cp.mu.Unlock()
+
+	// Sin id o sin certificado, la respuesta no sirve.
+	for _, body := range []string{
+		`{"success":true,"errors":[],"result":{"id":"","certificate":"PEM"}}`,
+		`{"success":true,"errors":[],"result":{"id":"1","certificate":""}}`,
+	} {
+		_, url := newCapture(t, 200, body)
+		if _, err := New(url).CreateOriginCert(context.Background(), token, "api.x.cl", "CSR", 90); !errors.Is(err, entity.ErrCloudflareUnavailable) {
+			t.Errorf("%s: %v", body, err)
+		}
+	}
+}
+
+// Contra el Origin CA falso: con el permiso, la hoja va firmada por su raíz;
+// sin él, 400 con 10000; fuera de las zonas, 1010; un CSR que no se lee,
+// 1011. Revocar: bien, 404 (ErrDNSNotFound) o 1014 (ya revocado).
+func TestOriginCertAgainstFake(t *testing.T) {
+	ctx := context.Background()
+	cf := cftest.New(t)
+	cf.AddToken(token)
+	cf.AddZone("z1", "x.cl")
+	cf.GrantSSL(token, "z1")
+	cf.AddZone("z2", "y.cl")
+	c := New(cf.URL())
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "api.x.cl"}, DNSNames: []string{"api.x.cl"}}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csr := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}))
+	got, err := c.CreateOriginCert(ctx, token, "api.x.cl", csr, 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if is := cf.Issued(); len(is) != 1 || is[0].ID != got.ID || is[0].CertPEM != got.CertPEM || is[0].Validity != 90 || is[0].RequestType != "origin-ecc" {
+		t.Fatalf("emitido: %+v %+v", got, is)
+	}
+
+	code := func(name string, err error, status, want int) {
+		t.Helper()
+		noToken(t, err)
+		de, ok := errors.AsType[*service.DNSError](err)
+		if !ok || de.Code != want || de.Status != status || errors.Is(err, entity.ErrCloudflareUnavailable) {
+			t.Errorf("%s: %v, esperaba %d con el código %d", name, err, status, want)
+		}
+	}
+	_, err = c.CreateOriginCert(ctx, token, "api.y.cl", csr, 90)
+	code("sin el permiso", err, 400, 10000)
+	_, err = c.CreateOriginCert(ctx, token, "api.otra.cl", csr, 90)
+	code("fuera de las zonas", err, 400, 1010)
+	_, err = c.CreateOriginCert(ctx, token, "api.x.cl", "-----BEGIN CERTIFICATE REQUEST-----\nAAAA\n-----END CERTIFICATE REQUEST-----\n", 90)
+	code("CSR ilegible", err, 400, 1011)
+
+	if err := c.RevokeOriginCert(ctx, token, got.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !cf.Revoked(got.ID) {
+		t.Fatal("no quedó revocado")
+	}
+	code("ya revocado", c.RevokeOriginCert(ctx, token, got.ID), 400, 1014)
+	if err := c.RevokeOriginCert(ctx, token, "999"); !errors.Is(err, service.ErrDNSNotFound) {
+		t.Fatalf("desconocido: %v", err)
+	}
+	if calls := cf.Calls(); !slices.Contains(calls, "DELETE /certificates/"+got.ID) {
+		t.Fatalf("llamadas: %q", calls)
+	}
+
+	// 429 y 5xx: Cloudflare no responde.
+	cf.FailNext("POST", "/certificates", 429, 971, "Please wait and consider throttling your request speed")
+	_, err = c.CreateOriginCert(ctx, token, "api.x.cl", csr, 90)
+	if !errors.Is(err, entity.ErrCloudflareUnavailable) {
+		t.Fatalf("429: %v", err)
+	}
+	cf.FailNext("DELETE", "/certificates/", 502, 1100, "boom")
+	if err := c.RevokeOriginCert(ctx, token, got.ID); !errors.Is(err, entity.ErrCloudflareUnavailable) {
+		t.Fatalf("502: %v", err)
+	}
+	// Un mensaje de /certificates que trajera el token, también como ***.
+	cf.FailNext("POST", "/certificates", 400, 1010, "Failed to validate requested hostname "+token)
+	_, err = c.CreateOriginCert(ctx, token, "api.x.cl", csr, 90)
+	code("token en el mensaje", err, 400, 1010)
 }

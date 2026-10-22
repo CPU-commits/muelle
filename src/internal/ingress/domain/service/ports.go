@@ -70,7 +70,19 @@ type Settings interface {
 type ProxyPorts struct{ HTTPPort, HTTPSPort int }
 
 // Zone es una zona de Cloudflare visible para el token.
-type Zone struct{ ID, Name string }
+type Zone struct {
+	ID, Name string
+	// Status es el de Cloudflare: initializing, pending, active o moved.
+	Status string
+	// Permissions son los de la zona en GET /zones ("#ssl:edit",
+	// "#dns_records:edit"…). Cloudflare los marca como deprecados: nil si
+	// no vienen. Solo los mira CheckOriginCAPermission, como pista (§3.3 del
+	// diseño de Origin CA).
+	Permissions []string
+}
+
+// ZoneActive es el status de una zona que Cloudflare ya usa de proxy.
+const ZoneActive = "active"
 
 // Record es un registro DNS de Cloudflare.
 type Record struct {
@@ -104,6 +116,25 @@ type DNS interface {
 	CreateRecord(ctx context.Context, token, zoneID string, r Record) (Record, error)
 	UpdateRecord(ctx context.Context, token, zoneID, id string, c RecordChange) (Record, error)
 	DeleteRecord(ctx context.Context, token, zoneID, id string) error
+}
+
+// IssuedOriginCert es un certificado que emitió Cloudflare Origin CA: su id
+// (el serial en decimal, para revocarlo) y el PEM que devolvió.
+type IssuedOriginCert struct{ ID, CertPEM string }
+
+// OriginCA es la API de Cloudflare Origin CA (adaptador:
+// infra/out/service/cloudflare, contrato §3.7). Los errores son los de DNS:
+// ErrCloudflareUnavailable (sin red, 5xx, 429, respuesta ilegible),
+// ErrDNSNotFound (404) o un *DNSError con el código de Cloudflare. Ninguno
+// trae el token.
+type OriginCA interface {
+	// CreateOriginCert pide un certificado origin-ecc para un solo hostname,
+	// con el CSR en PEM y validityDays de validez (POST /certificates).
+	CreateOriginCert(ctx context.Context, token, hostname, csrPEM string, validityDays int) (IssuedOriginCert, error)
+	// RevokeOriginCert revoca el certificado (DELETE /certificates/{id}).
+	// Uno desconocido es ErrDNSNotFound, y uno ya revocado un *DNSError con
+	// el código 1014.
+	RevokeOriginCert(ctx context.Context, token, id string) error
 }
 
 // App es una app de catalog como la necesita ingress.

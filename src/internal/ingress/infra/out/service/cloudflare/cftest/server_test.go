@@ -107,7 +107,7 @@ func TestZonesPages(t *testing.T) {
 	if err := json.Unmarshal(r.env.Result, &zones, json.MatchCaseInsensitiveNames(true)); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(zones, []service.Zone{{ID: "z3", Name: "c.cl"}}) {
+	if len(zones) != 1 || zones[0].ID != "z3" || zones[0].Name != "c.cl" || zones[0].Status != "active" {
 		t.Fatalf("página 2: %+v", zones)
 	}
 	// per_page tiene un máximo de 50, como en Cloudflare.
