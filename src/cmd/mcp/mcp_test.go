@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -69,5 +71,56 @@ func TestDeadlinesDoNotOutliveTheRequest(t *testing.T) {
 	res.Body.Close()
 	if err != nil || n != 1<<20 || !reused {
 		t.Fatalf("el pedido siguiente leyó %d bytes (misma conexión: %v): %v", n, reused, err)
+	}
+}
+
+// Un panic en una herramienta, servido por el handler HTTP, es un internal
+// en la respuesta: el SDK corre el pedido en una goroutine suya, sin el
+// recover por pedido de net/http, y sin el del tools.Kit tiraría el proceso.
+func TestPanicInAToolDoesNotCrash(t *testing.T) {
+	k := tools.NewKit(tools.Config{Classify: func(error) (string, string, bool) { return "", "", false }, Log: slog.New(slog.DiscardHandler)})
+	type in struct {
+		Project string `json:"project"`
+		Stage   string `json:"stage"`
+		Panic   bool   `json:"panic,omitzero"`
+	}
+	tools.Register(k, tools.Tool{Name: "boom", Title: "Boom", Description: "Hace panic.", Kind: tools.Read},
+		func(in in) *tools.Scope { return &tools.Scope{Project: in.Project, Stage: in.Stage} },
+		func(_ context.Context, in in) (any, error) {
+			if in.Panic {
+				var m map[string]int
+				m["x"]++
+			}
+			return map[string]string{"ok": "sí"}, nil
+		})
+	h := NewHandler(k)
+	p := entity.Principal{Token: &entity.TokenScope{ID: 1, Name: "t", ProjectSlug: "p1"}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ServeHTTP(w, r.WithContext(entity.WithPrincipal(r.Context(), p)))
+	}))
+	defer srv.Close()
+	call := func(boom bool) string {
+		t.Helper()
+		body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boom","arguments":{"project":"p1","stage":"s1","panic":%t}}}`, boom)
+		req, _ := http.NewRequest("POST", srv.URL, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("MCP-Protocol-Version", "2025-11-25")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		if res.StatusCode != 200 {
+			t.Fatalf("%d %s", res.StatusCode, b)
+		}
+		return string(b)
+	}
+	if got := call(true); !strings.Contains(got, `"isError":true`) || !strings.Contains(got, `\"code\":\"internal\"`) {
+		t.Fatalf("con panic: %s", got)
+	}
+	if got := call(false); !strings.Contains(got, `{\"ok\":\"sí\"}`) || strings.Contains(got, `"isError":true`) {
+		t.Fatalf("después del panic: %s", got)
 	}
 }

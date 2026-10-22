@@ -681,7 +681,7 @@ Los códigos de ejecución:
 | `not_found` | `repository.ErrNotFound`: la app, el deploy o el servicio en Swarm |
 | `conflict`, `no_previous_deploy` | Los de deploy: la app se está borrando; rollback sin anterior |
 | `docker_unavailable` | `entity.ErrDockerUnavailable` |
-| `internal` | Cualquier otro: `"error interno"`. Va al log como `mcp: error interno` con `tool`, `token_id` y el error, sin los argumentos. Un `context.Canceled` con el ctx del pedido ya cancelado va en Debug, como en `Kit.Fail` |
+| `internal` | Cualquier otro: `"error interno"`. Va al log como `mcp: error interno` con `tool`, `token_id` y el error, sin los argumentos. Un `context.Canceled` con el ctx del pedido ya cancelado va en Debug, como en `Kit.Fail`. Un panic en el alcance, la herramienta, el caso de uso o la serialización también es `internal`, con `panic` y `stack` en el log: `Kit.call` lo recupera, porque el SDK corre cada pedido en una goroutine suya sin `recover`, y sin eso un panic tiraría el proceso entero (en REST, `net/http` lo recupera por pedido) |
 
 **Cómo se reusa el mapeo de REST:**
 - `utils.Kit` suma `Classify(err error) (code, message string, ok bool)`, con la misma búsqueda que `Fail` (`*validate.Error` primero y después `lookup`), sin escribir nada.
@@ -1001,7 +1001,8 @@ Todos con TDD, en el estilo del repo:
   - un `*validate.Error` da `invalid` con su mensaje;
   - un error registrado da su `code` y su `message`;
   - un error cualquiera da `internal`, con un log que no trae los argumentos (un handler de log de prueba);
-  - un `context.Canceled` con el ctx cancelado va en Debug.
+  - un `context.Canceled` con el ctx cancelado va en Debug;
+  - un panic en el handler da `internal`, con el panic y el stack en el log (sin los argumentos), libera el lugar de la llamada, y el kit sigue respondiendo; por HTTP (`mcp.NewHandler`), el proceso sigue vivo.
 - Resultado:
   - JSON compacto en un `TextContent`;
   - un resultado de más de `MaxResultBytes` da `internal`;

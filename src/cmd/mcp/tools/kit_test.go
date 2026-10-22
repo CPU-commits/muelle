@@ -44,8 +44,8 @@ type readIn struct {
 	Since   string   `json:"since,omitzero"`
 	Keys    []string `json:"keys,omitzero"`
 	// Fail hace que el handler devuelva ese error: "validate", "registered",
-	// "other", "big", "wait" (espera a que se cancele el ctx) o "block"
-	// (espera a que el test lo suelte).
+	// "other", "big", "panic" (escribe en un map nil), "wait" (espera a que
+	// se cancele el ctx) o "block" (espera a que el test lo suelte).
 	Fail string `json:"fail,omitzero"`
 }
 
@@ -100,6 +100,9 @@ func newFixture(t *testing.T) *fixture {
 			return nil, errors.New("se rompió algo")
 		case "big":
 			return map[string]string{"x": strings.Repeat("a", tools.MaxResultBytes)}, nil
+		case "panic":
+			var m map[string]int
+			m[in.Since]++
 		case "wait":
 			f.started <- struct{}{}
 			<-ctx.Done()
@@ -420,6 +423,35 @@ func TestErrors(t *testing.T) {
 	if strings.Contains(log, "valor-que-no-va-al-log") || strings.Contains(log, "secreto-de-set-env") {
 		t.Errorf("el log trae los argumentos: %s", log)
 	}
+}
+
+// Un panic en la herramienta o en el caso de uso que llama no tira el
+// proceso: el SDK corre cada pedido en su propia goroutine, sin recover, y
+// en el endpoint HTTP un panic ahí mataría a muelle entero (la API, el
+// panel, los workers y el cron). La llamada da internal, el log lleva el
+// panic y el stack sin los argumentos, el lugar de la llamada se libera y
+// el kit sigue respondiendo.
+func TestPanicIsInternal(t *testing.T) {
+	f := newFixture(t)
+	s := toolstest.Connect(t, f.kit, tokenP1)
+	code, msg := toolstest.Fail(s, "fake_read", map[string]any{"project": "p1", "stage": "s1", "since": "valor-que-no-va-al-log", "fail": "panic"})
+	if code != "internal" || msg != "error interno" {
+		t.Fatalf("%s %q", code, msg)
+	}
+	log := f.logString()
+	if !strings.Contains(log, `"msg":"mcp: error interno"`) || !strings.Contains(log, `"level":"ERROR"`) ||
+		!strings.Contains(log, `"tool":"fake_read"`) || !strings.Contains(log, `"token_id":1`) ||
+		!strings.Contains(log, "assignment to entry in nil map") || !strings.Contains(log, "kit_test.go") {
+		t.Errorf("log: %s", log)
+	}
+	if strings.Contains(log, "valor-que-no-va-al-log") {
+		t.Errorf("el log trae los argumentos: %s", log)
+	}
+	if n := tools.CallsInFlight(f.kit); n != 0 {
+		t.Fatalf("quedaron %d llamadas en curso", n)
+	}
+	toolstest.OK[map[string]any](s, "fake_read", map[string]any{"project": "p1", "stage": "s1"})
+	toolstest.OK[map[string]any](toolstest.Connect(t, f.kit, tokenP1), "fake_read", map[string]any{"project": "p1", "stage": "s1"})
 }
 
 // Un context.Canceled con el ctx de la llamada cancelado (el cliente se fue)

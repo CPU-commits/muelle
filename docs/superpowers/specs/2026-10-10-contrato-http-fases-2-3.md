@@ -1774,7 +1774,7 @@ Los `code` de ejecución:
 | `conflict` | La app se está borrando (`deploy`, `rollback`) | "la app se está borrando" |
 | `no_previous_deploy` | `rollback` sin un `succeeded` anterior | "no hay un deploy exitoso anterior al actual" |
 | `docker_unavailable` | Docker no responde | "Docker no responde; reintenta en unos segundos" |
-| `internal` | Cualquier otro, o un resultado que pasa de 40 960 bytes **después** de los recortes de su herramienta (§8.3): es un bug | "error interno". Va al log del servidor como `mcp: error interno`, con la herramienta, el id del token y el error, **nunca con los argumentos** (`set_env` trae valores) |
+| `internal` | Cualquier otro; un resultado que pasa de 40 960 bytes **después** de los recortes de su herramienta (§8.3), que es un bug; o un panic en la herramienta o en el caso de uso, que termina solo esa llamada y no el proceso | "error interno". Va al log del servidor como `mcp: error interno`, con la herramienta, el id del token y el error (o el panic y su stack), **nunca con los argumentos** (`set_env` trae valores) |
 
 `utils.Kit` suma `Classify(err) (code, message string, ok bool)`, con la misma búsqueda que `Kit.Fail` sin escribir nada: los errores que registran los módulos en `RegisterRoutes` valen igual para MCP, y uno sin registrar es `internal`.
 

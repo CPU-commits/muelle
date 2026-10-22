@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -214,12 +215,27 @@ func annotations(t Tool) *sdk.ToolAnnotations {
 // call envuelve una llamada, en el orden de §3.2 (paso 12) del diseño: via,
 // read_only_token, el alcance, el límite por token, el plazo, la llamada, el
 // error y el tope del resultado.
-func (k *Kit) call(ctx context.Context, t Tool, scope func() (*Scope, bool), run func(context.Context) (any, error), timeout time.Duration) *sdk.CallToolResult {
+//
+// Un panic en el alcance, la herramienta, el caso de uso o la serialización
+// es internal: el SDK corre cada pedido en una goroutine suya, sin recover,
+// y sin esto un panic tiraría el proceso entero (la API, el panel, los
+// workers y el cron), no solo la llamada, como pasa en REST con net/http.
+// Los defer de la llamada (su lugar en el límite, el plazo, los streams del
+// caso de uso) corren antes de recuperarlo.
+func (k *Kit) call(ctx context.Context, t Tool, scope func() (*Scope, bool), run func(context.Context) (any, error), timeout time.Duration) (res *sdk.CallToolResult) {
 	p, ok := entity.PrincipalFrom(ctx)
 	if !ok {
 		k.log.Error("mcp: una llamada sin Principal", "tool", t.Name)
 		return errorResult("internal", "error interno")
 	}
+	defer func() {
+		if v := recover(); v != nil {
+			// Sin los argumentos, como en fail: set_env trae valores.
+			k.log.Error("mcp: error interno", "tool", t.Name, "token_id", tokenID(p),
+				"panic", fmt.Sprint(v), "stack", string(debug.Stack()))
+			res = errorResult("internal", "error interno")
+		}
+	}()
 	ctx = entity.WithVia(ctx, entity.ViaMCP)
 	write := t.Kind == Write
 	if write && p.ReadOnly() {
