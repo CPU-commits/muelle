@@ -79,7 +79,8 @@ func (s *Server) Kit() *utils.Kit { return s.kit }
 
 // ServeHTTP pone X-Content-Type-Options: nosniff y, en /api/, Cache-Control: no-store;
 // rechaza con 403 bad_origin las peticiones que modifican algo, sin Bearer y
-// con un Origin que no es PanelOrigin ni el de ProxyOrigin.
+// con un Origin que no es PanelOrigin ni el de ProxyOrigin, y las de
+// utils.MCPPath con un Origin que no es ninguno de los dos (originAllowed).
 // Una petición que no coincide con ninguna ruta responde en JSON, en vez del
 // texto plano del ServeMux: 405 method_not_allowed (con el header Allow) si la
 // ruta existe con otro método, y 404 no_route si no. no_route es distinto de
@@ -135,7 +136,15 @@ func isAPIPath(p string) bool {
 // en ese host solo muelle-caddy sirve el panel) o PanelOrigin, que se
 // configura a mano. Un navegador no puede agregar Authorization a una
 // petición de otro origen sin CORS, y muelle no lo habilita.
+//
+// En utils.MCPPath, con cualquier método, un Origin que viene tiene que ser
+// uno de esos aunque la petición traiga Bearer (el spec MCP lo pide contra el
+// DNS rebinding), y sin Origin pasa: Claude Code no lo manda (contrato §8.2).
 func (s *Server) originAllowed(r *http.Request) bool {
+	if r.URL.Path == utils.MCPPath {
+		origin := r.Header.Get("Origin")
+		return origin == "" || s.panelOrigin(r, origin)
+	}
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return true
@@ -145,9 +154,13 @@ func (s *Server) originAllowed(r *http.Request) bool {
 	}
 	// Sin Origin no pasa ninguna, aunque PanelOrigin o ProxyOrigin sean "".
 	origin := r.Header.Get("Origin")
+	return origin != "" && s.panelOrigin(r, origin)
+}
+
+// panelOrigin dice si origin, que no es "", es PanelOrigin o el de
+// ProxyOrigin en este momento.
+func (s *Server) panelOrigin(r *http.Request, origin string) bool {
 	switch {
-	case origin == "":
-		return false
 	case origin == s.origin:
 		return true
 	case s.proxyOrigin == nil:
