@@ -93,10 +93,12 @@ func cutChars(s string, max int) string {
 	return s
 }
 
-// Register registra las herramientas de deploy.
+// Register registra las siete herramientas de deploy.
 func Register(k *tools.Kit, uc UseCases, cfg Config) {
 	registerStatus(k, uc)
 	registerLogs(k, uc, cfg)
+	registerDeploys(k, uc, cfg)
+	registerWrites(k, uc)
 }
 
 // principal es el Principal del ctx de una llamada (el kit siempre lo pone).
