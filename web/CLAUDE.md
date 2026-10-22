@@ -504,10 +504,13 @@ propios de un módulo los traduce el módulo y caen acá para el resto).
     - `fields`: nombre de dominio de los campos de un 422 (`{ deploy_timeout_s: 'deployTimeoutSeconds' }`).
       El 422 `invalid` trae `"<campo>: <motivo>"`; sale como `ValidationError` con `field` y
       `message` = el motivo. El viewModel lo pone en el campo del formulario.
-    - Siempre, en cualquier endpoint: 403 `bad_origin` → `BadOriginError` y 400
-      `ambiguous_session` → `AmbiguousSessionError` (dos cookies de sesión). `describeError`
-      les da el texto que dice qué hacer. `bad_origin` es una escritura desde una dirección
-      que no es la del panel (contrato §0.1): la de Ajustes, `https://<panel_domain>` con el
+    - Siempre, en cualquier endpoint: 403 `bad_origin` → `BadOriginError`, 400
+      `ambiguous_session` → `AmbiguousSessionError` (dos cookies de sesión) y 403
+      `read_only_token` → `ReadOnlyTokenError` (un `ForbiddenError`: un token de solo
+      lectura que escribe, contrato §8.1; el panel usa la sesión y no debería verlo).
+      `describeError` les da el texto que dice qué hacer. `bad_origin` es una escritura
+      desde una dirección que no es la del panel (contrato §0.1): la de Ajustes,
+      `https://<panel_domain>` con el
       puerto HTTPS si no es 443, o `MUELLE_PANEL_ORIGIN` si alguien la puso a mano (detrás de
       otro proxy, o en desarrollo). install ya no escribe `MUELLE_PANEL_ORIGIN`
       (`MUELLE_PANEL_DOMAIN`, §5.2): el texto la nombra solo para el caso del otro proxy.

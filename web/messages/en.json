@@ -25,6 +25,7 @@
 	"common_load_more": "Load more",
 	"common_no_more": "Nothing more",
 	"common_forbidden": "You don't have permission to do this.",
+	"common_read_only_token": "The token is read-only: it can't deploy or change variables. Use one that isn't read-only.",
 	"common_rate_limited": "Too many attempts. Wait a few minutes and try again.",
 	"common_bad_origin": "muelle doesn't accept changes from this address. Use the panel's address: https://<panel domain>, with the HTTPS port from Settings if it isn't 443. If muelle is behind another proxy, this address goes in MUELLE_PANEL_ORIGIN.",
 	"common_panel_moved": "The panel moved to {origin}: this address no longer accepts changes. Continue there. If it doesn't respond within a minute, reload this page: if muelle-caddy didn't start with the new port, muelle goes back to the previous ports on its own and this address accepts changes again.",

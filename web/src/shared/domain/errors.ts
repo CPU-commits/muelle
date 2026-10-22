@@ -88,6 +88,18 @@ export class PanelMovedError extends BadOriginError {
 }
 
 /**
+ * `read_only_token`: un token de API de solo lectura intentó escribir (contrato §8.1). El
+ * panel usa la sesión y no debería verlo nunca; si llega, se dice qué pasó y no un "no
+ * tienes permiso" cualquiera.
+ */
+export class ReadOnlyTokenError extends ForbiddenError {
+	constructor(options?: ErrorOptions) {
+		super('el token es de solo lectura', options)
+		this.name = 'ReadOnlyTokenError'
+	}
+}
+
+/**
  * `ambiguous_session`: el navegador mandó más de una cookie de sesión (otra app de un
  * subdominio plantó la suya). Se arregla borrando las cookies del panel.
  */

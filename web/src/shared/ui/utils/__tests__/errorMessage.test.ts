@@ -5,6 +5,7 @@ import {
 	ForbiddenError,
 	PanelMovedError,
 	RateLimitedError,
+	ReadOnlyTokenError,
 	UnavailableError,
 } from '@/shared/domain'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
@@ -14,6 +15,15 @@ describe('describeError', () => {
 	it('explica qué hacer con un origen o una sesión mal configurados', () => {
 		expect(describeError(new BadOriginError())).toBe(m.common_bad_origin())
 		expect(describeError(new AmbiguousSessionError())).toBe(m.common_ambiguous_session())
+	})
+
+	it('un token de solo lectura que intenta escribir lo dice, y no "no tienes permiso"', () => {
+		expect(describeError(new ReadOnlyTokenError())).toBe(m.common_read_only_token())
+		for (const locale of ['es', 'en'] as const) {
+			expect(m.common_read_only_token({}, { locale })).not.toBe(
+				m.common_forbidden({}, { locale }),
+			)
+		}
 	})
 
 	it('con bad_origin dice por qué dirección entrar; MUELLE_PANEL_ORIGIN, solo detrás de otro proxy', () => {

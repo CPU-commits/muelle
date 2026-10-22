@@ -5,6 +5,7 @@ import {
 	ForbiddenError,
 	NotFoundError,
 	RateLimitedError,
+	ReadOnlyTokenError,
 	UnauthorizedError,
 	UnavailableError,
 	UnexpectedError,
@@ -37,6 +38,7 @@ const MISSING_ROUTE_CODES = new Set(['no_route', 'method_not_allowed'])
 const SHARED_CODES: Readonly<Record<string, (error: ApiError) => Error>> = {
 	bad_origin: (error) => new BadOriginError({ cause: error }),
 	ambiguous_session: (error) => new AmbiguousSessionError({ cause: error }),
+	read_only_token: (error) => new ReadOnlyTokenError({ cause: error }),
 }
 
 const FIELD_MESSAGE = /^([A-Za-z0-9_.[\]-]+): (.+)$/s
