@@ -7,7 +7,7 @@
 .env
 *.key
 muelle_master_key
-# El build del panel copiado para compilar con -tags panel (README, "Con el panel").
+# El build del panel copiado para compilar con -tags panel (README, "Correrlo en local").
 /src/cmd/http/panel/build/
 
 # Panel web (web/). Lo que genera pnpm: el build (copiado a mano o por la
