@@ -11,7 +11,7 @@ Las Fases 2 (deploy), 3 (ingress) y 5 (distribución) se implementan **en parale
 
 El panel (`web/`, Fase 4) ya está hecho contra una versión supuesta de este contrato (`web/src/modules/{deploy,ingress}/README.md` y los DTOs de `admin`). La sección 7 lista dónde el contrato decidió algo distinto.
 
-La sección 8 fija los tokens de solo lectura y de todos los proyectos, y el servidor MCP para Claude Code. Los implementan en paralelo el backend y el panel, cada uno en su rama ([diseño](2026-10-21-mcp-design.md)).
+La sección 8 fija los tokens de solo lectura y de todos los proyectos, y el servidor MCP para Claude Code. Los implementaron en paralelo el backend y el panel, cada uno en su rama, y ya están en este árbol ([diseño](2026-10-21-mcp-design.md)).
 
 ## 0. Convenciones
 
@@ -1836,14 +1836,19 @@ No hay herramientas de proyectos, stages o apps (escritura), dominios (escritura
 
 - **Entrada:** `{project, stage, app}`.
 - **Qué hace:** `GET {app}/domains` (§3.2), que un token lee en su alcance (§8.1).
-- **Salida:** ordenados por hostname, con estos campos de §3.1 (`last_error` cortado a 300 caracteres):
+- **Salida:** ordenados por hostname, con estos campos de §3.1 (`last_error` y `origin_ca.error` cortados a 300 caracteres). `cert_source` y `origin_ca` son los de §3.7, con las cinco claves de `origin_ca` siempre, o `origin_ca` null en los mismos casos que en REST:
 
   ```json
   {"domains":[{"hostname":"api.tudominio.cl","target_service":"api","target_port":3000,"status":"active",
                "last_error_code":null,"last_error":null,"proxied":true,"tls_mode":"cloudflare",
-               "cert_issuer":"Let's Encrypt","cert_expires_at":"2027-01-05T10:00:00Z"}],
+               "cert_issuer":"Let's Encrypt","cert_expires_at":"2027-01-05T10:00:00Z",
+               "cert_source":"letsencrypt",
+               "origin_ca":{"status":"failed","error_code":"permission","error":"…",
+                            "retry_at":"2026-10-22T18:00:00Z","expires_at":null}}],
    "omitted":0,"warning":"…"}
   ```
+
+  Así Claude Code ve con qué certificado se sirve el dominio y por qué no salió el de Cloudflare, sin el resto del dominio de REST (los ids de Cloudflare y los registros).
 
 #### 12. `deploy` (escritura)
 

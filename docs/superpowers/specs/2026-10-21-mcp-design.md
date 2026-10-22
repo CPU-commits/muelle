@@ -559,7 +559,7 @@ Cada fila dice qué módulo la registra (en su `infra/in/mcp`), qué caso de uso
 - Entrada: `{project, stage, app}`.
 - Alcance: `(project, stage)`.
 - Caso de uso: el de `GET {app}/domains`.
-- Salida: `{"domains":[{"hostname","target_service","target_port","status","last_error_code","last_error"(≤300),"proxied","tls_mode","cert_issuer","cert_expires_at"}],"omitted":0,"warning":"…"}`.
+- Salida: `{"domains":[{"hostname","target_service","target_port","status","last_error_code","last_error"(≤300),"proxied","tls_mode","cert_issuer","cert_expires_at","cert_source","origin_ca"}],"omitted":0,"warning":"…"}`. `cert_source` y `origin_ca` (con su `error` ≤300) se sumaron al integrar con Origin CA (§14, punto 12).
 
 #### Escritura (solo en el servidor completo)
 
@@ -880,7 +880,7 @@ Los errores de backend nuevos (`422` en `project` o `read_only` con `all_project
   - `all_projects` sin `read_only` → `422 read_only: …`.
 - Guarda las marcas.
 - `GET /tokens` las devuelve, con `project` omitido en un token de todos los proyectos.
-- La base de ejemplo suma un token de solo lectura y uno de todos los proyectos, así el e2e los ve.
+- La base de ejemplo suma un token de solo lectura y uno de todos los proyectos, así el panel los muestra contra MSW.
 
 ---
 
@@ -1133,7 +1133,7 @@ go test -tags integration -race -count=1 -timeout 25m -run IntegrationMCP -v ./s
   - `CreateTokenModal.viewModel.svelte.test.ts`: `setProject('*')` deshabilita el stage, fija `readOnly` y pone el vencimiento a 90 días si estaba vacío; no pisa una fecha elegida; volver a un proyecto restaura `readOnly` y vacía el vencimiento que puso `*` (no el que cambió la persona); borrar la fecha con `*` deja crear sin vencimiento; `canSubmit` sin proyectos con `*`; el payload que se manda;
   - `Tokens.viewModel.svelte.test.ts`: `claudeCommand` y `mcpJson` con un origen inyectado (`https://panel.example:8443`), el snippet de Actions solo si `canDeploy`, el aviso de escritura solo si no es de solo lectura, y el alcance "todos los proyectos".
 - **Componentes:** `TokensScreen.svelte.test.ts` muestra la caja, con `CopyButton` y `target`, y el badge. La prueba de memoria ("no retiene lo que mostró") se extiende al comando con el secreto: después de "Listo", `aliveAfterGc` es 0.
-- **E2E (MSW, bajo la CSP):** un archivo **nuevo**, `web/e2e/tokensMcp.e2e.ts`. Ajustes → Tokens: crear "Todos los proyectos (solo lectura)". Verifica que el stage está deshabilitado, que el vencimiento viene en 90 días, que aparece "Conectar con Claude Code" con la URL `…/api/v1/mcp` del origen del build, que copiar funciona (o el plan B de `CopyButton`), que no hay ejemplo de Actions y que no hay errores de CSP.
+- **E2E (MSW, bajo la CSP):** **no se hizo.** La regla del dueño (2026-10-22, `web/CLAUDE.md`) deja los e2e solo para los flujos críticos; esto lo cubren `TokensScreen.svelte.test.ts`, `CreateTokenModal.viewModel.svelte.test.ts`, `Tokens.viewModel.svelte.test.ts` e `identity.integration.test.ts` (contra MSW). El plan original era un archivo nuevo, `web/e2e/tokensMcp.e2e.ts`. Ajustes → Tokens: crear "Todos los proyectos (solo lectura)". Verifica que el stage está deshabilitado, que el vencimiento viene en 90 días, que aparece "Conectar con Claude Code" con la URL `…/api/v1/mcp` del origen del build, que copiar funciona (o el plan B de `CopyButton`), que no hay ejemplo de Actions y que no hay errores de CSP.
 - **E2E real** (opcional, P8): en `journey.real.ts`, después de crear el token de CI, crear uno de solo lectura desde el panel y, con `request.post('/api/v1/mcp', …)` de Playwright (el `tools/list` del contrato §8.2, con sus headers), verificar que no trae `deploy`. Depende de que la línea B esté en `main`.
 
 ---
@@ -1275,7 +1275,7 @@ Cada paso:
 4. **P4. ViewModel de `CreateTokenModal`**, con sus tests (el vencimiento de 90 días incluido).
 5. **P5. Markup del modal y mensajes es/en** (§9.4). `pnpm codegen`, componente.
 6. **P6. `TokensScreen`:** el viewModel (`claudeCommand`, `mcpJson`, `canDeploy` y el alcance), después el markup de la caja y la prueba de memoria.
-7. **P7. Integración MSW y e2e** `tokensMcp.e2e.ts`. `pnpm verify`, `pnpm build` y `pnpm test:e2e`.
+7. **P7. Integración MSW** (el e2e `tokensMcp.e2e.ts` no se hizo, por la regla de los e2e: §11). `pnpm verify`, `pnpm build` y `pnpm test:e2e`.
 8. **P8.** (Opcional, después de que B esté en `main`.) El paso del e2e real (§11.7).
 9. **P9.** (Opcional.) "vía MCP" en Auditoría, leyendo `details.via`.
 
@@ -1327,7 +1327,7 @@ Las dos líneas se juntan cuando los tests de las dos están en verde. El job `p
 9. **IPs permitidas.** Con `panel_allowed_cidrs` activo, Claude Code falla con un 403 sin cuerpo que no explica nada. Solo queda documentarlo.
 10. **Tokenizado.** 32 KiB de logs con muchos símbolos pueden pasar los 10 000 tokens: Claude Code avisa, pero no corta. Los defaults (16 KiB de logs, 12 KiB de cola de deploy) quedan cómodos. Que los tamaños se midan en JSON ayuda: un log lleno de colores ANSI trae menos texto, no más.
 11. **RAM y binario.** +2,2 MB de binario medidos en otro servidor. Se mide en B15 contra el presupuesto de 40 MB.
-12. **La rama de Origin CA.** Suma campos al dominio (contrato §3.1) y una §3.7. `GET {app}/domains` con token devuelve el dominio completo, con lo que sume Origin CA; `list_domains` devuelve solo los campos de §5.3 #11 hasta que alguien decida sumar los nuevos. Los dos tocan el encabezado, §6 y §7 del contrato: el conflicto se resuelve al integrar, sin cambiar el sentido de ninguno.
+12. **La rama de Origin CA.** Suma campos al dominio (contrato §3.1) y una §3.7. `GET {app}/domains` con token devuelve el dominio completo, con lo que sume Origin CA; Al integrar (2026-10-22) se decidió sumar a `list_domains` `cert_source` y `origin_ca` (con su `error` cortado a 300 caracteres, como `last_error`), para que Claude Code pueda ver por qué un dominio no tiene el certificado de Cloudflare; lo demás que suma Origin CA queda en REST. Los dos tocan el encabezado, §6 y §7 del contrato: el conflicto se resuelve al integrar, sin cambiar el sentido de ninguno.
 13. **Herramienta desconocida da HTTP 400 en stateless**, y no un error JSON-RPC. Es comportamiento del SDK, y el cliente lo muestra como un fallo de la llamada. Con el servidor de solo lectura, el modelo nunca ve esas herramientas, así que en la práctica no pasa.
 
 ## 15. Decisiones del dueño

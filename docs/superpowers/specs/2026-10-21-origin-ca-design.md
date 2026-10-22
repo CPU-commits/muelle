@@ -1010,7 +1010,7 @@ Va en `src/internal/ingress/integration_origin_ca_test.go`, con las ranuras 4 y 
     - quitar el token con la opción encendida manda los dos campos.
   - `DomainCard`: el texto de cada `status`, el pie `warn` con Reintentar, y la pista de DNS only en sus dos variantes.
   - Los dos mockean el container, como hoy.
-- **E2E (Playwright contra el build con MSW, bajo la CSP):**
+- **E2E (Playwright contra el build con MSW, bajo la CSP):** **no se hicieron.** La regla del dueño (2026-10-22, `web/CLAUDE.md`) deja los e2e solo para los flujos críticos, y `main` borró `ajustes.e2e.ts` y `deployIngress.e2e.ts`. Lo cubren `ProxySettings.viewModel.svelte.test.ts`, `SettingsScreen.svelte.test.ts`, `DomainCard.svelte.test.ts`, `admin.integration.test.ts` e `ingressFlow.integration.test.ts` (contra MSW). El plan original era:
   - `e2e/ajustes.e2e.ts`: encender, ver el toast y la línea del panel; apagar con confirmación; un token `sin-ssl` muestra el error.
   - `e2e/deployIngress.e2e.ts`: con la opción encendida, Dominios muestra "Cloudflare Origin CA · vence …" en el que tiene proxy y la pista en el DNS only.
 - **`e2e-real`:** no se toca. El recorrido no usa Cloudflare, y no hay un Cloudflare falso del lado del binario. La integración de §13.2 cubre el backend. En la rama de la línea 2, hasta que entra la línea 1, falla (§14, "El punto de encuentro").
@@ -1066,7 +1066,7 @@ Cada paso es rojo → verde. `pnpm codegen` después de tocar `messages/`.
 7. Los textos `messages/admin` e `ingress` (es y en), y `pnpm codegen`.
 8. `domainLabels.ts` y `DomainCard.svelte`, con su test de componente.
 9. `ProxySettings.viewModel.svelte.ts` y `ProxySettings.svelte` (el switch, la confirmación al apagar, los errores, la línea del panel y la nota), con el test del viewModel.
-10. Los E2E (`ajustes.e2e.ts`, `deployIngress.e2e.ts`).
+10. Los E2E (`ajustes.e2e.ts`, `deployIngress.e2e.ts`): no se hicieron, por la regla de los e2e (§13); los cubren los tests de Vitest.
 11. `src/modules/ingress/README.md` y `web/CLAUDE.md`. Hasta este paso, los dos dicen algo que ya no vale: la sección "Diferencias con el contrato" del README tiene una nota (del Paso 0a) que dice que §3.7 falta en el panel, y `web/CLAUDE.md` ("Las fases 2, 3 y 5") dice que el README resume el contrato "sin diferencias". Este paso suma los campos y los estados al README, borra esa nota y deja `web/CLAUDE.md` como en §11.2. El Paso 0a no tocó nada más de `web/`.
 12. `pnpm verify`, `pnpm build` y `pnpm test:e2e`.
 

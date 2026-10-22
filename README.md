@@ -270,7 +270,7 @@ Cada persona exporta el suyo antes de abrir Claude Code (`export MUELLE_TOKEN=mk
 | `get_app_logs` | Los logs de un servicio, sin follow: `tail`, `since` (`15m`, o una fecha), `contains` y `stream` |
 | `list_deploys`, `get_deploy` | El historial, y un deploy con el final de su log. `wait_s` espera a que termine |
 | `read_deploy_log` | El log completo de un deploy, por partes |
-| `list_domains` | Los dominios de la app, con el estado de su DNS y de su certificado |
+| `list_domains` | Los dominios de la app, con el estado de su DNS y de su certificado (de Let's Encrypt o de Cloudflare, y por qué no salió el de Cloudflare) |
 | `deploy` (escribe) | Despliega, con `image` o `images` opcionales, como la API |
 | `rollback` (escribe) | Vuelve al deploy anterior |
 | `set_env` (escribe) | Guarda variables **no secretas**: no pisa una secreta, ni la tapa con una de la app. Se aplican en el próximo deploy |
