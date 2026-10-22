@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
@@ -41,13 +42,14 @@ var _ service.CertProbe = TLSProbe{}
 //     motivo en Problem, y sin error;
 //   - uno que verifica es Valid, con el emisor (su primera Organization, o
 //     su CN) y el vencimiento en UTC y a milisegundos;
-//   - con pinned (el DER de la hoja de Origin CA que guardó muelle), una
-//     hoja que no verifica contra Roots pero es idéntica a pinned vale si es
-//     para hostname y está vigente: se verifica con ella misma como raíz.
+//   - con pinned (los DER de las hojas de Origin CA que guardó muelle), una
+//     hoja que no verifica contra Roots pero es idéntica a una de pinned vale
+//     si es para hostname y está vigente: se verifica con ella misma como
+//     raíz.
 //     Una que verifica contra Roots vale igual (el cambio entre Let's
 //     Encrypt y Origin CA no la deja inválida). No se embeben las raíces de
 //     Origin CA: fijar la hoja es más estricto.
-func (p TLSProbe) Probe(ctx context.Context, hostname string, pinned []byte) (service.CertObservation, error) {
+func (p TLSProbe) Probe(ctx context.Context, hostname string, pinned [][]byte) (service.CertObservation, error) {
 	ctx, cancel := context.WithTimeout(ctx, cmp.Or(p.Timeout, DefaultProbeTimeout))
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", p.Addr)
@@ -74,7 +76,7 @@ func (p TLSProbe) Probe(ctx context.Context, hostname string, pinned []byte) (se
 		intermediates.AddCert(c)
 	}
 	_, err = leaf.Verify(x509.VerifyOptions{DNSName: hostname, Roots: p.Roots, Intermediates: intermediates})
-	if err != nil && pinned != nil && bytes.Equal(leaf.Raw, pinned) {
+	if err != nil && slices.ContainsFunc(pinned, func(pin []byte) bool { return bytes.Equal(leaf.Raw, pin) }) {
 		self := x509.NewCertPool()
 		self.AddCert(leaf)
 		_, err = leaf.Verify(x509.VerifyOptions{DNSName: hostname, Roots: self})

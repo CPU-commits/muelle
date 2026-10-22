@@ -38,16 +38,16 @@ type fakeProbe struct {
 	block chan struct{}
 	calls []string
 	// pins es el pinned de la última sonda de cada host.
-	pins map[string][]byte
+	pins map[string][][]byte
 	// probing recibe el host cuando un Probe empieza (si no es nil).
 	probing chan string
 }
 
-func (p *fakeProbe) Probe(ctx context.Context, host string, pinned []byte) (service.CertObservation, error) {
+func (p *fakeProbe) Probe(ctx context.Context, host string, pinned [][]byte) (service.CertObservation, error) {
 	p.mu.Lock()
 	p.calls = append(p.calls, host)
 	if p.pins == nil {
-		p.pins = map[string][]byte{}
+		p.pins = map[string][][]byte{}
 	}
 	p.pins[host] = pinned
 	block, probing := p.block, p.probing
@@ -81,7 +81,7 @@ func (p *fakeProbe) set(host string, o service.CertObservation) {
 func (p *fakeProbe) setErr(err error) { p.mu.Lock(); p.err = err; p.mu.Unlock() }
 
 // pinned es el pinned de la última sonda de host (nil si no hubo).
-func (p *fakeProbe) pinned(host string) []byte {
+func (p *fakeProbe) pinned(host string) [][]byte {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.pins[host]

@@ -250,9 +250,12 @@ func (f *ucFixture) originServed(t *testing.T) []byte {
 	return der
 }
 
+// samePins dice si got son las hojas want, en ese orden.
+func samePins(got [][]byte, want ...[]byte) bool { return slices.EqualFunc(got, want, bytes.Equal) }
+
 // La verificación fija la hoja de Origin CA cuando el host se sirve con ella
 // (§8 del diseño de Origin CA), con la misma regla que la configuración de
-// Caddy; si no, pinned es nil.
+// Caddy; si no, pinned está vacío.
 func TestCheckPinsOriginCA(t *testing.T) {
 	f := newUCFixture(t)
 	der := f.originServed(t)
@@ -260,7 +263,7 @@ func TestCheckPinsOriginCA(t *testing.T) {
 	if err := f.certs.Check(ctx, dnsHost); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.probe.pinned(dnsHost); !bytes.Equal(got, der) {
+	if got := f.probe.pinned(dnsHost); !samePins(got, der) {
 		t.Fatalf("pinned: %x", got)
 	}
 	// La de retry (checkLocked) también.
@@ -273,7 +276,7 @@ func TestCheckPinsOriginCA(t *testing.T) {
 		_, err = f.certs.checkLocked(opCtx, dbCtx, &d)
 		return err
 	})
-	if err != nil || !bytes.Equal(f.probe.pinned(dnsHost), der) {
+	if err != nil || !samePins(f.probe.pinned(dnsHost), der) {
 		t.Fatalf("checkLocked: %v %x", err, f.probe.pinned(dnsHost))
 	}
 
@@ -284,7 +287,7 @@ func TestCheckPinsOriginCA(t *testing.T) {
 	if err := f.certs.CheckAll(ctx, EligibleHourly); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.probe.pinned(dnsHost); got != nil {
+	if got := f.probe.pinned(dnsHost); len(got) != 0 {
 		t.Fatalf("DNS only: %x", got)
 	}
 	// La opción apagada: tampoco.
@@ -295,7 +298,7 @@ func TestCheckPinsOriginCA(t *testing.T) {
 	if err := f.certs.Check(ctx, dnsHost); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.probe.pinned(dnsHost); got != nil {
+	if got := f.probe.pinned(dnsHost); len(got) != 0 {
 		t.Fatalf("apagada: %x", got)
 	}
 }

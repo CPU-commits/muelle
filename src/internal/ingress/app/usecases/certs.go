@@ -117,11 +117,11 @@ func (c *CertChecker) CheckAll(ctx context.Context, include func(entity.Domain) 
 	return errors.Join(errs...)
 }
 
-// pinned es el DER de la hoja de Origin CA que se espera para d: la del
-// active de su hostname si, con los datos de ahora, el host se sirve con
+// pinned son los DER de las hojas de Origin CA que se esperan para d: la
+// del active de su hostname si, con los datos de ahora, el host se sirve con
 // Origin CA (service.OriginServes, la misma regla que la configuración de
-// Caddy); si no, nil. El proxy está synced (habilitado).
-func (c *CertChecker) pinned(ctx context.Context, d entity.Domain) ([]byte, error) {
+// Caddy); si no, ninguna. El proxy está synced (habilitado).
+func (c *CertChecker) pinned(ctx context.Context, d entity.Domain) ([][]byte, error) {
 	if !c.origin.set() {
 		return nil, nil
 	}
@@ -147,7 +147,7 @@ func (c *CertChecker) pinned(ctx context.Context, d entity.Domain) ([]byte, erro
 	if block == nil {
 		return nil, fmt.Errorf("ingress: el certificado de Origin CA de %s no es un PEM", d.Hostname)
 	}
-	return block.Bytes, nil
+	return [][]byte{block.Bytes}, nil
 }
 
 // check sondea d fuera del lock y, con el lock tomado, aplica la regla solo

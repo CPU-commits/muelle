@@ -40,7 +40,7 @@ const (
 // cambia nada.
 type unreachableProbe struct{}
 
-func (unreachableProbe) Probe(context.Context, string, []byte) (service.CertObservation, error) {
+func (unreachableProbe) Probe(context.Context, string, [][]byte) (service.CertObservation, error) {
 	return service.CertObservation{}, service.ErrCaddyUnreachable
 }
 

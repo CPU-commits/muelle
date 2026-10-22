@@ -182,7 +182,7 @@ func TestIntegrationCaddyLoadPEM(t *testing.T) {
 		self := x509.NewCertPool()
 		self.AddCert(mustParse(t, der))
 		e.eventually(30*time.Second, "Caddy sirve el PEM cargado para "+oca, e.servedBy(oca, self, der))
-		if o, err := (outservice.TLSProbe{Addr: e.opts.CaddyTLSAddr, Roots: x509.NewCertPool()}).Probe(ctx, oca, der); err != nil || !o.Valid {
+		if o, err := (outservice.TLSProbe{Addr: e.opts.CaddyTLSAddr, Roots: x509.NewCertPool()}).Probe(ctx, oca, [][]byte{der}); err != nil || !o.Valid {
 			t.Fatalf("la sonda con la hoja fijada: %+v %v", o, err)
 		}
 		// web: la CA interna.

@@ -209,12 +209,14 @@ type CaddyAdmin interface {
 // conecta por TLS a muelle-caddy:443 con SNI = hostname (adaptador:
 // infra/out/service.TLSProbe, §8 del spec). Un handshake que falla, o un
 // certificado que no verifica, es una observación inválida y no un error;
-// si no llega a Caddy, ErrCaddyUnreachable ("no se sabe", D9). pinned es el
-// DER de la hoja de Origin CA que se espera (nil si el host no se sirve con
-// Origin CA): una hoja servida idéntica, para ese hostname y vigente, es
-// válida sin verificar la cadena (§8 del diseño de Origin CA).
+// si no llega a Caddy, ErrCaddyUnreachable ("no se sabe", D9). pinned son
+// los DER de las hojas de Origin CA que Caddy puede estar sirviendo para
+// hostname (ninguna si no se sirve con Origin CA; dos en una renovación,
+// hasta que Caddy carga la nueva): una hoja servida idéntica a una de ellas,
+// para ese hostname y vigente, es válida sin verificar la cadena (§8 del
+// diseño de Origin CA).
 type CertProbe interface {
-	Probe(ctx context.Context, hostname string, pinned []byte) (CertObservation, error)
+	Probe(ctx context.Context, hostname string, pinned [][]byte) (CertObservation, error)
 }
 
 // CaddyWant es cómo tiene que quedar muelle-caddy (contrato §3.4).
