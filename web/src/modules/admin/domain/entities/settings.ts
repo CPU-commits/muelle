@@ -53,6 +53,11 @@ export interface SettingsPatch {
 	readonly panelAllowedCidrs?: readonly string[]
 	/** `''` quita el token (y las zonas que veía). */
 	readonly cloudflareToken?: string
+	/**
+	 * Encender o apagar los certificados de Cloudflare (Origin CA). Quitar el token con la
+	 * opción encendida la apaga en el mismo cambio (contrato §4.1).
+	 */
+	readonly cloudflareOriginCa?: boolean
 	/** Guardar una lista de IPs que deja fuera esta sesión (si no, `WouldLockOut`). */
 	readonly confirmLockout?: boolean
 }

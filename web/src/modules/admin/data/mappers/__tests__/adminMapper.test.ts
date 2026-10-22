@@ -96,6 +96,15 @@ describe('adminMapper', () => {
 		expect(settingsPatchPayload({})).toEqual({})
 		// Quitar el token es mandar "".
 		expect(settingsPatchPayload({ cloudflareToken: '' })).toEqual({ cloudflare_token: '' })
+		// Los certificados de Cloudflare: encenderlos, y apagarlos junto con quitar el token
+		// (contrato §4.1). `false` también es un valor: va.
+		expect(settingsPatchPayload({ cloudflareOriginCa: true })).toEqual({
+			cloudflare_origin_ca: true,
+		})
+		expect(settingsPatchPayload({ cloudflareToken: '', cloudflareOriginCa: false })).toEqual({
+			cloudflare_token: '',
+			cloudflare_origin_ca: false,
+		})
 	})
 
 	it('un evento de auditoría pierde los details en el borde', () => {

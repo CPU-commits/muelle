@@ -60,6 +60,9 @@ export function settingsPatchPayload(patch: SettingsPatch): SettingsPatchPayload
 			? { panel_allowed_cidrs: [...patch.panelAllowedCidrs] }
 			: {}),
 		...(patch.cloudflareToken !== undefined ? { cloudflare_token: patch.cloudflareToken } : {}),
+		...(patch.cloudflareOriginCa !== undefined
+			? { cloudflare_origin_ca: patch.cloudflareOriginCa }
+			: {}),
 		...(patch.confirmLockout ? { confirm_lockout: true } : {}),
 	}
 }

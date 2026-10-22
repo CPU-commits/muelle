@@ -73,6 +73,8 @@ export interface SettingsPatchPayload {
 	panel_allowed_cidrs?: string[]
 	/** `""` quita el token y las zonas. */
 	cloudflare_token?: string
+	/** Los certificados de Cloudflare (Origin CA, contrato §3.7). */
+	cloudflare_origin_ca?: boolean
 	/** Guardar una lista que deja fuera esta sesión (si no, `409 would_lock_out`). */
 	confirm_lockout?: boolean
 }
