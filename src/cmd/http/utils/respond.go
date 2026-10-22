@@ -102,6 +102,24 @@ func (k *Kit) Fail(w http.ResponseWriter, r *http.Request, err error) {
 	k.writeError(w, http.StatusInternalServerError, "internal", "error interno")
 }
 
+// Classify da el código y el mensaje con que Fail respondería err, sin
+// escribir nada: *validate.Error es "invalid" con ve.Error(), y un error
+// registrado, su código y su mensaje. ok es false para cualquier otro (el
+// "internal" de Fail), y para nil. El servidor MCP lo usa para responder los
+// mismos errores que REST (contrato §8.4).
+func (k *Kit) Classify(err error) (code, message string, ok bool) {
+	if err == nil {
+		return "", "", false
+	}
+	if ve, isVE := errors.AsType[*validate.Error](err); isVE {
+		return "invalid", ve.Error(), true
+	}
+	if e, found := k.lookup(err); found {
+		return e.code, e.message, true
+	}
+	return "", "", false
+}
+
 // logPath es la ruta de r para el log, sin secretos: el valor del comodín
 // {token} (el link de una invitación lo lleva en la ruta) se reemplaza por
 // "{token}".
