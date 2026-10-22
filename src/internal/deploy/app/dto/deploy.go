@@ -43,3 +43,21 @@ type LogLine struct {
 	Text   string
 	Offset int
 }
+
+// TailLog pide el final del log de un deploy: a lo más Bytes del log
+// (get_deploy por MCP, contrato §8.3 #9).
+type TailLog struct {
+	DeployRef
+	Bytes int
+}
+
+// LogTail es el final del log en líneas completas: Lines con el offset
+// después de cada una, desde FromOffset; Length es el largo del log al
+// leerlo.
+type LogTail struct {
+	Lines        []LogLine
+	FromOffset   int
+	Length       int
+	Status       entity.Status
+	SupersededBy *int64
+}
