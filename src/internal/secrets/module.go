@@ -13,6 +13,7 @@ import (
 	"github.com/CPU-commits/muelle/src/internal/secrets/app/usecases"
 	"github.com/CPU-commits/muelle/src/internal/secrets/domain/service"
 	envhttp "github.com/CPU-commits/muelle/src/internal/secrets/infra/in/http"
+	envmcp "github.com/CPU-commits/muelle/src/internal/secrets/infra/in/mcp"
 	envsqlite "github.com/CPU-commits/muelle/src/internal/secrets/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/secrets/infra/out/service"
 	"github.com/CPU-commits/muelle/src/package/audit"
@@ -32,6 +33,7 @@ type Deps struct {
 // Module arma secrets.
 type Module struct {
 	env     *envhttp.EnvHandler
+	tools   envmcp.UseCases
 	resolve *usecases.ResolveEnv
 }
 
@@ -40,12 +42,11 @@ func New(d Deps) *Module {
 	owners := outservice.NewOwnerResolver(d.DB)
 	marker := outservice.NewChangeMarker(d.DB)
 	ec := service.NewEnvCrypto(d.Cipher)
+	get := usecases.NewGetEnv(owners, repo, ec)
+	patch := usecases.NewPatchEnv(d.DB, owners, repo, marker, ec, d.Clock, d.Audit)
 	return &Module{
-		env: envhttp.NewEnvHandler(
-			usecases.NewGetEnv(owners, repo, ec),
-			usecases.NewReplaceEnv(d.DB, owners, repo, marker, ec, d.Clock, d.Audit),
-			usecases.NewPatchEnv(d.DB, owners, repo, marker, ec, d.Clock, d.Audit),
-		),
+		env:     envhttp.NewEnvHandler(get, usecases.NewReplaceEnv(d.DB, owners, repo, marker, ec, d.Clock, d.Audit), patch),
+		tools:   envmcp.UseCases{GetEnv: get, PatchEnv: patch},
 		resolve: usecases.NewResolveEnv(d.DB, owners, repo, ec),
 	}
 }
@@ -68,5 +69,6 @@ func (m *Module) RegisterRoutes(k *utils.Kit) {
 	m.env.Register(k)
 }
 
-// RegisterTools registra las herramientas MCP de secrets (contrato §8.3).
-func (m *Module) RegisterTools(k *tools.Kit) {}
+// RegisterTools registra las herramientas MCP de secrets (contrato §8.3):
+// get_env, set_env y unset_env.
+func (m *Module) RegisterTools(k *tools.Kit) { envmcp.Register(k, m.tools) }
