@@ -126,7 +126,7 @@ func (s *Syncer) build(ctx context.Context, p shared.ProxySettings) (service.Pro
 	if err != nil {
 		return service.ProxyConfig{}, fmt.Errorf("leyendo las apps: %w", err)
 	}
-	return service.BuildProxyConfig(p, dns.ZoneID, domains, apps, s.internalCA), nil
+	return service.BuildProxyConfig(p, dns.ZoneID, domains, apps, s.internalCA, service.OriginInputs{}), nil
 }
 
 // fail deja el error en el estado y en el log, y llama a onFail.

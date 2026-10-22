@@ -17,6 +17,9 @@ import (
 type Route struct {
 	Hostname, Upstream string
 	TLS                entity.TLSMode
+	// OriginCA es el certificado de Cloudflare Origin CA con que se sirve el
+	// host (contrato §3.7); nil: el de ACME, según TLS.
+	OriginCA *OriginPEM
 }
 
 // PanelRoute es la ruta del panel (contrato §3.4).
@@ -24,13 +27,16 @@ type PanelRoute struct {
 	Hostname, Upstream string
 	AllowedCIDRs       []string // [] = cualquiera; nunca nil
 	TLS                entity.TLSMode
+	// OriginCA es el certificado de Origin CA del panel, como en Route.
+	OriginCA *OriginPEM
 }
 
 // ProxyConfig es la configuración completa de Caddy como datos (D1 del plan
 // de la Fase 3): qué host va a qué upstream, con qué TLS, y las IPs del
-// panel. El JSON de Caddy lo arma el adaptador (caddy.Render). El token va
-// en claro: String, GoString, LogValue y MarshalJSON lo ocultan, como en
-// shared.ProxySettings.
+// panel. El JSON de Caddy lo arma el adaptador (caddy.Render). El token y
+// las claves de Origin CA van en claro: String, GoString, LogValue y
+// MarshalJSON los ocultan, como en shared.ProxySettings (las claves, con los
+// métodos de OriginPEM).
 type ProxyConfig struct {
 	Panel           *PanelRoute // nil sin panel_domain
 	Routes          []Route     // por hostname; nunca nil
@@ -40,15 +46,21 @@ type ProxyConfig struct {
 }
 
 // BuildProxyConfig arma la configuración desde los ajustes, la zona del panel
-// (panel_cf_zone_id, "" si no cae en una zona visible), los dominios y las
-// apps (por id). Es pura (contrato §3.4 y §8 del spec):
+// (panel_cf_zone_id, "" si no cae en una zona visible), los dominios, las
+// apps (por id) y lo de Origin CA (los active con su clave, lo observado y
+// la hora). Es pura (contrato §3.4 y §8 del spec), y se llama solo con el
+// proxy habilitado:
 //   - el panel va a muelle_muelle:8080, con cloudflare si hay token y zona;
 //   - cada dominio va a <proyecto>_<stage>_<app>_<servicio>:<puerto>, en
 //     cualquier estado (DNS-01 puede emitir igual);
 //   - sin token, todo va por http, aunque el dominio diga cloudflare;
 //   - se saltan el dominio cuyo hostname es el del panel (la ruta del panel
-//     gana) y el que no tiene su app en apps.
-func BuildProxyConfig(p shared.ProxySettings, panelZoneID string, domains []entity.Domain, apps map[int64]App, internalCA bool) ProxyConfig {
+//     gana) y el que no tiene su app en apps;
+//   - con los certificados de Cloudflare en uso (OriginOn), un host que se
+//     sirve con Origin CA (OriginServes, la regla de la API) lleva su
+//     certificado en OriginCA (contrato §3.7).
+func BuildProxyConfig(p shared.ProxySettings, panelZoneID string, domains []entity.Domain, apps map[int64]App, internalCA bool,
+	origin OriginInputs) ProxyConfig {
 	cfg := ProxyConfig{
 		Routes:          []Route{},
 		ACMEEmail:       p.ACMEEmail,
@@ -56,6 +68,17 @@ func BuildProxyConfig(p shared.ProxySettings, panelZoneID string, domains []enti
 		InternalCA:      internalCA,
 	}
 	hasToken := p.CloudflareToken != ""
+	on := OriginOn(p, true)
+	pemFor := func(t OriginTarget) *OriginPEM {
+		if !on {
+			return nil
+		}
+		c, ok := origin.Certs[t.Hostname]
+		if !ok || !OriginServes(t, origin.Hosts[t.Hostname], &c, origin.Now) {
+			return nil
+		}
+		return &OriginPEM{CertPEM: c.CertPEM, KeyPEM: c.KeyPEM}
+	}
 	if p.PanelDomain != "" {
 		tls := entity.TLSHTTP
 		if hasToken && panelZoneID != "" {
@@ -70,6 +93,7 @@ func BuildProxyConfig(p shared.ProxySettings, panelZoneID string, domains []enti
 			Upstream:     naming.Upstream(naming.MuelleService, naming.MuellePort),
 			AllowedCIDRs: cidrs,
 			TLS:          tls,
+			OriginCA:     pemFor(PanelOriginTarget(p.PanelDomain, panelZoneID)),
 		}
 	}
 	for _, d := range domains {
@@ -88,6 +112,7 @@ func BuildProxyConfig(p shared.ProxySettings, panelZoneID string, domains []enti
 			Hostname: d.Hostname,
 			Upstream: naming.Upstream(naming.Service(app.Project, app.Stage, app.Slug, d.TargetService), d.TargetPort),
 			TLS:      tls,
+			OriginCA: pemFor(DomainOriginTarget(d)),
 		})
 	}
 	slices.SortStableFunc(cfg.Routes, func(a, b Route) int { return cmp.Compare(a.Hostname, b.Hostname) })
