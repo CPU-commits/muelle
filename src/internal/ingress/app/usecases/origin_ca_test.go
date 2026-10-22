@@ -409,8 +409,8 @@ func TestOriginPass429(t *testing.T) {
 }
 
 // No revoca si el Sync falló, ni si el retiro es de después del último Sync
-// bueno (la carrera: un Sync que leyó la base antes del retiro y terminó
-// después), ni antes del margen.
+// bueno, ni antes del margen. La carrera con un Sync que leyó la base antes
+// del retiro está en TestOriginPassRevokeRace.
 func TestOriginPassNoRevokeWithoutGoodLoad(t *testing.T) {
 	f := newOFixture(t)
 	d := f.managed(t, "api.auditfy.cl", true, true)
@@ -435,6 +435,85 @@ func TestOriginPassNoRevokeWithoutGoodLoad(t *testing.T) {
 	f.job(t, time.Minute)
 	if !f.cf.Revoked(id) {
 		t.Fatal("no revocó después de la carga buena")
+	}
+}
+
+// raceDNS es el DNS de Cloudflare que, una vez, corre hook dentro de la
+// lectura de los registros de host: lo que pasa mientras la pasada espera a
+// Cloudflare.
+type raceDNS struct {
+	service.DNS
+	host string
+	hook func()
+	done bool
+}
+
+func (r *raceDNS) Records(ctx context.Context, token, zoneID, name string) ([]service.Record, error) {
+	if name == r.host && !r.done {
+		r.done = true
+		r.hook()
+	}
+	return r.DNS.Records(ctx, token, zoneID, name)
+}
+
+// El retiro lleva la hora en que se escribe, no la del comienzo de la
+// pasada, también el del viejo en una renovación: un Sync que empezó durante
+// la pasada (el job "proxy", un cambio de un dominio, el Retrier), antes del
+// retiro, todavía lo mandó y salió bien. Si desde ahí Caddy rechaza todo,
+// sigue sirviendo esa configuración, con el certificado: no se revoca hasta
+// que cargue una sin él.
+func TestOriginPassRevokeRace(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// retire deja api para que la próxima pasada retire su certificado.
+		retire func(f *oFixture, d entity.Domain)
+	}{
+		{"DNS only", func(f *oFixture, d entity.Domain) {
+			f.cf.PutRecord("z1", service.Record{ID: d.CFRecordID, Type: "A", Name: d.Hostname, Content: "203.0.113.24"})
+			f.clock.Advance(5 * time.Minute)
+		}},
+		{"renovación", func(f *oFixture, _ entity.Domain) { f.clock.Advance(61 * day) }}, // faltan 29 días
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newOFixture(t)
+			ctx := context.Background()
+			d := f.managed(t, "api.auditfy.cl", true, true)
+			f.pass(t)
+			cert := f.active(t, "api.auditfy.cl")
+			id := cert.CFCertID
+			tc.retire(f, d)
+			f.uc.d.DNS = &raceDNS{DNS: f.uc.d.DNS, host: "api.auditfy.cl", hook: func() {
+				f.clock.Advance(time.Second)
+				if err := f.syncer.Sync(ctx, false); err != nil {
+					t.Error(err)
+				}
+				f.caddy.Reject("no")
+			}}
+			if err := f.uc.Execute(ctx); err == nil {
+				t.Fatal("el Sync de la pasada falló: devuelve el error")
+			}
+			loads := f.caddy.Loads()
+			// Una línea de base64 de la hoja aparece tal cual en el JSON.
+			if line := strings.Split(cert.CertPEM, "\n")[1]; len(loads) < 2 || !strings.Contains(string(loads[len(loads)-2]), line) {
+				t.Fatal("la última carga aceptada no lo trae")
+			}
+			if r := f.retired(t); len(r) != 1 || r[0].CFCertID != id {
+				t.Fatalf("retirados: %d", len(r))
+			} else if !r[0].RetiredAt.Equal(f.clock.Now()) {
+				t.Fatalf("retired_at = %s, esperaba la hora en que se escribió (%s)", r[0].RetiredAt, f.clock.Now())
+			}
+			f.clock.Advance(2 * time.Minute)
+			_ = f.uc.Execute(ctx)
+			if f.cf.Revoked(id) {
+				t.Fatal("revocó uno que sirve la última configuración que Caddy aceptó")
+			}
+			// Caddy carga una configuración sin él: pasado el margen, se revoca.
+			f.caddy.Accept()
+			f.job(t, time.Minute)
+			if !f.cf.Revoked(id) {
+				t.Fatal("no revocó después de la carga buena")
+			}
+		})
 	}
 }
 

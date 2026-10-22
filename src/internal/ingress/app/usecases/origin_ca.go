@@ -202,7 +202,8 @@ type pass struct {
 //     falla la registra con su espera (OriginBackoff);
 //  4. retira los active que no se van a servir: sin candidatos, el host que
 //     ya no es candidato, lo observado en dns_only, missing o unreadable, o
-//     uno vencido (nunca porque Cloudflare no respondió);
+//     uno vencido (nunca porque Cloudflare no respondió). Todo retiro, también
+//     el del paso 3, lleva la hora en que se escribe (Syncer.Retiring);
 //  5. si algo cambió, manda la configuración (Syncer.Sync). Si falla, la
 //     pasada termina sin revocar;
 //  6. revoca los retirados que ya se pueden revocar (RetiredDue, con
@@ -289,20 +290,20 @@ func (u *EnsureOriginCA) Execute(ctx context.Context) error {
 	for _, t := range targets {
 		byHost[t.Hostname] = t
 	}
+	var retire []entity.OriginCert
 	for _, c := range sortedCerts(active) {
 		t, ok := byHost[c.Hostname]
 		obs := hosts[c.Hostname].Observed
 		keep := on && ok && t.Candidate() && c.ZoneID == t.ZoneID && c.ExpiresAt.After(ps.now) &&
 			obs != entity.ObservedDNSOnly && obs != entity.ObservedMissing && obs != entity.ObservedUnreadable
-		if keep {
-			continue
+		if !keep {
+			retire = append(retire, c)
 		}
-		if err := u.d.Repos.Certs.Retire(db, c.ID, ps.now); err != nil {
-			return fmt.Errorf("ingress: retirando el certificado de Origin CA de %s: %w", c.Hostname, err)
-		}
-		u.d.Log.Info("ingress: certificado de Cloudflare retirado", "hostname", c.Hostname, "cf_cert_id", c.CFCertID)
-		ps.changed = true
 	}
+	if err := u.retire(db, retire); err != nil {
+		return err
+	}
+	ps.changed = ps.changed || len(retire) > 0
 
 	// 5. Mandar la configuración.
 	if ps.changed {
@@ -402,9 +403,16 @@ func (u *EnsureOriginCA) issue(ctx, db context.Context, ps *pass, t service.Orig
 			"failures", failures, "retry_at", next)
 		return nil, nil
 	}
+	// Insert retira el active anterior con retired_at = CreatedAt: la hora en
+	// que se escribe, con el mutex de los Sync (Syncer.Retiring, §6 del
+	// diseño de Origin CA), y no la del comienzo de la pasada.
 	c := entity.OriginCert{Hostname: t.Hostname, ZoneID: t.ZoneID, CFCertID: issued.ID, CertPEM: leafPEM, KeyPEM: keyPEM,
-		ExpiresAt: notAfter, CreatedAt: ps.now}
-	if err := u.d.Repos.Certs.Insert(db, &c); err != nil {
+		ExpiresAt: notAfter}
+	err = u.d.Syncer.Retiring(func(at time.Time) error {
+		c.CreatedAt = at
+		return u.d.Repos.Certs.Insert(db, &c)
+	})
+	if err != nil {
 		return nil, fmt.Errorf("ingress: guardando el certificado de Origin CA de %s: %w", t.Hostname, err)
 	}
 	if h.Failed() {
@@ -416,6 +424,27 @@ func (u *EnsureOriginCA) issue(ctx, db context.Context, ps *pass, t service.Orig
 	ps.changed = true
 	c.KeyPEM = ""
 	return &c, nil
+}
+
+// retire retira los certs con la hora en que se escribe, con el mutex de los
+// Sync (Syncer.Retiring). No sirve la del comienzo de la pasada, que pudo
+// ser minutos antes: un Sync que empezó en el medio todavía los lee active y
+// los manda, y si sale bien deja LastGoodBuild después de esa hora. Si los
+// Sync siguientes fallan, Caddy los sigue sirviendo y se revocarían igual
+// (§6 del diseño de Origin CA).
+func (u *EnsureOriginCA) retire(db context.Context, certs []entity.OriginCert) error {
+	if len(certs) == 0 {
+		return nil
+	}
+	return u.d.Syncer.Retiring(func(at time.Time) error {
+		for _, c := range certs {
+			if err := u.d.Repos.Certs.Retire(db, c.ID, at); err != nil {
+				return fmt.Errorf("ingress: retirando el certificado de Origin CA de %s: %w", c.Hostname, err)
+			}
+			u.d.Log.Info("ingress: certificado de Cloudflare retirado", "hostname", c.Hostname, "cf_cert_id", c.CFCertID)
+		}
+		return nil
+	})
 }
 
 // revoke revoca los retirados que ya se pueden revocar (§6 del diseño).
