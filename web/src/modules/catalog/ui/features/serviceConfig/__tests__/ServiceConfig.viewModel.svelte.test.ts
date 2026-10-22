@@ -1,5 +1,5 @@
 import type { BeforeNavigate } from '@sveltejs/kit'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup } from 'vitest-browser-svelte'
 import { createQueryClient } from '@/shared/data/query'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
@@ -13,12 +13,19 @@ import {
 	type ServiceApp,
 } from '../../../../domain'
 import { fakeServiceApp } from '../../../../domain/repositories/__fakes__/inMemoryCatalogRepository'
+import {
+	band,
+	crossing,
+	installFakeObserver,
+	sectionsPage,
+} from '@/shared/ui/components/molecules/subNav/__tests__/fakeIntersectionObserver'
 import { mountViewModel } from '../../../__tests__/mountViewModel'
-import { ServiceConfigViewModel } from '../ServiceConfig.viewModel.svelte.ts'
+import { SECTION_IDS, ServiceConfigViewModel } from '../ServiceConfig.viewModel.svelte.ts'
 
 const mocks = vi.hoisted(() => ({
 	updateApp: vi.fn(),
 	guards: [] as ((navigation: BeforeNavigate) => void)[],
+	page: { url: new URL('http://localhost/configuracion') },
 }))
 
 vi.mock('@/modules/catalog/container', () => ({
@@ -36,8 +43,9 @@ vi.mock('@/modules/catalog/container', () => ({
 	},
 }))
 
-// La subnav lee el hash de la URL; fuera de SvelteKit no hay `page` ni `beforeNavigate`.
-vi.mock('$app/state', () => ({ page: { url: new URL('http://localhost/configuracion') } }))
+// La subnav lee el ancla con la que se abrió la página; fuera de SvelteKit no hay `page` ni
+// `beforeNavigate`.
+vi.mock('$app/state', () => ({ page: mocks.page }))
 vi.mock('$app/navigation', () => ({
 	beforeNavigate: (callback: (navigation: BeforeNavigate) => void) => {
 		mocks.guards.push(callback)
@@ -69,6 +77,7 @@ describe('ServiceConfigViewModel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mocks.guards.length = 0
+		mocks.page.url = new URL('http://localhost/configuracion')
 		mocks.updateApp.mockImplementation(async ({ changes }) => ({
 			...app,
 			...(changes.spec ? { spec: changes.spec } : {}),
@@ -235,5 +244,52 @@ describe('ServiceConfigViewModel', () => {
 		guard(after)
 		expect(confirm).not.toHaveBeenCalled()
 		expect(after.cancel).not.toHaveBeenCalled()
+	})
+
+	describe('la nav de secciones', () => {
+		const activeLabel = (vm: ServiceConfigViewModel) =>
+			vm.navItems.find((item) => item.active)?.label
+
+		afterEach(() => {
+			vi.unstubAllGlobals()
+		})
+
+		it('son anclas a las tarjetas; sin ancla ni scroll, Imagen es la activa', async () => {
+			const vm = await mount()
+
+			expect(vm.navItems.map((item) => item.href)).toEqual(
+				Object.values(SECTION_IDS).map((id) => `#${id}`),
+			)
+			expect(activeLabel(vm)).toBe(m.catalog_config_image())
+		})
+
+		it('seguir un link marca su tarjeta en el acto', async () => {
+			const vm = await mount()
+
+			vm.navItems[3]!.onselect?.()
+
+			expect(activeLabel(vm)).toBe(m.catalog_config_volumes())
+			expect(vm.navItems.filter((item) => item.active)).toHaveLength(1)
+		})
+
+		it('un deep link (el ancla con la que se abrió) marca su tarjeta', async () => {
+			mocks.page.url = new URL('http://localhost/configuracion#c-res')
+			const vm = await mount()
+
+			expect(activeLabel(vm)).toBe(m.catalog_config_resources())
+		})
+
+		it('la activa es la tarjeta que se está leyendo', async () => {
+			installFakeObserver()
+			const page = sectionsPage(Object.values(SECTION_IDS))
+			const vm = await mount()
+			const stop = vm.sections.track(page.container)
+
+			band().fire(crossing(Object.values(SECTION_IDS), SECTION_IDS.health))
+			expect(activeLabel(vm)).toBe(m.catalog_config_health())
+
+			if (typeof stop === 'function') stop()
+			page.remove()
+		})
 	})
 })

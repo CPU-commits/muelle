@@ -24,7 +24,7 @@
 		{#snippet subtitle()}{m.catalog_config_subtitle()}{/snippet}
 	</ConfigHeader>
 
-	<SubNavLayout label={m.catalog_config_sections()} items={vm.navItems}>
+	<SubNavLayout label={m.catalog_config_sections()} items={vm.navItems} spy={vm.sections}>
 		<div class={sections}>
 			<ImageSection section={vm.image} id={SECTION_IDS.image} />
 			<RunSection section={vm.run} id={SECTION_IDS.run} />
