@@ -148,6 +148,7 @@ Claude Code ──HTTPS──► muelle-caddy
 - `sdk.Implementation{Name: "muelle", Title: "muelle", Version: <la versión del binario>}` (`muelle version`, `dev` en desarrollo).
 - `ServerOptions.Instructions`: el texto de §5.2, de menos de 4 096 caracteres, que es el límite de Claude Code para las instrucciones del servidor.
 - `ServerOptions.Capabilities: &sdk.ServerCapabilities{Tools: &sdk.ToolCapabilities{}}`, en los dos servidores: anuncia `{"tools":{}}` y nada más (contrato §8.2). Sin esto, `Server.capabilities()` de la v1.8.0 parte de `{"logging":{}}` y suma `"tools":{"listChanged":true}` en cuanto hay una herramienta. muelle no tiene logging de MCP ni manda notificaciones (stateless, `JSONResponse`, sin GET de SSE), así que no debe anunciarlos.
+- `ServerOptions.SetCacheable`, en los dos servidores: `ttlMs: 0` y `cacheScope: "private"` en `tools/list` y `server/discover`. El SDK, sin esto, manda `"public"`, que deja a cualquier cliente o intermediario compartir el resultado entre principales, y la lista depende del token (11 herramientas o 15). Con `ttlMs: 0` ya nada se guarda, pero `"private"` dice lo que es.
 - Las herramientas se registran con `sdk.AddTool[In, any]` y el handler devuelve `(*sdk.CallToolResult, nil, nil)`. Así no hay `outputSchema` ni `structuredContent`, y un test lo verifica (§11.2). `Tool.Title` y `annotations.title` llevan el mismo título.
 - El esquema de entrada lo infiere jsonschema-go (draft 2020-12, el que acepta Claude Code):
   - un struct da `"additionalProperties": false`, y los campos sin `omitempty`/`omitzero` van en `required`;
@@ -1073,6 +1074,7 @@ Todos con TDD, en el estilo del repo:
 - Sin `Accept` de los dos tipos: 400.
 - La negociación que hizo el cliente del SDK: 2026-07-28 en stateless. Si el SDK deja fijar la versión del cliente, también 2025-11-25. El `curl` de ejemplo del contrato §8.2, con `MCP-Protocol-Version: 2025-11-25`, responde `tools/list`.
 - `server/discover` o `initialize` trae las `instructions`, `Implementation.Version` y `capabilities` exactamente `{"tools":{}}`, sin `logging` ni `listChanged`, con un token de escritura y con uno de solo lectura (los dos servidores).
+- `tools/list` (con 2025-11-25 y con 2026-07-28) y `server/discover` van con `ttlMs: 0` y `cacheScope: "private"`, con los dos tipos de token.
 - **El plazo de lectura:** con `srv.Config.ReadTimeout` de 1 s, un `get_deploy` con `wait_s: 2` vuelve con el deploy, no con el ctx cancelado.
 - Llamada de punta a punta: `deploy` con un token de escritura deja el deploy en la base con el nombre del token, y `GET /audit` (con la sesión) muestra `deploy.create` con `details.via = "mcp"`.
 - Con un token de solo lectura, llamar a `deploy` da error.

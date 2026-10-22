@@ -228,6 +228,52 @@ func TestMCPCurlExample(t *testing.T) {
 	}
 }
 
+// meta2026 es el _meta de un pedido de 2026-07-28 (sin initialize ni
+// sesión: cada pedido dice su versión, SEP-2575), como el que arma el
+// cliente del SDK.
+const meta2026 = `"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"curl","version":"1"}}`
+
+// post2026 hace un POST de 2026-07-28 con los headers que pide esa versión
+// (Mcp-Method y, en tools/call, Mcp-Name).
+func (e *mcpEnv) post2026(t *testing.T, token, method, name, params string) *http.Response {
+	t.Helper()
+	body := `{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{` + params
+	if params != "" {
+		body += ","
+	}
+	body += meta2026 + `}}`
+	return e.post(t, body, "Authorization", "Bearer "+token, "MCP-Protocol-Version", "2026-07-28",
+		"Mcp-Method", method, "Mcp-Name", name)
+}
+
+// tools/list y server/discover dependen del token (las 11 herramientas o
+// las 15): en el cable van con cacheScope private y ttlMs 0, en las dos
+// versiones, nunca public.
+func TestMCPListsArePrivate(t *testing.T) {
+	e := newMCPEnv(t)
+	type cacheable struct {
+		Result *struct {
+			TTLMs      *int            `json:"ttlMs"`
+			CacheScope string          `json:"cacheScope"`
+			Tools      json.RawMessage `json:"tools"`
+		} `json:"result"`
+	}
+	check := func(name string, res *http.Response) {
+		t.Helper()
+		body := readBody(t, res)
+		var c cacheable
+		if err := json.Unmarshal([]byte(body), &c); err != nil || res.StatusCode != 200 || c.Result == nil ||
+			c.Result.CacheScope != "private" || c.Result.TTLMs == nil || *c.Result.TTLMs != 0 {
+			t.Errorf("%s: %d %.300s", name, res.StatusCode, body)
+		}
+	}
+	for _, token := range []string{e.p, e.pl} {
+		check("tools/list 2025-11-25", e.post(t, toolsList, "Authorization", "Bearer "+token))
+		check("tools/list 2026-07-28", e.post2026(t, token, "tools/list", "", ""))
+		check("server/discover", e.post2026(t, token, "server/discover", "", ""))
+	}
+}
+
 // La negociación del cliente del SDK: 2026-07-28 en stateless, o la que se
 // le fije (2025-11-25). Las dos dan las instrucciones, la versión y las
 // capacidades exactamente {"tools":{}}, con un token de escritura y con uno

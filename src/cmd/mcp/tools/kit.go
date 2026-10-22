@@ -119,9 +119,16 @@ func NewKit(c Config) *Kit {
 	options := func() *sdk.ServerOptions {
 		// Capabilities fija {"tools":{}}: sin esto el SDK anuncia logging y
 		// tools.listChanged, y muelle no tiene ninguno de los dos.
+		// SetCacheable deja tools/list y server/discover en private y ttlMs
+		// 0: la lista depende del token (11 herramientas o 15), y el
+		// default del SDK, public, dejaría que un intermediario la
+		// compartiera entre tokens.
 		return &sdk.ServerOptions{
 			Instructions: c.Instructions,
 			Capabilities: &sdk.ServerCapabilities{Tools: &sdk.ToolCapabilities{}},
+			SetCacheable: func(_ context.Context, _ sdk.Request, c *sdk.Cacheable) {
+				c.TTLMs, c.CacheScope = 0, "private"
+			},
 		}
 	}
 	return &Kit{

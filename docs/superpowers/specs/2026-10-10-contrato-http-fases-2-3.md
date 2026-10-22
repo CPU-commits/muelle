@@ -1393,6 +1393,7 @@ Estos errores son el `{"error": {"code", "message"}}` de la API (§0). No hay OA
 - `serverInfo`: `{"name": "muelle", "title": "muelle", "version": "<la de muelle version>"}` (`dev` en desarrollo);
 - `capabilities`: exactamente `{"tools": {}}`. No hay `logging`, recursos, prompts ni `listChanged`. El SDK, sin configurar, anuncia `logging` y `tools.listChanged`: muelle fija `ServerOptions.Capabilities` (diseño del MCP, §3.3);
 - `tools/list`: con un token `read_only`, las 11 herramientas de lectura de §8.3; con los demás, las 15;
+- `tools/list` y `server/discover` (2026-07-28) van con `"ttlMs": 0` y `"cacheScope": "private"`: dependen del token, así que ni un intermediario ni otro principal pueden reusarlos;
 - `instructions` (menos de 4 096 caracteres, el límite de Claude Code), exactamente:
 
 ```

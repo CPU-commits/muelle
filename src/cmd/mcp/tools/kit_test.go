@@ -174,6 +174,22 @@ func TestServersAndToolsList(t *testing.T) {
 	}
 }
 
+// tools/list depende del token (11 herramientas o 15): su cacheScope es
+// private, nunca public, que dejaría a un intermediario compartirla entre
+// tokens. ttlMs queda en 0.
+func TestToolsListIsPrivate(t *testing.T) {
+	f := newFixture(t)
+	for _, p := range []entity.Principal{tokenP1, tokenRO} {
+		res, err := toolstest.Connect(t, f.kit, p).Client().ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.CacheScope != "private" || res.TTLMs != 0 {
+			t.Errorf("%s: cacheScope=%q ttlMs=%d", p.Token.Name, res.CacheScope, res.TTLMs)
+		}
+	}
+}
+
 // El JSON de cada herramienta en tools/list: título, anotaciones exactas,
 // _meta solo en la de escritura (el booleano true), sin outputSchema, y el
 // esquema con pattern, maxLength, los rangos, el default y
