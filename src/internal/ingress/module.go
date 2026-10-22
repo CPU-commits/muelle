@@ -69,6 +69,7 @@ type Module struct {
 	ops           *usecases.Ops
 	panelDNS      *usecases.EnsurePanelDNS
 	checkToken    *usecases.CheckCloudflareToken
+	checkOrigin   *usecases.CheckOriginCAPermission
 	checkPorts    *usecases.CheckProxyPorts
 	settingsHook  *usecases.ProxySettingsChanged
 	certs         *usecases.CertChecker
@@ -135,6 +136,7 @@ func New(d Deps) *Module {
 		DomainOp: o.Timing.DomainOp, DomainRetry: o.Timing.DomainRetry,
 	}
 	m.checkToken = usecases.NewCheckCloudflareToken(dns)
+	m.checkOrigin = usecases.NewCheckOriginCAPermission(dns, dns, outservice.OriginKeys{}, origin.Certs, d.Clock, d.Log)
 	m.checkPorts = usecases.NewCheckProxyPorts(runtime, defImage, d.Log)
 	m.settingsHook = usecases.NewProxySettingsChanged(m.recreator, usecases.NewUpdateManagedRecords(dd), m.panelDNS, m.syncer,
 		m.state, o.Timing.Hook, d.Log)
@@ -216,6 +218,20 @@ func (m *Module) SyncRoutes(ctx context.Context) error { return m.syncer.Sync(ct
 // una cuenta, que /user/tokens/verify rechaza pero que lista zonas, se acepta.
 func (m *Module) CheckCloudflareToken(ctx context.Context, token string) (zones *int, err error) {
 	return m.checkToken.Execute(ctx, token)
+}
+
+// CheckCloudflareOriginCA comprueba, antes de que admin guarde un PATCH
+// /settings que enciende los certificados de Cloudflare o cambia el token
+// con la opción encendida, que el token tenga Zone → SSL and Certificates →
+// Edit en las zonas activas que ve (contrato §3.5), con un plazo de 30 s
+// sobre el ctx de la petición. field es el campo de los 422
+// (cloudflare_origin_ca o cloudflare_token). Sin el permiso en alguna zona,
+// un token que no lista zonas o no ve ninguna, o una prueba que Cloudflare
+// rechazó, devuelve un *validate.Error en field (422); si Cloudflare no
+// responde, un error que envuelve entity.ErrCloudflareUnavailable (502).
+// Ninguno trae el token.
+func (m *Module) CheckCloudflareOriginCA(ctx context.Context, token, field string) error {
+	return m.checkOrigin.Execute(ctx, token, field)
 }
 
 // CheckProxyPorts prueba, antes de que admin guarde otros puertos del proxy

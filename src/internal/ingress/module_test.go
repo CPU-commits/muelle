@@ -171,6 +171,25 @@ func TestModuleCheckCloudflareToken(t *testing.T) {
 	}
 }
 
+// CheckCloudflareOriginCA (admin, contrato §3.5) va al Cloudflare de
+// Options: con el permiso en la zona pasa, y sin él es un 422 en el campo
+// pedido.
+func TestModuleCheckCloudflareOriginCA(t *testing.T) {
+	tm := newTestModule(t)
+	const token = "cf-token-1234567890abcdef"
+	tm.cf.AddToken(token)
+	tm.cf.AddZone("z1", "tudominio.cl")
+	ctx := context.Background()
+	err := tm.CheckCloudflareOriginCA(ctx, token, "cloudflare_token")
+	if ve, ok := errors.AsType[*validate.Error](err); !ok || ve.Field != "cloudflare_token" || !strings.Contains(ve.Message, "en la zona tudominio.cl") {
+		t.Fatalf("sin el permiso: %v", err)
+	}
+	tm.cf.GrantSSL(token, "z1")
+	if err := tm.CheckCloudflareOriginCA(ctx, token, "cloudflare_origin_ca"); err != nil {
+		t.Fatalf("con el permiso: %v", err)
+	}
+}
+
 // CheckProxyPorts (admin, contrato §4.1) está cableado al Docker del módulo:
 // un puerto nuevo que otro contenedor tiene es un 422 en su campo, y el
 // muelle-caddy que sirve no cambia.

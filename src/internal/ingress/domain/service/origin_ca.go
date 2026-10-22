@@ -306,18 +306,19 @@ func OriginFailureCause(err error, t OriginTarget) string {
 		if t.Panel {
 			retry = msgRetryPanel
 		}
-		return fmt.Sprintf(msgPermissionCause, t.Hostname, cfMessage(err)) + retry
+		return fmt.Sprintf(msgPermissionCause, t.Hostname, CloudflareMessage(err)) + retry
 	case entity.OriginRejected:
 		if ce, ok := errors.AsType[*OriginCertError](err); ok {
 			return "Cloudflare devolvió un certificado que no sirve (" + truncateRunes(ce.Reason, originMessageMax) + ")"
 		}
-		return "Cloudflare lo rechazó (" + cfMessage(err) + ")"
+		return "Cloudflare lo rechazó (" + CloudflareMessage(err) + ")"
 	}
 	return "Cloudflare no respondió (" + unavailableDetail(err) + "); se reintenta solo"
 }
 
-// cfMessage es el mensaje de un *DNSError, cortado a 300 runas.
-func cfMessage(err error) string {
+// CloudflareMessage es el mensaje de Cloudflare de un *DNSError (ya sin el
+// token: lo saca el cliente), cortado a 300 runas; "sin detalle" si no hay.
+func CloudflareMessage(err error) string {
 	if de, ok := errors.AsType[*DNSError](err); ok && de.Message != "" {
 		return truncateRunes(de.Message, originMessageMax)
 	}
