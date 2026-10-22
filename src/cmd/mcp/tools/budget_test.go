@@ -172,6 +172,12 @@ func TestEncode(t *testing.T) {
 		tools.Fits(map[string]string{"a": strings.Repeat("x", tools.MaxResultBytes)}, false) {
 		t.Error("Fits")
 	}
+	empty := map[string]any{"list": []string{}, "omitted": 1000}
+	room := tools.Room(empty, true)
+	enc, _ := tools.Encode(empty, true)
+	if room != tools.MaxResultBytes-len(enc) || tools.Room(func() {}, false) >= 0 {
+		t.Errorf("Room = %d", room)
+	}
 	if tools.Size(func() {}) <= tools.MaxResultBytes {
 		t.Error("lo que no se serializa nunca entra")
 	}

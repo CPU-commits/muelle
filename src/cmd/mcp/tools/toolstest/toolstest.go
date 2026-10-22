@@ -7,14 +7,45 @@ package toolstest
 import (
 	"context"
 	jsonv2 "encoding/json/v2"
+	"log/slog"
 	"slices"
 	"testing"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	httpserver "github.com/CPU-commits/muelle/src/cmd/http"
+	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
+	"github.com/CPU-commits/muelle/src/cmd/http/utils"
 	"github.com/CPU-commits/muelle/src/cmd/mcp/tools"
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
 )
+
+// NewKit arma un tools.Kit con los errores de la API, como en el contenedor:
+// los comunes de cmd/http y los que registran los módulos en sus
+// RegisterRoutes (que se pasan en registerRoutes), así las herramientas
+// responden los mismos code y message que REST. Las rutas quedan en un
+// servidor que nadie sirve.
+func NewKit(t testing.TB, registerRoutes ...func(*utils.Kit)) *tools.Kit {
+	t.Helper()
+	srv := httpserver.NewServer(httpserver.Config{
+		Auth: httptestutil.FakeAuth{}, PanelOrigin: httptestutil.PanelOrigin,
+		Logger: slog.New(slog.DiscardHandler),
+	})
+	for _, r := range registerRoutes {
+		r(srv.Kit())
+	}
+	return tools.NewKit(tools.Config{Classify: srv.Kit().Classify, Log: slog.New(slog.DiscardHandler)})
+}
+
+// Token es un Principal de token de API, para Connect.
+func Token(id int64, project, stage string, readOnly bool) entity.Principal {
+	return entity.Principal{Token: &entity.TokenScope{ID: id, Name: "token", ProjectSlug: project, StageSlug: stage, ReadOnly: readOnly}}
+}
+
+// AllProjects es un Principal de un token de todos los proyectos.
+func AllProjects(id int64) entity.Principal {
+	return entity.Principal{Token: &entity.TokenScope{ID: id, Name: "todos", ReadOnly: true, AllProjects: true}}
+}
 
 // Session es un cliente del SDK conectado a un servidor del Kit.
 type Session struct {

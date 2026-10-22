@@ -65,6 +65,18 @@ func Fits(v any, untrusted bool) bool {
 	return err == nil && len(b) <= MaxResultBytes
 }
 
+// Room es lo que le queda al resultado v (con su warning, si untrusted) para
+// llegar a MaxResultBytes, o un número negativo si ya se pasa. Para llenar una
+// lista: v con la lista vacía y los contadores en su peor caso (todos
+// omitidos), y NewBudget(2 + Room(v)).
+func Room(v any, untrusted bool) int {
+	b, err := Encode(v, untrusted)
+	if err != nil {
+		return -1
+	}
+	return MaxResultBytes - len(b)
+}
+
 // Size es lo que mide v en el JSON de la salida, o math.MaxInt si v no se
 // puede serializar (nunca entra).
 func Size(v any) int {
