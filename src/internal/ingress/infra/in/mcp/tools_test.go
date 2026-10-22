@@ -90,9 +90,11 @@ func TestListDomains(t *testing.T) {
 	cut := strings.Repeat("é", 299) + tools.Ellipsis
 	want := `{"domains":[` +
 		`{"hostname":"api.p1.cl","target_service":"api","target_port":3000,"status":"active","last_error_code":null,` +
-		`"last_error":null,"proxied":true,"tls_mode":"cloudflare","cert_issuer":"Let's Encrypt","cert_expires_at":"2027-01-05T10:00:00Z"},` +
+		`"last_error":null,"proxied":true,"tls_mode":"cloudflare","cert_issuer":"Let's Encrypt","cert_expires_at":"2027-01-05T10:00:00Z",` +
+		`"cert_source":"letsencrypt","origin_ca":null},` +
 		`{"hostname":"www.p1.cl","target_service":"api","target_port":3000,"status":"error","last_error_code":"cloudflare",` +
-		`"last_error":"` + cut + `","proxied":true,"tls_mode":"cloudflare","cert_issuer":null,"cert_expires_at":null}],` +
+		`"last_error":"` + cut + `","proxied":true,"tls_mode":"cloudflare","cert_issuer":null,"cert_expires_at":null,` +
+		`"cert_source":"letsencrypt","origin_ca":null}],` +
 		`"omitted":0,"warning":"` + tools.UntrustedWarning + `"}`
 	if isErr || text != want {
 		t.Fatalf("list_domains:\n%s\nesperaba\n%s", text, want)
