@@ -352,7 +352,7 @@ function eligibleOriginCa(
 		// hasta que termina la pasada; después, la próxima espera de 6 h.
 		const attempt = retried ?? start
 		const retryAt =
-			retried !== null && now < retried + state.provisionMs
+			retried !== null && now <= retried + state.provisionMs
 				? retried
 				: attempt + state.provisionMs + 6 * HOUR
 		const action = panel

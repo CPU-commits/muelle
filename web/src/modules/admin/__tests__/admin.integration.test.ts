@@ -494,6 +494,84 @@ describe('settings', () => {
 	})
 })
 
+// Los certificados de Cloudflare (Origin CA, contrato §3.7 y §4.1) contra el mock.
+describe('certificados de Cloudflare', () => {
+	const ON = { tokenSet: true, zones: 4, originCa: false }
+	const sslToken = (tag: string) => `cf_token_${tag}_de_cuarenta_caracteres`.padEnd(40, 'x')
+
+	it('encenderlos: GET /settings los trae y los dominios traen su origin_ca', async () => {
+		ingressDb.reset({ provisionMs: 0 })
+
+		const settings = await adminUseCases.setCloudflareOriginCa(true, ON)
+
+		expect(settings.proxy.cloudflare.originCa).toBe(true)
+		expect((await adminUseCases.getSettings()).proxy.cloudflare.originCa).toBe(true)
+		const app = { project: 'auditfy', stage: 'staging', app: 'api' }
+		const [active] = await ingressUseCases.listDomains(app)
+		expect(active).toMatchObject({
+			hostname: 'api-staging.tudominio.cl',
+			certSource: 'cloudflare_origin_ca',
+			originCa: { status: 'active', errorCode: null },
+		})
+		const { panelCertificate } = await ingressUseCases.getProxyStatus()
+		expect(panelCertificate).toMatchObject({
+			certSource: 'cloudflare_origin_ca',
+			originCa: { status: 'active' },
+		})
+	})
+
+	it('si el token se quitó en otra pestaña, el 422 del backend llega al campo cloudflareOriginCa', async () => {
+		adminDb.state.cloudflareToken = null
+
+		const error = await adminUseCases
+			.setCloudflareOriginCa(true, ON)
+			.catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(ValidationError)
+		expect(error).toMatchObject({
+			field: 'cloudflareOriginCa',
+			message: 'necesita el token de Cloudflare: configúralo antes de activarla',
+		})
+	})
+
+	it('un token sin el permiso es 422 con el mensaje, y uno con Cloudflare caído es CloudflareUnavailable', async () => {
+		adminDb.state.cloudflareToken = sslToken('sin-ssl')
+		await expect(adminUseCases.setCloudflareOriginCa(true, ON)).rejects.toMatchObject({
+			field: 'cloudflareOriginCa',
+			message:
+				'el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona tudominio.cl (lo necesitan los certificados de Cloudflare): agrégalo al token en Cloudflare, o deja la opción apagada',
+		})
+
+		adminDb.state.cloudflareToken = sslToken('ssl-lento')
+		await expect(adminUseCases.setCloudflareOriginCa(true, ON)).rejects.toBeInstanceOf(
+			CloudflareUnavailable,
+		)
+		expect(adminDb.state.cloudflareOriginCa).toBe(false)
+	})
+
+	it('con ellos encendidos, un token nuevo sin el permiso es 422 en cloudflareToken', async () => {
+		adminDb.state.cloudflareOriginCa = true
+
+		const error = await adminUseCases
+			.replaceCloudflareToken(sslToken('sin-ssl'))
+			.catch((caught: unknown) => caught)
+
+		expect(error).toMatchObject({ name: 'ValidationError', field: 'cloudflareToken' })
+	})
+
+	it('quitar el token con ellos encendidos los apaga en el mismo cambio', async () => {
+		await adminUseCases.setCloudflareOriginCa(true, ON)
+
+		const settings = await adminUseCases.removeCloudflareToken({ ...ON, originCa: true })
+
+		expect(settings.proxy.cloudflare).toEqual({ tokenSet: false, zones: null, originCa: false })
+		expect(adminDb.state.audit.at(-1)?.details).toEqual({
+			cloudflare_token: 'removed',
+			cloudflare_origin_ca: false,
+		})
+	})
+})
+
 describe('auditoría', () => {
 	it('pagina con before, de la más nueva a la más vieja, sin details', async () => {
 		const first = await adminUseCases.listAudit()
