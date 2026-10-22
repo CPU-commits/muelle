@@ -1077,7 +1077,7 @@ Todos con TDD, en el estilo del repo:
 - `tools/list` (con 2025-11-25 y con 2026-07-28) y `server/discover` van con `ttlMs: 0` y `cacheScope: "private"`, con los dos tipos de token.
 - **El plazo de lectura:** con `srv.Config.ReadTimeout` de 1 s, un `get_deploy` con `wait_s: 2` vuelve con el deploy, no con el ctx cancelado.
 - Llamada de punta a punta: `deploy` con un token de escritura deja el deploy en la base con el nombre del token, y `GET /audit` (con la sesión) muestra `deploy.create` con `details.via = "mcp"`.
-- Con un token de solo lectura, llamar a `deploy` da error.
+- Con un token de solo lectura, llamar a `deploy` da error. En crudo, por versión: con 2025-11-25, HTTP 200 con el error JSON-RPC `-32602` (`unknown tool "deploy"`); con 2026-07-28 (`_meta` de SEP-2575, `Mcp-Method` y `Mcp-Name`), el mismo error en un HTTP 400.
 
 ### 11.6 Integración (`src/shared/infra/container/integration_mcp_test.go`, `//go:build integration`)
 

@@ -246,6 +246,45 @@ func (e *mcpEnv) post2026(t *testing.T, token, method, name, params string) *htt
 		"Mcp-Method", method, "Mcp-Name", name)
 }
 
+// rpcError es el error JSON-RPC de una respuesta.
+func rpcError(t *testing.T, body string) (int, string) {
+	t.Helper()
+	var r struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &r); err != nil || r.Error == nil {
+		t.Fatalf("no es un error JSON-RPC: %s", body)
+	}
+	return r.Error.Code, r.Error.Message
+}
+
+// Una herramienta que el servidor no tiene (deploy con un token de solo
+// lectura) es un error de protocolo, distinto según la versión (contrato
+// §8.4): con 2025-11-25, el error JSON-RPC -32602 en un HTTP 200; con
+// 2026-07-28, el mismo error en un HTTP 400 (SEP-2575).
+func TestMCPUnknownToolPerVersion(t *testing.T) {
+	e := newMCPEnv(t)
+	const args = `"name":"deploy","arguments":{"project":"p1","stage":"s1","app":"a"}`
+	res := e.post(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{`+args+`}}`, "Authorization", "Bearer "+e.pl)
+	body := readBody(t, res)
+	if code, msg := rpcError(t, body); res.StatusCode != 200 || code != -32602 || msg != `unknown tool "deploy"` {
+		t.Errorf("2025-11-25: %d %s", res.StatusCode, body)
+	}
+	res = e.post2026(t, e.pl, "tools/call", "deploy", args)
+	body = readBody(t, res)
+	if code, msg := rpcError(t, body); res.StatusCode != 400 || code != -32602 || msg != `unknown tool "deploy"` {
+		t.Errorf("2026-07-28: %d %s", res.StatusCode, body)
+	}
+	// Con un token de escritura, la misma llamada llega a la herramienta.
+	res = e.post2026(t, e.p, "tools/call", "deploy", args)
+	if body := readBody(t, res); res.StatusCode != 200 || strings.Contains(body, `"error"`) || !strings.Contains(body, `\"status\":\"queued\"`) {
+		t.Errorf("2026-07-28 con un token de escritura: %d %s", res.StatusCode, body)
+	}
+}
+
 // tools/list y server/discover dependen del token (las 11 herramientas o
 // las 15): en el cable van con cacheScope private y ttlMs 0, en las dos
 // versiones, nunca public.
