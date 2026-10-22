@@ -2,8 +2,8 @@ import { vi } from 'vitest'
 
 // Un IntersectionObserver de mentira para watchSections y SectionSpy: cada test dice qué
 // secciones tocan la franja de arriba de la pantalla, cuáles ya empezaron más arriba y si la
-// página llegó al fondo, sin depender de las medidas del navegador. Lo de verdad (el de Chromium) lo prueban SubNavLayout.svelte.test.ts
-// y e2e/subNav.e2e.ts.
+// página llegó al fondo, sin depender de las medidas del navegador. Lo de verdad (el de
+// Chromium, con el scroll y los links de verdad) lo prueba SubNavLayout.svelte.test.ts.
 
 type FakeEntry = { isIntersecting?: boolean; intersectionRatio?: number }
 

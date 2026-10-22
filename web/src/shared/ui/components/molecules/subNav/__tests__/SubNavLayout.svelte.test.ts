@@ -54,6 +54,38 @@ function sectionTop(id: string): number {
 const activeLabel = (links: HTMLElement[]) =>
 	links.find((link) => link.getAttribute('aria-current') === 'page')?.textContent?.trim()
 
+const atTheBottom = () =>
+	Math.ceil(window.scrollY + window.innerHeight) >= document.documentElement.scrollHeight
+
+const horizontalOverflow = () =>
+	document.documentElement.scrollWidth - document.documentElement.clientWidth
+
+/** Lo que está en el centro del elemento es el elemento (o algo suyo): nada lo tapa. */
+function isHittable(element: HTMLElement): boolean {
+	const rect = element.getBoundingClientRect()
+	const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+	return hit !== null && element.contains(hit)
+}
+
+/** Deja pasar unos cuadros: lo que tuviera que cambiar después de un salto, ya cambió. */
+const frames = (count = 4) =>
+	new Promise<void>((resolve) => {
+		const next = (left: number) =>
+			left === 0 ? resolve() : requestAnimationFrame(() => next(left - 1))
+		next(count)
+	})
+
+/** Anota cada cambio del link marcado, para ver si la marca pasó por otros. */
+function recordMarks(links: HTMLElement[]): { marks: (string | undefined)[]; stop: () => void } {
+	const marks: (string | undefined)[] = []
+	const observer = new MutationObserver(() => {
+		const mark = activeLabel(links)
+		if (marks.at(-1) !== mark) marks.push(mark)
+	})
+	observer.observe(links[0]!.parentElement!, { subtree: true, attributeFilter: ['aria-current'] })
+	return { marks, stop: () => observer.disconnect() }
+}
+
 describe('SubNavLayout', () => {
 	afterEach(() => {
 		window.scrollTo(0, 0)
@@ -69,6 +101,39 @@ describe('SubNavLayout', () => {
 				width >= 820 ? 'sticky' : 'static',
 			)
 			await parts.unmount()
+		}
+	})
+
+	it('al fondo de la página, la nav pegada arriba sigue entera en la pantalla y cada link se puede tocar', async () => {
+		await page.viewport(1400, 600)
+		const { aside, links } = await mount(1000, { sections: CONFIG_SECTIONS })
+		const navBottom = aside.getBoundingClientRect().bottom + window.scrollY
+
+		window.scrollTo(0, document.documentElement.scrollHeight)
+		expect(atTheBottom()).toBe(true)
+		// Si la página no scrolleara más allá de la nav, el test no probaría nada.
+		expect(window.scrollY).toBeGreaterThan(navBottom)
+
+		const rect = aside.getBoundingClientRect()
+		expect(rect.top).toBeGreaterThanOrEqual(0)
+		expect(rect.bottom).toBeLessThanOrEqual(window.innerHeight)
+		for (const link of links) expect(isHittable(link), link.textContent).toBe(true)
+	})
+
+	it('en un teléfono, la nav va arriba del contenido, se va con la página y no hay scroll horizontal', async () => {
+		for (const width of [360, 390]) {
+			await page.viewport(width, 740)
+			const { aside, unmount } = await mount(width, { sections: CONFIG_SECTIONS })
+
+			expect(aside.getBoundingClientRect().bottom, `${width}px`).toBeLessThanOrEqual(
+				sectionTop('seccion-0'),
+			)
+			expect(horizontalOverflow(), `${width}px`).toBe(0)
+			window.scrollTo(0, document.documentElement.scrollHeight)
+			expect(aside.getBoundingClientRect().bottom, `${width}px`).toBeLessThan(0)
+
+			window.scrollTo(0, 0)
+			await unmount()
 		}
 	})
 
@@ -222,5 +287,86 @@ describe('SubNavLayout', () => {
 
 		window.scrollTo(0, document.documentElement.scrollHeight)
 		await expect.poll(() => activeLabel(links)).toBe('Eliminar app')
+
+		// Un poco más arriba ya no es el fondo (el observer del fondo tiene un píxel de holgura,
+		// no más): vuelve la que empieza en la parte de arriba.
+		window.scrollTo(0, window.scrollY - 30)
+		expect(atTheBottom()).toBe(false)
+		await expect.poll(() => activeLabel(links)).toBe('Recursos')
+	})
+
+	it('un link de la nav marca su sección en el acto, sin pasar por otras, y scrollear después no toca el hash ni el historial', async () => {
+		await page.viewport(1400, 600)
+		const spy = new SectionSpy(SECTION_IDS)
+		// Como en Ajustes y Configuración: el link (un ancla de verdad, sin frenar) avisa al spy.
+		const { links } = await mount(1000, {
+			sections: CONFIG_SECTIONS,
+			spy,
+			onselect: (id) => spy.select(id),
+		})
+		const { marks, stop } = recordMarks(links)
+		const start = `${location.pathname}${location.search}`
+
+		try {
+			// El salto pasa por Ejecución y Healthcheck: la marca va derecho a Volúmenes, y la
+			// tarjeta queda a la altura de los links de la nav pegada arriba.
+			links[3]!.click()
+			expect(location.hash).toBe('#seccion-3')
+			await expect.poll(() => activeLabel(links)).toBe('Volúmenes')
+			await expect.poll(() => sectionTop('seccion-3')).toBe(24)
+			await frames()
+			expect(marks).toEqual(['Volúmenes'])
+
+			// Recursos es corta: el salto deja la página al fondo, donde ganaría la última, y la
+			// marca sigue en la del link.
+			links[4]!.click()
+			await expect.poll(() => activeLabel(links)).toBe('Recursos')
+			expect(atTheBottom()).toBe(true)
+			await frames()
+			expect(activeLabel(links)).toBe('Recursos')
+			expect(marks).toEqual(['Volúmenes', 'Recursos'])
+
+			// Scrollear a mano: la marca sigue al scroll, y la URL y el historial quedan como los
+			// dejó el link.
+			const length = history.length
+			const pushState = vi.spyOn(history, 'pushState')
+			const replaceState = vi.spyOn(history, 'replaceState')
+			const hashchange = vi.fn()
+			window.addEventListener('hashchange', hashchange)
+			window.scrollTo(0, 0)
+			await expect.poll(() => activeLabel(links)).toBe('Imagen')
+			window.scrollTo(0, window.scrollY + sectionTop('seccion-3') - 100)
+			await expect.poll(() => activeLabel(links)).toBe('Volúmenes')
+			window.scrollTo(0, document.documentElement.scrollHeight)
+			await expect.poll(() => activeLabel(links)).toBe('Eliminar app')
+			window.removeEventListener('hashchange', hashchange)
+
+			expect(location.hash).toBe('#seccion-4')
+			expect(history.length).toBe(length)
+			expect(pushState).not.toHaveBeenCalled()
+			expect(replaceState).not.toHaveBeenCalled()
+			expect(hashchange).not.toHaveBeenCalled()
+		} finally {
+			stop()
+			vi.restoreAllMocks()
+			history.replaceState(history.state, '', start)
+		}
+	})
+
+	it('en un teléfono, marcar otra sección no mueve la página ni cambia su alto', async () => {
+		await page.viewport(390, 740)
+		const spy = new SectionSpy(SECTION_IDS)
+		const { links } = await mount(390, { sections: CONFIG_SECTIONS, spy })
+
+		// Volúmenes en la parte de arriba de la pantalla (la franja es el 30 %: 222 px).
+		window.scrollTo(0, window.scrollY + sectionTop('seccion-3') - 185)
+		const scrollY = window.scrollY
+		const height = document.documentElement.scrollHeight
+		await expect.poll(() => activeLabel(links)).toBe('Volúmenes')
+		await frames()
+
+		expect(window.scrollY).toBe(scrollY)
+		expect(document.documentElement.scrollHeight).toBe(height)
+		expect(horizontalOverflow()).toBe(0)
 	})
 })

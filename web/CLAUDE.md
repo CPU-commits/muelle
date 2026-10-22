@@ -109,8 +109,27 @@ Estas reglas se revisan a mano en code review: no hay un verificador automático
   módulo, no la red. Ver
   `src/modules/auth/ui/screens/login/__tests__/` (también mockea `$app/navigation`: `goto`
   no existe fuera del runtime de SvelteKit).
-- E2E: `e2e/*.e2e.ts` contra el build con MSW servido con la CSP (`pnpm test:e2e`, ver
-  [CSP](#csp)).
+- **E2E: solo para los flujos críticos.** Son caros y puntuales: `e2e/*.e2e.ts` contra el
+  build con MSW servido con la CSP (`pnpm test:e2e`, ver [CSP](#csp)), y CI los corre en
+  cada cambio. Son tres, uno por flujo:
+    - `csp.e2e.ts`: el build de producción arranca bajo la CSP del header en un deep link
+      (rutas absolutas, `frame-ancestors`, sin el service worker de MSW), y cada pantalla
+      del panel una vez, en un teléfono, sin una violación de CSP ni scroll horizontal;
+    - `auth.e2e.ts`: el setup del primer usuario con el link (el token sale de la URL), el
+      2FA, salir desde el menú de la cuenta y entrar con la contraseña y el código;
+    - `deploy.e2e.ts`: un proyecto, un stage y una app nuevos, una variable secreta (su valor
+      no vuelve a la pantalla), un deploy seguido hasta "Exitoso", otro, el rollback al
+      primero y Proyectos con la app corriendo.
+
+    Una feature nueva prueba lo que hace con tests de dominio, de viewModel y de integración
+    contra MSW (y de componente para lo que es del markup: el foco, el layout, un
+    `aria-current`), no con un e2e. Suma un e2e solo si crea un flujo crítico nuevo, del
+    tamaño de esos tres; si solo toca uno, a lo sumo un paso en ese recorrido. Una pantalla
+    nueva se suma a `SCREENS` de `csp.e2e.ts` (su ruta y su título), nada más. Lo compartido
+    (el usuario demo, `login`, `watch`, que junta las violaciones de CSP, los errores y los
+    pedidos a `/undefined`, y `seedMock`, que siembra el estado del mock antes de que arranque
+    la página) está en `e2e/support.ts`.
+
 - E2E contra el backend de verdad: `e2e-real/*.real.ts`, el panel embebido en un
   `muelle serve` con el Swarm local (`pnpm test:e2e:real`, ver
   [E2E contra muelle](#e2e-contra-muelle)). Lo de node puro que usa (los códigos TOTP de
@@ -244,8 +263,9 @@ pnpm install
 pnpm dev:mock     # sin backend: MSW contesta en el navegador
 pnpm dev          # con un `muelle serve` local (ver web/README.md)
 pnpm verify       # antes de decir que terminaste
-pnpm test:e2e     # playwright contra build-e2e/ (con y sin MSW, bajo la CSP); no toca ./build
-                  # aislado de la red como pnpm test (ver "Cosas que conviene saber")
+pnpm test:e2e     # los flujos críticos con playwright contra build-e2e/ (con y sin MSW, bajo
+                  # la CSP); no toca ./build. Aislado de la red como pnpm test (ver "Cosas
+                  # que conviene saber")
 pnpm test:e2e:real  # el panel embebido en un muelle serve de verdad, con el Swarm local
                     # (ver "E2E contra muelle"): construye ./build y el binario con -tags panel
 pnpm build        # el ./build que embebe el binario (sin MSW ni mockServiceWorker.js)
@@ -360,8 +380,11 @@ cambiar `shared/`, `package.json` o una ruta ajena, se detiene y lo reporta.
     - lo que NO se puede atajar son los efectos: un componente del snippet que hace una
       query con los params tiene que llevar `enabled: Boolean(p && s)` (o recibir los datos
       ya cargados), o sale un pedido a `/projects/undefined`;
-    - `e2e/shell.e2e.ts` recorre app → Proyectos, app → variables del stage y los tabs: si
-      tu ruta tiene un `<ShellHeader>`, sumala ahí.
+    - `ShellHeader.svelte.test.ts` (con `RouteShellHarness.svelte`) prueba la salida de una
+      app a `/` y a las variables del stage, y `LocationBreadcrumb.viewModel.svelte.test.ts`
+      que sus selectores no piden nada con los params vacíos: si tu ruta tiene un
+      `<ShellHeader>` con algo nuevo, sumalo ahí. `e2e/deploy.e2e.ts` sale de una app a
+      Proyectos, y falla si sale un pedido a `/undefined`.
 
 ### i18n: prefijo por módulo
 
@@ -773,6 +796,10 @@ http.post(api('/projects'), async ({ request }) => {
 - Los usuarios y las invitaciones viven en `db/auth.ts` (`authDb.state.users`,
   `authDb.addInvite(token)`): el mock de `identity` los usa en vez de tener otra lista.
 - `server.use(…)` dentro de un test para un caso puntual (un 422, un 404, `HttpResponse.error()`).
+- En el navegador, `db/auth.ts` y `db/deploy.ts` completan lo guardado en `sessionStorage`
+  con su semilla, campo por campo: un e2e siembra solo lo que le importa, antes de que
+  arranque la página, con `seedMock` de `e2e/support.ts` (`{ auth: { users: [] } }`, una
+  instalación sin usuarios; `{ deploy: { liveScale: 0.05 } }`, deploys de medio segundo).
 
 ### Cosas que conviene saber
 
@@ -814,7 +841,8 @@ http.post(api('/projects'), async ({ request }) => {
 ### E2E contra muelle
 
 `e2e-real/` recorre el panel embebido en un `muelle serve` de verdad, con el Docker de
-verdad: lo que `e2e/` prueba contra MSW, acá contra Go y Swarm, bajo la CSP que manda Go.
+verdad: los flujos de `e2e/auth.e2e.ts` y `e2e/deploy.e2e.ts`, y algo más, contra Go y Swarm
+en vez de MSW, bajo la CSP que manda Go. Es el único punta a punta del camino de siempre.
 Un solo recorrido, en orden (`journey.real.ts`): el setup del primer usuario con el link del
 log, el 2FA con un código calculado de la clave que muestra el panel (`totp.ts`, RFC 6238;
 cada código de un paso nuevo, como exige el backend; sus tests, `totp.test.ts`, corren con
@@ -902,10 +930,10 @@ El panel corre bajo una CSP estricta: nada en línea ni `eval`, todo del mismo o
   condiciones (`If-None-Match` → `304`).
 - **`scripts/serve-build.mjs` lo copia a mano** para los e2e, sin el `ETag`, el `304` ni los
   `Range` (los e2e no los usan). Nada verifica que diga lo mismo que `panel.go`: si cambia
-  uno, se cambia el otro. `e2e/embed.e2e.ts` prueba lo que es del build (rutas absolutas
-  bajo `/_app/immutable/`, `frame-ancestors` en `csp-header.txt`); sus tests de headers, 404
-  y 405 documentan lo que hace `panel.go` contra el mock, y lo de verdad lo prueba
-  `panel_test.go`.
+  uno, se cambia el otro. `e2e/csp.e2e.ts` prueba lo que es del build: el `200.html` de una
+  ruta anidada arranca (sus assets van con rutas absolutas bajo `/_app/immutable/`) y el
+  header, que sale de `csp-header.txt`, trae `frame-ancestors 'none'`. Los headers, el 404 y
+  el 405 los prueba `panel_test.go`.
 - **Qué rompe la CSP** (lo atrapa `e2e/csp.e2e.ts`, que falla con cualquier violación):
     - un `style="…"` fijo en un template (va una clase de `styles.css.ts`; `style:prop={x}`
       sí se puede: Svelte lo aplica por CSSOM);
@@ -945,8 +973,8 @@ El panel corre bajo una CSP estricta: nada en línea ni `eval`, todo del mismo o
     - `ShadowHost.svelte.test.ts` lo prueba bajo `style-src 'self'` (y muestra que sin
       shadow root falla). Si otra librería no usa `adoptedStyleSheets`, no sirve: avisar.
 
-- Una pantalla nueva con algo raro (CodeMirror, un gráfico) se suma al recorrido de
-  `e2e/csp.e2e.ts`.
+- Una pantalla nueva se suma a `SCREENS` de `e2e/csp.e2e.ts` (su ruta y su título); si
+  tiene algo raro (CodeMirror, un gráfico), con un `check` que lo mire.
 - `pnpm dev` aplica la misma política como header, con `'unsafe-inline'` en los estilos
   (Vite los inyecta así). Una violación de scripts aparece igual en la consola.
 
