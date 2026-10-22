@@ -19,6 +19,8 @@ export {
 	hasWaitingDns,
 	isReachable,
 	manualRecords,
+	ORIGIN_CA_RENEW_DAYS,
+	originCaExpiresSoon,
 	originCaNotice,
 	publicAddress,
 	replaceDomain,

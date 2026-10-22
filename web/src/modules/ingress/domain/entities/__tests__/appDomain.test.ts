@@ -14,6 +14,7 @@ import {
 	hasProvisioning,
 	isReachable,
 	manualRecords,
+	originCaExpiresSoon,
 	originCaNotice,
 	publicAddress,
 	replaceDomain,
@@ -189,6 +190,18 @@ describe('originCaNotice', () => {
 			originCa: originCa({ ...failure, errorCode: null }),
 		})
 		expect(originCaNotice(domain)).toBe('renew_failed')
+	})
+
+	it('originCaExpiresSoon: el de Cloudflare a menos de 30 días (ya debería haberse renovado)', () => {
+		const now = Date.parse('2026-12-20T12:00:00Z')
+		const expiring = (days: number) =>
+			makeDomain('api.tudominio.cl', {
+				originCa: originCa({ expiresAt: new Date(now + days * 24 * 60 * 60 * 1000) }),
+			})
+
+		expect(originCaExpiresSoon(expiring(29), now)).toBe(true)
+		expect(originCaExpiresSoon(expiring(31), now)).toBe(false)
+		expect(originCaExpiresSoon(makeDomain('api.tudominio.cl'), now)).toBe(false)
 	})
 
 	it('hasProvisioning también cuenta un certificado de Cloudflare que se está emitiendo', () => {

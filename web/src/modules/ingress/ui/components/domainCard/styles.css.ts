@@ -77,6 +77,12 @@ export const meta = style({
 	color: theme.colors.text.tertiary,
 })
 
+// La pista del certificado de Cloudflare (emitiendo, DNS only), debajo de los datos.
+export const originHint = style({
+	fontSize: theme.typography.fontSize[13],
+	color: theme.colors.text.tertiary,
+})
+
 export const actions = style({
 	display: 'flex',
 	flexWrap: 'wrap',
@@ -130,6 +136,11 @@ export const manualText = style({
 
 export const errorText = style({
 	color: theme.colors.status.errorText,
+})
+
+// Un aviso que no es un error del dominio (el certificado de Cloudflare que falló).
+export const warnText = style({
+	color: theme.colors.status.warnText,
 })
 
 // `relative`: los `srOnly` (absolutos) de la tabla y del botón de copiar quedan dentro de

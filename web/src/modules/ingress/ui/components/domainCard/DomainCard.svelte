@@ -19,9 +19,17 @@
 		formatTarget,
 		isReachable,
 		manualRecords,
+		originCaNotice,
 		publicAddress,
 	} from '../../../domain'
-	import { certificateText, dnsText, stateLabel, stateTone } from '../labels/domainLabels'
+	import {
+		certificateText,
+		dnsText,
+		originCaFailureText,
+		originCaHint,
+		stateLabel,
+		stateTone,
+	} from '../labels/domainLabels'
 	import {
 		actions,
 		card,
@@ -36,12 +44,14 @@
 		main,
 		manualText,
 		meta,
+		originHint,
 		proxied,
 		recordsBox,
 		state as stateClass,
 		stateTones,
 		title,
 		titleRow,
+		warnText,
 	} from './styles.css'
 
 	// Un dominio de App-Dominios.dc.html: hostname, estado, destino, DNS y certificado, con
@@ -65,6 +75,11 @@
 	const records = $derived(manualRecords(domain))
 	const certificate = $derived(certificateText(domain))
 	const ip = $derived(publicAddress(domain))
+	// El certificado de Cloudflare (Origin CA, contrato §3.7): cuál se sirve y qué avisar.
+	const originCa = $derived(originCaNotice(domain))
+	const originCaHintText = $derived(originCaHint(originCa))
+	const servesOriginCa = $derived(domain.certSource === 'cloudflare_origin_ca')
+	const originCaFailed = $derived(originCa === 'failed' || originCa === 'renew_failed')
 
 	const menuItems: MenuEntry[] = $derived([
 		...(current === 'waiting_dns'
@@ -145,10 +160,17 @@
 					<Mono tone="secondary">{formatTarget(domain.target)}</Mono>
 				</span>
 				<span>{dnsText(domain)}</span>
-				{#if certificate}
+				{#if certificate && servesOriginCa}
+					<!-- Los navegadores no confían en él: se entra por Cloudflare. -->
+					<span title={m.ingress_origin_ca_trust()}>{certificate}</span>
+					<span class={srOnly}>{m.ingress_origin_ca_trust()}</span>
+				{:else if certificate}
 					<span>{certificate}</span>
 				{/if}
 			</p>
+			{#if originCaHintText}
+				<p class={originHint}>{originCaHintText}</p>
+			{/if}
 		</div>
 
 		<div class={actions}>
@@ -193,6 +215,16 @@
 	{:else if current === 'error'}
 		<div class={footer}>
 			<p class={[footerText, errorText]}>{domain.lastError ?? m.ingress_error_fallback()}</p>
+			<Button variant="secondary" size="sm" loading={busy} onclick={onRetry}>
+				<Icon name="refresh" size={14} />
+				{m.common_retry()}
+			</Button>
+		</div>
+	{:else if originCaFailed}
+		<!-- La emisión (o la renovación) del de Cloudflare falló: el dominio sigue andando, con
+		     Let's Encrypt o con el actual, y Reintentar reinicia la espera (contrato §3.2). -->
+		<div class={footer}>
+			<p class={[footerText, warnText]}>{originCaFailureText(domain)}</p>
 			<Button variant="secondary" size="sm" loading={busy} onclick={onRetry}>
 				<Icon name="refresh" size={14} />
 				{m.common_retry()}

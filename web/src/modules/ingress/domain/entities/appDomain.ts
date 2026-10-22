@@ -185,6 +185,18 @@ export function certificateExpiresSoon(domain: AppDomain, nowMs: number = Date.n
 	return certificate.expiresAt.getTime() - nowMs < CERT_WARNING_DAYS * DAY_MS
 }
 
+/**
+ * muelle renueva el certificado de Cloudflare cuando le faltan 30 días (contrato §3.7): uno
+ * más cerca del vencimiento no se pudo renovar todavía.
+ */
+export const ORIGIN_CA_RENEW_DAYS = 30
+
+export function originCaExpiresSoon(domain: AppDomain, nowMs: number = Date.now()): boolean {
+	const expiresAt = domain.originCa?.expiresAt
+	if (!expiresAt) return false
+	return expiresAt.getTime() - nowMs < ORIGIN_CA_RENEW_DAYS * DAY_MS
+}
+
 /** El dominio es un link que se puede abrir: activo, con certificado. */
 export function isReachable(domain: AppDomain): boolean {
 	return domain.status === 'active'
