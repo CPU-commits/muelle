@@ -17,6 +17,7 @@ import {
 	adminKeys,
 	removeCloudflareTokenMutation,
 	replaceCloudflareTokenMutation,
+	setCloudflareOriginCaMutation,
 	updateAcmeEmailMutation,
 	updateProxyPortsMutation,
 	updatePublicIpMutation,
@@ -31,7 +32,11 @@ import {
 	type ProxySettings,
 	type Settings,
 } from '../../../domain'
-import { adminErrorMessage, adminFieldError } from '../../components/adminMessages'
+import {
+	adminErrorMessage,
+	adminFieldError,
+	originCaErrorMessage,
+} from '../../components/adminMessages'
 import { currentOrigin } from './currentOrigin'
 import { clearPanelMove, loadPanelMove, PANEL_MOVED_PARAM, savePanelMove } from './panelMoveNotice'
 import { loadDismissedRollback, saveDismissedRollback } from './rollbackNotice'
@@ -141,6 +146,10 @@ export class ProxySettingsViewModel {
 	/** Por qué no se pudieron cambiar los puertos; se muestra adentro de la confirmación. */
 	portsError = $state<string | null>(null)
 	errors = $state<FieldErrors>({})
+	/** Por qué no se cambiaron los certificados de Cloudflare: un aviso en la tarjeta. */
+	originCaError = $state<string | null>(null)
+	/** Se pide confirmar el apagado: los dominios vuelven a Let's Encrypt. */
+	confirmingOriginCaOff = $state(false)
 
 	readonly #proxy: () => ProxySettings
 	readonly #client = useQueryClient()
@@ -149,6 +158,12 @@ export class ProxySettingsViewModel {
 	readonly #ports = createMutation(() => updateProxyPortsMutation(this.#client))
 	readonly #cloudflare = createMutation(() => replaceCloudflareTokenMutation(this.#client))
 	readonly #removeCloudflare = createMutation(() => removeCloudflareTokenMutation(this.#client))
+	readonly #originCa = createMutation(() => setCloudflareOriginCaMutation(this.#client))
+	/**
+	 * Cuántas veces se movió el switch de los certificados de Cloudflare: el switch muestra
+	 * siempre lo guardado, y cada movimiento lo vuelve a poner ahí (ver `originCaChecked`).
+	 */
+	#originCaMoves = $state(0)
 	/** Se prende al cambiar los puertos: se sigue la recreación y si muelle vuelve atrás. */
 	#watchingProxy = $state(false)
 	/**
@@ -414,6 +429,80 @@ export class ProxySettingsViewModel {
 
 	get isRemovingCloudflare(): boolean {
 		return this.#removeCloudflare.isPending
+	}
+
+	/**
+	 * Lo que muestra el switch de los certificados de Cloudflare: lo guardado, no es
+	 * optimista. Depende también de `#originCaMoves`: si el usuario lo mueve y lo guardado no
+	 * cambia (se pide confirmar, sigue guardando o falló), el switch vuelve a lo guardado.
+	 */
+	get originCaChecked(): boolean {
+		void this.#originCaMoves
+		return this.proxy.cloudflare.originCa
+	}
+
+	get isSavingOriginCa(): boolean {
+		return this.#originCa.isPending
+	}
+
+	/**
+	 * Sin token no se pueden encender (contrato §4.1). Si quedaron encendidos sin token (un
+	 * cambio a mano en la base), apagarlos sí se puede.
+	 */
+	get originCaDisabled(): boolean {
+		const { tokenSet, originCa } = this.proxy.cloudflare
+		return this.#originCa.isPending || (!tokenSet && !originCa)
+	}
+
+	/** Qué hacen, el permiso que necesita el token y, sin token, qué falta. */
+	get originCaHelp(): string {
+		const help = `${m.admin_cf_origin_ca_help()} ${m.admin_cf_origin_ca_permission()}`
+		return this.proxy.cloudflare.tokenSet
+			? help
+			: `${help} ${m.admin_cf_origin_ca_needs_token()}`
+	}
+
+	/**
+	 * El switch se movió. Encenderlos guarda enseguida; apagarlos pide confirmación (la vuelta
+	 * a Let's Encrypt puede dar un `525` un momento). En los dos casos el switch sigue en lo
+	 * guardado hasta que el cambio se guarde.
+	 */
+	toggleOriginCa = (enabled: boolean): void => {
+		this.#originCaMoves += 1
+		if (this.#originCa.isPending || enabled === this.proxy.cloudflare.originCa) return
+		this.originCaError = null
+		if (enabled) {
+			void this.#saveOriginCa(true)
+			return
+		}
+		this.confirmingOriginCaOff = true
+	}
+
+	cancelOriginCaOff = (): void => {
+		if (this.#originCa.isPending) return
+		this.confirmingOriginCaOff = false
+	}
+
+	confirmOriginCaOff = async (): Promise<void> => {
+		await this.#saveOriginCa(false)
+	}
+
+	async #saveOriginCa(enabled: boolean): Promise<void> {
+		if (this.#originCa.isPending) return
+		this.originCaError = null
+		try {
+			await this.#originCa.mutateAsync({ enabled, current: this.proxy.cloudflare })
+			// Los dominios y el panel recalculan `cert_source` y `origin_ca` (contrato §3.7).
+			this.#refreshIngress()
+			toast.success(
+				enabled ? m.admin_cf_origin_ca_enabled() : m.admin_cf_origin_ca_disabled(),
+			)
+		} catch (error) {
+			// No se guardó nada: el switch sigue en lo guardado, y el motivo va en la tarjeta.
+			this.originCaError = originCaErrorMessage(error)
+		} finally {
+			this.confirmingOriginCaOff = false
+		}
 	}
 
 	setField = (field: ProxyField, value: string): void => {

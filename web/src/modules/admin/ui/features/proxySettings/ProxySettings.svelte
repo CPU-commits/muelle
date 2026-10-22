@@ -11,6 +11,7 @@
 		Modal,
 		Mono,
 		StatusDot,
+		Switch,
 	} from '@/shared/ui'
 	import type { ProxySettings } from '../../../domain'
 	import { ProxySettingsViewModel } from './ProxySettings.viewModel.svelte.ts'
@@ -24,6 +25,11 @@
 		status,
 		statusLabel,
 		statusMeta,
+		switchControl,
+		switchHint,
+		switchRow,
+		switchText,
+		switchTitle,
 		warning,
 	} from './styles.css'
 
@@ -45,6 +51,11 @@
 		description={m.admin_cf_description()}
 		note={m.admin_cf_note()}
 	>
+		{#if vm.originCaError}
+			<!-- No se cambiaron los certificados de Cloudflare: el 422 del backend (el permiso
+			     del token), Cloudflare caído o sin token. -->
+			<Banner tone="error" title={vm.originCaError} />
+		{/if}
 		<div class={status}>
 			{#if vm.proxy.cloudflare.tokenSet}
 				<span class={statusLabel}><StatusDot status="ok" />{m.admin_cf_set()}</span>
@@ -56,6 +67,20 @@
 				<span class={statusMeta}>{m.admin_cf_unset_hint()}</span>
 			{/if}
 		</div>
+		<!-- Los certificados de Cloudflare (Origin CA, contrato §3.7). El switch muestra lo
+		     guardado: moverlo no lo cambia hasta que se guarda (y apagarlo pide confirmar). -->
+		<label class={switchRow}>
+			<span class={switchText}>
+				<span class={switchTitle}>{m.admin_cf_origin_ca_label()}</span>
+				<span class={switchHint}>{vm.originCaHelp}</span>
+			</span>
+			<Switch
+				class={switchControl}
+				bind:checked={() => vm.originCaChecked, vm.toggleOriginCa}
+				disabled={vm.originCaDisabled}
+				aria-busy={vm.isSavingOriginCa}
+			/>
+		</label>
 		{#snippet footer()}
 			{#if vm.proxy.cloudflare.tokenSet}
 				<Button variant="ghost" size="sm" onclick={vm.askRemoveCloudflare}>
@@ -358,6 +383,18 @@
 		/>
 	{/if}
 </ConfirmDialog>
+
+<ConfirmDialog
+	open={vm.confirmingOriginCaOff}
+	tone="primary"
+	title={m.admin_cf_origin_ca_off_title()}
+	body={m.admin_cf_origin_ca_off_body()}
+	confirmLabel={m.admin_cf_origin_ca_off_confirm()}
+	cancelLabel={m.common_cancel()}
+	loading={vm.isSavingOriginCa}
+	onConfirm={vm.confirmOriginCaOff}
+	onCancel={vm.cancelOriginCaOff}
+/>
 
 <ConfirmDialog
 	open={vm.confirmingRemoveCloudflare}

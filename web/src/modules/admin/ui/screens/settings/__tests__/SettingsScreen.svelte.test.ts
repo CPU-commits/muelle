@@ -4,7 +4,7 @@ import { render } from 'vitest-browser-svelte'
 import { createQueryClient } from '@/shared/data/query'
 import { formatDateTime } from '@/shared/ui'
 import { authKeys } from '@/modules/auth'
-import type { Settings } from '../../../../domain'
+import { CloudflareUnavailable, type Settings } from '../../../../domain'
 import SettingsView from './SettingsView.svelte'
 
 const mocks = vi.hoisted(() => ({
@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 	listAudit: vi.fn(),
 	listUsers: vi.fn(),
 	listTokens: vi.fn(),
+	setCloudflareOriginCa: vi.fn(),
 }))
 
 vi.mock('@/modules/admin/container', () => ({
@@ -24,7 +25,7 @@ vi.mock('@/modules/admin/container', () => ({
 		updateProxyPorts: vi.fn(),
 		replaceCloudflareToken: vi.fn(),
 		removeCloudflareToken: vi.fn(),
-		setCloudflareOriginCa: vi.fn(),
+		setCloudflareOriginCa: mocks.setCloudflareOriginCa,
 		listAudit: mocks.listAudit,
 		listRegistries: mocks.listRegistries,
 		addRegistry: vi.fn(),
@@ -175,6 +176,58 @@ describe('SettingsScreen', () => {
 		await expect
 			.element(ports.getByRole('link', { name: 'Volver a la dirección anterior' }))
 			.not.toBeInTheDocument()
+	})
+
+	it('el switch de los certificados de Cloudflare muestra lo guardado: apagarlo pide confirmar, y cancelar lo deja encendido', async () => {
+		mocks.getSettings.mockResolvedValue({
+			...SETTINGS,
+			proxy: {
+				...SETTINGS.proxy,
+				cloudflare: { tokenSet: true, zones: 4, originCa: true },
+			},
+		})
+		mocks.listRegistries.mockResolvedValue([])
+
+		const screen = await render(SettingsView, { client: client() })
+
+		const toggle = screen.getByRole('switch', {
+			name: /Certificados de Cloudflare \(Origin CA\)/,
+		})
+		await expect.element(toggle).toBeChecked()
+		await toggle.click()
+
+		const dialog = screen.getByRole('dialog', { name: "¿Volver a Let's Encrypt?" })
+		await expect.element(dialog).toBeVisible()
+		await expect.element(toggle).toBeChecked()
+		await dialog.getByRole('button', { name: 'Cancelar' }).click()
+		await expect.element(dialog).not.toBeInTheDocument()
+		await expect.element(toggle).toBeChecked()
+		expect(mocks.setCloudflareOriginCa).not.toHaveBeenCalled()
+	})
+
+	it('si encenderlos falla, el switch sigue apagado y la tarjeta dice por qué', async () => {
+		mocks.getSettings.mockResolvedValue(SETTINGS)
+		mocks.listRegistries.mockResolvedValue([])
+		mocks.setCloudflareOriginCa.mockRejectedValueOnce(new CloudflareUnavailable())
+
+		const screen = await render(SettingsView, { client: client() })
+
+		const toggle = screen.getByRole('switch', {
+			name: /Certificados de Cloudflare \(Origin CA\)/,
+		})
+		await expect.element(toggle).not.toBeChecked()
+		await toggle.click()
+
+		const cloudflare = screen.getByRole('region', { name: 'Cloudflare' })
+		await expect
+			.element(
+				cloudflare.getByText(
+					'Cloudflare no respondió: no se cambió nada. Vuelve a intentarlo en un momento.',
+				),
+			)
+			.toBeVisible()
+		expect(mocks.setCloudflareOriginCa).toHaveBeenCalledOnce()
+		await expect.element(toggle).not.toBeChecked()
 	})
 
 	it('cuándo se actualizó un registry es un <time> con la fecha, y la fecha exacta se lee', async () => {
