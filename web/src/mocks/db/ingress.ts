@@ -29,7 +29,17 @@ import { loadPersisted, savePersisted } from './persist'
 // - lo de Cloudflare y las IP públicas salen de los ajustes del mock (`db/admin.ts`), como
 //   en el backend: sin token, todo hostname queda fuera de Cloudflare; `records` se calcula
 //   con las IP de ahora (`[]` sin `public_ip`); adoptar sin token o sin IP deja el dominio en
-//   `error` + `cloudflare`; y sin dominio del panel, `GET /proxy` dice `disabled`.
+//   `error` + `cloudflare`; y sin dominio del panel, `GET /proxy` dice `disabled`;
+// - los certificados de Cloudflare (Origin CA, contrato §3.7), con la opción encendida en
+//   Ajustes (y el token, y el dominio del panel: si no, `origin_ca` es null): durante la
+//   primera pasada (`provisionMs` desde que se encendió, o desde que se creó el dominio) un
+//   dominio que califica dice `issuing`, y después `active`, con 90 días. El manejado sin
+//   Proxied es `dns_only`, y uno que muelle no maneja o fuera de Cloudflare, `not_eligible`.
+//   Por la primera etiqueta: con `gris-`, en Cloudflare está en DNS only (`dns_only` con
+//   Proxied prendido en muelle); con `falla-`, la emisión falla por el permiso del token
+//   (`failed`, se reintenta en 6 h o con Reintentar); con `renueva-`, falló la renovación y
+//   el actual todavía sirve (`active` con el aviso). El panel sigue las mismas reglas con su
+//   dominio (`panel_certificate` de `GET /proxy`), con su mensaje sin Reintentar.
 // Como los deploys, un `pending` con `activeAt` se resuelve solo con la hora.
 
 export const MOCK_ZONE = 'tudominio.cl'
@@ -66,6 +76,8 @@ export interface MockDomain {
 	activeAt: number | null
 	/** El registro que ya existía en Cloudflare (`record_exists`): su Proxied, y si se va. */
 	foreignRecord?: { proxied: boolean; goneAt: number | null } | null
+	/** El último Reintentar: reinicia la espera del certificado de Cloudflare que falló. */
+	originCaRetriedAt?: number | null
 	createdAt: number
 	updatedAt?: number
 }
@@ -82,6 +94,11 @@ interface IngressState {
 	recreatingFrom?: MockProxyPorts | null
 	/** La última vuelta a los puertos anteriores (`ports_rollback`, contrato §3.3). */
 	portsRollback?: MockPortsRollback | null
+	/**
+	 * Cuándo se encendieron los certificados de Cloudflare (Origin CA): desde ahí, la primera
+	 * pasada tarda `provisionMs` en emitirlos. null o sin la clave: hace mucho.
+	 */
+	originCaSince?: number | null
 }
 
 export interface MockProxyPorts {
@@ -258,6 +275,120 @@ function seedApp(project: string, stage: string, app: string, now: number): Mock
 	]
 }
 
+/** `origin_ca` de un dominio o del panel (contrato §3.7). */
+export interface MockOriginCa {
+	status: 'active' | 'issuing' | 'failed' | 'dns_only' | 'not_eligible'
+	error_code: 'permission' | 'cloudflare' | 'rejected' | null
+	error: string | null
+	retry_at: string | null
+	expires_at: string | null
+}
+
+const HOUR = 60 * 60 * 1000
+const SHORT_MONTHS = [
+	'ene',
+	'feb',
+	'mar',
+	'abr',
+	'may',
+	'jun',
+	'jul',
+	'ago',
+	'sep',
+	'oct',
+	'nov',
+	'dic',
+]
+
+/** Como `shortDate` del backend, en UTC: "2 ene 2027". */
+function shortDate(ms: number): string {
+	const date = new Date(ms)
+	return `${String(date.getUTCDate())} ${SHORT_MONTHS[date.getUTCMonth()] ?? ''} ${String(date.getUTCFullYear())}`
+}
+
+/** Las cinco claves, sin falla. */
+function originCaState(
+	status: MockOriginCa['status'],
+	expiresAt: number | null = null,
+): MockOriginCa {
+	return {
+		status,
+		error_code: null,
+		error: null,
+		retry_at: null,
+		expires_at: expiresAt === null ? null : new Date(expiresAt).toISOString(),
+	}
+}
+
+/** Los certificados de Cloudflare están en uso: encendidos, con token y con el proxy. */
+function originCaOn(): boolean {
+	const settings = adminDb.state
+	return (
+		settings.cloudflareOriginCa &&
+		settings.cloudflareToken !== null &&
+		settings.panelDomain !== ''
+	)
+}
+
+/**
+ * Un hostname que califica (`active`, `issuing`, `failed`, o `dns_only` en Cloudflare), por
+ * las reglas de arriba. `start` es desde cuándo corre su primera pasada; `retriedAt`, el
+ * último Reintentar (el panel no tiene).
+ */
+function eligibleOriginCa(
+	hostname: string,
+	start: number,
+	retriedAt: number | null,
+	panel: boolean,
+	now: number,
+): MockOriginCa {
+	const label = firstLabel(hostname)
+	if (label.startsWith('gris-')) return originCaState('dns_only')
+	const passEnd = start + state.provisionMs
+	if (label.startsWith('falla-')) {
+		const retried = retriedAt !== null && retriedAt >= start ? retriedAt : null
+		if (retried === null && now < passEnd) return originCaState('issuing')
+		// Justo después de un Reintentar, `retry_at` es la hora del pedido (en el pasado),
+		// hasta que termina la pasada; después, la próxima espera de 6 h.
+		const attempt = retried ?? start
+		const retryAt =
+			retried !== null && now < retried + state.provisionMs
+				? retried
+				: attempt + state.provisionMs + 6 * HOUR
+		const action = panel
+			? 'agrégalo al token: muelle lo reintenta solo cada 6 h'
+			: 'agrégalo al token y pulsa Reintentar'
+		return {
+			status: 'failed',
+			error_code: 'permission',
+			error: `muelle no pudo emitir el certificado de Cloudflare: el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de ${hostname} (Cloudflare: Authentication error); ${action}; mientras tanto usa Let's Encrypt`,
+			retry_at: new Date(retryAt).toISOString(),
+			expires_at: null,
+		}
+	}
+	if (now < passEnd) return originCaState('issuing')
+	if (label.startsWith('renueva-')) {
+		// Le quedan 20 días: se renueva a los 30 y deja de servirse a los 14.
+		const expiresAt = now + 20 * DAY
+		return {
+			status: 'active',
+			error_code: 'cloudflare',
+			error: `muelle no pudo renovar el certificado de Cloudflare, que vence el ${shortDate(expiresAt)}: Cloudflare no respondió (HTTP 503); se reintenta solo; si no lo renueva antes del ${shortDate(expiresAt - 14 * DAY)}, vuelve a Let's Encrypt`,
+			retry_at: new Date(now + 10 * 60_000).toISOString(),
+			expires_at: new Date(expiresAt).toISOString(),
+		}
+	}
+	return originCaState('active', passEnd + 90 * DAY)
+}
+
+/** `cert_source` y `origin_ca` (contrato §3.1): `cloudflare_origin_ca` solo con `active`. */
+export function certFields(originCa: MockOriginCa | null) {
+	return {
+		cert_source: originCa?.status === 'active' ? 'cloudflare_origin_ca' : 'letsencrypt',
+		origin_ca: originCa,
+	}
+}
+
 export interface NewMockDomain {
 	hostname: string
 	targetService: string
@@ -424,7 +555,9 @@ export const ingressDb = {
 	},
 
 	/** Reintentar / Verificar. Con `record_exists`, vuelve a mirar: si ya no está, lo crea. */
-	retry(domain: MockDomain, now = Date.now()): MockDomain {
+	retry(found: MockDomain, now = Date.now()): MockDomain {
+		// Con los certificados de Cloudflare, también reinicia la espera del suyo (§3.2).
+		const domain = { ...found, originCaRetriedAt: now }
 		if (domain.tlsMode === 'http') return this.save(issued(domain, now), now)
 		if (domain.lastErrorCode === 'record_exists') {
 			const goneAt = domain.foreignRecord?.goneAt ?? null
@@ -509,17 +642,46 @@ export const ingressDb = {
 	 */
 	proxy(now = Date.now()) {
 		this.settle(now)
-		const panelDomain = adminDb.state.panelDomain
 		return {
 			...proxyState(now),
 			ports_rollback: state.portsRollback ?? null,
-			// El certificado del panel (contrato §3.3): con los certificados de Cloudflare
-			// apagados, Let's Encrypt y sin `origin_ca`; null sin dominio del panel.
-			panel_certificate:
-				panelDomain === ''
-					? null
-					: { hostname: panelDomain, cert_source: 'letsencrypt', origin_ca: null },
+			panel_certificate: this.panelCertificate(now),
 		}
+	},
+
+	/** Un `PATCH /settings` encendió los certificados de Cloudflare: empieza la primera pasada. */
+	originCaTurnedOn(now = Date.now()): void {
+		state.originCaSince = now
+		commit()
+	},
+
+	/** El certificado de Cloudflare de un dominio (contrato §3.7), o null si no se usan. */
+	originCa(domain: MockDomain, now = Date.now()): MockOriginCa | null {
+		if (!originCaOn()) return null
+		if (domain.tlsMode !== 'cloudflare' || domain.zoneId === null || domain.recordId === null) {
+			return originCaState('not_eligible')
+		}
+		if (!domain.proxied) return originCaState('dns_only')
+		const start = Math.max(state.originCaSince ?? 0, domain.createdAt)
+		return eligibleOriginCa(
+			domain.hostname,
+			start,
+			domain.originCaRetriedAt ?? null,
+			false,
+			now,
+		)
+	},
+
+	/** El del panel (`panel_certificate`, contrato §3.3); null sin dominio del panel. */
+	panelCertificate(now = Date.now()) {
+		const hostname = adminDb.state.panelDomain
+		if (hostname === '') return null
+		const originCa = !originCaOn()
+			? null
+			: inZone(hostname)
+				? eligibleOriginCa(hostname, state.originCaSince ?? 0, null, true, now)
+				: originCaState('not_eligible')
+		return { hostname, ...certFields(originCa) }
 	},
 
 	/** Cloudflare falla al escribir (`cf-intermitente`): el dominio queda en error. */

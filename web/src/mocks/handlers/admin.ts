@@ -294,6 +294,8 @@ function applySettings(body: SettingsBody): Record<string, unknown> {
 	const originCaUnchanged = body.cloudflare_origin_ca === s.cloudflareOriginCa
 	if (typeof body.cloudflare_origin_ca === 'boolean' && !originCaUnchanged) {
 		s.cloudflareOriginCa = body.cloudflare_origin_ca
+		// Encenderla empieza la primera pasada: los dominios dicen `issuing` un momento.
+		if (body.cloudflare_origin_ca) ingressDb.originCaTurnedOn()
 	}
 	authDb.commit()
 	adminDb.commit()
