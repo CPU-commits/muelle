@@ -54,6 +54,18 @@ function toDateInput(date: Date): string {
 	return `${date.getFullYear()}-${month}-${day}`
 }
 
+/**
+ * Lo que propone el panel para un token de todos los proyectos (diseño del MCP, §9.3): se
+ * puede cambiar o borrar. El backend no lo exige.
+ */
+export const ALL_PROJECTS_EXPIRY_DAYS = 90
+
+/** El valor del `<input type="date">` de hoy + `days` días de calendario. */
+export function expiryInputInDays(days: number, today: Date = new Date()): string {
+	const start = startOfDay(today)
+	return toDateInput(new Date(start.getFullYear(), start.getMonth(), start.getDate() + days))
+}
+
 /** Los límites del `<input type="date">`: de mañana a 3650 días. */
 export function expiryInputRange(today: Date = new Date()): { min: string; max: string } {
 	const start = startOfDay(today)
