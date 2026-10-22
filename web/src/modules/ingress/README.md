@@ -1,8 +1,8 @@
 # Módulo `ingress` (Fase 3): el contrato que usa el panel
 
 La fuente es el contrato HTTP de las Fases 2 y 3:
-`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md` (§0 y §3), en este
-mismo árbol, con la Fase 3 terminada.
+`docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md` (§0 y §3, con los
+certificados de Cloudflare de §3.7), en este mismo árbol, con la Fase 3 terminada.
 Este archivo resume lo que la pantalla Dominios lee y manda, y cómo se comporta con cada
 respuesta. Si el contrato cambia, se cambian este README, `data/dtos/domainDto.ts` y los
 mocks (`src/mocks/{db,handlers}/ingress.ts`).
@@ -45,6 +45,8 @@ mocks (`src/mocks/{db,handlers}/ingress.ts`).
 	"last_error": null,
 	"cert_issuer": null,
 	"cert_expires_at": null,
+	"cert_source": "letsencrypt",
+	"origin_ca": null,
 	"records": [
 		{ "type": "A", "name": "api.tudominio.cl", "content": "203.0.113.24" },
 		{ "type": "AAAA", "name": "api.tudominio.cl", "content": "2001:db8::24" }
@@ -66,6 +68,8 @@ mocks (`src/mocks/{db,handlers}/ingress.ts`).
 | `last_error_code?`                 | Solo con `error`, y **siempre** con `error` (la migración 0003 lo garantiza): `record_exists` → Adoptar; `cloudflare` o `certificate` → Reintentar. El panel decide **solo por el código**, nunca por el texto. Uno desconocido es un error cualquiera                       |
 | `last_error?`                      | El mensaje en español, que el panel muestra                                                                                                                                                                                                                                  |
 | `cert_issuer?`, `cert_expires_at?` | Lo último que vio la verificación en un certificado **válido** (la organización del emisor, o su CN): "Let's Encrypt · vence 8 ene 2027"; sin los dos, "Certificado pendiente"                                                                                               |
+| `cert_source`                      | **Calculado**: qué certificado le pide muelle a Caddy ahora. `letsencrypt` (ACME, DNS-01 o HTTP-01) · `cloudflare_origin_ca` (uno de Cloudflare Origin CA que emitió muelle, §3.7). Es `cloudflare_origin_ca` si y solo si `origin_ca.status` es `active`. Obligatorio       |
+| `origin_ca`                        | **Calculado**: el certificado de Cloudflare Origin CA del dominio (abajo), o null con la opción apagada en Ajustes, sin token o con el proxy deshabilitado. Obligatorio (la clave; el valor puede ser null)                                                                  |
 | `records`                          | **Calculados con los ajustes actuales** (no se guardan): un `A` con la IP pública y un `AAAA` con la IPv6, si las hay; `[]` sin IP pública. `name` es el hostname. Con `cf_record_id` son los que maneja muelle; sin zona, los que hay que crear a mano (tabla con "copiar") |
 | `created_at`, `updated_at`         | `updated_at` cambia con cada cambio del dominio (crearlo, un `PATCH` que cambia algo, adoptarlo, un reintento que rehace el DNS y cada cambio de `status`); una verificación que solo renueva el certificado no lo mueve                                                     |
 
@@ -99,6 +103,45 @@ mocks (`src/mocks/{db,handlers}/ingress.ts`).
 Un dominio "Esperando DNS" se refresca cada 30 s: muelle lo verifica cada minuto mientras
 siga `pending`, así que pasa solo a `active` (o a `error` + `certificate` a los 10 min).
 **Verificar** lo mira ahora.
+
+### Certificados de Cloudflare (Origin CA, contrato §3.7)
+
+Opcionales, apagados por defecto (`cloudflare_origin_ca` en Ajustes). Con la opción
+encendida y un token con **Zone → SSL and Certificates → Edit**, cada dominio de Cloudflare
+con el proxy (nube naranja), también el del panel, usa un certificado de Cloudflare Origin
+CA en vez de Let's Encrypt (para el modo SSL Full (strict)). **Solo Cloudflare confía en
+él, los navegadores no.** Los de DNS only y los de fuera de Cloudflare siguen con Let's
+Encrypt. Lo emite y lo renueva muelle, en segundo plano.
+
+`origin_ca` trae siempre sus cinco claves:
+
+| Campo        | Qué                                                                                                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`     | `active` · `issuing` · `failed` · `dns_only` · `not_eligible` (abajo). Uno desconocido es un `ContractError`                                                                              |
+| `error_code` | `permission` · `cloudflare` · `rejected`, solo con `failed` y con `active` (una renovación que falló). Uno que el panel no conoce se lee como null y se muestra como una falla cualquiera |
+| `error`      | El mensaje en español, que el panel muestra tal cual (como oración)                                                                                                                       |
+| `retry_at`   | Cuándo se reintenta; después de un Reintentar, la hora del pedido (en el pasado) hasta que termina la pasada                                                                              |
+| `expires_at` | El vencimiento del que guardó muelle, se sirva o no; con `active`, nunca null                                                                                                             |
+
+| `status`           | Cuándo                                                                                          | Qué muestra Dominios (`originCaNotice`)                                                                                                   |
+| ------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `not_eligible`     | `tls_mode: http`, sin zona o sin `cf_record_id`; o en Cloudflare no hay registros de ese nombre | Nada                                                                                                                                      |
+| `dns_only`         | `proxied: false` en muelle, o la nube gris en Cloudflare                                        | La pista: "DNS only: usa Let's Encrypt…", o, con `proxied: true` en muelle, "En Cloudflare el registro está en DNS only (nube gris)…"     |
+| `active`           | Caddy sirve el de Origin CA                                                                     | "Cloudflare Origin CA · vence {expires_at}" ("pronto" a menos de 30 días), con "Solo Cloudflare confía en este certificado" en el `title` |
+| `active` + `error` | Falló una renovación y el actual todavía sirve                                                  | Lo de arriba y un pie en tono `warn` con el `error` y **Reintentar**                                                                      |
+| `failed`           | Califica, pero la última emisión falló: Let's Encrypt mientras tanto                            | Un pie en tono `warn` con el `error` y **Reintentar**. El dominio **no** pasa a `error`                                                   |
+| `issuing`          | muelle lo está emitiendo, o todavía no leyó sus registros: Let's Encrypt mientras tanto         | La pista "Emitiendo el certificado de Cloudflare…"; la lista se refresca cada 5 s mientras haya uno (`hasProvisioning`)                   |
+
+- El texto del certificado sale de `origin_ca.expires_at` (el que guardó muelle) con
+  `cert_source: cloudflare_origin_ca`: `cert_expires_at` es el de la verificación, que puede
+  ir hasta una hora atrasado después del cambio, y el texto de `cert_issuer` de Cloudflare
+  no está verificado.
+- Un dominio en `error` muestra su propio pie (con Reintentar, que también reintenta el de
+  Cloudflare): el aviso de Origin CA va cuando el dominio no tiene otro.
+- **Reintentar** (`retry`) también reinicia la espera del de Cloudflare que falló: la
+  respuesta trae `retry_at` en la hora del pedido, y el resultado se ve en la lista después.
+- Cambiar Proxied lo deja `dns_only` desde la respuesta (`false`) o `issuing` (`true`, o
+  `failed` si tenía una falla guardada).
 
 ## Endpoints
 
@@ -155,7 +198,12 @@ Dominios, arriba del formulario.
 		"http_port": 80,
 		"https_port": 443
 	},
-	"ports_rollback": null
+	"ports_rollback": null,
+	"panel_certificate": {
+		"hostname": "panel.tudominio.cl",
+		"cert_source": "letsencrypt",
+		"origin_ca": null
+	}
 }
 ```
 
@@ -180,6 +228,12 @@ Dominios, arriba del formulario.
   `{attempted: {http_port, https_port}, restored: {…}, error, at}`. Vive en la memoria de
   muelle (se pierde al reiniciarlo) y el próximo cambio de puertos la limpia. Viene siempre
   (null si no hubo). Dominios no la usa; Ajustes sí.
+- `panel_certificate` (`panelCertificate`): el certificado del panel, o null sin dominio del
+  panel. `hostname` es el dominio del panel, y `cert_source` y `origin_ca` tienen la forma y
+  las reglas de los de un dominio, salvo que el panel no tiene Reintentar: su falla se
+  reintenta sola (su mensaje lo dice). Con `disabled` también viene, y `origin_ca` es null.
+  Obligatorio. Dominios no lo usa; Ajustes sí (la línea "Panel: …" de la tarjeta de
+  Cloudflare).
 - Mientras dice `out_of_sync` o `recreating` se pregunta de nuevo cada 10 s (con la
   pestaña visible). Cada cambio de un dominio (crear, editar, borrar, adoptar,
   reintentar) lo vuelve a pedir: una ruta nueva puede dejarlo desincronizado.
@@ -191,14 +245,18 @@ Dominios, arriba del formulario.
   con el último pedido fallado, `proxyFollowQuery` deja de preguntar), y muestra si muelle-caddy quedó
   escuchando, el `error` si no arrancó, que no se pudo confirmar (pasado el plazo sin una
   respuesta que lo diga) o, si muelle volvió a los puertos anteriores, por qué y la
-  dirección anterior del panel (contrato §3.5).
+  dirección anterior del panel (contrato §3.5). Con los certificados de Cloudflare
+  encendidos, muestra `panel_certificate` (lo lee con `originCaNotice`), y
+  `proxyFollowQuery` también pregunta cada 10 s mientras el del panel dice `issuing`.
 
 ## Refresco y avisos
 
 - La lista se refresca cada 5 s mientras muelle está resolviendo algo ("Emitiendo
-  certificado") y cada 30 s mientras hay uno "Esperando DNS"; nunca con la pestaña oculta.
+  certificado", o el de Cloudflare `issuing`) y cada 30 s mientras hay uno "Esperando DNS";
+  nunca con la pestaña oculta.
 - Cambiar la IP pública o el token en Ajustes cambia los `records` y puede sacar dominios
-  de `error` + `cloudflare`: Ajustes invalida estas queries (`ingressKeys.all`).
+  de `error` + `cloudflare`, y encender o apagar los certificados de Cloudflare cambia
+  `cert_source` y `origin_ca`: Ajustes invalida estas queries (`ingressKeys.all`).
 - Los dominios con error se anuncian a un lector de pantalla en **una** región para toda la
   pantalla ("2 dominios tienen errores: …"), que cambia solo si cambia cuáles fallan.
 
@@ -230,9 +288,10 @@ Dominios:
   barrel de `catalog`): un `servicio:puerto` por cada puerto que declara cada servicio de
   la app (`services` de `GET {app}`, contrato §2.12). Siempre se suman los que ya usan los
   dominios.
-- `domainsQuery`, `proxyQuery`, `ingressKeys`, `ingressUseCases`, `domainState`,
-  `proxyNotice` y los tipos `AppDomain`, `DomainState`, `Hostname`, `ProxyStatus`,
-  `ProxyNotice`.
+- `domainsQuery`, `proxyQuery`, `proxyFollowQuery`, `ingressKeys`, `ingressUseCases`,
+  `domainState`, `originCaNotice`, `proxyNotice` y los tipos `AppDomain`, `DomainState`,
+  `Hostname`, `OriginCaState`, `PanelCertificate`, `PortsRollback`, `ProxyStatus`,
+  `ProxyNotice` y `ProxyPorts`.
 
 ## Mocks (`pnpm dev:mock`)
 
@@ -270,11 +329,25 @@ con Proxied prendido en Cloudflare: Adoptar lo copia) y `{app}.{stage}.otro-domi
 - Un `PATCH` de Proxied que sale bien saca un `error` + `cloudflare` (vuelve a `pending`).
   Sin token (se quitó en Ajustes), se guarda y el dominio queda en `error` + `cloudflare`
   con "agrega el token de Cloudflare en Ajustes", como en el backend.
+- **Certificados de Cloudflare** (`cloudflare_origin_ca` de Ajustes, apagados al empezar):
+  con la opción encendida, el token y el dominio del panel (si no, `origin_ca` es null),
+  durante la primera pasada (~3 s desde que se encendió, o desde que se creó el dominio) un
+  dominio que califica dice `issuing` y después `active`, con 90 días. Uno manejado sin
+  Proxied es `dns_only`; uno que muelle no maneja, o fuera de Cloudflare, `not_eligible`. Por
+  la primera etiqueta del hostname (también la del dominio del panel, en
+  `panel_certificate`):
+    - `falla-`: la emisión falla por el permiso del token (`failed` + `permission`, con el
+      mensaje del backend; se reintenta en 6 h o con Reintentar, que pone `retry_at` en la
+      hora del pedido);
+    - `gris-`: en Cloudflare el registro está en DNS only (`dns_only` con Proxied prendido
+      en muelle);
+    - `renueva-`: falló la renovación y el actual todavía sirve (`active` con el aviso).
+- En Ajustes, el token elige la respuesta de Cloudflare al encenderlos: con `sin-ssl` le
+  falta el permiso (`422` en `cloudflare_origin_ca`, o en `cloudflare_token` si se cambia el
+  token con ellos encendidos) y con `ssl-lento` Cloudflare no responde (`502`). Sin token,
+  encenderlos es `422`, y quitar el token con ellos encendidos sin mandarlos en `false`,
+  también (contrato §4.1, con los mensajes del contrato).
 
 ## Diferencias con el contrato
 
-Ninguna en lo de arriba. Falta lo de los certificados de Cloudflare (Origin CA, contrato §3.7):
-`cert_source` y `origin_ca` en el dominio, `panel_certificate` en `GET /proxy` y
-`cloudflare_origin_ca` en `/settings`. El contrato ya los tiene y el panel todavía no: los suma
-la línea 2 del diseño de Origin CA (`docs/superpowers/specs/2026-10-21-origin-ca-design.md`,
-§14), que también borra esta nota.
+Ninguna.
