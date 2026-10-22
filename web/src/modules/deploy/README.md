@@ -168,7 +168,8 @@ portada en `domain/value-objects/imageRef.ts` y probada contra el código Go con
 `imageRefOracle.json`).
 
 Respuesta: `{"id": 145, "status": "queued", "status_url": "…/deploys/145"}` (y el header
-`Location`). El panel va a Deploys, que abre el más reciente (ese).
+`Location`), igual en el rollback. Los tres campos son obligatorios en el DTO, aunque el
+panel use solo el `id`. El panel va a Deploys, que abre el más reciente (ese).
 
 Los `422` de una imagen, cada uno con su texto en el campo del servicio:
 
