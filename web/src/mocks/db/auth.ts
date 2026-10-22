@@ -66,7 +66,9 @@ function seed(): AuthState {
 	}
 }
 
-let state: AuthState = loadPersisted<AuthState>(STORAGE_KEY) ?? seed()
+// Lo guardado completa la semilla campo por campo: un e2e siembra solo lo que le importa
+// (`e2e/mock.ts`, una instalación sin usuarios con `{ users: [] }`).
+let state: AuthState = { ...seed(), ...loadPersisted<Partial<AuthState>>(STORAGE_KEY) }
 
 export const authDb = {
 	get state(): AuthState {

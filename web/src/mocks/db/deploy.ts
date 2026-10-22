@@ -126,7 +126,9 @@ function seed(overrides: Partial<DeployState> = {}): DeployState {
 	return { apps: {}, liveScale: 1, seedLive: true, ...overrides }
 }
 
-let state: DeployState = loadPersisted<DeployState>(STORAGE_KEY) ?? seed()
+// Lo guardado completa la semilla campo por campo: un e2e siembra solo lo que le importa
+// (`e2e/mock.ts`, deploys más rápidos con `{ liveScale }`).
+let state: DeployState = seed(loadPersisted<Partial<DeployState>>(STORAGE_KEY) ?? {})
 
 function commit(): void {
 	savePersisted(STORAGE_KEY, state)
