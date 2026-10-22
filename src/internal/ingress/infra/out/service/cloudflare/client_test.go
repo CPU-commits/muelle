@@ -176,9 +176,17 @@ func TestUnavailable(t *testing.T) {
 	cf.FailNext("GET", "/zones", 429, 10000, "Rate limited")
 	_, err = c.Zones(ctx, token)
 	check("429", err)
+	// Un 429 bloquea el token 5 min: se distingue, para cortar la pasada de
+	// Origin CA (§9.2 del diseño de Origin CA).
+	if !errors.Is(err, service.ErrRateLimited) {
+		t.Errorf("429: no es ErrRateLimited: %v", err)
+	}
 	cf.FailNext("POST", "/dns_records", 500, 10001, "boom")
 	_, err = c.CreateRecord(ctx, token, "z1", service.Record{Type: "A", Name: "a.x.cl", Content: "203.0.113.24"})
 	check("500", err)
+	if errors.Is(err, service.ErrRateLimited) {
+		t.Errorf("un 500 no es un 429: %v", err)
+	}
 
 	closed := httptest.NewServer(http.NotFoundHandler())
 	closed.Close()

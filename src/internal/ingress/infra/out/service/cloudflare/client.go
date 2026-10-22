@@ -174,7 +174,7 @@ func (c *Client) do(ctx context.Context, token, method, path string, q url.Value
 	case resp.StatusCode >= 500:
 		return 0, unavailable("respondió %d", resp.StatusCode)
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return 0, unavailable("respondió 429: demasiadas peticiones, reintenta en unos minutos")
+		return 0, fmt.Errorf("%w: %w", entity.ErrCloudflareUnavailable, service.ErrRateLimited)
 	case resp.StatusCode < 200 || (resp.StatusCode >= 300 && resp.StatusCode < 400):
 		return 0, unavailable("respondió %d", resp.StatusCode)
 	}
