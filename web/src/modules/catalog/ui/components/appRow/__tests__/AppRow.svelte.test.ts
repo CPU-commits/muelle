@@ -69,6 +69,18 @@ describe('AppRow', () => {
 		expect(calls[0]?.app.slug).toBe('api')
 	})
 
+	it('una app con cambios de después de su último deploy lleva "Cambios pendientes"; una al día, no', async () => {
+		const changed = fakeServiceApp('auditfy', 'staging', 'worker', {
+			lastDeployedAt: new Date(Date.now() - 60 * 60_000),
+			pendingChanges: true,
+		})
+		const { factory } = fakeDeploy()
+		await render(AppRowHarness, { apps: [api, changed], deploy: factory })
+
+		expect(rowText('worker')).toContain(m.catalog_app_pending())
+		expect(rowText('api')).not.toContain(m.catalog_app_pending())
+	})
+
 	it('un último deploy fallido suma "· falló" en rojo', async () => {
 		const { factory } = fakeDeploy({
 			lastDeployText: '#58 · hace 40 min',
