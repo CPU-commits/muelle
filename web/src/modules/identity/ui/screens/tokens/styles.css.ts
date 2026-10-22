@@ -72,6 +72,50 @@ export const snippet = style({
 	whiteSpace: 'pre',
 })
 
+// "Conectar con Claude Code": el comando y el .mcp.json, cada uno con su botón de copiar,
+// separados del token y del ejemplo de Actions por una línea.
+export const claude = style({
+	display: 'flex',
+	flexDirection: 'column',
+	gap: theme.space[10],
+	minWidth: 0,
+	paddingTop: theme.space[16],
+	borderTop: `1px solid ${theme.colors.borders.subtle}`,
+})
+
+export const claudeTitle = style({
+	fontSize: theme.typography.fontSize[14],
+	fontWeight: theme.typography.fontWeight.semibold,
+	letterSpacing: theme.typography.letterSpacing.snug,
+})
+
+export const claudeSubtitle = style({
+	marginTop: theme.space[6],
+	fontSize: theme.typography.fontSize[13],
+	fontWeight: theme.typography.fontWeight.medium,
+	color: theme.colors.text.primary,
+})
+
+// El bloque de código y su botón, del ancho del token de arriba: el bloque scrollea de
+// costado y, en un teléfono, el botón baja para que el bloque use todo el ancho.
+export const codeRow = style({
+	display: 'flex',
+	flexWrap: 'wrap',
+	alignItems: 'flex-start',
+	gap: theme.space[8],
+	maxWidth: '640px',
+	minWidth: 0,
+})
+
+export const codeBlock = style([
+	snippet,
+	{
+		flex: '1 1 280px',
+		minWidth: 0,
+		maxWidth: 'none',
+	},
+])
+
 export const group = style({
 	display: 'flex',
 	flexDirection: 'column',
@@ -127,9 +171,14 @@ export const creator = style({
 	color: theme.colors.text.tertiary,
 })
 
+// El alcance y, si es de solo lectura, su badge al lado (o abajo, si no entra).
 export const scopeCell = style({
 	flex: '1 1 200px',
 	minWidth: 0,
+	display: 'flex',
+	flexWrap: 'wrap',
+	alignItems: 'center',
+	gap: `${theme.space[4]} ${theme.space[8]}`,
 	overflowWrap: 'anywhere',
 })
 
