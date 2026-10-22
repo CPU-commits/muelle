@@ -591,7 +591,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - auditfy/staging completo desde GitHub Actions en una VM local.
 - Verificar los criterios de éxito de §1.
 
-**Frontend** (`web/`): `pnpm verify` (lint, `svelte-check` y vitest: dominio, casos de uso e integración contra MSW en node; componentes y viewModels en Chromium), `pnpm build` y `pnpm test:e2e` (Playwright contra el build con MSW, bajo la CSP). CI corre los tres en el job `web`, y el job `panel` compila y prueba Go con ese build embebido (`-tags panel`). Contra el backend de verdad, `pnpm test:e2e:real` (punta a punta, arriba).
+**Frontend** (`web/`): `pnpm verify` (lint, `svelte-check` y vitest: dominio, casos de uso e integración contra MSW en node; componentes y viewModels en Chromium), `pnpm build` y `pnpm test:e2e` (Playwright contra el build con MSW, bajo la CSP). Los e2e son caros y puntuales: solo cubren los flujos críticos (que el panel corre bajo la CSP del header, en cada pantalla; el setup del primer usuario con el 2FA y el login con el código; y de un proyecto nuevo a un deploy exitoso y su rollback). Lo que hace cada feature lo prueban los tests de dominio, de viewModel y de integración contra MSW; una feature suma un e2e solo si crea un flujo crítico nuevo (`web/CLAUDE.md`, "Tests"). CI corre los tres en el job `web`, y el job `panel` compila y prueba Go con ese build embebido (`-tags panel`). Contra el backend de verdad, `pnpm test:e2e:real` (punta a punta, arriba).
 
 ## 16. Migración desde Dokploy
 

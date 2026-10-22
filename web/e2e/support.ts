@@ -52,12 +52,13 @@ export async function login(page: Page): Promise<void> {
 }
 
 /**
- * Siembra el estado del mock antes de que arranque la página: cada db de src/mocks/db
- * guarda su estado en el sessionStorage de la pestaña (`muelle-mock:<db>`, persist.ts) y,
- * al arrancar, lo guardado completa su semilla campo por campo. Solo la primera vez: después
- * manda lo que el mock fue guardando (una recarga no lo vuelve a sembrar).
+ * Siembra el estado del mock antes de que arranque la página: cada db de src/mocks/db guarda
+ * su estado en el sessionStorage de la pestaña (`muelle-mock:<db>`, persist.ts), y `auth` y
+ * `deploy` completan lo guardado con su semilla, campo por campo. Solo la primera vez:
+ * después manda lo que el mock fue guardando (una recarga no lo vuelve a sembrar).
  *
- *   await seedMock(page, { auth: { users: [] } })   // una instalación sin usuarios
+ *   await seedMock(page, { auth: { users: [] } })          // una instalación sin usuarios
+ *   await seedMock(page, { deploy: { liveScale: 0.05 } })  // deploys de medio segundo
  */
 export async function seedMock(page: Page, dbs: Record<string, object>): Promise<void> {
 	await page.addInitScript((seeds) => {
