@@ -354,6 +354,7 @@ func TestReadOnlyTokenScopes(t *testing.T) {
 		{"GET", "/apps/a/env", nil, 200, ""},
 		{"GET", "/apps/a/deploys", nil, 200, ""},
 		{"GET", "/apps/a/status", nil, 200, ""},
+		{"GET", "/apps/a/domains", nil, 200, ""}, // D12: un token lee los dominios de sus apps
 		{"PUT", "/env", put, 204, ""},
 		{"PATCH", "/env", patch, 204, ""},
 		{"PUT", "/apps/a/env", put, 204, ""},
@@ -443,6 +444,12 @@ func TestReadOnlyTokenScopes(t *testing.T) {
 			{"GET", "/api/v1/audit", nil},
 			{"GET", "/api/v1/proxy", nil},
 			{"POST", "/api/v1/projects/p1/stages/s1/apps", map[string]any{"slug": "x"}},
+			// De los dominios, un token solo lee la lista (D12).
+			{"POST", "/api/v1/projects/p1/stages/s1/apps/a/domains", map[string]any{"hostname": "a.p1.cl", "target_service": "a", "target_port": 80}},
+			{"PATCH", "/api/v1/projects/p1/stages/s1/apps/a/domains/a.p1.cl", map[string]any{"proxied": true}},
+			{"DELETE", "/api/v1/projects/p1/stages/s1/apps/a/domains/a.p1.cl", nil},
+			{"POST", "/api/v1/projects/p1/stages/s1/apps/a/domains/a.p1.cl/adopt", nil},
+			{"POST", "/api/v1/projects/p1/stages/s1/apps/a/domains/a.p1.cl/retry", nil},
 		} {
 			expect(t, fmt.Sprintf("%s: %s %s", k.name, c.method, c.path), e.bearer(k.token, c.method, c.path, c.body), 403, "token_not_allowed")
 		}

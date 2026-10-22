@@ -147,10 +147,10 @@ func New(d Deps) *Module {
 	return m
 }
 
-// RegisterRoutes registra los errores y las rutas del módulo, todas solo con
-// sesión (contrato §3): GET /api/v1/proxy y los dominios (GET/POST
-// …/apps/{a}/domains, PATCH/DELETE …/domains/{hostname}, POST …/adopt y
-// …/retry).
+// RegisterRoutes registra los errores y las rutas del módulo (contrato §3):
+// GET /api/v1/proxy y los dominios (GET/POST …/apps/{a}/domains, PATCH/DELETE
+// …/domains/{hostname}, POST …/adopt y …/retry), solo con sesión, salvo GET
+// …/apps/{a}/domains, que también lee un token en su alcance (§8.1).
 func (m *Module) RegisterRoutes(k *utils.Kit) { inhttp.Register(k, m.httpUC) }
 
 // RegisterTools registra las herramientas MCP de ingress (contrato §8.3).

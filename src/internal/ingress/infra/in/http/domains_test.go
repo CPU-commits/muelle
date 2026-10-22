@@ -85,7 +85,10 @@ func newDomainsFixture(t *testing.T) *domainsFixture {
 	}
 	f.client = httptestutil.New(t, httptestutil.FakeAuth{
 		Sessions: map[string]entity.Principal{"s": {UserID: 1, Username: "felipe"}},
-		Tokens:   map[string]entity.Principal{"tok": {UserID: 1, Username: "felipe"}},
+		Tokens: map[string]entity.Principal{
+			"tok":  {Token: &entity.TokenScope{ID: 1, Name: "ci", ProjectSlug: "auditfy", StageSlug: "staging"}},
+			"otro": {Token: &entity.TokenScope{ID: 2, Name: "otro", ProjectSlug: "auditfy", StageSlug: "production"}},
+		},
 	}, func(k *utils.Kit) { Register(k, uc) })
 	ingresstest.App(t, db, "auditfy", "staging", "api", "service")
 	ingresstest.App(t, db, "auditfy", "staging", "infra", "compose")
@@ -253,11 +256,26 @@ func TestHTTPRetryDomain(t *testing.T) {
 	expectError(t, f.client, "POST", apiPath+"/domains/nada.tudominio.cl/retry", nil, 404, "not_found", "")
 }
 
-// Solo con sesión (contrato §3): un token recibe 403 token_not_allowed.
+// Un token lee la lista de dominios de una app de su alcance (contrato §3.2,
+// §8.1); fuera de él, out_of_scope. Lo demás de los dominios es solo de
+// sesión: un token recibe 403 token_not_allowed.
 func TestHTTPDomainsToken(t *testing.T) {
 	f := newDomainsFixture(t)
+	f.create(t, "api.tudominio.cl")
+	w := f.client.Do("GET", apiPath+"/domains", nil, httptestutil.WithBearer("tok"))
+	httptestutil.Expect(t, w, http.StatusOK)
+	list := httptestutil.Decode[[]map[string]any](t, w)
+	if len(list) != 1 || list[0]["hostname"] != "api.tudominio.cl" {
+		t.Fatalf("GET …/domains con token: %v", list)
+	}
+	checkKeys(t, list[0])
+	w = f.client.Do("GET", apiPath+"/domains", nil, httptestutil.WithBearer("otro"))
+	httptestutil.Expect(t, w, http.StatusForbidden)
+	if code := httptestutil.ErrorCode(t, w); code != "out_of_scope" {
+		t.Fatalf("GET …/domains con un token de otro stage: %s", code)
+	}
+
 	for _, r := range []struct{ method, path string }{
-		{"GET", apiPath + "/domains"},
 		{"POST", apiPath + "/domains"},
 		{"PATCH", apiPath + "/domains/a.tudominio.cl"},
 		{"DELETE", apiPath + "/domains/a.tudominio.cl"},
