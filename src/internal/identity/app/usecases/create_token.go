@@ -37,7 +37,7 @@ func NewCreateToken(tx sharedrepo.Transactor, users repository.UserRepository, t
 func (uc *CreateToken) Execute(ctx context.Context, in dto.CreateTokenInput) (dto.CreatedTokenOutput, error) {
 	now := uc.clock.Now()
 	plain, hash := service.RandomToken(service.APITokenPrefix)
-	tok, err := entity.NewAPIToken(in.Name, hash, 0, nil, &in.CreatedBy, now, nil)
+	tok, err := entity.NewAPIToken(in.Name, hash, 0, nil, &in.CreatedBy, now, nil, false, false)
 	if err != nil {
 		return dto.CreatedTokenOutput{}, err
 	}

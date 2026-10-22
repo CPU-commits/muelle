@@ -24,19 +24,25 @@ func NewTokenRepository(db *sqlitedb.DB) *TokenRepository { return &TokenReposit
 // lectura) y el username de quien lo creó (NULL si se borró: created_by es
 // ON DELETE SET NULL, el token no se borra con su creador). Las claves
 // foráneas ON DELETE CASCADE borran un token con su proyecto o su stage, pero
-// si la base quedó inconsistente (por ejemplo, un
-// borrado con foreign_keys=OFF) el token no puede ampliar su alcance: sin su
-// proyecto no aparece (JOIN), y con un stage que no existe o es de otro
-// proyecto el slug llega NULL y scanToken lo rechaza (errBrokenScope).
+// si la base quedó inconsistente (por ejemplo, un borrado con
+// foreign_keys=OFF) el token no puede ampliar su alcance: un token de
+// proyecto sin su proyecto no aparece (el LEFT JOIN lo deja con el proyecto
+// NULL, y el WHERE lo descarta; nunca se lee como uno de todos los
+// proyectos), y con un stage que no existe o es de otro proyecto el slug
+// llega NULL y scanToken lo rechaza (errBrokenScope). Termina con un WHERE:
+// las consultas suman sus condiciones con AND.
 const tokenSelect = `SELECT t.id, t.name, t.token_hash, t.project_id, p.slug, t.stage_id, s.slug,
-	t.created_by, u.username, t.created_at, t.last_used_at, t.expires_at
-	FROM api_tokens t JOIN projects p ON p.id = t.project_id
+	t.read_only, t.all_projects, t.created_by, u.username, t.created_at, t.last_used_at, t.expires_at
+	FROM api_tokens t LEFT JOIN projects p ON p.id = t.project_id
 	LEFT JOIN stages s ON s.id = t.stage_id AND s.project_id = t.project_id
-	LEFT JOIN users u ON u.id = t.created_by`
+	LEFT JOIN users u ON u.id = t.created_by
+	WHERE (t.all_projects = 1 OR p.id IS NOT NULL)`
 
-// errBrokenScope: el token tiene stage, pero el stage no existe o es de otro
-// proyecto. Sin su slug, Principal.Allows lo trataría como de todo el proyecto.
-var errBrokenScope = errors.New("identity: token con un stage que no existe")
+// errBrokenScope: el alcance del token no está completo (ScopeValid): tiene
+// stage, pero el stage no existe o es de otro proyecto (sin su slug,
+// Principal.Allows lo trataría como de todo el proyecto), o las marcas de
+// todos los proyectos no son coherentes.
+var errBrokenScope = errors.New("identity: token con el alcance roto")
 
 // scopeNotFound traduce un token inexistente o con el alcance roto a ErrNotFound.
 func scopeNotFound(err error) error {
@@ -48,9 +54,9 @@ func scopeNotFound(err error) error {
 
 func (r *TokenRepository) Create(ctx context.Context, t entity.APIToken) (entity.APIToken, error) {
 	res, err := r.db.Conn(ctx).ExecContext(ctx,
-		`INSERT INTO api_tokens (name, token_hash, project_id, stage_id, created_by, created_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		t.Name, t.TokenHash, t.ProjectID, nullInt(t.StageID), nullInt(t.CreatedBy),
+		`INSERT INTO api_tokens (name, token_hash, project_id, stage_id, read_only, all_projects, created_by, created_at, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.Name, t.TokenHash, projectID(t), nullInt(t.StageID), t.ReadOnly, t.AllProjects, nullInt(t.CreatedBy),
 		sqlitedb.Millis(t.CreatedAt), sqlitedb.NullMillis(t.ExpiresAt))
 	switch {
 	case sqlitedb.IsUnique(err):
@@ -64,12 +70,12 @@ func (r *TokenRepository) Create(ctx context.Context, t entity.APIToken) (entity
 	if err != nil {
 		return entity.APIToken{}, err
 	}
-	saved, err := scanToken(r.db.Conn(ctx).QueryRowContext(ctx, tokenSelect+` WHERE t.id = ?`, id))
+	saved, err := scanToken(r.db.Conn(ctx).QueryRowContext(ctx, tokenSelect+` AND t.id = ?`, id))
 	return saved, scopeNotFound(err)
 }
 
 func (r *TokenRepository) GetByHash(ctx context.Context, tokenHash string) (entity.APIToken, error) {
-	t, err := scanToken(r.db.Conn(ctx).QueryRowContext(ctx, tokenSelect+` WHERE t.token_hash = ?`, tokenHash))
+	t, err := scanToken(r.db.Conn(ctx).QueryRowContext(ctx, tokenSelect+` AND t.token_hash = ?`, tokenHash))
 	return t, scopeNotFound(err)
 }
 
@@ -103,21 +109,34 @@ func (r *TokenRepository) Touch(ctx context.Context, id int64, at time.Time) err
 	return err
 }
 
+// projectID es project_id: NULL en un token de todos los proyectos.
+func projectID(t entity.APIToken) sql.NullInt64 {
+	if t.AllProjects {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: t.ProjectID, Valid: true}
+}
+
 func scanToken(sc scanner) (entity.APIToken, error) {
 	var t entity.APIToken
-	var stageID, createdBy, used, expires sql.NullInt64
-	var stageSlug, createdByName sql.NullString
+	var projectID, stageID, createdBy, used, expires sql.NullInt64
+	var projectSlug, stageSlug, createdByName sql.NullString
 	var created int64
-	err := sc.Scan(&t.ID, &t.Name, &t.TokenHash, &t.ProjectID, &t.ProjectSlug, &stageID, &stageSlug,
-		&createdBy, &createdByName, &created, &used, &expires)
+	err := sc.Scan(&t.ID, &t.Name, &t.TokenHash, &projectID, &projectSlug, &stageID, &stageSlug,
+		&t.ReadOnly, &t.AllProjects, &createdBy, &createdByName, &created, &used, &expires)
 	if err != nil {
 		return entity.APIToken{}, err
 	}
 	if stageID.Valid && !stageSlug.Valid {
 		return entity.APIToken{}, errBrokenScope
 	}
+	t.ProjectID = projectID.Int64
+	t.ProjectSlug = projectSlug.String
 	t.StageSlug = stageSlug.String
 	t.StageID = fromNullInt(stageID)
+	if !t.ScopeValid() {
+		return entity.APIToken{}, errBrokenScope
+	}
 	t.CreatedBy = fromNullInt(createdBy)
 	t.CreatedByName = createdByName.String
 	t.CreatedAt = sqlitedb.Time(created)
