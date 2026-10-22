@@ -108,6 +108,16 @@ func NoPlaceholders(field, s string) error {
 	return nil
 }
 
+// cloudflareTokenRe es la forma de un token de API de Cloudflare.
+var cloudflareTokenRe = regexp.MustCompile(`^[\x21-\x7e]{20,512}$`)
+
+// IsCloudflareToken dice si s tiene la forma de un token de API de
+// Cloudflare: de 20 a 512 caracteres ASCII visibles, sin espacios ni saltos
+// de línea (contrato §4.1). La comparten PATCH /settings, install
+// (--cloudflare-token) y MUELLE_INIT_CLOUDFLARE_TOKEN_FILE, cada uno con su
+// mensaje, que nunca cita el valor.
+func IsCloudflareToken(s string) bool { return cloudflareTokenRe.MatchString(s) }
+
 // Port valida un puerto TCP o UDP (1-65535).
 func Port(field string, n int) error {
 	if n < 1 || n > 65535 {

@@ -10,6 +10,10 @@
 //	users:totp_pending:<id>  users.totp_pending
 //	settings:<key>           settings.value de un setting cifrado
 //	registries:password:<id> registries.password (<id> es registries.id, Fase 2)
+//	origin_ca_certs:private_key:<id>
+//	                         origin_ca_certs.private_key (<id> es
+//	                         origin_ca_certs.id): la clave de un certificado
+//	                         de Cloudflare Origin CA (contrato §3.7)
 //
 // La regla: el prefijo fijo (todo antes del último segmento) es distinto para
 // cada tabla y columna, y solo el último segmento es texto libre (puede

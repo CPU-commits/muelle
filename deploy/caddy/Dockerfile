@@ -3,7 +3,9 @@
 # Cloudflare (dns.providers.cloudflare, para el DNS-01 de Let's Encrypt), en
 # versiones fijas. Sin CMD ni configuración propios: ingress crea el
 # contenedor con `caddy run --resume` y CADDY_ADMIN en el socket
-# (naming.CaddyCommand y CaddyEnv). Desde la raíz del repo:
+# (naming.CaddyCommand y CaddyEnv). Los certificados de Cloudflare (Origin
+# CA, apps.tls.certificates.load_pem) son del núcleo de Caddy: no necesitan
+# nada más. Desde la raíz del repo:
 #   docker build --build-arg VERSION=v0.1.0 -t ghcr.io/cpu-commits/muelle-caddy:v0.1.0 deploy/caddy
 #
 # Las dos imágenes base son de la misma versión de Caddy, con tag exacto y el

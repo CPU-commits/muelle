@@ -72,7 +72,7 @@ func newSyncFixture(t *testing.T) *syncFixture {
 	}
 	log := slog.New(slog.NewTextHandler(f.log, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	f.syncer = NewSyncer(outservice.NewProxySettingsReader(db, c), f.repo, outservice.NewCatalogReader(db),
-		caddy.NewAdmin(f.caddy.Dial), f.state, f.clock, "", false, func() { f.fails.Add(1) }, log)
+		OriginRepos{Certs: reposqlite.NewOriginCerts(db, c), Hosts: reposqlite.NewOriginHosts(db)}, caddy.NewAdmin(f.caddy.Dial), f.state, f.clock, "", false, func() { f.fails.Add(1) }, log)
 	f.apiID = ingresstest.App(t, db, "auditfy", "staging", "api", "service")
 	return f
 }
@@ -281,5 +281,176 @@ func TestSyncSerialized(t *testing.T) {
 	}
 	if !strings.Contains(f.lastLoad(t), `"nuevo.auditfy.cl"`) {
 		t.Fatal("el último Load no tiene el dominio nuevo")
+	}
+}
+
+// adminFunc es una admin API de Caddy hecha con una función.
+type adminFunc func(ctx context.Context, cfg service.ProxyConfig, force bool) error
+
+func (f adminFunc) Load(ctx context.Context, cfg service.ProxyConfig, force bool) error {
+	return f(ctx, cfg, force)
+}
+
+const syncOriginKey = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49ClaveDelSync\n-----END PRIVATE KEY-----\n"
+
+// seedOrigin deja host como un dominio que califica (manejado, proxied, con
+// zona z1), con un active que vence en 90 días y visto con el proxy en
+// Cloudflare.
+func (f *syncFixture) seedOrigin(t *testing.T, host string) {
+	t.Helper()
+	ctx := context.Background()
+	d, err := entity.NewDomain(f.apiID, host, "api", 3000, true, f.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.TLSMode, d.CFZoneID, d.CFRecordID = entity.TLSCloudflare, "z1", "rec-"+host
+	if err := f.repo.Create(ctx, &d); err != nil {
+		t.Fatal(err)
+	}
+	c := entity.OriginCert{Hostname: host, ZoneID: "z1", CFCertID: "cf-" + host, CertPEM: "-----BEGIN CERTIFICATE-----\nMIIBsync\n-----END CERTIFICATE-----\n",
+		KeyPEM: syncOriginKey, ExpiresAt: f.clock.Now().Add(90 * 24 * time.Hour), CreatedAt: f.clock.Now()}
+	if err := reposqlite.NewOriginCerts(f.db, f.cipher).Insert(ctx, &c); err != nil {
+		t.Fatal(err)
+	}
+	if err := reposqlite.NewOriginHosts(f.db).SetObserved(ctx, host, entity.ObservedProxied, f.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// El Syncer lee los certificados de Origin CA (con la clave descifrada) y lo
+// observado, y los manda a Caddy solo con la opción encendida y con token.
+func TestSyncOriginCA(t *testing.T) {
+	f := newSyncFixture(t)
+	f.seedOrigin(t, "api.auditfy.cl")
+	on := func(p *shared.ProxySettings) { p.CloudflareToken, p.CloudflareOriginCA = syncToken, true }
+	f.enable(t, on)
+	if err := f.syncer.Sync(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	body := f.lastLoad(t)
+	if !strings.Contains(body, `"load_pem"`) || !strings.Contains(body, `ClaveDelSync`) || !strings.Contains(body, `"skip_certificates":["api.auditfy.cl"]`) {
+		t.Fatalf("sin el certificado de Origin CA: %s", body)
+	}
+	if strings.Contains(f.log.String(), "ClaveDelSync") {
+		t.Fatalf("la clave en el log: %s", f.log.String())
+	}
+	f.enable(t, func(p *shared.ProxySettings) { p.CloudflareToken = syncToken })
+	if err := f.syncer.Sync(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if body := f.lastLoad(t); strings.Contains(body, `"load_pem"`) || strings.Contains(body, "ClaveDelSync") {
+		t.Fatalf("con la opción apagada no va: %s", body)
+	}
+}
+
+// LastGoodBuild es el momento en que empezó a leer la base el último Sync
+// cuyo POST /load salió bien (§6 del diseño de Origin CA): no el del fin, y
+// no avanza si el Load falla.
+func TestSyncLastGoodBuild(t *testing.T) {
+	f := newSyncFixture(t)
+	f.enable(t, nil)
+	var fail atomic.Bool
+	admin := adminFunc(func(ctx context.Context, cfg service.ProxyConfig, force bool) error {
+		f.clock.Advance(time.Minute) // el Load tarda: termina un minuto después
+		if fail.Load() {
+			return &service.CaddyRejected{Message: "no"}
+		}
+		return nil
+	})
+	s := NewSyncer(outservice.NewProxySettingsReader(f.db, f.cipher), f.repo, outservice.NewCatalogReader(f.db), OriginRepos{},
+		admin, f.state, f.clock, "", false, nil, slog.New(slog.DiscardHandler))
+	if !s.LastGoodBuild().IsZero() {
+		t.Fatal("antes del primer Sync es cero")
+	}
+	start := f.clock.Now()
+	if err := s.Sync(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.LastGoodBuild(); !got.Equal(start) {
+		t.Fatalf("LastGoodBuild = %s, esperaba %s (el inicio, no el fin)", got, start)
+	}
+	fail.Store(true)
+	if err := s.Sync(context.Background(), false); err == nil {
+		t.Fatal("debió fallar")
+	}
+	if got := s.LastGoodBuild(); !got.Equal(start) {
+		t.Fatalf("un Load que falla no lo mueve: %s", got)
+	}
+	// Con el proxy deshabilitado no se manda nada, y tampoco avanza.
+	ingresstest.SetProxySettings(t, f.db, f.cipher, shared.DefaultProxySettings())
+	fail.Store(false)
+	if err := s.Sync(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.LastGoodBuild(); !got.Equal(start) {
+		t.Fatalf("deshabilitado: %s", got)
+	}
+}
+
+// Retiring corre fn con el mutex de los Sync tomado, con at: espera al Sync
+// en curso (que pudo leer el certificado active antes del retiro), y at
+// nunca es anterior al comienzo de un Sync anterior, aunque el reloj vuelva
+// atrás. Así un retiro de antes de LastGoodBuild ya no está en lo que sirve
+// Caddy (§6 del diseño de Origin CA).
+func TestSyncerRetiring(t *testing.T) {
+	f := newSyncFixture(t)
+	f.enable(t, nil)
+	loading, release := make(chan struct{}), make(chan struct{})
+	admin := adminFunc(func(ctx context.Context, cfg service.ProxyConfig, force bool) error {
+		if loading != nil {
+			close(loading)
+			<-release
+		}
+		return nil
+	})
+	s := NewSyncer(outservice.NewProxySettingsReader(f.db, f.cipher), f.repo, outservice.NewCatalogReader(f.db), OriginRepos{},
+		admin, f.state, f.clock, "", false, nil, slog.New(slog.DiscardHandler))
+	start := f.clock.Now()
+	synced := make(chan error, 1)
+	go func() { synced <- s.Sync(context.Background(), false) }()
+	<-loading
+	ran := make(chan time.Time, 1)
+	go func() {
+		_ = s.Retiring(func(at time.Time) error { ran <- at; return nil })
+	}()
+	select {
+	case <-ran:
+		t.Fatal("corrió con un Sync en curso")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if err := <-synced; err != nil {
+		t.Fatal(err)
+	}
+	if at := <-ran; at.Before(start) {
+		t.Fatalf("at = %s, antes del Sync (%s)", at, start)
+	}
+
+	// El reloj vuelve una hora atrás: at sigue sin ser anterior al último
+	// comienzo de un Sync, ni el comienzo del próximo anterior a at.
+	loading = nil
+	f.clock.Advance(time.Minute)
+	if err := s.Sync(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	last := s.LastGoodBuild()
+	f.clock.Advance(-time.Hour)
+	var at time.Time
+	if err := s.Retiring(func(a time.Time) error { at = a; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if at.Before(last) {
+		t.Fatalf("con el reloj atrás, at = %s, antes del Sync de %s", at, last)
+	}
+	if err := s.Sync(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.LastGoodBuild(); got.Before(at) {
+		t.Fatalf("con el reloj atrás, LastGoodBuild = %s, antes del retiro de %s", got, at)
+	}
+	// Un error de fn es el de Retiring.
+	boom := errors.New("boom")
+	if err := s.Retiring(func(time.Time) error { return boom }); !errors.Is(err, boom) {
+		t.Fatalf("error: %v", err)
 	}
 }

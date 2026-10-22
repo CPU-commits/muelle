@@ -15,10 +15,13 @@ import (
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
 	"github.com/CPU-commits/muelle/src/internal/ingress/app/usecases"
+	ingressentity "github.com/CPU-commits/muelle/src/internal/ingress/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
+	reposqlite "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
 	"github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service/caddy"
 	"github.com/CPU-commits/muelle/src/internal/ingress/ingresstest"
+	"github.com/CPU-commits/muelle/src/package/clock"
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/crypto"
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker/dockertest"
@@ -32,12 +35,15 @@ const testImage = "ghcr.io/cpu-commits/muelle-caddy:v0.1.0"
 // caddy.Runtime sobre dockertest y un ProxyState), sin el módulo: el paquete
 // ingress importa este, y su test no puede importarlo de vuelta.
 type proxyFixture struct {
-	db      *sqlite.DB
-	cipher  *crypto.Cipher
-	docker  *dockertest.Fake
-	runtime *caddy.Runtime
-	state   *usecases.ProxyState
-	client  *httptestutil.Client
+	db       *sqlite.DB
+	cipher   *crypto.Cipher
+	docker   *dockertest.Fake
+	runtime  *caddy.Runtime
+	state    *usecases.ProxyState
+	client   *httptestutil.Client
+	origin   usecases.OriginRepos
+	settings *outservice.ProxySettingsReader
+	clock    *clock.Manual
 }
 
 func newProxyFixture(t *testing.T) *proxyFixture {
@@ -52,7 +58,12 @@ func newProxyFixture(t *testing.T) *proxyFixture {
 	rt := caddy.NewRuntime(d, caddy.Names{Container: "t-caddy", PanelNetwork: "t_panel",
 		DataVolume: "t-data", ConfigVolume: "t-config", AdminVolume: "t-admin"}, log)
 	f := &proxyFixture{db: db, cipher: c, docker: d, runtime: rt, state: usecases.NewProxyState()}
-	uc := UseCases{ProxyStatus: usecases.NewGetProxyStatus(outservice.NewProxySettingsReader(db, c), rt, f.state, testImage)}
+	settings := outservice.NewProxySettingsReader(db, c)
+	f.origin = usecases.OriginRepos{Certs: reposqlite.NewOriginCerts(db, c), Hosts: reposqlite.NewOriginHosts(db)}
+	f.settings = settings
+	f.clock = clock.NewManual(time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC))
+	origin := usecases.NewEnsureOriginCA(usecases.OriginDeps{Settings: settings, Repos: f.origin, Clock: f.clock, DefImage: testImage})
+	uc := UseCases{ProxyStatus: usecases.NewGetProxyStatus(settings, rt, f.state, origin, f.clock, testImage)}
 	f.client = httptestutil.New(t, httptestutil.FakeAuth{
 		Sessions: map[string]entity.Principal{"s": {UserID: 1, Username: "felipe"}},
 		Tokens:   map[string]entity.Principal{"tok": {UserID: 1, Username: "felipe"}},
@@ -85,7 +96,8 @@ func TestProxyStatusInitial(t *testing.T) {
 	f.enable(t, nil)
 	want := map[string]any{
 		"status": "out_of_sync", "error": "muelle todavía no le mandó la configuración a Caddy", "synced_at": nil, "ports_rollback": nil,
-		"caddy": map[string]any{"image": nil, "running": false, "http_port": 80.0, "https_port": 443.0},
+		"caddy":             map[string]any{"image": nil, "running": false, "http_port": 80.0, "https_port": 443.0},
+		"panel_certificate": map[string]any{"hostname": "panel.auditfy.cl", "cert_source": "letsencrypt", "origin_ca": nil},
 	}
 	if got := f.get(t); !reflect.DeepEqual(got, want) {
 		t.Fatalf("GET /proxy:\n got %v\nwant %v", got, want)
@@ -104,7 +116,8 @@ func TestProxyStatusSynced(t *testing.T) {
 
 	want := map[string]any{
 		"status": "synced", "error": nil, "synced_at": "2026-10-14T12:20:41.123Z", "ports_rollback": nil,
-		"caddy": map[string]any{"image": testImage, "running": true, "http_port": 8080.0, "https_port": 8443.0},
+		"caddy":             map[string]any{"image": testImage, "running": true, "http_port": 8080.0, "https_port": 8443.0},
+		"panel_certificate": map[string]any{"hostname": "panel.auditfy.cl", "cert_source": "letsencrypt", "origin_ca": nil},
 	}
 	if got := f.get(t); !reflect.DeepEqual(got, want) {
 		t.Fatalf("GET /proxy:\n got %v\nwant %v", got, want)
@@ -118,12 +131,52 @@ func TestProxyStatusDisabled(t *testing.T) {
 	want := map[string]any{
 		"status": "disabled", "error": nil, "synced_at": nil, "ports_rollback": nil,
 		"caddy": map[string]any{"image": nil, "running": false, "http_port": 80.0, "https_port": 443.0},
+		// Sin panel_domain no hay certificado del panel.
+		"panel_certificate": nil,
 	}
 	if got := f.get(t); !reflect.DeepEqual(got, want) {
 		t.Fatalf("GET /proxy:\n got %v\nwant %v", got, want)
 	}
 	if slices.ContainsFunc(f.docker.Calls(), func(c string) bool { return strings.HasPrefix(c, "InspectContainer") }) {
 		t.Fatalf("no debería consultar Docker: %v", f.docker.Calls())
+	}
+}
+
+// panel_certificate (contrato §3.3): con la opción encendida y el panel en
+// una zona, el estado de su certificado de Origin CA, con la regla de un
+// dominio.
+func TestProxyStatusPanelCertificate(t *testing.T) {
+	f := newProxyFixture(t)
+	f.enable(t, func(p *entity.ProxySettings) {
+		p.CloudflareToken, p.CloudflareOriginCA = "cf-token-1234567890abcdef", true
+	})
+	f.docker.SetImagePresent(testImage)
+	ctx := context.Background()
+	if err := f.settings.SavePanelDNS(ctx, service.PanelDNS{ZoneID: "z1"}); err != nil {
+		t.Fatal(err)
+	}
+	exp := f.clock.Now().Add(90 * 24 * time.Hour)
+	c := ingressentity.OriginCert{Hostname: "panel.auditfy.cl", ZoneID: "z1", CFCertID: "1", CertPEM: "PEM", KeyPEM: "KEY",
+		ExpiresAt: exp, CreatedAt: f.clock.Now()}
+	if err := f.origin.Certs.Insert(ctx, &c); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.origin.Hosts.SetObserved(ctx, "panel.auditfy.cl", ingressentity.ObservedProxied, f.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	w := f.client.Do("GET", "/api/v1/proxy", nil, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusOK)
+	want := `"panel_certificate":{"hostname":"panel.auditfy.cl","cert_source":"cloudflare_origin_ca","origin_ca":{"status":"active","error_code":null,"error":null,"retry_at":null,"expires_at":"2027-01-19T12:00:00Z"}}`
+	if !strings.Contains(w.Body.String(), want) {
+		t.Fatalf("JSON:\n%s\nesperaba\n%s", w.Body, want)
+	}
+	// En DNS only en Cloudflare: dns_only, con expires_at del que tiene.
+	if err := f.origin.Hosts.SetObserved(ctx, "panel.auditfy.cl", ingressentity.ObservedDNSOnly, f.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.get(t)["panel_certificate"].(map[string]any)
+	if got["cert_source"] != "letsencrypt" || got["origin_ca"].(map[string]any)["status"] != "dns_only" {
+		t.Fatalf("dns_only: %v", got)
 	}
 }
 

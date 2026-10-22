@@ -10,7 +10,11 @@
 //   - la paginación de /zones (per_page hasta 50) y de los registros;
 //   - un A o AAAA no conviven con un CNAME del mismo nombre, ni dos CNAME
 //     (81053), y dos registros idénticos tampoco (81058). PutRecord no revisa
-//     nada: siembra lo que el test quiera.
+//     nada: siembra lo que el test quiera;
+//   - Origin CA (origin_ca.go): POST /certificates firma el CSR con una CA de
+//     prueba en memoria (OriginRoot) si el token tiene Zone → SSL and
+//     Certificates → Edit en la zona (GrantSSL), y DELETE /certificates/{id}
+//     lo revoca; GET /zones trae status y permissions de cada zona.
 package cftest
 
 import (
@@ -64,12 +68,14 @@ type Server struct {
 	hang    time.Duration
 	calls   []string
 	nextID  int
+	origin  originCA
 }
 
 // New arranca el servidor; se cierra con t.Cleanup.
 func New(t testing.TB) *Server {
 	t.Helper()
 	s := &Server{tokens: map[string]string{}, zones: map[string]string{}, records: map[string]map[string]*record{}}
+	s.origin = newOriginCA(t)
 	s.srv = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.srv.Close)
 	return s
@@ -300,7 +306,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case len(parts) == 1 && parts[0] == "zones" && r.Method == http.MethodGet:
-		s.listZones(w, r)
+		s.listZones(w, r, token)
+	case len(parts) == 1 && parts[0] == "certificates" && r.Method == http.MethodPost:
+		s.createOriginCert(w, r, token)
+	case len(parts) == 2 && parts[0] == "certificates" && r.Method == http.MethodDelete:
+		s.revokeOriginCert(w, token, parts[1])
 	case len(parts) >= 3 && parts[0] == "zones" && parts[2] == "dns_records":
 		zoneID := parts[1]
 		if _, ok := s.zones[zoneID]; !ok {
@@ -337,16 +347,20 @@ func paginate(r *http.Request, n, defPerPage, maxPerPage int) (from, to int, inf
 	return from, to, &resultInfo{Page: page, PerPage: perPage, Count: to - from, TotalCount: n, TotalPages: pages}
 }
 
-func (s *Server) listZones(w http.ResponseWriter, r *http.Request) {
+func (s *Server) listZones(w http.ResponseWriter, r *http.Request, token string) {
 	ids := make([]string, 0, len(s.zones))
 	for id := range s.zones {
 		ids = append(ids, id)
 	}
 	slices.SortFunc(ids, func(a, b string) int { return cmp.Or(cmp.Compare(s.zones[a], s.zones[b]), cmp.Compare(a, b)) })
 	from, to, info := paginate(r, len(ids), 20, 50)
-	out := []map[string]string{}
+	out := []map[string]any{}
 	for _, id := range ids[from:to] {
-		out = append(out, map[string]string{"id": id, "name": s.zones[id], "status": "active"})
+		z := map[string]any{"id": id, "name": s.zones[id], "status": s.zoneStatus(id)}
+		if !s.origin.omitPerms {
+			z["permissions"] = s.zonePermissions(token, id)
+		}
+		out = append(out, z)
 	}
 	ok(w, out, info)
 }

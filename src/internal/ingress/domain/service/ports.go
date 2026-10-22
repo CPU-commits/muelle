@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
 )
@@ -70,7 +71,19 @@ type Settings interface {
 type ProxyPorts struct{ HTTPPort, HTTPSPort int }
 
 // Zone es una zona de Cloudflare visible para el token.
-type Zone struct{ ID, Name string }
+type Zone struct {
+	ID, Name string
+	// Status es el de Cloudflare: initializing, pending, active o moved.
+	Status string
+	// Permissions son los de la zona en GET /zones ("#ssl:edit",
+	// "#dns_records:edit"…). Cloudflare los marca como deprecados: nil si
+	// no vienen. Solo los mira CheckOriginCAPermission, como pista (§3.3 del
+	// diseño de Origin CA).
+	Permissions []string
+}
+
+// ZoneActive es el status de una zona que Cloudflare ya usa de proxy.
+const ZoneActive = "active"
 
 // Record es un registro DNS de Cloudflare.
 type Record struct {
@@ -104,6 +117,40 @@ type DNS interface {
 	CreateRecord(ctx context.Context, token, zoneID string, r Record) (Record, error)
 	UpdateRecord(ctx context.Context, token, zoneID, id string, c RecordChange) (Record, error)
 	DeleteRecord(ctx context.Context, token, zoneID, id string) error
+}
+
+// IssuedOriginCert es un certificado que emitió Cloudflare Origin CA: su id
+// (el serial en decimal, para revocarlo) y el PEM que devolvió.
+type IssuedOriginCert struct{ ID, CertPEM string }
+
+// OriginCA es la API de Cloudflare Origin CA (adaptador:
+// infra/out/service/cloudflare, contrato §3.7). Los errores son los de DNS:
+// ErrCloudflareUnavailable (sin red, 5xx, 429, respuesta ilegible),
+// ErrDNSNotFound (404) o un *DNSError con el código de Cloudflare. Ninguno
+// trae el token.
+type OriginCA interface {
+	// CreateOriginCert pide un certificado origin-ecc para un solo hostname,
+	// con el CSR en PEM y validityDays de validez (POST /certificates).
+	CreateOriginCert(ctx context.Context, token, hostname, csrPEM string, validityDays int) (IssuedOriginCert, error)
+	// RevokeOriginCert revoca el certificado (DELETE /certificates/{id}).
+	// Uno desconocido es ErrDNSNotFound, y uno ya revocado un *DNSError con
+	// el código 1014.
+	RevokeOriginCert(ctx context.Context, token, id string) error
+}
+
+// OriginKeys genera la clave y el CSR de un certificado de Origin CA, y
+// revisa lo que devolvió Cloudflare antes de guardarlo (adaptador:
+// infra/out/service.OriginKeys; la aleatoriedad es infra, §5.1 del diseño
+// de Origin CA). La clave va en claro: nunca va a un log ni a un error.
+type OriginKeys interface {
+	// Generate es una clave ECDSA P-256 nueva, en PKCS#8 ("PRIVATE KEY"), y
+	// un CSR con CN y SAN = hostname, los dos en PEM.
+	Generate(hostname string) (keyPEM, csrPEM string, err error)
+	// Check revisa que certPEM vaya con keyPEM (como lo carga Caddy), que su
+	// hoja sea para hostname y que valga (NotBefore <= now+5 min < NotAfter).
+	// Devuelve la hoja sola, vuelta a codificar desde el DER, y su NotAfter.
+	// Un certificado que no sirve es un *OriginCertError.
+	Check(certPEM, keyPEM, hostname string, now time.Time) (leafPEM string, notAfter time.Time, err error)
 }
 
 // App es una app de catalog como la necesita ingress.
@@ -162,9 +209,14 @@ type CaddyAdmin interface {
 // conecta por TLS a muelle-caddy:443 con SNI = hostname (adaptador:
 // infra/out/service.TLSProbe, §8 del spec). Un handshake que falla, o un
 // certificado que no verifica, es una observación inválida y no un error;
-// si no llega a Caddy, ErrCaddyUnreachable ("no se sabe", D9).
+// si no llega a Caddy, ErrCaddyUnreachable ("no se sabe", D9). pinned son
+// los DER de las hojas de Origin CA que Caddy puede estar sirviendo para
+// hostname (ninguna si no se sirve con Origin CA; dos en una renovación,
+// hasta que Caddy carga la nueva): una hoja servida idéntica a una de ellas,
+// para ese hostname y vigente, es válida sin verificar la cadena (§8 del
+// diseño de Origin CA).
 type CertProbe interface {
-	Probe(ctx context.Context, hostname string) (CertObservation, error)
+	Probe(ctx context.Context, hostname string, pinned [][]byte) (CertObservation, error)
 }
 
 // CaddyWant es cómo tiene que quedar muelle-caddy (contrato §3.4).

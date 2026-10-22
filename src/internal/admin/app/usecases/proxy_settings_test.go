@@ -29,6 +29,17 @@ type fakeHook struct {
 	changes  [][2]entity.ProxySettings
 	portsErr error
 	probed   [][2]entity.ProxySettings
+	// originErr es lo que responde CheckCloudflareOriginCA, y originChecked
+	// las llamadas (token y campo).
+	originErr     error
+	originChecked [][2]string
+}
+
+func (h *fakeHook) CheckCloudflareOriginCA(ctx context.Context, token, field string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.originChecked = append(h.originChecked, [2]string{token, field})
+	return h.originErr
 }
 
 func (h *fakeHook) CheckProxyPorts(ctx context.Context, old, next entity.ProxySettings) error {
@@ -527,5 +538,199 @@ func TestApplyStartupSettingsLateInitIsIgnored(t *testing.T) {
 	}
 	if n := len(admintestEvents(t, e)); n != 0 {
 		t.Fatalf("eventos: %d", n)
+	}
+}
+
+const (
+	originToken    = "cf-token-1234567890abcdef"
+	originNewToken = "cf-token-nuevo-1234567890abc"
+	msgNeedsToken  = "necesita el token de Cloudflare: configúralo antes de activarla"
+	msgRemoveToken = "sin token no se pueden usar los certificados de Cloudflare: mándala en false en el mismo cambio para quitar el token"
+)
+
+// wantMessage exige un 422 en field con ese mensaje.
+func wantMessage(t *testing.T, err error, field, msg string) {
+	t.Helper()
+	wantField(t, err, field)
+	if ve, _ := errors.AsType[*validate.Error](err); ve.Message != msg {
+		t.Fatalf("mensaje:\n%s\nesperaba\n%s", ve.Message, msg)
+	}
+}
+
+// originState es lo guardado: la opción y el token.
+func (e *proxyEnv) originState(t *testing.T) (on string, token string) {
+	t.Helper()
+	on, _ = e.raw(t, entity.SettingCloudflareOriginCA)
+	token, _ = e.raw(t, entity.SettingCloudflareToken)
+	return on, token
+}
+
+// Encenderla sin token es un 422 (regla 1 de §3.2 del diseño de Origin CA),
+// también si el mismo PATCH quita el token; no se guarda nada ni se llama a
+// Cloudflare.
+func TestPatchOriginCANeedsToken(t *testing.T) {
+	e := newProxyEnv(t)
+	_, err := e.do(t, dto.PatchSettingsInput{CloudflareOriginCA: ptr(true), PublicIP: ptr("203.0.113.7")})
+	wantMessage(t, err, "cloudflare_origin_ca", msgNeedsToken)
+	if _, ok := e.raw(t, entity.SettingPublicIP); ok {
+		t.Fatal("no se guarda nada del PATCH")
+	}
+	// Con un token guardado, encenderla y quitarlo a la vez: el de la regla 1.
+	if _, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr(originToken)}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.do(t, dto.PatchSettingsInput{CloudflareOriginCA: ptr(true), CloudflareToken: ptr("")})
+	wantMessage(t, err, "cloudflare_origin_ca", msgNeedsToken)
+	if len(e.hook.originChecked) != 0 {
+		t.Fatalf("llamó a Cloudflare: %v", e.hook.originChecked)
+	}
+	if on, tok := e.originState(t); on == "true" || tok != originToken {
+		t.Fatalf("guardó: %q %q", on, tok)
+	}
+}
+
+// Encenderla comprueba el permiso con field cloudflare_origin_ca, guarda
+// "true", la audita como bool y avisa a ingress. Mandar otra vez true no es
+// un cambio: ni comprueba, ni audita, ni avisa.
+func TestPatchOriginCATurnOn(t *testing.T) {
+	e := newProxyEnv(t)
+	if _, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr(originToken)}); err != nil {
+		t.Fatal(err)
+	}
+	e.hook.checked, e.hook.changes = nil, nil
+	before := len(admintestEvents(t, e))
+	out, err := e.do(t, dto.PatchSettingsInput{CloudflareOriginCA: ptr(true)})
+	if err != nil || !out.CloudflareOriginCA {
+		t.Fatalf("encender: %+v %v", out, err)
+	}
+	if !slices.Equal(e.hook.originChecked, [][2]string{{originToken, "cloudflare_origin_ca"}}) || len(e.hook.checked) != 0 {
+		t.Fatalf("hook: %+v", e.hook)
+	}
+	if on, _ := e.originState(t); on != "true" {
+		t.Fatalf("guardada: %q", on)
+	}
+	if got, _ := e.get.Execute(context.Background(), dto.GetSettingsInput{}); !got.CloudflareOriginCA {
+		t.Fatal("GET /settings no la trae")
+	}
+	events := admintestEvents(t, e)
+	if len(events) != before+1 || string(events[0].Details) != `{"cloudflare_origin_ca":true}` {
+		t.Fatalf("auditoría: %s", events[0].Details)
+	}
+	if len(e.hook.changes) != 1 || !e.hook.changes[0][1].CloudflareOriginCA || e.hook.changes[0][0].CloudflareOriginCA {
+		t.Fatalf("ProxySettingsChanged: %+v", e.hook.changes)
+	}
+
+	// Otra vez true, y el mismo token: nada.
+	if _, err := e.do(t, dto.PatchSettingsInput{CloudflareOriginCA: ptr(true), CloudflareToken: ptr(originToken)}); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.hook.originChecked) != 1 || len(e.hook.changes) != 1 || len(admintestEvents(t, e)) != before+1 {
+		t.Fatalf("sin cambio: %+v", e.hook)
+	}
+
+	// Apagarla nunca llama a Cloudflare, y se audita como false.
+	out, err = e.do(t, dto.PatchSettingsInput{CloudflareOriginCA: ptr(false)})
+	if err != nil || out.CloudflareOriginCA || len(e.hook.originChecked) != 1 {
+		t.Fatalf("apagar: %+v %v %+v", out, err, e.hook.originChecked)
+	}
+	if events := admintestEvents(t, e); string(events[0].Details) != `{"cloudflare_origin_ca":false}` {
+		t.Fatalf("auditoría al apagar: %s", events[0].Details)
+	}
+}
+
+// Sin el permiso (un 422 del hook) o con Cloudflare caído (502), no se
+// guarda nada del PATCH.
+func TestPatchOriginCAPermissionFails(t *testing.T) {
+	e := newProxyEnv(t)
+	if _, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr(originToken)}); err != nil {
+		t.Fatal(err)
+	}
+	e.hook.originErr = validate.Errorf("cloudflare_origin_ca", "el token no tiene el permiso")
+	_, err := e.do(t, dto.PatchSettingsInput{CloudflareOriginCA: ptr(true), PublicIP: ptr("203.0.113.7")})
+	wantField(t, err, "cloudflare_origin_ca")
+	e.hook.originErr = fmt.Errorf("x: %w", entity.ErrCloudflareUnavailable)
+	if _, err := e.do(t, dto.PatchSettingsInput{CloudflareOriginCA: ptr(true), PublicIP: ptr("203.0.113.7")}); !errors.Is(err, entity.ErrCloudflareUnavailable) {
+		t.Fatalf("502: %v", err)
+	}
+	if on, _ := e.originState(t); on == "true" {
+		t.Fatal("se guardó la opción")
+	}
+	if _, ok := e.raw(t, entity.SettingPublicIP); ok {
+		t.Fatal("se guardó algo del PATCH")
+	}
+}
+
+// Con la opción encendida, un token nuevo se comprueba después de
+// CheckCloudflareToken, con field cloudflare_token; si se enciende en el
+// mismo PATCH, con cloudflare_origin_ca.
+func TestPatchOriginCATokenChange(t *testing.T) {
+	e := newProxyEnv(t)
+	if _, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr(originToken), CloudflareOriginCA: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(e.hook.originChecked, [][2]string{{originToken, "cloudflare_origin_ca"}}) {
+		t.Fatalf("token y opción a la vez: %v", e.hook.originChecked)
+	}
+	e.hook.originChecked, e.hook.checked = nil, nil
+	if _, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr(originNewToken)}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(e.hook.checked, []string{originNewToken}) || !slices.Equal(e.hook.originChecked, [][2]string{{originNewToken, "cloudflare_token"}}) {
+		t.Fatalf("token nuevo: %+v", e.hook)
+	}
+	// El token nuevo sin el permiso: 422 en cloudflare_token, y queda el anterior.
+	e.hook.originErr = validate.Errorf("cloudflare_token", "el token no tiene el permiso")
+	_, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr("cf-token-otro-1234567890abcd")})
+	wantField(t, err, "cloudflare_token")
+	if _, tok := e.originState(t); tok != originNewToken {
+		t.Fatalf("token: %q", tok)
+	}
+	// Si CheckCloudflareToken falla, no se comprueba el permiso.
+	e.hook.originErr, e.hook.originChecked = nil, nil
+	e.hook.checkErr = validate.Errorf("cloudflare_token", "Cloudflare rechazó el token")
+	_, err = e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr("cf-token-otro-1234567890abcd")})
+	wantField(t, err, "cloudflare_token")
+	if len(e.hook.originChecked) != 0 {
+		t.Fatalf("comprobó el permiso de un token rechazado: %v", e.hook.originChecked)
+	}
+}
+
+// Quitar el token con la opción encendida exige apagarla en el mismo PATCH
+// (regla 1b); con false, se guardan las dos cosas.
+func TestPatchOriginCARemoveToken(t *testing.T) {
+	e := newProxyEnv(t)
+	if _, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr(originToken), CloudflareOriginCA: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr(""), PublicIP: ptr("203.0.113.7")})
+	wantMessage(t, err, "cloudflare_origin_ca", msgRemoveToken)
+	if on, tok := e.originState(t); on != "true" || tok != originToken {
+		t.Fatalf("guardó: %q %q", on, tok)
+	}
+	out, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr(""), CloudflareOriginCA: ptr(false)})
+	if err != nil || out.CloudflareOriginCA || out.CloudflareTokenSet {
+		t.Fatalf("quitar con false: %+v %v", out, err)
+	}
+	if len(e.hook.originChecked) != 1 {
+		t.Fatalf("apagar no comprueba nada: %v", e.hook.originChecked)
+	}
+}
+
+// Las reglas miran lo que cambia en el PATCH, no lo guardado: la opción
+// encendida sin token (un UPDATE a mano) no frena un PATCH de otra cosa, ni
+// un cloudflare_token "" que ahí no quita nada.
+func TestPatchOriginCAStoredWithoutToken(t *testing.T) {
+	e := newProxyEnv(t)
+	if err := e.repo.Set(context.Background(), entity.SettingCloudflareOriginCA, []byte("true"), false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.do(t, dto.PatchSettingsInput{PublicIP: ptr("203.0.113.7")}); err != nil {
+		t.Fatalf("otra cosa: %v", err)
+	}
+	if _, err := e.do(t, dto.PatchSettingsInput{CloudflareToken: ptr("")}); err != nil {
+		t.Fatalf("\"\" sin token guardado: %v", err)
+	}
+	if len(e.hook.originChecked) != 0 {
+		t.Fatalf("hook: %v", e.hook.originChecked)
 	}
 }

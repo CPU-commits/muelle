@@ -48,6 +48,11 @@ const (
 	// Vacío (lo normal): la de esta versión de muelle (naming.CaddyImageFor).
 	// Solo lo escribe la configuración inicial (MUELLE_INIT_CADDY_IMAGE).
 	SettingCaddyImage = "caddy_image"
+	// SettingCloudflareOriginCA enciende los certificados de Cloudflare
+	// (Origin CA) para los dominios con el proxy de Cloudflare (contrato
+	// §3.7): "true" o "false" (FormatBool), sin cifrar; apagada por defecto.
+	// Se cambia solo en PATCH /settings: no hay un MUELLE_INIT_* para esto.
+	SettingCloudflareOriginCA = "cloudflare_origin_ca"
 )
 
 // SettingCloudflareTokenAAD liga el token cifrado a su fila (§12: settings:<clave>).
@@ -62,7 +67,7 @@ const (
 // ProxySettingKeys son las claves que guarda ProxySettings.Encode (todas
 // menos el token, que va cifrado aparte).
 var ProxySettingKeys = []string{
-	SettingACMEEmail, SettingCaddyImage, SettingPanelAllowedCIDRs, SettingPanelDomain,
+	SettingACMEEmail, SettingCaddyImage, SettingCloudflareOriginCA, SettingPanelAllowedCIDRs, SettingPanelDomain,
 	SettingProxyHTTPPort, SettingProxyHTTPSPort, SettingPublicIP, SettingPublicIPv6,
 }
 
@@ -82,6 +87,9 @@ type ProxySettings struct {
 	HTTPPort          int
 	HTTPSPort         int
 	CaddyImage        string
+	// CloudflareOriginCA: los certificados de Cloudflare (Origin CA) para
+	// los dominios con el proxy de Cloudflare, en vez de Let's Encrypt.
+	CloudflareOriginCA bool
 }
 
 // DefaultProxySettings son los ajustes de una base sin nada guardado.
@@ -132,6 +140,7 @@ func DecodeProxySettings(raw map[string]string, token string) (ProxySettings, er
 	p.ACMEEmail = raw[SettingACMEEmail]
 	p.PanelDomain = raw[SettingPanelDomain]
 	p.CaddyImage = raw[SettingCaddyImage]
+	p.CloudflareOriginCA = ParseBool(raw[SettingCloudflareOriginCA])
 	for key, dst := range map[string]*int{SettingProxyHTTPPort: &p.HTTPPort, SettingProxyHTTPSPort: &p.HTTPSPort} {
 		v := raw[key]
 		if v == "" {
@@ -164,14 +173,15 @@ func (p ProxySettings) Encode() map[string]string {
 	}
 	list, _ := json.Marshal(cidrs) // un []string siempre se puede serializar
 	return map[string]string{
-		SettingPublicIP:          p.PublicIP,
-		SettingPublicIPv6:        p.PublicIPv6,
-		SettingACMEEmail:         p.ACMEEmail,
-		SettingPanelDomain:       p.PanelDomain,
-		SettingPanelAllowedCIDRs: string(list),
-		SettingProxyHTTPPort:     strconv.Itoa(p.HTTPPort),
-		SettingProxyHTTPSPort:    strconv.Itoa(p.HTTPSPort),
-		SettingCaddyImage:        p.CaddyImage,
+		SettingPublicIP:           p.PublicIP,
+		SettingPublicIPv6:         p.PublicIPv6,
+		SettingACMEEmail:          p.ACMEEmail,
+		SettingPanelDomain:        p.PanelDomain,
+		SettingPanelAllowedCIDRs:  string(list),
+		SettingProxyHTTPPort:      strconv.Itoa(p.HTTPPort),
+		SettingProxyHTTPSPort:     strconv.Itoa(p.HTTPSPort),
+		SettingCaddyImage:         p.CaddyImage,
+		SettingCloudflareOriginCA: FormatBool(p.CloudflareOriginCA),
 	}
 }
 

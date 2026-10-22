@@ -14,15 +14,16 @@ import (
 
 func fullProxySettings() ProxySettings {
 	return ProxySettings{
-		CloudflareToken:   "cf-token",
-		PublicIP:          "203.0.113.7",
-		PublicIPv6:        "2001:db8::7",
-		ACMEEmail:         "tu@correo.cl",
-		PanelDomain:       "panel.tudominio.cl",
-		PanelAllowedCIDRs: []string{"203.0.113.0/24", "2001:db8::/32"},
-		HTTPPort:          8080,
-		HTTPSPort:         8443,
-		CaddyImage:        "ghcr.io/cpu-commits/muelle-caddy:v0.1.0",
+		CloudflareToken:    "cf-token",
+		PublicIP:           "203.0.113.7",
+		PublicIPv6:         "2001:db8::7",
+		ACMEEmail:          "tu@correo.cl",
+		PanelDomain:        "panel.tudominio.cl",
+		PanelAllowedCIDRs:  []string{"203.0.113.0/24", "2001:db8::/32"},
+		HTTPPort:           8080,
+		HTTPSPort:          8443,
+		CaddyImage:         "ghcr.io/cpu-commits/muelle-caddy:v0.1.0",
+		CloudflareOriginCA: true,
 	}
 }
 
@@ -34,14 +35,15 @@ func TestProxySettingsRoundTrip(t *testing.T) {
 		t.Fatal("Encode no incluye el token: va cifrado aparte")
 	}
 	want := map[string]string{
-		SettingPublicIP:          "203.0.113.7",
-		SettingPublicIPv6:        "2001:db8::7",
-		SettingACMEEmail:         "tu@correo.cl",
-		SettingPanelDomain:       "panel.tudominio.cl",
-		SettingPanelAllowedCIDRs: `["203.0.113.0/24","2001:db8::/32"]`,
-		SettingProxyHTTPPort:     "8080",
-		SettingProxyHTTPSPort:    "8443",
-		SettingCaddyImage:        "ghcr.io/cpu-commits/muelle-caddy:v0.1.0",
+		SettingPublicIP:           "203.0.113.7",
+		SettingPublicIPv6:         "2001:db8::7",
+		SettingACMEEmail:          "tu@correo.cl",
+		SettingPanelDomain:        "panel.tudominio.cl",
+		SettingPanelAllowedCIDRs:  `["203.0.113.0/24","2001:db8::/32"]`,
+		SettingProxyHTTPPort:      "8080",
+		SettingProxyHTTPSPort:     "8443",
+		SettingCaddyImage:         "ghcr.io/cpu-commits/muelle-caddy:v0.1.0",
+		SettingCloudflareOriginCA: "true",
 	}
 	if !maps.Equal(raw, want) {
 		t.Fatalf("Encode = %v\nesperaba   %v", raw, want)
@@ -92,6 +94,42 @@ func TestDecodeProxySettingsRejectsGarbage(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), key) {
 			t.Errorf("%s=%q: el error debe nombrar la clave: %v", key, value, err)
 		}
+	}
+}
+
+// cloudflare_origin_ca (contrato §3.7) se guarda como "true" o "false", sin
+// cifrar. Lo que no es exactamente "true" (también "" o una clave que no
+// está) es false: un valor raro no enciende los certificados de Cloudflare.
+func TestProxySettingsCloudflareOriginCA(t *testing.T) {
+	p := DefaultProxySettings()
+	if p.CloudflareOriginCA {
+		t.Fatal("apagada por defecto")
+	}
+	if got := p.Encode()[SettingCloudflareOriginCA]; got != "false" {
+		t.Fatalf("apagada se guarda como %q", got)
+	}
+	p.CloudflareOriginCA = true
+	if got := p.Encode()[SettingCloudflareOriginCA]; got != "true" {
+		t.Fatalf("encendida se guarda como %q", got)
+	}
+	for v, want := range map[string]bool{"true": true, "false": false, "": false, "1": false, "TRUE": false, "sí": false} {
+		got, err := DecodeProxySettings(map[string]string{SettingCloudflareOriginCA: v}, "")
+		if err != nil || got.CloudflareOriginCA != want {
+			t.Errorf("%q: %v %v, esperaba %v", v, got.CloudflareOriginCA, err, want)
+		}
+	}
+	if got, err := DecodeProxySettings(map[string]string{}, ""); err != nil || got.CloudflareOriginCA {
+		t.Fatalf("sin la clave: %v %v", got.CloudflareOriginCA, err)
+	}
+	// ChangedKeys la incluye sola, y el mismo valor no es un cambio.
+	old := fullProxySettings()
+	next := old
+	next.CloudflareOriginCA = false
+	if got := next.ChangedKeys(old); !slices.Equal(got, []string{SettingCloudflareOriginCA}) {
+		t.Fatalf("ChangedKeys = %v", got)
+	}
+	if got := old.ChangedKeys(old); len(got) != 0 {
+		t.Fatalf("sin cambios: %v", got)
 	}
 }
 

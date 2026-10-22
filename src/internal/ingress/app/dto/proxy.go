@@ -14,6 +14,18 @@ type ProxyOutput struct {
 	// anteriores porque muelle-caddy no arrancó con los nuevos; null si no
 	// hubo (contrato §3.5).
 	PortsRollback *PortsRollbackOutput `json:"ports_rollback"`
+	// PanelCertificate es el certificado del panel; null sin panel_domain
+	// (contrato §3.3).
+	PanelCertificate *PanelCertificateOutput `json:"panel_certificate"`
+}
+
+// PanelCertificateOutput es el certificado del panel: hostname es
+// panel_domain, y cert_source y origin_ca tienen las reglas de los de un
+// dominio (el panel no tiene retry).
+type PanelCertificateOutput struct {
+	Hostname   string          `json:"hostname"`
+	CertSource string          `json:"cert_source"`
+	OriginCA   *OriginCAOutput `json:"origin_ca"`
 }
 
 // PortsRollbackOutput es una vuelta a los puertos anteriores del proxy.

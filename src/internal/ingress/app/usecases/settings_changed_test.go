@@ -35,7 +35,7 @@ func newHookFixture(t *testing.T, delay time.Duration) *hookFixture {
 		DomainOp: 30 * time.Second, DomainRetry: 20 * time.Second,
 	})
 	return &hookFixture{lifecycleFixture: f, recreator: r,
-		uc: NewProxySettingsChanged(r, records, f.panel, f.syncer, f.state, 2*time.Minute, f.slog)}
+		uc: NewProxySettingsChanged(r, records, f.panel, f.syncer, nil, f.state, 2*time.Minute, f.slog)}
 }
 
 // change guarda los ajustes con mod, como admin antes de llamar al hook, y

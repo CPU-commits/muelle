@@ -23,6 +23,14 @@ var (
 	ErrDNSNotFound = errors.New("Cloudflare: no existe")
 )
 
+// ErrRateLimited: Cloudflare respondió 429. Va junto con
+// entity.ErrCloudflareUnavailable: bloquea el token 5 minutos, también el
+// DNS, así que el reconciliador de Origin CA corta su pasada (§9.2 del
+// diseño de Origin CA).
+// El texto es el que sigue a "Cloudflare no responde: " en el error del
+// cliente.
+var ErrRateLimited = errors.New("respondió 429: demasiadas peticiones, reintenta en unos minutos")
+
 // DNSError es un pedido que Cloudflare rechazó (un 4xx que no es 404 ni 429,
 // o success: false). Message es el de Cloudflare, sin el token.
 type DNSError struct {

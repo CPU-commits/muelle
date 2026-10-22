@@ -22,7 +22,7 @@ func newProxyJob(f *lifecycleFixture) *ProxyJob {
 	return NewProxyJob(f.settings, f.catalog,
 		NewEnsureStageNetwork(nets, testCaddyNames.Container, f.slog), f.ensure,
 		NewRemoveOrphanNetworks(nets, f.catalog, testCaddyNames.Container, "", f.slog),
-		f.syncer, f.panel, f.state, defCaddyImage, time.Millisecond, 4*time.Millisecond, f.slog)
+		f.syncer, f.panel, nil, f.state, defCaddyImage, time.Millisecond, 4*time.Millisecond, f.slog)
 }
 
 // En desarrollo no hace nada: ni Docker ni la admin API.

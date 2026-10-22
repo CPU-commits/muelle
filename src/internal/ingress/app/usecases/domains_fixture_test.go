@@ -37,13 +37,19 @@ type fakeProbe struct {
 	err   error
 	block chan struct{}
 	calls []string
+	// pins es el pinned de la última sonda de cada host.
+	pins map[string][][]byte
 	// probing recibe el host cuando un Probe empieza (si no es nil).
 	probing chan string
 }
 
-func (p *fakeProbe) Probe(ctx context.Context, host string) (service.CertObservation, error) {
+func (p *fakeProbe) Probe(ctx context.Context, host string, pinned [][]byte) (service.CertObservation, error) {
 	p.mu.Lock()
 	p.calls = append(p.calls, host)
+	if p.pins == nil {
+		p.pins = map[string][][]byte{}
+	}
+	p.pins[host] = pinned
 	block, probing := p.block, p.probing
 	p.mu.Unlock()
 	if probing != nil {
@@ -74,6 +80,13 @@ func (p *fakeProbe) set(host string, o service.CertObservation) {
 
 func (p *fakeProbe) setErr(err error) { p.mu.Lock(); p.err = err; p.mu.Unlock() }
 
+// pinned es el pinned de la última sonda de host (nil si no hubo).
+func (p *fakeProbe) pinned(host string) [][]byte {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pins[host]
+}
+
 func (p *fakeProbe) probed() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -91,6 +104,7 @@ type ucFixture struct {
 	caddy  *caddytest.Admin
 	clock  *clock.Manual
 	repo   *reposqlite.Domains
+	origin OriginRepos
 	state  *ProxyState
 	syncer *Syncer
 	probe  *fakeProbe
@@ -121,15 +135,21 @@ func newUCFixture(t *testing.T) *ucFixture {
 		db: db, cipher: c, cf: cftest.New(t), caddy: caddytest.New(t),
 		clock: clock.NewManual(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)),
 		repo:  reposqlite.NewDomains(db), state: NewProxyState(), probe: &fakeProbe{def: invalidCert}, ops: &Ops{},
+		origin: OriginRepos{Certs: reposqlite.NewOriginCerts(db, c), Hosts: reposqlite.NewOriginHosts(db)},
 	}
 	f.cf.AddToken(dnsToken)
 	f.cf.AddZone("z1", "tudominio.cl")
 	settings := outservice.NewProxySettingsReader(db, c)
 	catalog := outservice.NewCatalogReader(db)
-	f.syncer = NewSyncer(settings, f.repo, catalog, caddy.NewAdmin(f.caddy.Dial), f.state, f.clock, "", false, nil, log)
-	f.certs = NewCertChecker(f.probe, f.repo, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, log)
+	f.syncer = NewSyncer(settings, f.repo, catalog, f.origin, caddy.NewAdmin(f.caddy.Dial), f.state, f.clock, "", false, nil, log)
+	f.certs = NewCertChecker(f.probe, f.repo, settings, f.origin, f.syncer, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, log)
+	client := cloudflare.New(f.cf.URL())
 	f.deps = DomainDeps{
-		Repo: f.repo, Catalog: catalog, Settings: settings, DNS: cloudflare.New(f.cf.URL()), Syncer: f.syncer,
+		Repo: f.repo, Catalog: catalog, Settings: settings, DNS: client, Syncer: f.syncer,
+		Origin: NewEnsureOriginCA(OriginDeps{
+			Settings: settings, Domains: f.repo, Repos: f.origin, DNS: client, CA: client, Keys: outservice.OriginKeys{},
+			Syncer: f.syncer, Clock: f.clock, Pass: 5 * time.Minute, Grace: time.Minute, Log: log,
+		}),
 		Certs: f.certs, Ops: f.ops, Clock: f.clock, Audit: sqlite.NewAuditRecorder(db, f.clock, log), Log: log,
 		DomainOp: 30 * time.Second, DomainRetry: 20 * time.Second,
 	}

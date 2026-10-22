@@ -7,8 +7,10 @@
 // manda la configuración a muelle-caddy por su admin API, el ciclo de vida
 // de muelle-caddy (el job "proxy", los reintentos y la recreación), GET
 // /api/v1/proxy, los dominios con su DNS en Cloudflare (…/domains), el
-// registro DNS del panel, la verificación de los certificados y los hooks de
-// admin (el token de Cloudflare y los ajustes del proxy). El contrato está en
+// registro DNS del panel, la verificación de los certificados, los
+// certificados de Cloudflare (Origin CA, opcionales: emitirlos, renovarlos y
+// revocarlos) y los hooks de admin (el token de Cloudflare, el permiso de
+// Origin CA y los ajustes del proxy). El contrato está en
 // docs/superpowers/specs/2026-10-10-contrato-http-fases-2-3.md.
 package ingress
 
@@ -69,9 +71,11 @@ type Module struct {
 	ops           *usecases.Ops
 	panelDNS      *usecases.EnsurePanelDNS
 	checkToken    *usecases.CheckCloudflareToken
+	checkOrigin   *usecases.CheckOriginCAPermission
 	checkPorts    *usecases.CheckProxyPorts
 	settingsHook  *usecases.ProxySettingsChanged
 	certs         *usecases.CertChecker
+	origin        *usecases.EnsureOriginCA
 	jobs          []cron.Job
 	httpUC        inhttp.UseCases
 }
@@ -102,6 +106,7 @@ func New(d Deps) *Module {
 	catalog := outservice.NewCatalogReader(d.DB)
 	registries := outservice.NewRegistriesReader(d.DB, d.Cipher)
 	domains := reposqlite.NewDomains(d.DB)
+	origin := usecases.OriginRepos{Certs: reposqlite.NewOriginCerts(d.DB, d.Cipher), Hosts: reposqlite.NewOriginHosts(d.DB)}
 	runtime := caddy.NewRuntime(d.Docker, caddy.Names{
 		Container: o.CaddyContainer, PanelNetwork: o.PanelNetwork,
 		DataVolume: o.CaddyDataVolume, ConfigVolume: o.CaddyConfigVolume, AdminVolume: o.CaddyAdminVolume,
@@ -109,7 +114,7 @@ func New(d Deps) *Module {
 
 	m := &Module{state: usecases.NewProxyState()}
 	// Un Sync que falla despierta al Retrier, que reintenta con backoff.
-	m.syncer = usecases.NewSyncer(settings, domains, catalog, caddy.NewAdmin(o.CaddyAdminDial), m.state, d.Clock,
+	m.syncer = usecases.NewSyncer(settings, domains, catalog, origin, caddy.NewAdmin(o.CaddyAdminDial), m.state, d.Clock,
 		defImage, o.InternalCA, func() { m.retrier.Kick() }, d.Log)
 	m.retrier = usecases.NewRetrier(func(ctx context.Context) error { return m.syncer.Sync(ctx, false) },
 		o.Timing.RetryMin, o.Timing.RetryMax)
@@ -121,24 +126,29 @@ func New(d Deps) *Module {
 	m.ops = &usecases.Ops{}
 	dns := cloudflare.New(o.CloudflareURL)
 	m.panelDNS = usecases.NewEnsurePanelDNS(settings, dns, m.ops, o.Timing.DomainOp, d.Log)
-	m.proxyJob = usecases.NewProxyJob(settings, catalog, m.ensureNetwork, m.caddy, m.orphans, m.syncer, m.panelDNS, m.state,
-		defImage, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
+	m.origin = usecases.NewEnsureOriginCA(usecases.OriginDeps{
+		Settings: settings, Domains: domains, Repos: origin, DNS: dns, CA: dns, Keys: outservice.OriginKeys{},
+		Syncer: m.syncer, Clock: d.Clock, DefImage: defImage, Pass: o.Timing.OriginPass, Grace: o.Timing.OriginRevokeGrace, Log: d.Log,
+	})
+	m.proxyJob = usecases.NewProxyJob(settings, catalog, m.ensureNetwork, m.caddy, m.orphans, m.syncer, m.panelDNS, m.origin,
+		m.state, defImage, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	m.recreator = usecases.NewRecreator(m.caddy, m.syncer, m.state, o.Timing.RecreateDelay, o.Timing.RetryMin, o.Timing.RetryMax, d.Log)
 	probe := outservice.TLSProbe{Addr: o.CaddyTLSAddr, Roots: o.TLSRoots, Timeout: outservice.DefaultProbeTimeout}
-	m.certs = usecases.NewCertChecker(probe, domains, m.state, m.ops, d.Clock, o.Timing.FirstCheck, o.Timing.PendingEvery,
+	m.certs = usecases.NewCertChecker(probe, domains, settings, origin, m.syncer, m.state, m.ops, d.Clock, o.Timing.FirstCheck, o.Timing.PendingEvery,
 		o.Timing.DomainOp, d.Log)
 	m.jobs = incron.Jobs(m.proxyJob.Run, func(ctx context.Context) error { return m.certs.CheckAll(ctx, usecases.EligibleHourly) })
 	dd := usecases.DomainDeps{
 		Repo: domains, Catalog: catalog, Settings: settings, DNS: dns, Syncer: m.syncer,
-		Certs: m.certs, Ops: m.ops, Clock: d.Clock, Audit: d.Audit, Log: d.Log,
+		Certs: m.certs, Origin: m.origin, Ops: m.ops, Clock: d.Clock, Audit: d.Audit, Log: d.Log,
 		DomainOp: o.Timing.DomainOp, DomainRetry: o.Timing.DomainRetry,
 	}
 	m.checkToken = usecases.NewCheckCloudflareToken(dns)
+	m.checkOrigin = usecases.NewCheckOriginCAPermission(dns, dns, outservice.OriginKeys{}, origin.Certs, d.Clock, d.Log)
 	m.checkPorts = usecases.NewCheckProxyPorts(runtime, defImage, d.Log)
 	m.settingsHook = usecases.NewProxySettingsChanged(m.recreator, usecases.NewUpdateManagedRecords(dd), m.panelDNS, m.syncer,
-		m.state, o.Timing.Hook, d.Log)
+		m.origin, m.state, o.Timing.Hook, d.Log)
 	m.httpUC = inhttp.UseCases{
-		ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, defImage),
+		ProxyStatus: usecases.NewGetProxyStatus(settings, runtime, m.state, m.origin, d.Clock, defImage),
 		ListDomains: usecases.NewListDomains(dd), CreateDomain: usecases.NewCreateDomain(dd),
 		UpdateDomain: usecases.NewUpdateDomain(dd), DeleteDomain: usecases.NewDeleteDomain(dd),
 		AdoptDomain: usecases.NewAdoptDomain(dd), RetryDomain: usecases.NewRetryDomain(dd),
@@ -165,13 +175,16 @@ func (m *Module) Jobs() []cron.Job { return m.jobs }
 // configuración que Caddy no aceptó, la recreación de muelle-caddy que
 // agenda ProxySettingsChanged (si no arranca con los puertos nuevos, vuelve
 // a los anteriores: contrato §3.5), la verificación de un dominio 30 s
-// después de crearlo, adoptarlo o reintentarlo, y la de los pending cada
-// minuto (§8).
+// después de crearlo, adoptarlo o reintentarlo, la de los pending cada
+// minuto (§8) y la reconciliación de los certificados de Cloudflare (Origin
+// CA, contrato §3.7): una pasada a la vez, cada vez que la despierta el job
+// "proxy", un PATCH /settings o un cambio de un dominio.
 func (m *Module) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Go(func() { m.retrier.Run(ctx) })
 	wg.Go(func() { m.recreator.Run(ctx) })
 	wg.Go(func() { m.certs.Run(ctx) })
+	wg.Go(func() { m.origin.Run(ctx) })
 	wg.Wait()
 }
 
@@ -215,6 +228,20 @@ func (m *Module) SyncRoutes(ctx context.Context) error { return m.syncer.Sync(ct
 // una cuenta, que /user/tokens/verify rechaza pero que lista zonas, se acepta.
 func (m *Module) CheckCloudflareToken(ctx context.Context, token string) (zones *int, err error) {
 	return m.checkToken.Execute(ctx, token)
+}
+
+// CheckCloudflareOriginCA comprueba, antes de que admin guarde un PATCH
+// /settings que enciende los certificados de Cloudflare o cambia el token
+// con la opción encendida, que el token tenga Zone → SSL and Certificates →
+// Edit en las zonas activas que ve (contrato §3.5), con un plazo de 30 s
+// sobre el ctx de la petición. field es el campo de los 422
+// (cloudflare_origin_ca o cloudflare_token). Sin el permiso en alguna zona,
+// un token que no lista zonas o no ve ninguna, o una prueba que Cloudflare
+// rechazó, devuelve un *validate.Error en field (422); si Cloudflare no
+// responde, un error que envuelve entity.ErrCloudflareUnavailable (502).
+// Ninguno trae el token.
+func (m *Module) CheckCloudflareOriginCA(ctx context.Context, token, field string) error {
+	return m.checkOrigin.Execute(ctx, token, field)
 }
 
 // CheckProxyPorts prueba, antes de que admin guarde otros puertos del proxy

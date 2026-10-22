@@ -15,6 +15,7 @@ import (
 	"github.com/CPU-commits/muelle/src/cmd/http/httptestutil"
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
 	"github.com/CPU-commits/muelle/src/internal/ingress/app/usecases"
+	ingressentity "github.com/CPU-commits/muelle/src/internal/ingress/domain/entity"
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
 	reposqlite "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/repository/sqlite"
 	outservice "github.com/CPU-commits/muelle/src/internal/ingress/infra/out/service"
@@ -39,7 +40,7 @@ const (
 // cambia nada.
 type unreachableProbe struct{}
 
-func (unreachableProbe) Probe(context.Context, string) (service.CertObservation, error) {
+func (unreachableProbe) Probe(context.Context, string, [][]byte) (service.CertObservation, error) {
 	return service.CertObservation{}, service.ErrCaddyUnreachable
 }
 
@@ -51,6 +52,8 @@ type domainsFixture struct {
 	cipher *crypto.Cipher
 	cf     *cftest.Server
 	client *httptestutil.Client
+	clock  *clock.Manual
+	origin usecases.OriginRepos
 }
 
 func newDomainsFixture(t *testing.T) *domainsFixture {
@@ -71,11 +74,18 @@ func newDomainsFixture(t *testing.T) *domainsFixture {
 	repo := reposqlite.NewDomains(db)
 	state := usecases.NewProxyState()
 	state.Loaded(clk.Now())
-	syncer := usecases.NewSyncer(settings, repo, catalog, caddy.NewAdmin(admin.Dial), state, clk, "", false, nil, log)
+	f.clock = clk
+	f.origin = usecases.OriginRepos{Certs: reposqlite.NewOriginCerts(db, c), Hosts: reposqlite.NewOriginHosts(db)}
+	syncer := usecases.NewSyncer(settings, repo, catalog, f.origin, caddy.NewAdmin(admin.Dial), state, clk, "", false, nil, log)
 	ops := &usecases.Ops{}
+	client := cloudflare.New(f.cf.URL())
 	d := usecases.DomainDeps{
-		Repo: repo, Catalog: catalog, Settings: settings, DNS: cloudflare.New(f.cf.URL()), Syncer: syncer,
-		Certs: usecases.NewCertChecker(unreachableProbe{}, repo, state, ops, clk, time.Second, time.Second, time.Second, log),
+		Repo: repo, Catalog: catalog, Settings: settings, DNS: client, Syncer: syncer,
+		Origin: usecases.NewEnsureOriginCA(usecases.OriginDeps{
+			Settings: settings, Domains: repo, Repos: f.origin, DNS: client, CA: client, Keys: outservice.OriginKeys{},
+			Syncer: syncer, Clock: clk, Pass: 5 * time.Minute, Grace: time.Minute, Log: log,
+		}),
+		Certs: usecases.NewCertChecker(unreachableProbe{}, repo, settings, usecases.OriginRepos{}, syncer, state, ops, clk, time.Second, time.Second, time.Second, log),
 		Ops:   ops, Clock: clk, Audit: sqlite.NewAuditRecorder(db, clk, log), Log: log,
 		DomainOp: 30 * time.Second, DomainRetry: 20 * time.Second,
 	}
@@ -117,8 +127,8 @@ func expectError(t *testing.T, c *httptestutil.Client, method, path string, body
 
 // domainKeys son las claves del dominio del contrato §3.1: siempre todas.
 var domainKeys = []string{
-	"cert_expires_at", "cert_issuer", "cf_record_id", "cf_zone_id", "created_at", "hostname", "last_error", "last_error_code",
-	"proxied", "records", "status", "target_port", "target_service", "tls_mode", "updated_at",
+	"cert_expires_at", "cert_issuer", "cert_source", "cf_record_id", "cf_zone_id", "created_at", "hostname", "last_error",
+	"last_error_code", "origin_ca", "proxied", "records", "status", "target_port", "target_service", "tls_mode", "updated_at",
 }
 
 func checkKeys(t *testing.T, d map[string]any) {
@@ -251,6 +261,37 @@ func TestHTTPRetryDomain(t *testing.T) {
 		expectError(t, f.client, "POST", path, body, 400, "invalid_json", "")
 	}
 	expectError(t, f.client, "POST", apiPath+"/domains/nada.tudominio.cl/retry", nil, 404, "not_found", "")
+}
+
+// cert_source y origin_ca en el JSON (contrato §3.1 y §3.7): null y
+// letsencrypt con la opción apagada; el objeto con sus cinco claves, en UTC
+// con a lo más ms, con la opción encendida.
+func TestHTTPDomainOriginCA(t *testing.T) {
+	f := newDomainsFixture(t)
+	w := f.client.Do("POST", apiPath+"/domains", map[string]any{"hostname": "api.tudominio.cl", "target_service": "api", "target_port": 3000,
+		"proxied": true}, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusCreated)
+	d := httptestutil.Decode[map[string]any](t, w)
+	if d["cert_source"] != "letsencrypt" || d["origin_ca"] != nil {
+		t.Fatalf("apagada: %v %v", d["cert_source"], d["origin_ca"])
+	}
+	p := entity.DefaultProxySettings()
+	p.PanelDomain, p.CaddyImage, p.CloudflareToken, p.PublicIP = "panel.tudominio.cl", "caddy:2-alpine", cfToken, "203.0.113.24"
+	p.CloudflareOriginCA = true
+	ingresstest.SetProxySettings(t, f.db, f.cipher, p)
+	ctx := context.Background()
+	if err := f.origin.Hosts.RecordFailure(ctx, "api.tudominio.cl", 1, ingressentity.OriginPermission, "sin permiso",
+		time.Date(2026, 10, 14, 18, 0, 0, 500_000_000, time.UTC), f.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	w = f.client.Do("GET", apiPath+"/domains", nil, httptestutil.WithSession("s"))
+	httptestutil.Expect(t, w, http.StatusOK)
+	body := w.Body.String()
+	want := `"cert_source":"letsencrypt","origin_ca":{"status":"failed","error_code":"permission","error":"muelle no pudo emitir el certificado de Cloudflare: sin permiso; mientras tanto usa Let's Encrypt","retry_at":"2026-10-14T18:00:00.5Z","expires_at":null}`
+	if !strings.Contains(body, want) {
+		t.Fatalf("JSON:\n%s\nesperaba que trajera\n%s", body, want)
+	}
+	checkKeys(t, httptestutil.Decode[[]map[string]any](t, w)[0])
 }
 
 // Solo con sesión (contrato §3): un token recibe 403 token_not_allowed.

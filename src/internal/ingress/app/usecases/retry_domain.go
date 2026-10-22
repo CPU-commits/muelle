@@ -24,9 +24,11 @@ func NewRetryDomain(d DomainDeps) *RetryDomain { return &RetryDomain{d: d} }
 //     certificate que vuelve a pending pide reenviar la configuración
 //     forzando la recarga, así Caddy reintenta la emisión.
 //
-// Después, fuera del lock, manda la configuración a Caddy (forzada en el
-// caso 3), agenda la verificación de los 30 s después de 1 y 2, y audita.
-// Responde con el estado resultante.
+// Después, fuera del lock: reinicia los reintentos del certificado de Origin
+// CA de ese dominio (contrato §3.2; la falla queda hasta la pasada), manda la
+// configuración a Caddy (forzada en el caso 3), despierta al reconciliador
+// de Origin CA, agenda la verificación de los 30 s después de 1 y 2, y
+// audita. Responde con el estado resultante.
 func (uc *RetryDomain) Execute(ctx context.Context, ref dto.DomainRef) (dto.DomainOutput, error) {
 	app, err := uc.d.app(ctx, ref.AppRef)
 	if err != nil {
@@ -64,10 +66,13 @@ func (uc *RetryDomain) Execute(ctx context.Context, ref dto.DomainRef) (dto.Doma
 		return dto.DomainOutput{}, err
 	}
 	uc.d.logResult("domain.retry", dom)
-	uc.d.sync(ctx, repush)
+	if err := uc.d.Origin.ResetBackoff(context.WithoutCancel(ctx), dom.Hostname); err != nil {
+		uc.d.Log.Warn("ingress: reiniciando los reintentos del certificado de Cloudflare", "hostname", dom.Hostname, "error", err)
+	}
+	uc.d.syncAndKick(ctx, repush)
 	if redone {
 		uc.d.Certs.ScheduleFirst(dom.Hostname)
 	}
 	uc.d.audit(ctx, "domain.retry", app, dom.Hostname, nil)
-	return toOutput(dom, p), nil
+	return uc.d.output(ctx, dom, p)
 }

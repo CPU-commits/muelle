@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/tls"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/internal/ingress/domain/service"
@@ -32,15 +34,22 @@ type TLSProbe struct {
 
 var _ service.CertProbe = TLSProbe{}
 
-// Probe sigue D9 del plan de la Fase 3:
+// Probe sigue D9 del plan de la Fase 3 y §8 del diseño de Origin CA:
 //   - una conexión TCP que falla, o un handshake que no termina a tiempo,
 //     es "no se sabe": service.ErrCaddyUnreachable;
 //   - un handshake que falla (Caddy no tiene un certificado para ese SNI) o
 //     un certificado que no verifica es una observación inválida, con el
 //     motivo en Problem, y sin error;
 //   - uno que verifica es Valid, con el emisor (su primera Organization, o
-//     su CN) y el vencimiento en UTC y a milisegundos.
-func (p TLSProbe) Probe(ctx context.Context, hostname string) (service.CertObservation, error) {
+//     su CN) y el vencimiento en UTC y a milisegundos;
+//   - con pinned (los DER de las hojas de Origin CA que guardó muelle), una
+//     hoja que no verifica contra Roots pero es idéntica a una de pinned vale
+//     si es para hostname y está vigente: se verifica con ella misma como
+//     raíz.
+//     Una que verifica contra Roots vale igual (el cambio entre Let's
+//     Encrypt y Origin CA no la deja inválida). No se embeben las raíces de
+//     Origin CA: fijar la hoja es más estricto.
+func (p TLSProbe) Probe(ctx context.Context, hostname string, pinned [][]byte) (service.CertObservation, error) {
 	ctx, cancel := context.WithTimeout(ctx, cmp.Or(p.Timeout, DefaultProbeTimeout))
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", p.Addr)
@@ -67,6 +76,11 @@ func (p TLSProbe) Probe(ctx context.Context, hostname string) (service.CertObser
 		intermediates.AddCert(c)
 	}
 	_, err = leaf.Verify(x509.VerifyOptions{DNSName: hostname, Roots: p.Roots, Intermediates: intermediates})
+	if err != nil && slices.ContainsFunc(pinned, func(pin []byte) bool { return bytes.Equal(leaf.Raw, pin) }) {
+		self := x509.NewCertPool()
+		self.AddCert(leaf)
+		_, err = leaf.Verify(x509.VerifyOptions{DNSName: hostname, Roots: self})
+	}
 	if err != nil {
 		return service.CertObservation{Problem: verifyProblem(err, leaf, hostname)}, nil
 	}

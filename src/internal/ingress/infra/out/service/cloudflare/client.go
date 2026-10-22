@@ -1,6 +1,7 @@
 // Package cloudflare es el cliente mínimo de la API v4 de Cloudflare que usa
 // ingress (implementa service.DNS): verificar el token, listar las zonas y
-// manejar los registros DNS. Sin SDK: son seis rutas.
+// manejar los registros DNS, y Cloudflare Origin CA (implementa
+// service.OriginCA): emitir y revocar certificados. Sin SDK: son ocho rutas.
 //
 // El token va solo en el header Authorization de cada petición: nunca en la
 // URL, en un error ni en un log. El cliente no sigue redirects, así el token
@@ -48,7 +49,14 @@ type Client struct {
 	http *http.Client
 }
 
-var _ service.DNS = (*Client)(nil)
+var (
+	_ service.DNS      = (*Client)(nil)
+	_ service.OriginCA = (*Client)(nil)
+)
+
+// originRequestType es el tipo de los certificados de Origin CA que pide
+// muelle: ECDSA (§5.1 del diseño de Origin CA).
+const originRequestType = "origin-ecc"
 
 // New arma el cliente con la base de la API ("" → DefaultBaseURL).
 func New(baseURL string) *Client {
@@ -81,8 +89,10 @@ type envelope struct {
 }
 
 type zoneJSON struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Status      string   `json:"status"`
+	Permissions []string `json:"permissions"`
 }
 
 type recordJSON struct {
@@ -164,7 +174,7 @@ func (c *Client) do(ctx context.Context, token, method, path string, q url.Value
 	case resp.StatusCode >= 500:
 		return 0, unavailable("respondió %d", resp.StatusCode)
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return 0, unavailable("respondió 429: demasiadas peticiones, reintenta en unos minutos")
+		return 0, fmt.Errorf("%w: %w", entity.ErrCloudflareUnavailable, service.ErrRateLimited)
 	case resp.StatusCode < 200 || (resp.StatusCode >= 300 && resp.StatusCode < 400):
 		return 0, unavailable("respondió %d", resp.StatusCode)
 	}
@@ -258,7 +268,7 @@ func (c *Client) Zones(ctx context.Context, token string) ([]service.Zone, error
 			return nil, op("listando las zonas", err)
 		}
 		for _, z := range res {
-			out = append(out, service.Zone{ID: z.ID, Name: z.Name})
+			out = append(out, service.Zone{ID: z.ID, Name: z.Name, Status: z.Status, Permissions: z.Permissions})
 		}
 		if page >= pages || len(res) == 0 {
 			return out, nil
@@ -343,4 +353,35 @@ func (c *Client) UpdateRecord(ctx context.Context, token, zoneID, id string, ch 
 func (c *Client) DeleteRecord(ctx context.Context, token, zoneID, id string) error {
 	_, err := c.do(ctx, token, http.MethodDelete, recordPath(zoneID, id), nil, nil, nil)
 	return op("borrando un registro", err)
+}
+
+// CreateOriginCert pide un certificado de Origin CA (POST /certificates):
+// origin-ecc, un solo hostname, requested_validity en días y el CSR en PEM.
+// Una respuesta sin id o sin certificado no sirve (ErrCloudflareUnavailable).
+func (c *Client) CreateOriginCert(ctx context.Context, token, hostname, csrPEM string, validityDays int) (service.IssuedOriginCert, error) {
+	body := struct {
+		Hostnames         []string `json:"hostnames"`
+		RequestType       string   `json:"request_type"`
+		RequestedValidity int      `json:"requested_validity"`
+		CSR               string   `json:"csr"`
+	}{[]string{hostname}, originRequestType, validityDays, csrPEM}
+	var res struct {
+		ID          string `json:"id"`
+		Certificate string `json:"certificate"`
+	}
+	name := "emitiendo el certificado de Origin CA de " + hostname
+	if _, err := c.do(ctx, token, http.MethodPost, "/certificates", nil, body, &res); err != nil {
+		return service.IssuedOriginCert{}, op(name, err)
+	}
+	if res.ID == "" || res.Certificate == "" {
+		return service.IssuedOriginCert{}, op(name, unavailable("la respuesta no trae el id o el certificado"))
+	}
+	return service.IssuedOriginCert{ID: res.ID, CertPEM: res.Certificate}, nil
+}
+
+// RevokeOriginCert revoca un certificado de Origin CA (DELETE
+// /certificates/{id}).
+func (c *Client) RevokeOriginCert(ctx context.Context, token, id string) error {
+	_, err := c.do(ctx, token, http.MethodDelete, "/certificates/"+url.PathEscape(id), nil, nil, nil)
+	return op("revocando un certificado de Origin CA", err)
 }

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,6 +39,33 @@ func threeRoutes() []service.Route {
 	}
 }
 
+// originPEM es un certificado de Origin CA de prueba para host: Render no
+// lo lee, así que basta con la forma de un PEM.
+func originPEM(host string) *service.OriginPEM {
+	label := strings.ReplaceAll(host, ".", "")
+	return &service.OriginPEM{
+		CertPEM: "-----BEGIN CERTIFICATE-----\nMIIBcert" + label + "\n-----END CERTIFICATE-----\n",
+		KeyPEM:  "-----BEGIN PRIVATE KEY-----\nMIGHkey" + label + "SecretoDeLaClave\n-----END PRIVATE KEY-----\n",
+	}
+}
+
+// withOrigin es routes con un certificado de Origin CA en los hosts.
+func withOrigin(routes []service.Route, hosts ...string) []service.Route {
+	for i := range routes {
+		if slices.Contains(hosts, routes[i].Hostname) {
+			routes[i].OriginCA = originPEM(routes[i].Hostname)
+		}
+	}
+	return routes
+}
+
+// originPanel es el panel con su certificado de Origin CA.
+func originPanel(tls entity.TLSMode, cidrs ...string) *service.PanelRoute {
+	p := testPanel(tls, cidrs...)
+	p.OriginCA = originPEM(p.Hostname)
+	return p
+}
+
 // goldenCases son las configuraciones de testdata/<caso>.golden.json.
 func goldenCases() map[string]service.ProxyConfig {
 	return map[string]service.ProxyConfig{
@@ -57,6 +85,28 @@ func goldenCases() map[string]service.ProxyConfig {
 		"internal": {
 			Panel:  testPanel(entity.TLSHTTP, "203.0.113.0/24"),
 			Routes: threeRoutes(), ACMEEmail: "ops@auditfy.cl", CloudflareToken: testToken, InternalCA: true,
+		},
+		// Origin CA (§7.2 del diseño de Origin CA): el panel y api con su
+		// certificado, web en DNS only (DNS-01) y grafana fuera de
+		// Cloudflare (HTTP-01).
+		"origin_ca": {
+			Panel:  originPanel(entity.TLSCloudflare, "190.5.6.0/24", "2001:db8::/32"),
+			Routes: withOrigin(threeRoutes(), "api.auditfy.cl"), ACMEEmail: "ops@auditfy.cl", CloudflareToken: testToken,
+		},
+		// Todos con Origin CA: no va automation.
+		"origin_ca_all": {
+			Panel: originPanel(entity.TLSCloudflare),
+			Routes: withOrigin([]service.Route{
+				{Hostname: "api.auditfy.cl", Upstream: "auditfy_staging_api_api:3000", TLS: entity.TLSCloudflare},
+				{Hostname: "web.auditfy.cl", Upstream: "auditfy_production_web_web:8080", TLS: entity.TLSCloudflare},
+			}, "api.auditfy.cl", "web.auditfy.cl"),
+			ACMEEmail: "ops@auditfy.cl", CloudflareToken: testToken,
+		},
+		// Lo que manda la integración: Origin CA para un host y la CA
+		// interna para los demás.
+		"origin_ca_internal": {
+			Panel:  testPanel(entity.TLSHTTP),
+			Routes: withOrigin(threeRoutes(), "api.auditfy.cl"), ACMEEmail: "ops@auditfy.cl", CloudflareToken: testToken, InternalCA: true,
 		},
 	}
 }
@@ -201,11 +251,40 @@ func TestRenderInvariants(t *testing.T) {
 			if path(t, routes[0], "match", 0, "host", 0) != "panel.auditfy.cl" || path(t, routes[0], "handle", 0, "handler") != "subroute" {
 				t.Errorf("la primera ruta no es la del panel: %v", routes[0])
 			}
-			policies, _ := path(t, m, "apps", "tls", "automation", "policies").([]any)
+			var policies []any
+			tlsApp, _ := path(t, m, "apps").(map[string]any)["tls"].(map[string]any)
+			if auto, ok := tlsApp["automation"].(map[string]any); ok {
+				policies = auto["policies"].([]any)
+			}
+			// Un host de Origin CA (skip_certificates) tiene su load_pem y no
+			// está en ninguna política.
+			skipped := map[string]bool{}
+			if auto, ok := srv.(map[string]any)["automatic_https"]; ok {
+				for _, h := range path(t, auto, "skip_certificates").([]any) {
+					skipped[h.(string)] = true
+				}
+			}
+			loaded := 0
+			if certs, ok := tlsApp["certificates"]; ok {
+				for _, p := range path(t, certs, "load_pem").([]any) {
+					loaded++
+					if host := strings.TrimPrefix(path(t, p, "tags", 1).(string), "muelle_origin_ca:"); !skipped[host] {
+						t.Errorf("load_pem de %s sin skip_certificates", host)
+					}
+				}
+			}
+			if loaded != len(skipped) || (loaded > 0) != (tlsApp["disable_ocsp_stapling"] == true) {
+				t.Errorf("%d load_pem, %d en skip_certificates, disable_ocsp_stapling %v", loaded, len(skipped), tlsApp["disable_ocsp_stapling"])
+			}
 			cloudflare := 0
 			for _, p := range policies {
 				if len(path(t, p, "subjects").([]any)) == 0 {
 					t.Errorf("política sin subjects: %v", p)
+				}
+				for _, h := range path(t, p, "subjects").([]any) {
+					if skipped[h.(string)] {
+						t.Errorf("%s tiene Origin CA y está en una política", h)
+					}
 				}
 				if path(t, p, "issuers", 0, "challenges") != nil {
 					cloudflare++
@@ -298,6 +377,58 @@ func TestRenderTLSPolicies(t *testing.T) {
 	}
 }
 
+// Origin CA (§7.2 del diseño de Origin CA): cada certificado en
+// apps.tls.certificates.load_pem, por hostname y con sus tags; el host en
+// automatic_https.skip_certificates, ordenado, y en ninguna política;
+// disable_ocsp_stapling solo si hay alguno. ACME sigue igual para los demás.
+func TestRenderOriginCA(t *testing.T) {
+	m := decode(t, render(t, goldenCases()["origin_ca"]))
+	pems := path(t, m, "apps", "tls", "certificates", "load_pem").([]any)
+	if len(pems) != 2 {
+		t.Fatalf("load_pem: %v", pems)
+	}
+	for i, host := range []string{"api.auditfy.cl", "panel.auditfy.cl"} {
+		want := originPEM(host)
+		if path(t, pems[i], "certificate") != want.CertPEM || path(t, pems[i], "key") != want.KeyPEM {
+			t.Errorf("load_pem[%d]: %v", i, pems[i])
+		}
+		if got := path(t, pems[i], "tags"); !reflect.DeepEqual(got, []any{"muelle_origin_ca", "muelle_origin_ca:" + host}) {
+			t.Errorf("tags de %s: %v", host, got)
+		}
+	}
+	srv := path(t, m, "apps", "http", "servers", "muelle")
+	if got := path(t, srv, "automatic_https", "skip_certificates"); !reflect.DeepEqual(got, []any{"api.auditfy.cl", "panel.auditfy.cl"}) {
+		t.Errorf("skip_certificates: %v", got)
+	}
+	if path(t, m, "apps", "tls", "disable_ocsp_stapling") != true {
+		t.Error("disable_ocsp_stapling")
+	}
+	policies := path(t, m, "apps", "tls", "automation", "policies").([]any)
+	if len(policies) != 2 || !reflect.DeepEqual(path(t, policies[0], "subjects"), []any{"web.auditfy.cl"}) ||
+		!reflect.DeepEqual(path(t, policies[1], "subjects"), []any{"grafana.ejemplo.com"}) {
+		t.Errorf("políticas: %v", policies)
+	}
+	// Las rutas siguen siendo las mismas, con los mismos hosts.
+	if routes := path(t, srv, "routes").([]any); len(routes) != 4 || path(t, routes[1], "match", 0, "host", 0) != "api.auditfy.cl" {
+		t.Errorf("rutas: %v", routes)
+	}
+
+	// Todos con Origin CA: certificates sin automation.
+	m = decode(t, render(t, goldenCases()["origin_ca_all"]))
+	if path(t, m, "apps", "tls", "automation") != nil || len(path(t, m, "apps", "tls", "certificates", "load_pem").([]any)) != 3 {
+		t.Errorf("todos con Origin CA: %v", path(t, m, "apps", "tls"))
+	}
+	// Sin ninguno, nada de esto (los golden de antes no cambian).
+	for _, name := range []string{"full", "no_token", "internal", "panel_only", "no_email"} {
+		b := render(t, goldenCases()[name])
+		for _, k := range []string{"load_pem", "skip_certificates", "disable_ocsp_stapling", "automatic_https", "certificates"} {
+			if bytes.Contains(b, []byte(`"`+k+`"`)) {
+				t.Errorf("%s trae %s", name, k)
+			}
+		}
+	}
+}
+
 // D16: Caddy expande placeholders en el email del emisor y en api_token: con
 // { o } no se arma nada.
 func TestRenderRejectsPlaceholders(t *testing.T) {
@@ -306,6 +437,16 @@ func TestRenderRejectsPlaceholders(t *testing.T) {
 		"email":        func(c *service.ProxyConfig) { c.ACMEEmail = "a{x}@b.cl" },
 		"token":        func(c *service.ProxyConfig) { c.CloudflareToken = "{file./etc/passwd}" },
 		"token cierre": func(c *service.ProxyConfig) { c.CloudflareToken = "cf-tok}en-1234567890" },
+		// Un PEM de Origin CA no los trae (es base64), pero Caddy también
+		// los expandiría (load_pem pasa por ReplaceKnown).
+		"certificado": func(c *service.ProxyConfig) {
+			c.Routes = withOrigin(threeRoutes(), "api.auditfy.cl")
+			c.Routes[0].OriginCA.CertPEM = "-----BEGIN CERTIFICATE-----\n{env.X}\n-----END CERTIFICATE-----\n"
+		},
+		"clave": func(c *service.ProxyConfig) {
+			c.Panel = originPanel(entity.TLSCloudflare)
+			c.Panel.OriginCA.KeyPEM = "{file./etc/shadow}"
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := base

@@ -290,13 +290,13 @@ func TestSettingsProxyKeysAPI(t *testing.T) {
 	w := e.c.Do("GET", "/api/v1/settings", nil, con)
 	httptestutil.Expect(t, w, http.StatusOK)
 	got := httptestutil.Decode[map[string]any](t, w)
-	for _, k := range []string{"require_2fa", "cloudflare_token_set", "cloudflare_zones", "public_ip", "public_ipv6", "acme_email",
-		"panel_domain", "panel_allowed_cidrs", "proxy_http_port", "proxy_https_port", "client_ip"} {
+	for _, k := range []string{"require_2fa", "cloudflare_token_set", "cloudflare_zones", "cloudflare_origin_ca", "public_ip", "public_ipv6",
+		"acme_email", "panel_domain", "panel_allowed_cidrs", "proxy_http_port", "proxy_https_port", "client_ip"} {
 		if _, ok := got[k]; !ok {
 			t.Errorf("falta %q en %v", k, got)
 		}
 	}
-	if got["proxy_http_port"] != float64(80) || got["cloudflare_zones"] != nil || got["client_ip"] != "192.0.2.1" {
+	if got["proxy_http_port"] != float64(80) || got["cloudflare_zones"] != nil || got["client_ip"] != "192.0.2.1" || got["cloudflare_origin_ca"] != false {
 		t.Fatalf("GET=%v", got)
 	}
 	if list, ok := got["panel_allowed_cidrs"].([]any); !ok || len(list) != 0 {
@@ -317,6 +317,17 @@ func TestSettingsProxyKeysAPI(t *testing.T) {
 	// panel_domain es de solo lectura: mandarlo es una clave desconocida.
 	w = e.c.Do("PATCH", "/api/v1/settings", map[string]any{"panel_domain": "otro.cl"}, con)
 	httptestutil.Expect(t, w, http.StatusBadRequest)
+	// cloudflare_origin_ca es un bool: otro tipo es 400 invalid_json.
+	for _, v := range []any{"true", 1} {
+		w = e.c.Do("PATCH", "/api/v1/settings", map[string]any{"cloudflare_origin_ca": v}, con)
+		httptestutil.Expect(t, w, http.StatusBadRequest)
+	}
+	// Encenderla sin token: 422 en cloudflare_origin_ca.
+	w = e.c.Do("PATCH", "/api/v1/settings", map[string]any{"cloudflare_origin_ca": true}, con)
+	httptestutil.Expect(t, w, http.StatusUnprocessableEntity)
+	if msg := httptestutil.Decode[map[string]map[string]string](t, w)["error"]["message"]; msg != "cloudflare_origin_ca: necesita el token de Cloudflare: configúralo antes de activarla" {
+		t.Fatalf("message=%q", msg)
+	}
 	// Una lista de IPs que deja fuera la IP de la petición: 409 would_lock_out.
 	w = e.c.Do("PATCH", "/api/v1/settings", map[string]any{"panel_allowed_cidrs": []string{"198.51.100.0/24"}}, con)
 	httptestutil.Expect(t, w, http.StatusConflict)

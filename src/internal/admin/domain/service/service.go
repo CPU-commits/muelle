@@ -28,6 +28,15 @@ type ProxyHook interface {
 	// error que envuelve entity.ErrCloudflareUnavailable (502). Si falla, no
 	// se guarda nada del PATCH.
 	CheckCloudflareToken(ctx context.Context, token string) (zones *int, err error)
+	// CheckCloudflareOriginCA comprueba, antes de guardar, que el token tenga
+	// Zone → SSL and Certificates → Edit en las zonas activas que ve (los
+	// certificados de Cloudflare, contrato §3.5). field es el campo de los
+	// 422: cloudflare_origin_ca si la opción se enciende en ese PATCH, y si
+	// no cloudflare_token. Sin el permiso, un *validate.Error en field (422);
+	// si Cloudflare no responde, un error que envuelve
+	// entity.ErrCloudflareUnavailable (502). Si falla, no se guarda nada del
+	// PATCH.
+	CheckCloudflareOriginCA(ctx context.Context, token, field string) error
 	// CheckProxyPorts prueba, antes de guardar, que muelle-caddy pueda tomar
 	// los puertos del proxy que cambian de old a next (contrato §4.1). Uno
 	// ocupado es un *validate.Error en su campo (422); Docker caído, un error

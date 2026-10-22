@@ -2,6 +2,7 @@ package dto
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -29,5 +30,17 @@ func TestInitialSettingsDoesNotPrintToken(t *testing.T) {
 	}
 	if !strings.Contains(s.Init.String(), "203.0.113.7") || !strings.Contains(s.Init.String(), "***") {
 		t.Fatalf("String esconde solo el token: %s", s.Init.String())
+	}
+}
+
+// GET /settings trae siempre todas las claves, también cloudflare_origin_ca
+// (contrato §4): el panel las trata como obligatorias.
+func TestSettingsOutputAlwaysHasOriginCA(t *testing.T) {
+	b, err := json.Marshal(SettingsOutput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"cloudflare_origin_ca":false`) {
+		t.Fatalf("falta cloudflare_origin_ca: %s", b)
 	}
 }

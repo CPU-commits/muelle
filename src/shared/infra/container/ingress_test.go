@@ -76,6 +76,72 @@ func TestContractCloudflareTokenThroughSettings(t *testing.T) {
 	}
 }
 
+// admin → ingress (contrato §3.5, §3.7 y §4.1): cloudflare_origin_ca de
+// punta a punta. Encenderla sin token, o con un token sin Zone → SSL and
+// Certificates → Edit en una zona activa, es 422 y no guarda nada; con el
+// permiso se guarda y GET /settings la trae. El dominio trae cert_source y
+// origin_ca.
+func TestContractOriginCAThroughSettings(t *testing.T) {
+	const token = "cf-token-1234567890abcdef"
+	cf := cftest.New(t)
+	cf.AddToken(token)
+	cf.AddZone("z1", "tudominio.cl")
+	cf.AddZone("z2", "nueva.cl")
+	cf.SetZoneStatus("z2", "pending") // no se revisa
+	e := newIngressContainer(t, cf)
+	s := e.setup()
+
+	w := e.do("PATCH", "/api/v1/settings", map[string]any{"cloudflare_origin_ca": true}, s)
+	expect(t, "sin token", w, http.StatusUnprocessableEntity, "invalid")
+	if msg := errorMessage(t, w); msg != "cloudflare_origin_ca: necesita el token de Cloudflare: configúralo antes de activarla" {
+		t.Fatalf("sin token: %q", msg)
+	}
+	httptestutil.Expect(t, e.do("PATCH", "/api/v1/settings", map[string]any{"cloudflare_token": token}, s), http.StatusOK)
+
+	w = e.do("PATCH", "/api/v1/settings", map[string]any{"cloudflare_origin_ca": true, "public_ip": "203.0.113.24"}, s)
+	expect(t, "sin el permiso", w, http.StatusUnprocessableEntity, "invalid")
+	want := "cloudflare_origin_ca: el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona tudominio.cl (lo necesitan los certificados de Cloudflare): agrégalo al token en Cloudflare, o deja la opción apagada"
+	if msg := errorMessage(t, w); msg != want || strings.Contains(msg, token) {
+		t.Fatalf("sin el permiso: %q", msg)
+	}
+	cf.GrantSSL(token, "z1")
+	cf.SetDown(true)
+	expect(t, "Cloudflare caído", e.do("PATCH", "/api/v1/settings", map[string]any{"cloudflare_origin_ca": true}, s),
+		http.StatusBadGateway, "cloudflare_unavailable")
+	w = e.do("GET", "/api/v1/settings", nil, s)
+	if got := httptestutil.Decode[map[string]any](t, w); got["cloudflare_origin_ca"] != false || got["public_ip"] != "" {
+		t.Fatalf("no se guardó nada: %v", got)
+	}
+
+	cf.SetDown(false)
+	w = e.do("PATCH", "/api/v1/settings", map[string]any{"cloudflare_origin_ca": true}, s)
+	httptestutil.Expect(t, w, http.StatusOK)
+	if got := httptestutil.Decode[map[string]any](t, w); got["cloudflare_origin_ca"] != true {
+		t.Fatalf("PATCH: %v", got)
+	}
+	w = e.do("GET", "/api/v1/settings", nil, s)
+	if got := httptestutil.Decode[map[string]any](t, w); got["cloudflare_origin_ca"] != true {
+		t.Fatalf("GET: %v", got)
+	}
+	// Quitar el token sin apagarla: 422.
+	expect(t, "quitar el token", e.do("PATCH", "/api/v1/settings", map[string]any{"cloudflare_token": ""}, s),
+		http.StatusUnprocessableEntity, "invalid")
+
+	// Un dominio: el proxy está deshabilitado en el contenedor de prueba (sin
+	// panel_domain), así que origin_ca es null y cert_source letsencrypt.
+	const P = "/api/v1/projects/p"
+	e.create(s, "/api/v1/projects", map[string]string{"slug": "p", "name": "P"})
+	e.create(s, P+"/stages", map[string]string{"slug": "tmp"})
+	e.create(s, P+"/stages/tmp/apps", map[string]any{"slug": "api", "kind": "service", "spec": map[string]any{"image": "x:1", "port": 80}})
+	got := e.create(s, P+"/stages/tmp/apps/api/domains", map[string]any{"hostname": "api.tudominio.cl", "target_service": "api", "target_port": 80})
+	if got["cert_source"] != "letsencrypt" || got["origin_ca"] != nil {
+		t.Fatalf("dominio: %v", got)
+	}
+	if _, ok := got["origin_ca"]; !ok {
+		t.Fatalf("falta origin_ca: %v", got)
+	}
+}
+
 // Las claves panel_cf_* (contrato §3.6) son de ingress: GET /settings no las
 // muestra y PATCH /settings no las acepta.
 func TestContractPanelKeysHidden(t *testing.T) {

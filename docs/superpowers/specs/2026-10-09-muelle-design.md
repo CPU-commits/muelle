@@ -1,8 +1,8 @@
 # muelle — Diseño
 
 > Deploy manager ultraligero sobre Docker Swarm: panel web + API, secretos, stages y proxy con certificados automáticos.
-> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1), 2026-10-13 (etapa de contratos de las Fases 2, 3 y 5) y 2026-10-14 (su revisión: §6.3, Caddy en JSON, el cambio de puertos) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
-> La API, los puertos entre módulos y la configuración de install de las Fases 2, 3 y 5 están en detalle en [`2026-10-10-contrato-http-fases-2-3.md`](2026-10-10-contrato-http-fases-2-3.md).
+> Fecha: 2026-10-09 · Actualizado: 2026-10-10 (arquitectura hexagonal, §4; revisión final de la Fase 1), 2026-10-13 (etapa de contratos de las Fases 2, 3 y 5), 2026-10-14 (su revisión: §6.3, Caddy en JSON, el cambio de puertos) y 2026-10-21 (los certificados de Cloudflare, Origin CA: §5.1, §8, §9, §11, §12, §13 y §15) · Estado: aprobado; plan de la Fase 1 en `docs/superpowers/plans/2026-10-10-muelle-fase1-hexagonal.md`.
+> La API, los puertos entre módulos y la configuración de install de las Fases 2, 3 y 5 están en detalle en [`2026-10-10-contrato-http-fases-2-3.md`](2026-10-10-contrato-http-fases-2-3.md). Los certificados de Cloudflare (Origin CA), opcionales, en [`2026-10-21-origin-ca-design.md`](2026-10-21-origin-ca-design.md) y en el contrato, §3.7.
 > "muelle" es un nombre provisional.
 
 ## 1. Contexto y objetivo
@@ -224,14 +224,16 @@ proyecto (auditfy)
 | `domains` | `id`, `app_id` (una app con dominios no se borra), `hostname` (único global), `target_service`, `target_port`, `proxied` (bool), `tls_mode` (`cloudflare`\|`http`), `cf_zone_id`, `cf_record_id` y `cf_record_id_aaaa` (nulos si muelle no maneja el registro), `status` (`pending`\|`active`\|`error`), `last_error_code` (`record_exists`\|`cloudflare`\|`certificate`, solo con `error`), `last_error`, `cert_issuer`, `cert_expires_at`, `created_at`, `updated_at` |
 | `deploys` | `id`, `app_id`, `status` (`queued`\|`running`\|`succeeded`\|`failed`\|`superseded`), `images` (JSON `servicio → ref@digest`), `requested_images` (las refs pedidas, antes de resolver), `config_images` (las refs de la configuración que leyó el deploy), `trigger` (`panel`\|`api`\|`rollback`), `actor_type` (`user`\|`token`), `actor_id`, `actor_name` (copiado al crear), `superseded_by`, `error`, `log` (texto, truncado a 256 KB, con `log_truncated`), `routes_warning` (el paso 7 no pudo actualizar Caddy), `created_at`, `started_at`, `finished_at` |
 | `registries` | `id`, `host` (único), `username`, `password` (cifrado), `created_at`, `updated_at` |
+| `origin_ca_certs` | `id`, `hostname` (de un dominio o del panel, sin FK), `zone_id`, `cf_cert_id` (único: el id de Cloudflare, para revocarlo), `certificate` (PEM de la hoja), `private_key` (cifrada; vacía en uno retirado), `expires_at`, `state` (`active`\|`retired`; a lo más un `active` por hostname), `created_at`, `retired_at`, `revoke_failures`, `next_revoke_at` |
+| `origin_ca_hosts` | `hostname`, `observed` (`proxied`\|`dns_only`\|`missing`\|`unreadable`: lo último que se vio en Cloudflare), `observed_at`, `failures`, `last_error_code` (`permission`\|`cloudflare`\|`rejected`), `last_error`, `next_attempt_at`, `updated_at` |
 | `users` | `id`, `username` (único), `password_hash`, `totp_secret` (cifrado, nulo si no tiene 2FA), `totp_pending` (cifrado, generado pero sin confirmar), `created_by`, `created_at` |
 | `invites` | `id`, `token_hash`, `created_by`, `expires_at`, `used_at` |
 | `sessions` | `id_hash`, `user_id`, `mfa_pending` (contraseña correcta, falta el código TOTP), `created_at`, `last_seen_at`, `expires_at`, `user_agent`, `ip` |
 | `api_tokens` | `id`, `name`, `token_hash`, `project_id`, `stage_id` (nulo = todo el proyecto), `created_by`, `last_used_at`, `expires_at` (opcional) |
 | `audit_events` | `id`, `actor_type` (`user`\|`token`\|`system`), `actor_id`, `actor_name` (el username, el nombre del token o `system`, copiado al escribir), `action`, `target`, `details` (JSON, sin valores secretos), `at` |
-| `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `cloudflare_zones`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain` (`MUELLE_PANEL_DOMAIN`, o el host de `MUELLE_PANEL_ORIGIN`; de solo lectura), `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` (vacío: la imagen de Caddy de la misma versión de muelle) y las del registro DNS del panel (`panel_cf_*`, de ingress) |
+| `settings` | `key`, `value`, `encrypted` (bool). Claves: `cloudflare_token`, `cloudflare_zones`, `public_ip`, `public_ipv6`, `acme_email`, `panel_domain` (`MUELLE_PANEL_DOMAIN`, o el host de `MUELLE_PANEL_ORIGIN`; de solo lectura), `require_2fa`, `panel_allowed_cidrs`, `manager_node_id`, `proxy_http_port`, `proxy_https_port`, `caddy_image` (vacío: la imagen de Caddy de la misma versión de muelle), `cloudflare_origin_ca` (los certificados de Cloudflare, `false` por defecto) y las del registro DNS del panel (`panel_cf_*`, de ingress) |
 
-La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con la migración `0002_deploy.sql`, y `domains` con `0003_ingress.sql`. Las dos las reservó la etapa de contratos; cada fase edita la suya, en vez de agregar otra, mientras no haya una versión publicada. `0004_audit_actor_name.sql`, un pendiente de la Fase 1, suma `audit_events.actor_name` y lo llena en los eventos que ya había, y `0005_deploy_routes_warning.sql` suma `deploys.routes_warning` (contrato §6).
+La migración inicial (`0001_init.sql`) crea las tablas de la Fase 1: `projects`, `stages`, `apps`, `env_vars`, `users`, `invites`, `sessions`, `api_tokens`, `audit_events` y `settings`. `deploys` y `registries` llegan con la migración `0002_deploy.sql`, y `domains` con `0003_ingress.sql`. Las dos las reservó la etapa de contratos; cada fase edita la suya, en vez de agregar otra, mientras no haya una versión publicada. `0004_audit_actor_name.sql`, un pendiente de la Fase 1, suma `audit_events.actor_name` y lo llena en los eventos que ya había, `0005_deploy_routes_warning.sql` suma `deploys.routes_warning`, y `0006_origin_ca.sql` crea `origin_ca_certs` y `origin_ca_hosts` (contrato §6).
 
 ### 5.2 Reglas
 
@@ -388,10 +390,11 @@ Un deploy que termina `failed` también aplica la retención. El apagado de muel
   - `tls_mode: cloudflare` → emisor ACME con el desafío DNS `cloudflare` y el token incluido en el JSON.
   - `tls_mode: http` → emisor ACME por defecto.
   - Email ACME tomado de settings.
-  - Nota: el token de Cloudflare queda en el `autosave.json` del volumen `muelle_caddy_config`.
+  - Opcional (`cloudflare_origin_ca`, apagado por defecto): los dominios de Cloudflare con el proxy, y el panel, usan un certificado de Cloudflare Origin CA que emite y renueva muelle (90 días, ECDSA). Va en `apps.tls.certificates.load_pem` y fuera de ACME, y se revoca después de dejar de servirlo. Solo Cloudflare confía en él: es para el modo SSL Full (strict). Los dominios en DNS only y los de fuera de Cloudflare siguen con Let's Encrypt (contrato §3.7).
+  - Nota: el token de Cloudflare y las claves de los certificados de Origin CA quedan en claro en el `autosave.json` del volumen `muelle_caddy_config`.
 - **IP real del cliente:** `servers.trusted_proxies` con los rangos de IP de Cloudflare (lista estática dentro de muelle, que se actualiza con cada versión) y `client_ip_headers: ["CF-Connecting-IP", "X-Forwarded-For"]`, con `trusted_proxies_strict` (`X-Forwarded-For` de derecha a izquierda: no cuenta una IP que el cliente puso adelante). En la ruta del panel, Caddy reenvía a muelle la IP real en `X-Real-IP`: en el JSON, `"headers": {"request": {"set": {"X-Real-IP": ["{http.vars.client_ip}"]}}}` en el `reverse_proxy`. El atajo `{client_ip}` es solo del Caddyfile y en JSON no se reemplaza (contrato §3.4). muelle confía en ese header porque Caddy es el único otro miembro de `muelle_panel`, la única red de muelle: lo acepta solo si la conexión viene de loopback o de una dirección privada (RFC 1918, ULA), y si no usa la IP de la conexión. Por eso el puerto de muelle (`MUELLE_LISTEN`, `:8080`) nunca se publica.
 - Las escrituras a Caddy pasan por un mutex global. Si fallan, el panel muestra "proxy desincronizado" (`GET /proxy`) y se reintenta con backoff (1 s, 2 s, 4 s… hasta 60 s). Además, cada 5 minutos un proceso reenvía todo.
-- **Verificación de certificados:** 30 s después de crear, adoptar o reintentar un dominio, cada minuto mientras sigue `pending` y cada hora para todos, muelle se conecta por TLS a `muelle-caddy:443` con SNI = hostname a través de `muelle_panel`. Lee el emisor y el vencimiento del certificado servido y, si es válido, actualiza `cert_issuer`/`cert_expires_at`. Si el certificado es inválido o vence en menos de 14 días, el dominio pasa a `error` (uno `pending`, recién 10 min después de su último cambio); uno en `error` por el certificado vuelve a `active` cuando ya es válido. Si muelle no llega a Caddy, o el proxy no está sincronizado, no cambia nada (contrato §3.1).
+- **Verificación de certificados:** 30 s después de crear, adoptar o reintentar un dominio, cada minuto mientras sigue `pending` y cada hora para todos, muelle se conecta por TLS a `muelle-caddy:443` con SNI = hostname a través de `muelle_panel`. Lee el emisor y el vencimiento del certificado servido y, si es válido, actualiza `cert_issuer`/`cert_expires_at`. Para un host con Origin CA, también es válida la hoja servida que es idéntica a la que guardó muelle (en una renovación, también la vieja hasta que Caddy carga la nueva), sin verificar la cadena contra las raíces del sistema. Si el certificado es inválido o vence en menos de 14 días, el dominio pasa a `error` (uno `pending`, recién 10 min después de su último cambio); uno en `error` por el certificado vuelve a `active` cuando ya es válido. Si muelle no llega a Caddy, o el proxy no está sincronizado, no cambia nada (contrato §3.1).
 
 ## 9. DNS (Cloudflare)
 
@@ -404,6 +407,7 @@ Un deploy que termina `failed` también aplica la retención. El apagado de muel
 - **Cambiar `proxied` o la IP pública:** actualiza los registros que maneja muelle.
 - **Al borrar un dominio:** solo se borra el registro en Cloudflare si `cf_record_id` no es nulo. Si Cloudflare no responde o rechaza el borrado, no se borra nada (`502`), así no quedan registros huérfanos.
 - **Si Cloudflare responde con error:** el dominio queda en `error` con el mensaje y un botón para reintentar. **Un error de DNS nunca bloquea un deploy.**
+- **Con los certificados de Cloudflare encendidos** (contrato §3.7), muelle lee cada 5 min, y después de cada cambio, el `proxied` de los registros de los dominios que califican y del panel. No los cambia: decide con eso si usa Origin CA o Let's Encrypt.
 
 ## 10. API (`/api/v1`)
 
@@ -460,13 +464,13 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
   - **Dominios:** estado de DNS y del certificado, `proxied`, adoptar y reintentar.
   - **Deploys:** historial y log en vivo.
   - **Logs:** en vivo por servicio.
-- **Ajustes:** Cloudflare (token, IP pública), email ACME, registries, usuarios e invitaciones, tokens, exigir 2FA, IPs permitidas para el panel y auditoría.
+- **Ajustes:** Cloudflare (token, IP pública y los certificados de Cloudflare, opcionales), email ACME, registries, usuarios e invitaciones, tokens, exigir 2FA, IPs permitidas para el panel y auditoría.
 
 ## 12. Seguridad
 
 - **muelle tiene `docker.sock`, que equivale a ser root en el host.** Por eso: tokens con alcance mínimo, sesiones estrictas, rate limiting, 2FA disponible (y exigible) e IPs permitidas opcionales.
 - **Secretos:**
-  - Se cifran con AES-256-GCM y AAD ligada a la fila y la columna, así que un valor cifrado copiado a otra fila no se puede descifrar. Las AAD son `env:app:<id>:<key>` y `env:stage:<id>:<key>` (`env_vars.value`), `users:totp:<id>` (`users.totp_secret`), `users:totp_pending:<id>` (`users.totp_pending`) y `settings:<key>` (un setting cifrado). Solo el último segmento es texto libre; una columna cifrada nueva agrega su prefijo (la lista canónica está en `shared/infra/out/crypto`).
+  - Se cifran con AES-256-GCM y AAD ligada a la fila y la columna, así que un valor cifrado copiado a otra fila no se puede descifrar. Las AAD son `env:app:<id>:<key>` y `env:stage:<id>:<key>` (`env_vars.value`), `users:totp:<id>` (`users.totp_secret`), `users:totp_pending:<id>` (`users.totp_pending`), `settings:<key>` (un setting cifrado) y `origin_ca_certs:private_key:<id>` (la clave de un certificado de Origin CA). Solo el último segmento es texto libre; una columna cifrada nueva agrega su prefijo (la lista canónica está en `shared/infra/out/crypto`).
   - La clave maestra solo vive en el secreto Swarm; nunca en SQLite ni en logs.
   - Los valores se enmascaran en los logs de deploy.
   - El compose final no se persiste.
@@ -475,7 +479,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 - **Limitación aceptada:** las credenciales de los registries son de todo muelle, una por host. Un token con alcance a un proyecto puede desplegar en sus apps cualquier imagen que vea esa credencial, también una privada de otro proyecto (contrato §2.10).
 - **Clave maestra:** se imprime en la instalación y se puede volver a leer con `docker exec` en el contenedor de muelle (`/run/secrets/muelle_master_key`). Si se pierde junto con el secreto Swarm, los secretos no se pueden recuperar.
 - **Verificación de la clave:** en el primer arranque muelle guarda en `settings` un valor de control cifrado con la clave maestra. En cada arranque lo descifra, y si falla no arranca ("clave maestra incorrecta"). Así, recrear el secreto Swarm con otra clave no mezcla datos cifrados con dos claves.
-- **Ids no reutilizables:** las tablas cuyos ids forman parte de la AAD (`stages`, `apps`, `users`) usan `AUTOINCREMENT`, para que un valor cifrado sacado de un backup no descifre en una fila nueva con el mismo id.
+- **Ids no reutilizables:** las tablas cuyos ids forman parte de la AAD (`stages`, `apps`, `users`, `origin_ca_certs`) usan `AUTOINCREMENT`, para que un valor cifrado sacado de un backup no descifre en una fila nueva con el mismo id.
 - **Respaldo de muelle:** a diario, `VACUUM INTO /data/backups/muelle-<fecha>.db`, guardando los últimos 7.
 - **Redes:** ver §3.2. Cada stage está aislado en su red; solo Caddy toca varias. La admin API de Caddy solo es accesible por el socket unix.
 - **Apps:** nunca montan `docker.sock`, ni una ruta del host, ni los secretos o los archivos de muelle. El render solo acepta las claves de compose que conoce (§6.3).
@@ -492,6 +496,7 @@ Los cuerpos JSON se leen con `encoding/json/v2` en modo estricto: se rechazan ca
 | Caddy rechaza la configuración o el socket no responde | Se conserva la configuración anterior; banner "proxy desincronizado"; reintentos con backoff y el proceso de cada 5 minutos |
 | Error de la API de Cloudflare | Dominio en `error` con el mensaje y reintento; no bloquea deploys |
 | Certificado inválido o por vencer | Dominio en `error` según la verificación de §8 |
+| Cloudflare no emite o no renueva un certificado de Origin CA | El dominio sigue con Let's Encrypt (no pasa a `error`) y avisa en `origin_ca`; reintentos con backoff (contrato §3.7) |
 | Docker no responde | Los endpoints que usan Docker responden `503`; el panel muestra "degradado" |
 | muelle se reinicia | Reconciliación (§7) |
 
@@ -565,7 +570,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
   - respeto de los overrides del usuario
   - interpolación y variables faltantes
   - cada restricción de §6.3
-- `proxy`: rutas → JSON golden de Caddy (incluye `admin.listen`, políticas TLS y `trusted_proxies`, y ningún atajo del Caddyfile como `{client_ip}`).
+- `proxy`: rutas → JSON golden de Caddy (incluye `admin.listen`, políticas TLS y `trusted_proxies`, y ningún atajo del Caddyfile como `{client_ip}`), también con los certificados de Origin CA (`load_pem`, `skip_certificates` y `disable_ocsp_stapling`).
 - `crypto`: ida y vuelta; un valor alterado o una AAD distinta fallan.
 - `auth`:
   - matriz de alcance de tokens (operación × alcance → permitido o 403)
@@ -573,7 +578,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
   - vencimiento de sesiones e invitaciones
   - flujo de TOTP
 - repositorios y reglas: mezcla de variables, validación de slugs, servicios duplicados dentro de un stage, cálculo de "cambios pendientes", retención.
-- `dns`: contra un servidor HTTP falso: búsqueda de zona por sufijo, conflicto/adopción, borrar solo lo propio.
+- `dns`: contra un servidor HTTP falso: búsqueda de zona por sufijo, conflicto/adopción, borrar solo lo propio, y Origin CA (emitir, revocar y la prueba del permiso).
 
 **Integración** (`//go:build integration`, `go test -tags integration ./...`). Corren en local, con un Swarm activo en el que el nodo es manager, y se saltan si no lo hay o si falta una imagen que necesitan (`caddy:2-alpine`, `nginx:alpine`, `it5-muelle:test`…, ver el README); CI no los corre. Cubren:
 - deploy de `traefik/whoami` por formulario y por compose
@@ -582,6 +587,7 @@ Nota: `build-push.yaml` ya publica el tag `sha-<commit completo>` (`type=sha,for
 - `--prune` elimina un servicio quitado del compose
 - deploy de un servicio con volumen (stop-first)
 - Caddy real con `tls internal` enrutando a whoami por hostname
+- Caddy real sirviendo un PEM cargado (`load_pem`) para un host y la CA interna para otro, y la vuelta a ACME
 - crear un stage nuevo conecta Caddy a su red sin reiniciarlo (el contenedor conserva su id y su uptime)
 - aislamiento: un contenedor de un stage no resuelve ni alcanza servicios de otro stage
 - reconciliación tras matar muelle a mitad de un deploy

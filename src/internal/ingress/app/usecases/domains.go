@@ -26,10 +26,14 @@ type DomainDeps struct {
 	DNS      service.DNS
 	Syncer   *Syncer
 	Certs    *CertChecker
-	Ops      *Ops
-	Clock    clock.Clock
-	Audit    audit.Recorder
-	Log      *slog.Logger
+	// Origin es el reconciliador de Origin CA (contrato §3.7): crear,
+	// editar, adoptar, reintentar y borrar un dominio lo despiertan después
+	// de su Sync. nil: sin Origin CA (los tests que no lo usan).
+	Origin *EnsureOriginCA
+	Ops    *Ops
+	Clock  clock.Clock
+	Audit  audit.Recorder
+	Log    *slog.Logger
 	// DomainOp es el plazo de crear, editar, borrar y adoptar (30 s), y
 	// DomainRetry el de retry (20 s), desde antes de esperar el lock (D6).
 	DomainOp, DomainRetry time.Duration
@@ -76,6 +80,13 @@ func (d DomainDeps) sync(ctx context.Context, force bool) {
 	_ = d.Syncer.Sync(context.WithoutCancel(ctx), force)
 }
 
+// syncAndKick es sync y, después, despierta al reconciliador de Origin CA
+// sin esperarlo (contrato §3.2).
+func (d DomainDeps) syncAndKick(ctx context.Context, force bool) {
+	d.sync(ctx, force)
+	d.Origin.Kick()
+}
+
 // audit registra la acción sobre el dominio, con la app en details.
 func (d DomainDeps) audit(ctx context.Context, action string, app service.App, hostname string, extra map[string]string) {
 	details := map[string]string{"app": app.Project + "/" + app.Stage + "/" + app.Slug}
@@ -103,9 +114,10 @@ func checkFormTarget(app service.App, target string) error {
 	return nil
 }
 
-// toOutput arma el dominio del contrato §3.1: "" es null, y records sale de
-// los ajustes actuales.
-func toOutput(d entity.Domain, p shared.ProxySettings) dto.DomainOutput {
+// toOutput arma el dominio del contrato §3.1: "" es null, records sale de
+// los ajustes actuales, y cert_source y origin_ca de la vista de Origin CA
+// (v; nil es origin_ca: null).
+func toOutput(d entity.Domain, p shared.ProxySettings, v *service.OriginView) dto.DomainOutput {
 	str := func(s string) *string {
 		if s == "" {
 			return nil
@@ -116,6 +128,7 @@ func toOutput(d entity.Domain, p shared.ProxySettings) dto.DomainOutput {
 		Hostname: d.Hostname, TargetService: d.TargetService, TargetPort: d.TargetPort, Proxied: d.Proxied,
 		TLSMode: string(d.TLSMode), CFZoneID: str(d.CFZoneID), CFRecordID: str(d.CFRecordID), Status: string(d.Status),
 		LastErrorCode: str(string(d.ErrorCode)), LastError: str(d.LastError), CertIssuer: str(d.CertIssuer),
+		CertSource: service.CertSource(v), OriginCA: originOutput(v),
 		Records:   []dto.RecordOutput{},
 		CreatedAt: d.CreatedAt.UTC(), UpdatedAt: d.UpdatedAt.UTC(),
 	}
@@ -129,13 +142,35 @@ func toOutput(d entity.Domain, p shared.ProxySettings) dto.DomainOutput {
 	return out
 }
 
+// originOn dice si los certificados de Cloudflare están en uso con p: la
+// opción, el token y el proxy habilitado.
+func (d DomainDeps) originOn(p shared.ProxySettings) bool {
+	return service.OriginOn(p, d.Syncer.Enabled(p))
+}
+
+// output es toOutput con la vista de Origin CA de dom, leída ahora (contrato
+// §3.7: la misma regla que la configuración de Caddy). Se lee sin la
+// cancelación del cliente, como la operación.
+func (d DomainDeps) output(ctx context.Context, dom entity.Domain, p shared.ProxySettings) (dto.DomainOutput, error) {
+	if !d.originOn(p) {
+		return toOutput(dom, p, nil), nil
+	}
+	active, h, err := d.Origin.SnapshotFor(context.WithoutCancel(ctx), dom.Hostname)
+	if err != nil {
+		return dto.DomainOutput{}, err
+	}
+	v := service.OriginCAView(true, service.DomainOriginTarget(dom), active, h, d.Clock.Now())
+	return toOutput(dom, p, v), nil
+}
+
 // ListDomains es GET {app}/domains.
 type ListDomains struct{ d DomainDeps }
 
 func NewListDomains(d DomainDeps) *ListDomains { return &ListDomains{d: d} }
 
 // Execute devuelve los dominios de la app, por hostname ([] sin dominios),
-// con records según los ajustes actuales.
+// con records según los ajustes actuales y origin_ca con lo de Origin CA de
+// ahora (leído una vez para todos).
 func (uc *ListDomains) Execute(ctx context.Context, ref dto.AppRef) ([]dto.DomainOutput, error) {
 	app, err := uc.d.app(ctx, ref)
 	if err != nil {
@@ -149,9 +184,23 @@ func (uc *ListDomains) Execute(ctx context.Context, ref dto.AppRef) ([]dto.Domai
 	if err != nil {
 		return nil, err
 	}
+	on := uc.d.originOn(p)
+	active, hosts := map[string]entity.OriginCert{}, map[string]entity.OriginHost{}
+	if on {
+		if active, hosts, err = uc.d.Origin.Snapshot(ctx); err != nil {
+			return nil, err
+		}
+	}
+	now := uc.d.Clock.Now()
 	out := make([]dto.DomainOutput, 0, len(ds))
 	for _, dom := range ds {
-		out = append(out, toOutput(dom, p))
+		var cur *entity.OriginCert
+		if c, ok := active[dom.Hostname]; ok {
+			cur = &c
+		}
+		h := hosts[dom.Hostname]
+		h.Hostname = dom.Hostname
+		out = append(out, toOutput(dom, p, service.OriginCAView(on, service.DomainOriginTarget(dom), cur, h, now)))
 	}
 	return out, nil
 }
@@ -204,10 +253,10 @@ func (uc *CreateDomain) Execute(ctx context.Context, in dto.CreateDomainInput) (
 		return dto.DomainOutput{}, err
 	}
 	uc.d.logResult("domain.create", dom)
-	uc.d.sync(ctx, false)
+	uc.d.syncAndKick(ctx, false)
 	uc.d.Certs.ScheduleFirst(dom.Hostname)
 	uc.d.audit(ctx, "domain.create", app, dom.Hostname, nil)
-	return toOutput(dom, p), nil
+	return uc.d.output(ctx, dom, p)
 }
 
 // UpdateDomain es PATCH {app}/domains/{hostname}.
@@ -219,8 +268,10 @@ func NewUpdateDomain(d DomainDeps) *UpdateDomain { return &UpdateDomain{d: d} }
 // dentro: el destino (422 si no es válido, o si en una app de formulario no
 // es su servicio) y proxied (422 sin registro propio, D22; si no, cambia los
 // registros: setProxied). Lo que no cambia nada (como {}) no guarda, no
-// audita y no mueve updated_at. Si algo cambió, guarda, manda la
-// configuración a Caddy fuera del lock y audita.
+// audita y no mueve updated_at. Si algo cambió, guarda; si cambió proxied,
+// olvida lo que se vio en Cloudflare de ese hostname (Origin CA, contrato
+// §3.7: la falla queda); después manda la configuración a Caddy fuera del
+// lock, despierta al reconciliador de Origin CA y audita.
 func (uc *UpdateDomain) Execute(ctx context.Context, in dto.UpdateDomainInput) (dto.DomainOutput, error) {
 	app, err := uc.d.app(ctx, in.AppRef)
 	if err != nil {
@@ -228,7 +279,7 @@ func (uc *UpdateDomain) Execute(ctx context.Context, in dto.UpdateDomainInput) (
 	}
 	var dom entity.Domain
 	var p shared.ProxySettings
-	changed := false
+	changed, proxiedChanged := false, false
 	err = uc.d.Ops.Do(ctx, uc.d.DomainOp, func(opCtx, dbCtx context.Context) error {
 		var err error
 		if dom, err = uc.d.domain(dbCtx, app, in.Hostname); err != nil {
@@ -266,7 +317,7 @@ func (uc *UpdateDomain) Execute(ctx context.Context, in dto.UpdateDomainInput) (
 		}
 		if in.Proxied != nil && *in.Proxied != dom.Proxied {
 			uc.d.dnsOps().setProxied(opCtx, &dom, p, *in.Proxied)
-			changed = true
+			changed, proxiedChanged = true, true
 		}
 		if !changed {
 			return nil
@@ -280,12 +331,17 @@ func (uc *UpdateDomain) Execute(ctx context.Context, in dto.UpdateDomainInput) (
 	if err != nil {
 		return dto.DomainOutput{}, err
 	}
+	if proxiedChanged {
+		if err := uc.d.Origin.ForgetObserved(context.WithoutCancel(ctx), dom.Hostname); err != nil {
+			uc.d.Log.Warn("ingress: olvidando lo que se vio en Cloudflare", "hostname", dom.Hostname, "error", err)
+		}
+	}
 	if changed {
 		uc.d.logResult("domain.update", dom)
-		uc.d.sync(ctx, false)
+		uc.d.syncAndKick(ctx, false)
 		uc.d.audit(ctx, "domain.update", app, dom.Hostname, nil)
 	}
-	return toOutput(dom, p), nil
+	return uc.d.output(ctx, dom, p)
 }
 
 // DeleteDomain es DELETE {app}/domains/{hostname}.
@@ -324,7 +380,7 @@ func (uc *DeleteDomain) Execute(ctx context.Context, ref dto.DomainRef) error {
 	if err != nil {
 		return err
 	}
-	uc.d.sync(ctx, false)
+	uc.d.syncAndKick(ctx, false)
 	var extra map[string]string
 	if kept {
 		extra = map[string]string{"dns": "kept"}
