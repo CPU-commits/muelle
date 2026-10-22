@@ -332,9 +332,20 @@ Un deploy sin cuerpo repite las imágenes del deploy actual; `{"image":"nginx:1.
 ingress crea muelle-caddy y lo mantiene: el job `"proxy"`, al arrancar y cada 5 minutos, asegura el contenedor y las redes, y le reenvía la configuración. Cambiar los puertos del proxy en Ajustes lo recrea 2 s después de responder el `PATCH` (contrato §3.5). Antes de guardarlos, muelle prueba que los puertos nuevos estén libres en el host (uno ocupado es un `422` y no cambia nada); si igual muelle-caddy no arranca con ellos, muelle vuelve a los anteriores y lo dice en `GET /api/v1/proxy` (`ports_rollback`) y en la auditoría.
 
 - **En desarrollo** (un `MUELLE_PANEL_ORIGIN` con una IP o `localhost`, que deja `panel_domain` vacío, o un binario sin versión y sin `caddy_image`), muelle no crea muelle-caddy ni toca los puertos del host, y `GET /api/v1/proxy` dice `disabled`. Los dominios y su DNS en Cloudflare funcionan igual.
-- **El token de Cloudflare** (Ajustes) necesita los permisos Zone:Read y DNS:Edit sobre las zonas de tus dominios. muelle lo verifica al guardarlo, y con él crea los registros de los dominios y el del panel, y valida los certificados por DNS-01.
+- **El token de Cloudflare** (Ajustes) necesita los permisos Zone:Read y DNS:Edit sobre las zonas de tus dominios y, si activas los certificados de Cloudflare, también Zone → SSL and Certificates → Edit en esas zonas. El usuario dueño del token tiene que tener API Access. muelle lo verifica al guardarlo, y con él crea los registros de los dominios y el del panel, y valida los certificados por DNS-01.
 - **Una `caddy_image` propia** (`MUELLE_INIT_CADDY_IMAGE`) tiene que ser Caddy 2.10 o más nuevo, con el módulo `dns.providers.cloudflare` (contrato §3.4). Antes de la 2.10, la admin API por socket unix revisa el header `Host` y rechaza el que manda muelle (caddy#6832), y todo `POST /load` falla. La imagen `muelle-caddy` de cada versión cumple las dos cosas.
 - **Imágenes privadas:** muelle baja la muelle-caddy de cada versión nueva con el registry `ghcr.io` de Ajustes → Registries, que siembra install. Si su token vence, muelle-caddy sigue con la imagen anterior y el error de `GET /api/v1/proxy` dice que hay que actualizar la credencial en Ajustes → Registries (el token de GitHub con `read:packages` que explica la parte de install, Fase 5).
+
+**Certificados de Cloudflare (Origin CA)** (Ajustes → Cloudflare, apagados por defecto; contrato §3.7):
+- Son opcionales y sirven para el modo SSL **Full (strict)** de Cloudflare. muelle no cambia el modo SSL de la zona: con "Flexible" hay un bucle de redirects.
+- **Solo Cloudflare confía en ellos, los navegadores no.**
+- Los usan los dominios de Cloudflare con el proxy (nube naranja) cuyo registro maneja muelle, y el del panel si cae en una de tus zonas y su registro tiene el proxy. muelle lee el `proxied` de los registros cada 5 minutos.
+- Los dominios en DNS only y los que están fuera de Cloudflare siguen con Let's Encrypt. Un dominio que pierde el proxy, o todos al apagar la opción, vuelven a Let's Encrypt.
+- Son de 90 días y muelle los renueva solo cuando faltan 30. Si no puede renovarlo, a los 14 días que faltan vuelve a Let's Encrypt.
+- muelle revoca cada uno cuando deja de usarse, después de que Caddy cargó una configuración sin él.
+- Sus claves quedan cifradas en la base, y en claro en el autosave de Caddy (volumen `muelle_caddy_config`), como el token.
+- Con el panel en Origin CA hay que entrar por Cloudflare: directo al servidor (por ejemplo con `/etc/hosts`) el navegador no confía en el certificado. Apaga el proxy del registro del panel en Cloudflare para volver a Let's Encrypt en a lo más 5 minutos.
+- Al apagarlos, Cloudflare puede responder `525` un momento, mientras Caddy consigue el de Let's Encrypt.
 
 **Antes de migrar los sitios (spec §15), a mano, contra una zona de prueba:**
 1. Guarda en Ajustes un token que vea solo la zona de prueba, y la IP pública del servidor.
@@ -349,7 +360,7 @@ ingress crea muelle-caddy y lo mantiene: el job `"proxy"`, al arrancar y cada 5 
 go test -tags integration -count=1 -run Integration -v ./src/internal/ingress/...
 ```
 
-Solo crean contenedores, redes y volúmenes con el prefijo `it3`, en los puertos 21000–21999 (los de la vuelta atrás de los puertos del proxy, `it6` y 23000–23999), y los borran al terminar; nunca usan 80, 443 ni 2019, ni la API real de Cloudflare. No corren a la vez que los otros paquetes de integración que usan el Swarm (ver "Tests").
+Solo crean contenedores, redes y volúmenes con el prefijo `it3`, en los puertos 21000–21999 (los de la vuelta atrás de los puertos del proxy, `it6` y 23000–23999), y los borran al terminar; nunca usan 80, 443 ni 2019, ni la API real de Cloudflare. No corren a la vez que los otros paquetes de integración que usan el Swarm (ver "Tests"). Los de Origin CA corren además con la imagen de `MUELLE_IT_CADDY_IMAGE` si está en el nodo, por ejemplo la muelle-caddy local (`MUELLE_IT_CADDY_IMAGE=it5-muelle-caddy:test`); no la bajan ni la borran.
 
 ## Solo detrás de Caddy (o de otro proxy)
 
