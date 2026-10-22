@@ -7,6 +7,7 @@ import {
 	adminKeys,
 	removeRegistryMutation,
 	replaceCloudflareTokenMutation,
+	setCloudflareOriginCaMutation,
 	updateRegistryMutation,
 	updateSecurityMutation,
 } from '../adminQueries'
@@ -35,6 +36,15 @@ describe('adminQueries', () => {
 		expect(client.getQueryData(adminKeys.settings())).toEqual(SETTINGS)
 		// La auditoría la refresca `refreshAuditOnWrites` mientras está montada.
 		expect(spy).not.toHaveBeenCalled()
+	})
+
+	it('encender los certificados de Cloudflare pone los ajustes que vuelven en el cache', async () => {
+		const client = new QueryClient()
+		const options = setCloudflareOriginCaMutation(client)
+
+		await options.onSuccess(SETTINGS)
+
+		expect(client.getQueryData(adminKeys.settings())).toEqual(SETTINGS)
 	})
 
 	it('un cambio de registries solo recarga la lista', async () => {

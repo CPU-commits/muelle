@@ -7,6 +7,8 @@ export {
 	removeCloudflareTokenMutation,
 	removeRegistryMutation,
 	replaceCloudflareTokenMutation,
+	type SetCloudflareOriginCaInput,
+	setCloudflareOriginCaMutation,
 	settingsQuery,
 	updateAcmeEmailMutation,
 	updateProxyPortsMutation,

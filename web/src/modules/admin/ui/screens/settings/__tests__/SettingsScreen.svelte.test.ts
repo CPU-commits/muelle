@@ -24,6 +24,7 @@ vi.mock('@/modules/admin/container', () => ({
 		updateProxyPorts: vi.fn(),
 		replaceCloudflareToken: vi.fn(),
 		removeCloudflareToken: vi.fn(),
+		setCloudflareOriginCa: vi.fn(),
 		listAudit: mocks.listAudit,
 		listRegistries: mocks.listRegistries,
 		addRegistry: vi.fn(),

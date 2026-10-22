@@ -461,6 +461,29 @@ describe('settings', () => {
 		expect(adminDb.state.cloudflareToken).toBe('cf_token_demo_de_cuarenta_caracteres_xx')
 	})
 
+	it('un 422 en cloudflare_origin_ca llega al campo cloudflareOriginCa, con el motivo; un 502 es CloudflareUnavailable', async () => {
+		const reason =
+			'el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona tudominio.cl (lo necesitan los certificados de Cloudflare): agrégalo al token en Cloudflare, o deja la opción apagada'
+		server.use(http.patch(api('/settings'), () => invalid('cloudflare_origin_ca', reason)))
+		const current = { tokenSet: true, zones: 4, originCa: false }
+
+		const error = await adminUseCases
+			.setCloudflareOriginCa(true, current)
+			.catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(ValidationError)
+		expect(error).toMatchObject({ field: 'cloudflareOriginCa', message: reason })
+
+		server.use(
+			http.patch(api('/settings'), () =>
+				apiError(502, 'cloudflare_unavailable', 'Cloudflare no respondió'),
+			),
+		)
+		await expect(adminUseCases.setCloudflareOriginCa(true, current)).rejects.toBeInstanceOf(
+			CloudflareUnavailable,
+		)
+	})
+
 	it('si Cloudflare no responde es CloudflareUnavailable (se reintenta), no un error del campo', async () => {
 		const error = await adminUseCases
 			.replaceCloudflareToken('cf_token_con_cloudflare_caido_xxxxxx')

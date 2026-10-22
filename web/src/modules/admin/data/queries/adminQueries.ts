@@ -113,6 +113,18 @@ export function removeCloudflareTokenMutation(client: QueryClient) {
 	)
 }
 
+export interface SetCloudflareOriginCaInput {
+	readonly enabled: boolean
+	/** Lo que se ve del token: sin él, encenderlos no sale (`OriginCaNeedsToken`). */
+	readonly current: CloudflareStatus
+}
+
+export function setCloudflareOriginCaMutation(client: QueryClient) {
+	return settingsMutation(client, ({ enabled, current }: SetCloudflareOriginCaInput) =>
+		adminUseCases.setCloudflareOriginCa(enabled, current),
+	)
+}
+
 function registryMutation<TInput, TResult>(
 	client: QueryClient,
 	run: (input: TInput) => Promise<TResult>,
