@@ -45,6 +45,89 @@ func TestAllows(t *testing.T) {
 	}
 }
 
+// La matriz de §5.5 del diseño del MCP (contrato §8.1): los cinco tokens
+// sobre p1 (stages s1 y s2) y p2, más los dos AllProjects que no deberían
+// existir (sin ReadOnly, o con slugs), que no autorizan nada.
+func TestAllowsReadOnlyAndAllProjects(t *testing.T) {
+	session := Principal{UserID: 1, Username: "felipe"}
+	p := Principal{Token: &TokenScope{ID: 1, Name: "p", ProjectSlug: "p1"}}
+	ps := Principal{Token: &TokenScope{ID: 2, Name: "ps", ProjectSlug: "p1", StageSlug: "s1"}}
+	pl := Principal{Token: &TokenScope{ID: 3, Name: "pl", ProjectSlug: "p1", ReadOnly: true}}
+	psl := Principal{Token: &TokenScope{ID: 4, Name: "psl", ProjectSlug: "p1", StageSlug: "s1", ReadOnly: true}}
+	tl := Principal{Token: &TokenScope{ID: 5, Name: "tl", ReadOnly: true, AllProjects: true}}
+	allWrite := Principal{Token: &TokenScope{ID: 6, Name: "roto", AllProjects: true}}
+	allSlugs := Principal{Token: &TokenScope{ID: 7, Name: "roto", ProjectSlug: "p1", ReadOnly: true, AllProjects: true}}
+	allStage := Principal{Token: &TokenScope{ID: 8, Name: "roto", StageSlug: "s1", ReadOnly: true, AllProjects: true}}
+
+	type cell struct {
+		project, stage string
+		write          bool
+	}
+	cells := []cell{
+		{"p1", "", false}, {"p1", "", true},
+		{"p1", "s1", false}, {"p1", "s1", true},
+		{"p1", "s2", false}, {"p1", "s2", true},
+		{"p2", "", false}, {"p2", "s1", false}, {"p2", "s1", true},
+		{"", "", false}, {"", "s1", false},
+	}
+	// want[i] es la respuesta para cells[i].
+	cases := []struct {
+		name string
+		p    Principal
+		want []bool
+	}{
+		{"sesión", session, []bool{true, true, true, true, true, true, true, true, true, true, true}},
+		{"P", p, []bool{true, true, true, true, true, true, false, false, false, false, false}},
+		{"PS", ps, []bool{true, false, true, true, false, false, false, false, false, false, false}},
+		{"P·L", pl, []bool{true, false, true, false, true, false, false, false, false, false, false}},
+		{"PS·L", psl, []bool{true, false, true, false, false, false, false, false, false, false, false}},
+		{"T·L", tl, []bool{true, false, true, false, true, false, true, true, false, false, false}},
+		{"todos sin solo lectura", allWrite, []bool{false, false, false, false, false, false, false, false, false, false, false}},
+		{"todos con proyecto", allSlugs, []bool{false, false, false, false, false, false, false, false, false, false, false}},
+		{"todos con stage", allStage, []bool{false, false, false, false, false, false, false, false, false, false, false}},
+	}
+	for _, c := range cases {
+		for i, cl := range cells {
+			if got := c.p.Allows(cl.project, cl.stage, cl.write); got != c.want[i] {
+				t.Errorf("%s: Allows(%q, %q, %v) = %v, esperaba %v", c.name, cl.project, cl.stage, cl.write, got, c.want[i])
+			}
+		}
+	}
+}
+
+func TestPrincipalReadOnly(t *testing.T) {
+	cases := []struct {
+		name string
+		p    Principal
+		want bool
+	}{
+		{"sesión", Principal{UserID: 1}, false},
+		{"token de escritura", Principal{Token: &TokenScope{ID: 1, ProjectSlug: "p1"}}, false},
+		{"token de solo lectura", Principal{Token: &TokenScope{ID: 1, ProjectSlug: "p1", ReadOnly: true}}, true},
+		{"token de todos los proyectos", Principal{Token: &TokenScope{ID: 1, ReadOnly: true, AllProjects: true}}, true},
+	}
+	for _, c := range cases {
+		if got := c.p.ReadOnly(); got != c.want {
+			t.Errorf("%s: ReadOnly() = %v, esperaba %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestVia(t *testing.T) {
+	if _, ok := ViaFrom(context.Background()); ok {
+		t.Fatal("un ctx vacío no tiene via")
+	}
+	ctx := WithVia(context.Background(), ViaMCP)
+	if via, ok := ViaFrom(ctx); !ok || via != "mcp" {
+		t.Fatalf("ViaFrom = %q, %v", via, ok)
+	}
+	// El Principal y via van juntos en el mismo ctx.
+	ctx = WithPrincipal(ctx, Principal{UserID: 2})
+	if via, ok := ViaFrom(ctx); !ok || via != ViaMCP {
+		t.Fatalf("ViaFrom con Principal = %q, %v", via, ok)
+	}
+}
+
 func TestActor(t *testing.T) {
 	typ, id := Principal{UserID: 3, Token: &TokenScope{ID: 9}}.Actor()
 	if typ != ActorToken || id == nil || *id != 9 {
