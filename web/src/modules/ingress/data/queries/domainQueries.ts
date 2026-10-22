@@ -8,6 +8,7 @@ import {
 	type DomainRef,
 	hasProvisioning,
 	hasWaitingDns,
+	panelCertificateIssuing,
 	proxySettling,
 	replaceDomain,
 	type SetProxiedInput,
@@ -46,7 +47,9 @@ export interface ProxyFollowOptions {
  * `GET /proxy` para quien espera cómo termina una recreación de muelle-caddy (Ajustes,
  * después de cambiar los puertos): lo mismo que `proxyQuery`, y además pregunta cada 10 s
  * mientras `waiting()` diga que sí, aunque la última respuesta haya fallado o sea de antes
- * del cambio. El panel puede pasar por el mismo muelle-caddy que se recrea.
+ * del cambio. El panel puede pasar por el mismo muelle-caddy que se recrea. También mientras
+ * muelle emite el certificado de Cloudflare del panel (`panel_certificate`, que Ajustes
+ * muestra).
  *
  * Pasado el plazo (`expired()`), un último pedido que falló corta: TanStack guarda la
  * respuesta de antes, y si decía `recreating` se seguiría preguntando cada 10 s para siempre.
@@ -57,7 +60,10 @@ export function proxyFollowQuery({ waiting, expired }: ProxyFollowOptions) {
 		refetchInterval: (query) => {
 			if (waiting()) return PROXY_SETTLING_REFRESH_MS
 			if (expired() && query.state.status === 'error') return false
-			return proxySettling(query.state.data) ? PROXY_SETTLING_REFRESH_MS : false
+			const data = query.state.data
+			return proxySettling(data) || panelCertificateIssuing(data)
+				? PROXY_SETTLING_REFRESH_MS
+				: false
 		},
 	})
 }

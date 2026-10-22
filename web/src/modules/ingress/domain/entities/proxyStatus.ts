@@ -87,3 +87,11 @@ export function proxyNotice(proxy: ProxyStatus | null | undefined): ProxyNotice 
 export function proxySettling(proxy: ProxyStatus | null | undefined): boolean {
 	return proxy?.status === 'out_of_sync' || proxy?.status === 'recreating'
 }
+
+/**
+ * muelle está emitiendo el certificado de Cloudflare del panel (contrato §3.7): termina en
+ * segundos, o en unos minutos con muchos dominios, y Ajustes lo sigue hasta que sale.
+ */
+export function panelCertificateIssuing(proxy: ProxyStatus | null | undefined): boolean {
+	return proxy?.panelCertificate?.originCa?.status === 'issuing'
+}

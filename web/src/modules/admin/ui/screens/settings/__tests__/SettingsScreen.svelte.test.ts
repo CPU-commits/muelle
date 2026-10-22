@@ -205,6 +205,52 @@ describe('SettingsScreen', () => {
 		expect(mocks.setCloudflareOriginCa).not.toHaveBeenCalled()
 	})
 
+	it('con los certificados de Cloudflare encendidos, la tarjeta dice cuál usa el panel y el aviso de su falla', async () => {
+		mocks.getSettings.mockResolvedValue({
+			...SETTINGS,
+			proxy: {
+				...SETTINGS.proxy,
+				cloudflare: { tokenSet: true, zones: 4, originCa: true },
+			},
+		})
+		mocks.listRegistries.mockResolvedValue([])
+		const error =
+			"muelle no pudo emitir el certificado de Cloudflare: el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de panel.tudominio.cl (Cloudflare: Authentication error); agrégalo al token: muelle lo reintenta solo cada 6 h; mientras tanto usa Let's Encrypt"
+		ingress.getProxyStatus.mockResolvedValue({
+			status: 'synced',
+			error: null,
+			syncedAt: new Date('2026-10-16T12:00:00Z'),
+			caddy: { image: null, running: true, httpPort: 80, httpsPort: 443 },
+			portsRollback: null,
+			panelCertificate: {
+				hostname: 'panel.tudominio.cl',
+				certSource: 'letsencrypt',
+				originCa: {
+					status: 'failed',
+					errorCode: 'permission',
+					error,
+					retryAt: new Date(),
+					expiresAt: null,
+				},
+			},
+		})
+
+		const screen = await render(SettingsView, { client: client() })
+
+		const cloudflare = screen.getByRole('region', { name: 'Cloudflare' })
+		await expect.element(cloudflare.getByText("Panel: Let's Encrypt")).toBeVisible()
+		await expect
+			.element(
+				cloudflare.getByText('No se pudo emitir el certificado de Cloudflare del panel'),
+			)
+			.toBeVisible()
+		await expect.element(cloudflare.getByText(`M${error.slice(1)}`)).toBeVisible()
+		// El panel no tiene Reintentar: se reintenta solo.
+		await expect
+			.element(cloudflare.getByRole('button', { name: 'Reintentar' }))
+			.not.toBeInTheDocument()
+	})
+
 	it('si encenderlos falla, el switch sigue apagado y la tarjeta dice por qué', async () => {
 		mocks.getSettings.mockResolvedValue(SETTINGS)
 		mocks.listRegistries.mockResolvedValue([])

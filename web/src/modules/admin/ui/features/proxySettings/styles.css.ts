@@ -63,6 +63,12 @@ export const switchControl = style({
 	marginTop: theme.space[2],
 })
 
+// Qué certificado usa el panel, con los certificados de Cloudflare encendidos.
+export const panelLine = style({
+	fontSize: theme.typography.fontSize[13],
+	color: theme.colors.text.secondary,
+})
+
 export const fields = style({
 	display: 'grid',
 	gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))',

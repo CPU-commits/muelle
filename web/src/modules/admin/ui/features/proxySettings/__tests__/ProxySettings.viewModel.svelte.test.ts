@@ -7,6 +7,7 @@ import { m } from '@/shared/ui/i18n/paraglide/messages'
 import { PanelMovedError, UnavailableError, ValidationError } from '@/shared/domain'
 import { PORTS_WATCH_TIMEOUT_MS, type ProxySettingsViewModel } from '..'
 import { toast } from '@/shared/ui/stores'
+import { formatDate } from '@/shared/ui'
 import {
 	CloudflareUnavailable,
 	InvalidIpAddress,
@@ -14,7 +15,12 @@ import {
 	type ProxySettings,
 	type Settings,
 } from '../../../../domain'
-import { ingressKeys, type PortsRollback, type ProxyStatus } from '@/modules/ingress'
+import {
+	ingressKeys,
+	type OriginCaState,
+	type PortsRollback,
+	type ProxyStatus,
+} from '@/modules/ingress'
 import { adminKeys } from '../../../../data'
 import ProxySettingsHarness from './ProxySettingsHarness.svelte'
 import { cacheHolds } from '../../../__tests__/cacheHolds'
@@ -1278,6 +1284,138 @@ describe('ProxySettingsViewModel', () => {
 			await vm.removeCloudflare()
 
 			expect(mocks.removeCloudflareToken).toHaveBeenCalledExactlyOnceWith(ON.cloudflare)
+		})
+
+		describe('el certificado del panel (panel_certificate de GET /proxy)', () => {
+			const EXPIRES = new Date('2027-01-19T12:00:00Z')
+			const panel = (originCa: OriginCaState | null): ProxyStatus =>
+				proxyStatus({
+					panelCertificate: {
+						hostname: 'panel.tudominio.cl',
+						certSource:
+							originCa?.status === 'active' ? 'cloudflare_origin_ca' : 'letsencrypt',
+						originCa,
+					},
+				})
+			const state = (overrides: Partial<OriginCaState>): OriginCaState => ({
+				status: 'active',
+				errorCode: null,
+				error: null,
+				retryAt: null,
+				expiresAt: EXPIRES,
+				...overrides,
+			})
+			async function panelLine(originCa: OriginCaState | null, proxy = ON) {
+				ingress.getProxyStatus.mockResolvedValue(panel(originCa))
+				const vm = await mountViewModel(proxy)
+				await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+				await vi.waitFor(() =>
+					expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success'),
+				)
+				return vm
+			}
+
+			it('con Origin CA, la línea dice que el panel lo usa y cuándo vence', async () => {
+				const vm = await panelLine(state({}))
+
+				expect(vm.panelOriginCaLine).toBe(
+					m.admin_cf_origin_ca_panel({
+						source: m.admin_cf_origin_ca_panel_origin_ca({ date: formatDate(EXPIRES) }),
+					}),
+				)
+				expect(vm.panelOriginCaLine).toMatch(/^Panel: Cloudflare Origin CA · vence /)
+				expect(vm.panelOriginCaWarning).toBeNull()
+			})
+
+			it("en DNS only en Cloudflare, o mientras se emite, Let's Encrypt", async () => {
+				const dnsOnly = await panelLine(state({ status: 'dns_only', expiresAt: null }))
+				expect(dnsOnly.panelOriginCaLine).toBe(
+					"Panel: Let's Encrypt (DNS only en Cloudflare)",
+				)
+
+				const issuing = await panelLine(state({ status: 'issuing', expiresAt: null }))
+				expect(issuing.panelOriginCaLine).toBe(
+					m.admin_cf_origin_ca_panel({ source: m.admin_cf_origin_ca_panel_issuing() }),
+				)
+			})
+
+			it('si su emisión falló, el aviso con el mensaje de muelle, sin Reintentar (se reintenta solo)', async () => {
+				const error =
+					"muelle no pudo emitir el certificado de Cloudflare: el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona de panel.tudominio.cl (Cloudflare: Authentication error); agrégalo al token: muelle lo reintenta solo cada 6 h; mientras tanto usa Let's Encrypt"
+				const vm = await panelLine(
+					state({
+						status: 'failed',
+						errorCode: 'permission',
+						error,
+						retryAt: new Date(),
+						expiresAt: null,
+					}),
+				)
+
+				expect(vm.panelOriginCaLine).toBe("Panel: Let's Encrypt")
+				expect(vm.panelOriginCaWarning).toEqual({
+					title: m.admin_cf_origin_ca_panel_failed(),
+					body: `M${error.slice(1)}`,
+				})
+			})
+
+			it('si falló su renovación, el aviso de la renovación y sigue con Origin CA', async () => {
+				const vm = await panelLine(
+					state({
+						errorCode: 'cloudflare',
+						error: 'muelle no pudo renovar…',
+						retryAt: new Date(),
+					}),
+				)
+
+				expect(vm.panelOriginCaLine).toMatch(/Cloudflare Origin CA/)
+				expect(vm.panelOriginCaWarning).toEqual({
+					title: m.admin_cf_origin_ca_panel_renew_failed(),
+					body: 'Muelle no pudo renovar…',
+				})
+			})
+
+			it('con la opción apagada, o sin panel_certificate, no hay línea ni aviso', async () => {
+				const off = await panelLine(null, WITH_TOKEN)
+				expect(off.panelOriginCaLine).toBeNull()
+				expect(off.panelOriginCaWarning).toBeNull()
+
+				ingress.getProxyStatus.mockResolvedValue(proxyStatus({ panelCertificate: null }))
+				const none = await mountViewModel(ON)
+				await vi.waitFor(() =>
+					expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success'),
+				)
+				expect(none.panelOriginCaLine).toBeNull()
+			})
+
+			it('mientras el del panel se emite, GET /proxy se vuelve a pedir hasta que sale', async () => {
+				ingress.getProxyStatus.mockResolvedValue(
+					panel(state({ status: 'issuing', expiresAt: null })),
+				)
+				vi.useFakeTimers({
+					toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+					shouldAdvanceTime: true,
+				})
+				try {
+					const vm = await mountViewModel(ON)
+					await vi.waitFor(() =>
+						expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success'),
+					)
+
+					ingress.getProxyStatus.mockResolvedValue(panel(state({})))
+					await vi.advanceTimersByTimeAsync(PROXY_REFRESH_MS)
+
+					await vi.waitFor(() =>
+						expect(vm.panelOriginCaLine).toMatch(/Cloudflare Origin CA/),
+					)
+					// Ya salió: no pregunta más.
+					const asked = ingress.getProxyStatus.mock.calls.length
+					await vi.advanceTimersByTimeAsync(3 * PROXY_REFRESH_MS)
+					expect(ingress.getProxyStatus.mock.calls.length).toBe(asked)
+				} finally {
+					vi.useRealTimers()
+				}
+			})
 		})
 
 		it('Cloudflare caído (502): el aviso dice que no se cambió nada; apagarlos también cierra la confirmación', async () => {

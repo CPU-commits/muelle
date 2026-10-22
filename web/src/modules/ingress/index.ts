@@ -4,7 +4,8 @@
 // `proxyQuery` y `proxyNotice` (null si anda bien, o si `GET /proxy` falló); Ajustes,
 // `proxyFollowQuery`, que después de cambiar los puertos sigue preguntando aunque
 // `GET /proxy` falle, `portsRollback` (muelle volvió a los puertos anteriores) y
-// `panelCertificate` (el certificado del panel, con los de Cloudflare Origin CA).
+// `panelCertificate` (el certificado del panel, con los de Cloudflare Origin CA, que se lee
+// con `originCaNotice`).
 export { ingressUseCases } from './container'
 export { domainsQuery, ingressKeys, proxyFollowQuery, proxyQuery } from './data'
 export type {
@@ -18,6 +19,6 @@ export type {
 	ProxyPorts,
 	ProxyStatus,
 } from './domain'
-export { domainState, proxyNotice } from './domain'
+export { domainState, originCaNotice, proxyNotice } from './domain'
 export type { DomainsProps } from './ui'
 export { DomainsScreen } from './ui'

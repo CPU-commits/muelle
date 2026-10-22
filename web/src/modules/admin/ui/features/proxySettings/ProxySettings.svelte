@@ -17,6 +17,7 @@
 	import { ProxySettingsViewModel } from './ProxySettings.viewModel.svelte.ts'
 	import {
 		fields,
+		panelLine,
 		portFields,
 		readonlyField,
 		readonlyLabel,
@@ -81,6 +82,17 @@
 				aria-busy={vm.isSavingOriginCa}
 			/>
 		</label>
+		{#if vm.panelOriginCaWarning}
+			<!-- Sin Reintentar: el del panel se reintenta solo (contrato §3.7). -->
+			<Banner
+				tone="warn"
+				title={vm.panelOriginCaWarning.title}
+				{...vm.panelOriginCaWarning.body ? { body: vm.panelOriginCaWarning.body } : {}}
+			/>
+		{/if}
+		{#if vm.panelOriginCaLine}
+			<p class={panelLine}>{vm.panelOriginCaLine}</p>
+		{/if}
 		{#snippet footer()}
 			{#if vm.proxy.cloudflare.tokenSet}
 				<Button variant="ghost" size="sm" onclick={vm.askRemoveCloudflare}>

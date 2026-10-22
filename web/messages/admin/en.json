@@ -44,6 +44,13 @@
 	"admin_cf_origin_ca_off_body": "Caddy requests a Let's Encrypt certificate for each domain, usually in under a minute. Meanwhile Cloudflare may answer with a 525 error. muelle revokes the Cloudflare certificates afterwards.",
 	"admin_cf_origin_ca_off_confirm": "Turn off",
 	"admin_cf_origin_ca_unavailable": "Cloudflare didn't respond: nothing changed. Try again in a moment.",
+	"admin_cf_origin_ca_panel": "Panel: {source}",
+	"admin_cf_origin_ca_panel_origin_ca": "Cloudflare Origin CA · expires {date}",
+	"admin_cf_origin_ca_panel_dns_only": "Let's Encrypt (DNS only in Cloudflare)",
+	"admin_cf_origin_ca_panel_issuing": "Let's Encrypt, while muelle issues the Cloudflare one",
+	"admin_cf_origin_ca_panel_letsencrypt": "Let's Encrypt",
+	"admin_cf_origin_ca_panel_failed": "The panel's Cloudflare certificate couldn't be issued",
+	"admin_cf_origin_ca_panel_renew_failed": "The panel's Cloudflare certificate couldn't be renewed",
 	"admin_error_cf_token_length": "A Cloudflare token has between {min} and {max} characters.",
 	"admin_error_cf_token_spaces": "No spaces: paste just the token.",
 

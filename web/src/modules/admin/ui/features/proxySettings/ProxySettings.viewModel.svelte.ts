@@ -3,10 +3,12 @@ import { untrack } from 'svelte'
 import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query'
 import { heldWritesOrigin, holdWrites, releaseWrites } from '@/shared/data/http/client'
 import { m } from '@/shared/ui/i18n/paraglide/messages'
-import { formatRelative, withQuery } from '@/shared/ui'
+import { formatDate, formatRelative, withQuery } from '@/shared/ui'
 import { toast } from '@/shared/ui/stores'
 import {
 	ingressKeys,
+	originCaNotice,
+	type OriginCaState,
 	type PortsRollback,
 	proxyFollowQuery,
 	proxyNotice,
@@ -36,6 +38,7 @@ import {
 	adminErrorMessage,
 	adminFieldError,
 	originCaErrorMessage,
+	sentence,
 } from '../../components/adminMessages'
 import { currentOrigin } from './currentOrigin'
 import { clearPanelMove, loadPanelMove, PANEL_MOVED_PARAM, savePanelMove } from './panelMoveNotice'
@@ -106,6 +109,23 @@ export interface PortsRollbackView {
 export interface CloudflareNotice {
 	readonly title: string
 	readonly body: string | null
+}
+
+/** De dónde sale el certificado del panel, para "Panel: {source}". */
+function panelCertificateSource(originCa: OriginCaState): string {
+	switch (originCa.status) {
+		case 'active':
+			return originCa.expiresAt
+				? m.admin_cf_origin_ca_panel_origin_ca({ date: formatDate(originCa.expiresAt) })
+				: 'Cloudflare Origin CA'
+		case 'dns_only':
+			return m.admin_cf_origin_ca_panel_dns_only()
+		case 'issuing':
+			return m.admin_cf_origin_ca_panel_issuing()
+		case 'failed':
+		case 'not_eligible':
+			return m.admin_cf_origin_ca_panel_letsencrypt()
+	}
 }
 
 /**
@@ -180,11 +200,12 @@ export class ProxySettingsViewModel {
 	/** Cuándo se guardaron: un estado del proxy de antes (en el cache) no dice nada. */
 	#watchingSince = 0
 	// `GET /proxy` (ingress): se pide al abrir Ajustes (por si muelle volvió a los puertos
-	// anteriores: `ports_rollback`) y, después de cambiar los puertos, se vuelve a pedir
-	// mientras no diga cómo terminó, aunque falle (2 min como mucho). `waiting` y `expired` los
-	// llama TanStack adentro del efecto que suscribe la query: leídos con `untrack`, o cada
-	// respuesta haría que se vuelva a suscribir, y eso cancela el pedido en curso (y descarta
-	// su respuesta).
+	// anteriores: `ports_rollback`; y el certificado del panel, `panel_certificate`, que
+	// `proxyFollowQuery` sigue mientras se emite) y, después de cambiar los puertos, se vuelve
+	// a pedir mientras no diga cómo terminó, aunque falle (2 min como mucho). `waiting` y
+	// `expired` los llama TanStack adentro del efecto que suscribe la query: leídos con
+	// `untrack`, o cada respuesta haría que se vuelva a suscribir, y eso cancela el pedido en
+	// curso (y descarta su respuesta).
 	readonly #proxyStatus = createQuery(() =>
 		proxyFollowQuery({
 			waiting: () => untrack(() => this.#awaitingProxy),
@@ -248,6 +269,46 @@ export class ProxySettingsViewModel {
 		const zones = this.proxy.cloudflare.zones
 		if (zones === null) return m.admin_cf_encrypted()
 		return zones === 1 ? m.admin_cf_zones_one() : m.admin_cf_zones({ count: zones })
+	}
+
+	/**
+	 * El certificado de Cloudflare del panel (`panel_certificate` de `GET /proxy`, contrato
+	 * §3.3), si los certificados de Cloudflare están encendidos y `GET /proxy` lo trae.
+	 */
+	get #panelOriginCa(): OriginCaState | null {
+		if (!this.proxy.cloudflare.originCa) return null
+		return this.#proxyStatus.data?.panelCertificate?.originCa ?? null
+	}
+
+	/**
+	 * Qué certificado usa el panel: "Panel: Cloudflare Origin CA · vence 19 ene 2027", o Let's
+	 * Encrypt (en DNS only en Cloudflare, mientras se emite el de Cloudflare, o si no se pudo).
+	 * null con los certificados de Cloudflare apagados, o si no se sabe.
+	 */
+	get panelOriginCaLine(): string | null {
+		const originCa = this.#panelOriginCa
+		if (!originCa) return null
+		return m.admin_cf_origin_ca_panel({ source: panelCertificateSource(originCa) })
+	}
+
+	/**
+	 * Si falló la emisión o la renovación del certificado de Cloudflare del panel, con el
+	 * mensaje de muelle. Sin Reintentar: el panel no tiene `retry` y se reintenta solo
+	 * (contrato §3.7), lo que ya dice el mensaje.
+	 */
+	get panelOriginCaWarning(): CloudflareNotice | null {
+		const originCa = this.#panelOriginCa
+		if (!originCa) return null
+		// El panel no tiene Proxied en muelle: su DNS only es siempre el de Cloudflare.
+		const notice = originCaNotice({ proxied: true, originCa })
+		if (notice !== 'failed' && notice !== 'renew_failed') return null
+		return {
+			title:
+				notice === 'failed'
+					? m.admin_cf_origin_ca_panel_failed()
+					: m.admin_cf_origin_ca_panel_renew_failed(),
+			body: originCa.error ? sentence(originCa.error) : null,
+		}
 	}
 
 	/**
