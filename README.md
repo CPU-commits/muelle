@@ -24,6 +24,8 @@ Fase 5 (distribución): el panel embebido en el binario (`-tags panel`), las im�
 
 Fase 4 (panel): el panel web en `web/` (SvelteKit sin SSR, ver `web/README.md` y `web/CLAUDE.md`), que la imagen embebe en el binario.
 
+MCP: un servidor MCP en `POST /api/v1/mcp` para Claude Code, con 15 herramientas (11 de lectura y 4 de escritura) sobre los mismos casos de uso que la API, y los tokens de solo lectura y de todos los proyectos (solo lectura). Ver "Claude Code (MCP)".
+
 ## Estructura (spec §4.1)
 
 ```
@@ -35,6 +37,7 @@ src/
 ├── cmd/http/       ServeMux, middleware y errores → HTTP
 ├── cmd/http/panel/ sirve el panel embebido (-tags panel; ver "Con el panel")
 ├── cmd/cron/       ejecuta las tareas periódicas de los módulos
+├── cmd/mcp/        el servidor MCP (POST /api/v1/mcp) y su kit (tools/), con que los módulos registran sus herramientas
 ├── cmd/install/     muelle install (ver "Instalar")
 ├── cmd/settingscli/ muelle settings reset-panel-ips (ver "Recuperar el acceso")
 ├── internal/
@@ -49,7 +52,7 @@ src/
 └── settings/       carga y validación de MUELLE_*
 ```
 
-Cada módulo tiene `domain/`, `app/` e `infra/` (in/out). Los módulos no se importan entre sí.
+Cada módulo tiene `domain/`, `app/` e `infra/` (in/out; las herramientas MCP de catalog, secrets, deploy e ingress están en su `infra/in/mcp`). Los módulos no se importan entre sí.
 
 ## Instalar
 
@@ -228,8 +231,6 @@ Un error de muelle se muestra con su `code` y su `message` (`403 out_of_scope: �
 
 ## Claude Code (MCP)
 
-> **En construcción:** el servidor MCP llega con la rama `mcp` (contrato §8). Hasta que esté en tu versión de muelle, `/api/v1/mcp` responde `404 no_route` y Claude Code no conecta.
-
 muelle sirve un servidor MCP en `https://panel.tudominio.cl/api/v1/mcp` (el origen del panel, con `:<puerto>` si no es 443). Con él, Claude Code lee el estado de las apps, sus deploys, sus logs, sus variables (sin los secretos) y sus dominios y, con un token que no es de solo lectura, despliega, hace rollback y cambia variables no secretas. No hay nada que instalar: es HTTP, con un token de API.
 
 **El token**, en Ajustes → Tokens de API:
@@ -292,8 +293,8 @@ Las cuatro que escriben solo están con un token que no es de solo lectura.
 - `401`: el token no existe, se revocó o venció, o `MUELLE_TOKEN` no está exportada en la shell en que abriste Claude Code;
 - `403` sin cuerpo: tu IP no está en las IPs permitidas del panel (Ajustes). Suma la de tu oficina o tu VPN;
 - `403 bad_origin`: el cliente manda un `Origin` que no es el del panel (Claude Code no lo manda);
-- `404 no_route`: tu muelle todavía no tiene el servidor MCP;
-- si Claude Code no logra negociar el protocolo: `MCP_PROTOCOL_NEGOTIATION=legacy claude`, que usa el protocolo anterior a 2026-07-28.
+- `404 no_route`: tu muelle es anterior al servidor MCP: actualízalo;
+- si Claude Code no logra negociar el protocolo: `MCP_PROTOCOL_NEGOTIATION=legacy claude`, que usa el protocolo anterior a 2026-07-28. muelle habla los dos: 2026-07-28 (con `server/discover`, sin sesiones) y, con `initialize`, 2025-11-25 y las anteriores.
 
 Para probarlo sin Claude Code, el `curl` del contrato (§8.2).
 
@@ -469,14 +470,20 @@ Los de integración (build tag `integration`) usan el Docker real: necesitan un 
 go test -tags integration -race -count=1 -timeout 40m ./...
 ```
 
-Cada paquete usa su prefijo (`it2` deploy, `it3` ingress e `it6` su vuelta atrás de los puertos del proxy, `it5` distribución e install, `ctr23` el cliente de Docker, `it9` la prueba de punta a punta de `container`; `it7` es el e2e real del panel, abajo) y borra lo suyo. Los que usan el Swarm (deploy, ingress, el cliente de Docker, install y `container`) corren de a uno aunque `go test` los lance a la vez: los serializa un candado en el directorio temporal (`dockertest/swarmlock`), porque con varios creando y borrando overlays a la vez, Swarm deja de conectar contenedores a una overlay attachable ("attaching to network failed … context deadline exceeded"). La espera cuenta para el `-timeout` de cada paquete. Los de install necesitan además las imágenes `it5-muelle:test` de este árbol y `it5-muelle-caddy:test`, construida desde `deploy/caddy` (`docker build -t it5-muelle-caddy:test deploy/caddy`; ver `src/cmd/install/integration_test.go`). Sin ellas, los tests que las usan se saltan.
+Cada paquete usa su prefijo (`it2` deploy, `it3` ingress e `it6` su vuelta atrás de los puertos del proxy, `it5` distribución e install, `ctr23` el cliente de Docker, `it9` la prueba de punta a punta de `container` e `it8` la del MCP; `it7` es el e2e real del panel, abajo) y borra lo suyo. Los que usan el Swarm (deploy, ingress, el cliente de Docker, install y `container`) corren de a uno aunque `go test` los lance a la vez: los serializa un candado en el directorio temporal (`dockertest/swarmlock`), porque con varios creando y borrando overlays a la vez, Swarm deja de conectar contenedores a una overlay attachable ("attaching to network failed … context deadline exceeded"). La espera cuenta para el `-timeout` de cada paquete. Los de install necesitan además las imágenes `it5-muelle:test` de este árbol y `it5-muelle-caddy:test`, construida desde `deploy/caddy` (`docker build -t it5-muelle-caddy:test deploy/caddy`; ver `src/cmd/install/integration_test.go`). Sin ellas, los tests que las usan se saltan.
 
 Los tests de `action/` corren el `deploy.sh` de la GitHub Action con bash, `curl` y `jq` contra un muelle falso (se saltan si falta alguno); CI corre además `shellcheck action/deploy.sh`.
 
-Los tests de `src/shared/infra/container` arman muelle completo con los seis módulos (matriz de permisos de los tokens, contratos entre módulos, fechas). Con el tag `integration`, `TestIntegrationEndToEnd` prueba las Fases 2, 3 y 5 juntas contra el Swarm real, por la API HTTP: proyecto, stage y una app de formulario con una variable secreta; el deploy seguido por SSE (con el secreto enmascarado), el estado y los logs; un dominio con Cloudflare falso que muelle-caddy (`caddy:2-alpine` con la CA interna) enruta a la app; un redeploy y el rollback; y al borrar todo, ni servicios, ni red, ni rutas. Usa el prefijo `it9` y los puertos 23001–23003, y necesita `nginx:alpine`, `caddy:2-alpine` y `alpine/socat:latest` en el nodo:
+Los tests de `src/shared/infra/container` arman muelle completo con los seis módulos (matriz de permisos de los tokens, contratos entre módulos, fechas, y el MCP por HTTP con el cliente del SDK: su matriz de herramientas por tipo de token y lo que revisa antes del SDK). Con el tag `integration`, `TestIntegrationEndToEnd` prueba las Fases 2, 3 y 5 juntas contra el Swarm real, por la API HTTP: proyecto, stage y una app de formulario con una variable secreta; el deploy seguido por SSE (con el secreto enmascarado), el estado y los logs; un dominio con Cloudflare falso que muelle-caddy (`caddy:2-alpine` con la CA interna) enruta a la app; un redeploy y el rollback; y al borrar todo, ni servicios, ni red, ni rutas. Usa el prefijo `it9` y los puertos 23001–23003, y necesita `nginx:alpine`, `caddy:2-alpine` y `alpine/socat:latest` en el nodo:
 
 ```bash
 go test -tags integration -race -count=1 -timeout 25m -run Integration -v ./src/shared/infra/container/
+```
+
+`TestIntegrationMCP` prueba el servidor MCP contra el mismo Swarm, con el cliente del SDK de Go: muelle sirve en `127.0.0.1`, en el primer puerto libre de 25500 a 25599, sin dominio del panel (sin muelle-caddy). Con un token de escritura de un stage, despliega `nginx:alpine` y sigue el deploy con `get_deploy` y `wait_s` hasta que termina bien; lee el estado y los logs (el secreto que imprime la app sale enmascarado, y `contains` con el secreto no encuentra nada) y cambia una variable no secreta; con uno de todos los proyectos de solo lectura, no tiene las herramientas de escritura; y la auditoría marca `"via": "mcp"`. El secreto no aparece en ninguna respuesta. Usa el prefijo `it8` y necesita `nginx:alpine` en el nodo:
+
+```bash
+go test -tags integration -race -count=1 -timeout 25m -run IntegrationMCP -v ./src/shared/infra/container/
 ```
 
 El panel (`web/`, ver `web/README.md`): `pnpm verify` (lint, svelte-check y vitest), `pnpm build` y `pnpm test:e2e` (Playwright contra el build con MSW, bajo la CSP). CI corre los tres en el job `web`, y el job `panel` compila y prueba Go con ese build embebido (`-tags panel`).
