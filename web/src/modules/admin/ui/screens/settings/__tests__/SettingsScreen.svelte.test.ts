@@ -39,6 +39,13 @@ vi.mock('@/modules/admin/container', () => ({
 const ingress = vi.hoisted(() => ({ getProxyStatus: vi.fn() }))
 vi.mock('@/modules/ingress/container', () => ({ ingressUseCases: ingress }))
 
+// El origen de la página: el de vitest, salvo que un test entre por una dirección de Caddy
+// (`https://<panel_domain>[:puerto]`), que no es la de vitest.
+const page = vi.hoisted(() => ({ origin: null as string | null }))
+vi.mock('@/modules/admin/ui/features/proxySettings/currentOrigin', () => ({
+	currentOrigin: () => page.origin ?? location.origin,
+}))
+
 // Usuarios es de identity.
 vi.mock('@/modules/identity/container', () => ({
 	identityUseCases: {
@@ -82,6 +89,7 @@ describe('SettingsScreen', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		localStorage.clear()
+		page.origin = null
 		ingress.getProxyStatus.mockResolvedValue({
 			status: 'synced',
 			error: null,
@@ -176,6 +184,41 @@ describe('SettingsScreen', () => {
 		await expect
 			.element(ports.getByRole('link', { name: 'Volver a la dirección anterior' }))
 			.not.toBeInTheDocument()
+	})
+
+	it('en la dirección que falló, Puertos ofrece volver a la anterior: Ajustes allá', async () => {
+		// Una pestaña que quedó en la dirección nueva: muelle-caddy no arrancó con el 8443 y
+		// muelle volvió al 443 (contrato §3.5).
+		page.origin = 'https://panel.tudominio.cl:8443'
+		mocks.getSettings.mockResolvedValue(SETTINGS)
+		mocks.listRegistries.mockResolvedValue([])
+		ingress.getProxyStatus.mockResolvedValue({
+			status: 'synced',
+			error: null,
+			syncedAt: new Date('2026-10-16T12:00:00Z'),
+			caddy: { image: null, running: true, httpPort: 80, httpsPort: 443 },
+			portsRollback: {
+				attempted: { httpPort: 80, httpsPort: 8443 },
+				restored: { httpPort: 80, httpsPort: 443 },
+				error: 'el puerto 8443 del host ya está en uso, y muelle-caddy no pudo arrancar con él',
+				at: new Date(Date.now() - 60_000),
+			},
+			panelCertificate: null,
+		})
+
+		const screen = await render(SettingsView, { client: client() })
+
+		const ports = screen.getByRole('region', { name: 'Puertos del proxy' })
+		await expect
+			.element(
+				ports.getByText(
+					/La dirección del panel sigue siendo https:\/\/panel\.tudominio\.cl\./,
+				),
+			)
+			.toBeVisible()
+		const back = ports.getByRole('link', { name: 'Volver a la dirección anterior' })
+		await expect.element(back).toBeVisible()
+		await expect.element(back).toHaveAttribute('href', 'https://panel.tudominio.cl/ajustes')
 	})
 
 	it('el switch de los certificados de Cloudflare muestra lo guardado: apagarlo pide confirmar, y cancelar lo deja encendido', async () => {
