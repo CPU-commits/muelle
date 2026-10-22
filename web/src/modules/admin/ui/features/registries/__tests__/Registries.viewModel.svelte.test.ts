@@ -246,7 +246,7 @@ describe('RegistriesViewModel', () => {
 		expect(vm.removeBody).toBe(m.admin_registry_delete_body())
 		vm.cancelRemove()
 
-		// install lo guarda: las imágenes de muelle son privadas (contrato §3.4 y §5.2).
+		// install lo guarda si bajó las imágenes con una credencial (contrato §3.4 y §5.2).
 		vm.askRemove('ghcr.io')
 		expect(vm.removeBody).toBe(m.admin_registry_delete_body_muelle())
 	})

@@ -147,7 +147,7 @@ func TestParseArgsTokenFromStdin(t *testing.T) {
 	}
 }
 
-// Las imágenes de muelle son privadas: la credencial viene de
+// Con un registry privado, la credencial viene de
 // --registry-user y la contraseña de stdin, nunca de un flag.
 func TestParseArgsRegistry(t *testing.T) {
 	const pass = "ghp_s3cr3t pass con espacio"

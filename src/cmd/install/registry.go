@@ -17,14 +17,16 @@ import (
 	"github.com/CPU-commits/muelle/src/shared/infra/out/docker"
 )
 
-// Las imágenes de muelle son privadas (plan de la Fase 5, "Cambio de
-// requisito del dueño"): install las baja con la credencial de --registry-user
-// y --registry-password-stdin o, si no vino, con la del config.json de Docker
+// Las imágenes de muelle son públicas y se bajan sin credencial. Si vienen de
+// un registry privado (una --caddy-image propia, o un muelle construido
+// aparte), install las baja con la credencial de --registry-user y
+// --registry-password-stdin o, si no vino, con la del config.json de Docker
 // del host, montado en el contenedor.
 
-// privateHint es lo que hay que hacer si no se pudo bajar una imagen.
-const privateHint = "las imágenes de muelle son privadas: haz docker login ghcr.io con un token de GitHub con permiso read:packages y monta ~/.docker/config.json " +
-	"(docker run … -v ~/.docker/config.json:/root/.docker/config.json:ro), o usa --registry-user y --registry-password-stdin"
+// pullHint es lo que hay que hacer si una imagen de un registry privado no se
+// pudo bajar.
+const pullHint = "si la imagen está en un registry privado, haz docker login en él (en ghcr.io: docker login ghcr.io, con un token de GitHub con permiso read:packages) " +
+	"y monta ~/.docker/config.json (docker run … -v ~/.docker/config.json:/root/.docker/config.json:ro), o usa --registry-user y --registry-password-stdin"
 
 // registryHost es el host de una imagen, como lo da reference.Domain
 // ("ghcr.io", "docker.io" para Docker Hub): el de la tabla registries

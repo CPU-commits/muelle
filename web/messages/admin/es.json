@@ -182,7 +182,7 @@
 	"admin_audit_load_error": "No se pudo cargar la auditoría.",
 	"admin_audit_more_error": "No se pudieron cargar más eventos.",
 	"admin_error_registry_username_colon": "Sin \":\": la autenticación del registry lo usa para separar el usuario de la contraseña.",
-	"admin_registry_delete_body_muelle": "Las imágenes de muelle son privadas y se bajan con este registry: sin él, muelle no puede bajar la imagen de Caddy de una versión nueva, y los deploys con imágenes privadas de ghcr.io van a fallar al bajarlas.",
+	"admin_registry_delete_body_muelle": "Lo guardó install. Los deploys con imágenes privadas de ghcr.io van a fallar al bajarlas, y también la imagen de Caddy de una versión nueva si la fijaste en una privada.",
 	"admin_error_placeholder": "Sin llaves: Caddy las lee como un placeholder y dejaría de recibir la configuración.",
 	"admin_security_recovery_label": "Para vaciarla, en el servidor (reinicia muelle unos segundos):",
 	"admin_security_recovery_copy": "Copiar el comando"

@@ -31,8 +31,8 @@ type Options struct {
 	CloudflareToken                                         string // ya leído si vino "-"
 	CaddyImage                                              string
 	Reinstall                                               bool
-	// Las credenciales de las imágenes privadas (plan de la Fase 5, "Cambio
-	// de requisito del dueño"); la contraseña ya leída de stdin.
+	// La credencial de un registry privado, si las imágenes vienen de uno; la
+	// contraseña ya leída de stdin.
 	RegistryUser, RegistryPassword string
 	// Ocultos, solo para los tests de integración (contrato §5.1).
 	NamePrefix, Image, PanelOrigin string
@@ -81,9 +81,9 @@ flags:
   --caddy-image <imagen>      fija la imagen de muelle-caddy (avanzado)
   --advertise-addr <ip>       la dirección de docker swarm init, si el Swarm no está
                               iniciado y la máquina tiene varias IPs
-  --registry-user <usuario>   usuario del registry de las imágenes de muelle, que son
-                              privadas (con --registry-password-stdin); sin él, usa
-                              el config.json de Docker montado en /root/.docker
+  --registry-user <usuario>   usuario del registry, si las imágenes vienen de uno
+                              privado (con --registry-password-stdin); sin él, usa
+                              el config.json de Docker montado en /root/.docker, si hay
   --registry-password-stdin   lee la contraseña o el token del registry de la primera
                               línea de stdin (docker run -i)
   --reinstall                 vuelve a desplegar muelle después de docker stack rm

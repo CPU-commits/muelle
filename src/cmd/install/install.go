@@ -397,9 +397,9 @@ func pullError(ref string, cred *docker.RegistryAuth, err error) error {
 	denied := errors.Is(err, docker.ErrDenied) || strings.Contains(msg, "denied") || strings.Contains(msg, "unauthorized")
 	switch {
 	case cred == nil:
-		return fmt.Errorf("no pude bajar %s (%w). Si es una imagen de muelle: %s", ref, err, privateHint)
+		return fmt.Errorf("no pude bajar %s (%w): revisa que la versión exista y que el servidor llegue al registry; %s", ref, err, pullHint)
 	case denied:
-		return fmt.Errorf("%s rechazó la credencial de %s para %s (%w): revisa que el token tenga permiso read:packages. %s", cred.Host, cred.Username, ref, err, privateHint)
+		return fmt.Errorf("%s rechazó la credencial de %s para %s (%w): revisa que el token pueda leer la imagen; %s", cred.Host, cred.Username, ref, err, pullHint)
 	default:
 		return fmt.Errorf("no pude bajar %s: %w", ref, err)
 	}

@@ -116,7 +116,7 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 | deploy | `settings.manager_node_id` y `settings.init_registry_applied` | `manager_node_id` al arrancar; `init_registry_applied`, la marca del registry inicial de install (§2.10), en el primer arranque de la base | Fase 2 |
 | ingress | `settings` (admin): `entity.ProxySettings`, con el token descifrado | `cloudflare_zones`, las claves reservadas de §3.6 y, solo al volver a los puertos anteriores (§3.5), `proxy_http_port` y `proxy_https_port` | `ingress/infra/out/service.NewProxySettingsReader` (hecho) |
 | ingress | `apps`, `stages` y `projects` (catalog), para el kind de la app y los nombres de los servicios | — | `ingress/infra/out/service.NewCatalogReader` (hecho) |
-| ingress | `registries` (deploy): la credencial del host de la imagen de Caddy, si hay una (las imágenes de muelle son privadas, §3.4) | — | `NewRegistriesReader` (hecho) |
+| ingress | `registries` (deploy): la credencial del host de la imagen de Caddy, si hay una (§3.4) | — | `NewRegistriesReader` (hecho) |
 | catalog | `domains`: cuántos tiene una app antes de borrarla | — | Hecho |
 
 `deploy` lee `domains` por SQL y no llama a `ingress` para eso: así la Fase 2 se prueba sin la Fase 3.
@@ -522,7 +522,7 @@ Se valida en su forma canónica, sin normalizar: minúsculas, etiquetas `[a-z0-9
   - el paso 5 pasa a `DeployStack` solo las credenciales de los hosts que usa el compose.
   - `docker.RegistryAuth` y `docker.StackDeploy` (que lleva el compose final, con los valores de las variables) se imprimen sin la contraseña ni el compose: `String`, `GoString`, `LogValue` y `MarshalJSON` los ocultan, así un `slog`, un `%v` o un `json.Marshal` no los filtran.
 - Cambiar o borrar un registry no redespliega nada.
-- **El registry inicial de install.** Las imágenes de muelle son privadas, así que install le pasa a muelle la credencial con que las bajó: un JSON `{"host", "username", "password"}` en un secreto Swarm, con su ruta en `MUELLE_INIT_REGISTRY_FILE` (la Fase 5 documenta el secreto y la variable en §5.2 y §5.3).
+- **El registry inicial de install.** Si install bajó las imágenes con una credencial (de un registry privado), se la pasa a muelle: un JSON `{"host", "username", "password"}` en un secreto Swarm, con su ruta en `MUELLE_INIT_REGISTRY_FILE` (la Fase 5 documenta el secreto y la variable en §5.2 y §5.3).
   - `settings.Load` lee y valida el archivo en cada arranque, como el del token de Cloudflare: JSON estricto (sin otros campos) y las reglas de esta sección para `host`, `username` y `password`. Si no sirve, muelle no arranca, y el error nombra la variable sin la contraseña ni el contenido del archivo.
   - deploy lo guarda como un registry (cifrado, con `registry.create`, actor `system` y details `{"username", "source": "install"}`) **solo en el primer arranque de la base**, como los demás `MUELLE_INIT_*` (§5.2). La marca es suya, `init_registry_applied` en `settings`, y se guarda en ese arranque haya o no archivo, en la misma transacción que el registry.
   - Por qué una marca: el secreto y la variable quedan en el servicio. Sin la marca, un registry que el admin borró en el panel (porque el token se filtró) volvería con el próximo reinicio. Una reinstalación sobre el mismo `muelle_data` no cambia las credenciales: se editan en el panel.
@@ -776,7 +776,7 @@ Lo del diseño (§3.1 y §8), con estas precisiones:
     - `PATCH /settings` prueba los puertos nuevos antes de guardarlos (§4.1), así que esto pasa solo si alguien los toma entre el `PATCH` y la recreación.
     - Los puertos se prueban antes de crear el contenedor nuevo, con uno descartable, `muelle-caddy-probe`: la misma imagen, en la red `bridge` y sin redes de Swarm, corre `caddy version` y se borra siempre. Si no, un arranque que falla por un puerto deja en Docker 29 una IP de `muelle_panel` tomada que no se suelta, y los reintentos cada 5 min agotarían la red.
 - **Imagen:** `caddy_image` si está, o `naming.CaddyImageFor(version)`. Se baja con `PullImage` si `InspectImage` da `ErrNotFound`: con la credencial de `registries` de su host si hay una (§1.1), y si no, anónima.
-  - Las imágenes de muelle son privadas (decisión del dueño, 2026-10-15): install baja la primera y siembra el registry `ghcr.io`, y con ese registry se bajan las versiones nuevas.
+  - Las imágenes de muelle son públicas (decisión del dueño, 2026-10-22, que corrige la del 2026-10-15). Si install las bajó con una credencial, siembra el registry `ghcr.io`, y con ese registry se bajan las versiones nuevas.
   - Si el registry no da acceso a la imagen, el `error` de `GET /proxy` dice qué hacer con el registry de ese host en Ajustes → Registries: agregarlo si no hay uno, o actualizar su credencial si la hay. La contraseña del registry nunca aparece en un mensaje, un log ni un JSON.
 - **TLS** (§8 del diseño), en `apps.tls.automation.policies`, una política por modo:
   - `cloudflare`: el emisor `acme` con `challenges.dns.provider` = `{"name": "cloudflare", "api_token": …}` y `resolvers: ["1.1.1.1:53", "1.0.0.1:53"]` (la propagación se mira en Cloudflare, no en el DNS del host). Un dominio con `tls_mode: cloudflare` va por `http` si ya no hay token.
@@ -1166,7 +1166,7 @@ docker service update --secret-rm muelle_init_cloudflare_token --env-rm MUELLE_I
 docker secret rm muelle_init_cloudflare_token
 ```
 
-**La credencial del registry** (las imágenes de muelle son privadas): install baja las imágenes de muelle y de Caddy con ella (§5.4 paso 5) y se la pasa a muelle para que ingress pueda bajar la Caddy de la versión siguiente y las apps puedan usar imágenes del mismo registry.
+**La credencial del registry** (opcional: las imágenes de muelle son públicas, y hace falta solo con un registry privado): install baja las imágenes de muelle y de Caddy con ella (§5.4 paso 5) y se la pasa a muelle para que ingress pueda bajar la Caddy de la versión siguiente y las apps puedan usar imágenes del mismo registry.
 - Viene de `--registry-user` y `--registry-password-stdin` (la contraseña nunca va en un flag ni en una variable), y si no, del `config.json` de Docker del host montado en solo lectura: `auths[<host>].auth`, la base64 de `usuario:contraseña`. Si `docker login` la guardó en un helper (`credHelpers[<host>]`, o `credsStore` con una entrada vacía de ese host), el helper no se puede correr dentro del contenedor de install: error que pide los flags. `--registry-password-stdin` y `--cloudflare-token -` no se pueden juntar (los dos leen stdin).
 - El host es el de la imagen de muelle, como lo da `reference.Domain` (`ghcr.io`). Los flags dan solo la credencial de ese host; del `config.json` sale la de cada host (el de la imagen de Caddy puede ser otro).
 - Se valida con las reglas de `POST /registries` (§2.10): usuario de 1 a 255 caracteres y contraseña de 1 a 4096 bytes, los dos sin caracteres de control. Ningún error ni salida de install cita la contraseña.
@@ -1270,7 +1270,7 @@ networks:
 - **Sin una tarea corriendo:** muelle que sale enseguida (la clave, una variable) deja la tarea `failed` en milisegundos, y Swarm la reintenta cada ~5 s; una tarea `rejected` (el bind de `/var/run/docker.sock` no existe, con Docker rootless) o `pending` sin un nodo posible (la restricción no se cumple: "no suitable node") nunca corre, y el motivo está solo en su `Err`. Por eso, mientras ninguna corre, install toma la tarea más nueva del servicio (con cualquier `desired_state`), muestra en stderr su estado y su `Err` (`aviso: …`) y, si tuvo contenedor y terminó, las líneas `ERROR` de su log, una vez por tarea.
 - El plazo es de 2 min. Si se pasa, el stack queda desplegado e install termina con código 1 y sugiere `docker service logs muelle_muelle` y `docker service ps --no-trunc muelle_muelle`.
 
-**Actualizar:** `docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<v> muelle_muelle`, con `docker login ghcr.io` hecho en el servidor (las imágenes son privadas: `--with-registry-auth` le pasa a Swarm la credencial para bajar la nueva).
+**Actualizar:** `docker service update --with-registry-auth --image ghcr.io/cpu-commits/muelle:<v> muelle_muelle`, (con un registry privado, `--with-registry-auth` le pasa a Swarm la credencial del `docker login` del servidor).
 - La imagen de Caddy de la versión nueva la baja ingress con el registry `ghcr.io` que guardó install (§5.2).
 - Con `caddy_image` vacío, el job `"proxy"` del arranque recrea muelle-caddy con la imagen de la versión nueva, con unos segundos de corte.
 - Con `caddy_image` fijo (solo se fija al instalar, con `--caddy-image`), Caddy no cambia.

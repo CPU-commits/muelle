@@ -58,7 +58,7 @@ type Init struct {
 }
 
 // InitRegistry es la credencial de un registry que install le pasa a muelle
-// (las imágenes de muelle son privadas, contrato §2.10). La contraseña va en
+// (la de un registry privado, si la usó; contrato §2.10). La contraseña va en
 // claro: String, GoString, LogValue y MarshalJSON la ocultan, también dentro
 // de Init y de Settings (fmt usa el String de un campo exportado, también de
 // un puntero).

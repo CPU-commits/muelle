@@ -182,7 +182,7 @@
 	"admin_audit_load_error": "The audit log couldn't be loaded.",
 	"admin_audit_more_error": "More events couldn't be loaded.",
 	"admin_error_registry_username_colon": "No \":\": registry authentication uses it to separate the username from the password.",
-	"admin_registry_delete_body_muelle": "muelle's images are private and are pulled with this registry: without it, muelle can't pull the Caddy image of a new version, and deploys with private ghcr.io images will fail to pull.",
+	"admin_registry_delete_body_muelle": "install saved it. Deploys with private ghcr.io images will fail to pull, and so will the Caddy image of a new version if you pinned a private one.",
 	"admin_error_placeholder": "No curly braces: Caddy reads them as a placeholder and would stop receiving the configuration.",
 	"admin_security_recovery_label": "To clear it, on the server (restarts muelle for a few seconds):",
 	"admin_security_recovery_copy": "Copy the command"

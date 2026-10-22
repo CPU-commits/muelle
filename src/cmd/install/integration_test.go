@@ -456,7 +456,7 @@ func TestIntegrationInstallFromImage(t *testing.T) {
 	}
 }
 
-// Las imágenes de muelle son privadas: un registry con htpasswd en
+// Imágenes de un registry privado: uno con htpasswd en
 // 127.0.0.1:22500 (Docker acepta 127.0.0.0/8 sin TLS) con la imagen de
 // prueba. Sin credenciales, install falla antes de crear nada y dice qué
 // hacer; con --registry-user, la baja, guarda el secreto del registry y

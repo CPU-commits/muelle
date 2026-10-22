@@ -4,8 +4,8 @@ name: Release
 # con el tag de git (contrato §5.4), después de los mismos tests que CI. Las
 # dos imágenes llevan el mismo tag vX.Y.Z[-sufijo]; :latest solo muelle, y solo
 # las versiones finales. Con workflow_dispatch construye sin subir (para probar
-# los Dockerfile). Los paquetes de GHCR son privados: ningún paso los vuelve
-# públicos.
+# los Dockerfile). Los paquetes de GHCR son públicos: GitHub crea un paquete
+# nuevo como privado, y se pasa a público a mano una sola vez (README).
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+*']
