@@ -37,8 +37,10 @@ describe('Tabs', () => {
 		const box = nav.getBoundingClientRect()
 		const tab = active.getBoundingClientRect()
 		expect(nav.scrollLeft).toBeGreaterThan(0)
-		expect(tab.left).toBeGreaterThanOrEqual(box.left)
-		expect(tab.right).toBeLessThanOrEqual(box.right)
+		// Con 1 px de margen: scrollLeft queda en píxeles enteros y el ancho de los tabs depende
+		// de las fuentes de la máquina (en CI quedaba 0,3 px más allá del borde).
+		expect(tab.left).toBeGreaterThanOrEqual(box.left - 1)
+		expect(tab.right).toBeLessThanOrEqual(box.right + 1)
 		// La página no se movió de costado por eso.
 		expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
 			document.documentElement.clientWidth,
