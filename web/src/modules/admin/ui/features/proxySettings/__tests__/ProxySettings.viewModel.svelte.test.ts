@@ -376,7 +376,12 @@ describe('ProxySettingsViewModel', () => {
 
 		await vm.removeCloudflare()
 
-		expect(mocks.removeCloudflareToken).toHaveBeenCalledOnce()
+		// Con lo que se ve del token: con los certificados de Cloudflare, los apaga también.
+		expect(mocks.removeCloudflareToken).toHaveBeenCalledExactlyOnceWith({
+			tokenSet: true,
+			zones: 4,
+			originCa: false,
+		})
 		expect(vm.confirmingRemoveCloudflare).toBe(false)
 		expect(success).toHaveBeenCalledWith(m.admin_cf_removed())
 	})

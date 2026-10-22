@@ -431,7 +431,11 @@ describe('settings', () => {
 	})
 
 	it('quitar el token borra también las zonas', async () => {
-		const settings = await adminUseCases.removeCloudflareToken()
+		const settings = await adminUseCases.removeCloudflareToken({
+			tokenSet: true,
+			zones: 3,
+			originCa: false,
+		})
 
 		expect(settings.proxy?.cloudflare).toEqual({
 			tokenSet: false,

@@ -164,6 +164,20 @@ export class InvalidRegistryCredential extends ValidationError {
 	}
 }
 
+/**
+ * Encender los certificados de Cloudflare (Origin CA) sin token: el backend lo rechaza con un
+ * `422` en `cloudflare_origin_ca` (contrato §4.1). El panel no lo manda.
+ */
+export class OriginCaNeedsToken extends ValidationError {
+	constructor() {
+		super(
+			'Los certificados de Cloudflare necesitan el token de Cloudflare',
+			'cloudflareOriginCa',
+		)
+		this.name = 'OriginCaNeedsToken'
+	}
+}
+
 export type CloudflareTokenProblem = 'length' | 'spaces' | PlaceholderProblem
 
 /**

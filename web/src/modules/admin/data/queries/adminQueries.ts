@@ -6,6 +6,7 @@ import {
 } from '@tanstack/svelte-query'
 import { adminUseCases } from '../../container'
 import type {
+	CloudflareStatus,
 	RegistryInput,
 	Settings,
 	UpdateProxyPortsInput,
@@ -105,8 +106,11 @@ export function replaceCloudflareTokenMutation(client: QueryClient) {
 	}
 }
 
+/** La variable es lo que se ve del token: con los certificados de Cloudflare, los apaga. */
 export function removeCloudflareTokenMutation(client: QueryClient) {
-	return settingsMutation(client, () => adminUseCases.removeCloudflareToken())
+	return settingsMutation(client, (current: CloudflareStatus) =>
+		adminUseCases.removeCloudflareToken(current),
+	)
 }
 
 function registryMutation<TInput, TResult>(

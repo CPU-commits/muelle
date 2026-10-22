@@ -582,7 +582,7 @@ export class ProxySettingsViewModel {
 		if (this.#removeCloudflare.isPending) return
 		this.removeCloudflareError = null
 		try {
-			await this.#removeCloudflare.mutateAsync()
+			await this.#removeCloudflare.mutateAsync(this.proxy.cloudflare)
 			this.#refreshIngress()
 			toast.success(m.admin_cf_removed())
 			this.confirmingRemoveCloudflare = false

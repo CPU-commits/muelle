@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { CloudflareStatus } from '../..'
 import {
 	InvalidAcmeEmail,
 	InvalidCloudflareToken,
@@ -6,9 +7,11 @@ import {
 	InvalidPort,
 	makeRemoveCloudflareToken,
 	makeReplaceCloudflareToken,
+	makeSetCloudflareOriginCa,
 	makeUpdateAcmeEmail,
 	makeUpdateProxyPorts,
 	makeUpdatePublicIp,
+	OriginCaNeedsToken,
 	RequiredField,
 } from '../..'
 import {
@@ -92,10 +95,80 @@ describe('ajustes de proxy y DNS', () => {
 
 	it('quitar el token manda "" y deja sin token ni zonas', async () => {
 		const settings = new InMemorySettingsRepository()
+		const current = settings.settings.proxy.cloudflare
 
-		await expect(makeRemoveCloudflareToken({ settings })()).resolves.toMatchObject({
+		await expect(makeRemoveCloudflareToken({ settings })(current)).resolves.toMatchObject({
 			proxy: { cloudflare: { tokenSet: false, zones: null, originCa: false } },
 		})
 		expect(settings.patches).toEqual([{ cloudflareToken: '' }])
+	})
+
+	it('quitar el token con los certificados de Cloudflare encendidos los apaga en el mismo cambio', async () => {
+		const settings = withCloudflare({ tokenSet: true, zones: 4, originCa: true })
+		const current = settings.settings.proxy.cloudflare
+
+		await expect(makeRemoveCloudflareToken({ settings })(current)).resolves.toMatchObject({
+			proxy: { cloudflare: { tokenSet: false, zones: null, originCa: false } },
+		})
+		// Sin el false, el backend lo rechaza (contrato §4.1).
+		expect(settings.patches).toEqual([{ cloudflareToken: '', cloudflareOriginCa: false }])
+	})
+})
+
+function withCloudflare(cloudflare: CloudflareStatus): InMemorySettingsRepository {
+	return new InMemorySettingsRepository({
+		settings: fakeSettings({ proxy: fakeProxySettings({ cloudflare }) }),
+	})
+}
+
+// Los certificados de Cloudflare (Origin CA, contrato §3.7 y §4.1).
+describe('certificados de Cloudflare', () => {
+	it('encenderlos sin token es OriginCaNeedsToken en el campo, sin llamar al backend', async () => {
+		const settings = withCloudflare({ tokenSet: false, zones: null, originCa: false })
+		const set = makeSetCloudflareOriginCa({ settings })
+
+		const error = await set(true, settings.settings.proxy.cloudflare).catch(
+			(caught: unknown) => caught,
+		)
+
+		expect(error).toBeInstanceOf(OriginCaNeedsToken)
+		expect((error as OriginCaNeedsToken).field).toBe('cloudflareOriginCa')
+		expect(settings.patches).toEqual([])
+	})
+
+	it('con token, encenderlos y apagarlos manda solo cloudflareOriginCa', async () => {
+		const settings = withCloudflare({ tokenSet: true, zones: 4, originCa: false })
+		const set = makeSetCloudflareOriginCa({ settings })
+
+		await expect(set(true, settings.settings.proxy.cloudflare)).resolves.toMatchObject({
+			proxy: { cloudflare: { tokenSet: true, zones: 4, originCa: true } },
+		})
+		await expect(set(false, settings.settings.proxy.cloudflare)).resolves.toMatchObject({
+			proxy: { cloudflare: { originCa: false } },
+		})
+		expect(settings.patches).toEqual([
+			{ cloudflareOriginCa: true },
+			{ cloudflareOriginCa: false },
+		])
+	})
+
+	it('apagarlos sin token se puede (quedaron encendidos sin token, a mano)', async () => {
+		const settings = withCloudflare({ tokenSet: false, zones: null, originCa: true })
+
+		await expect(
+			makeSetCloudflareOriginCa({ settings })(false, settings.settings.proxy.cloudflare),
+		).resolves.toMatchObject({ proxy: { cloudflare: { originCa: false } } })
+		expect(settings.patches).toEqual([{ cloudflareOriginCa: false }])
+	})
+
+	it('el fake rechaza como el backend: quitar el token sin apagarlos es un 422 del campo', async () => {
+		const settings = withCloudflare({ tokenSet: true, zones: 4, originCa: true })
+
+		const error = await settings
+			.patch({ cloudflareToken: '' })
+			.catch((caught: unknown) => caught)
+
+		expect(error).toMatchObject({ name: 'ValidationError', field: 'cloudflareOriginCa' })
+		expect(settings.settings.proxy.cloudflare.tokenSet).toBe(true)
 	})
 })
