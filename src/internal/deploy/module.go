@@ -72,6 +72,9 @@ type Module struct {
 	streamCtx   context.Context
 	stopStreams context.CancelFunc
 	sse         dephttp.SSEConfig
+	// slots cuenta los streams por principal: los SSE y, por MCP,
+	// get_app_logs y get_deploy con wait_s (contrato §8.5).
+	slots *usecases.StreamSlots
 }
 
 // New arma el módulo. DB, Cipher, Audit, Docker, Env e Ingress son
@@ -128,6 +131,7 @@ func New(d Deps) *Module {
 		streamCtx:    streamCtx,
 		stopStreams:  stopStreams,
 		sse:          dephttp.DefaultSSEConfig(),
+		slots:        usecases.NewStreamSlots(dephttp.DefaultSSEConfig().MaxPerPrincipal),
 		deploys:      deploys,
 		dispatcher:   dispatcher,
 		storeManager: usecases.NewStoreManagerNode(dk, settings, d.Log),
@@ -158,7 +162,7 @@ func New(d Deps) *Module {
 // y …/log/stream, POST …/apps/{a}/rollback, GET …/apps/{a}/status y
 // …/logs (AccessToken), y /api/v1/registries (AccessSession).
 func (m *Module) RegisterRoutes(k *utils.Kit) {
-	dephttp.Register(k, m.uc, dephttp.Streams{Ctx: m.streamCtx, Config: m.sse})
+	dephttp.Register(k, m.uc, dephttp.Streams{Ctx: m.streamCtx, Config: m.sse, Slots: m.slots})
 }
 
 // RegisterTools registra las herramientas MCP de deploy (contrato §8.3).

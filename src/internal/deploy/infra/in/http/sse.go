@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/CPU-commits/muelle/src/cmd/http/utils"
+	"github.com/CPU-commits/muelle/src/internal/deploy/app/usecases"
 	"github.com/CPU-commits/muelle/src/shared/domain/entity"
 )
 
@@ -33,57 +32,13 @@ func DefaultSSEConfig() SSEConfig {
 
 // Streams es lo que necesitan los streams además de los casos de uso: el ctx
 // de Module.Run (al cancelarse, con la señal de apagado, se cierran todos, así
-// srv.Shutdown no los espera) y los límites.
+// srv.Shutdown no los espera), los límites y el contador de streams por
+// principal, que se comparte con las herramientas MCP (contrato §8.5). Sin
+// Slots, uno nuevo de Config.MaxPerPrincipal.
 type Streams struct {
 	Ctx    context.Context
 	Config SSEConfig
-}
-
-// ErrTooManyStreams: el principal ya tiene MaxPerPrincipal streams abiertos
-// (contrato §0.3): 429 rate_limited, con Retry-After, antes de abrir.
-var ErrTooManyStreams = errors.New("demasiados streams abiertos")
-
-// streamLimit cuenta los streams abiertos por principal: "s:"+SessionHash o
-// "t:"+id del token.
-type streamLimit struct {
-	mu   sync.Mutex
-	max  int
-	open map[string]int
-}
-
-func newStreamLimit(max int) *streamLimit { return &streamLimit{max: max, open: map[string]int{}} }
-
-func principalKey(p entity.Principal) string {
-	switch {
-	case p.Token != nil:
-		return "t:" + strconv.FormatInt(p.Token.ID, 10)
-	case p.SessionHash != "":
-		return "s:" + p.SessionHash
-	}
-	// Una sesión sin hash no la produce identity; por las dudas, el usuario.
-	return "u:" + strconv.FormatInt(p.UserID, 10)
-}
-
-// acquire reserva un lugar para p; release lo devuelve (se puede llamar
-// varias veces). ok es false si p ya tiene max abiertos.
-func (s *streamLimit) acquire(p entity.Principal) (release func(), ok bool) {
-	key := principalKey(p)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.open[key] >= s.max {
-		return nil, false
-	}
-	s.open[key]++
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			if s.open[key]--; s.open[key] <= 0 {
-				delete(s.open, key)
-			}
-		})
-	}, true
+	Slots  *usecases.StreamSlots
 }
 
 // sse escribe los eventos de un stream ya abierto (contrato §0.3).
@@ -205,9 +160,9 @@ type liveStream struct {
 // tiene MaxPerPrincipal abiertos, responde 429 y devuelve false.
 func (h *Handler) acquire(w http.ResponseWriter, r *http.Request) (func(), bool) {
 	p, _ := entity.PrincipalFrom(r.Context())
-	release, ok := h.limit.acquire(p)
+	release, ok := h.limit.Acquire(p)
 	if !ok {
-		h.k.Fail(w, r, ErrTooManyStreams)
+		h.k.Fail(w, r, usecases.ErrTooManyStreams)
 		return nil, false
 	}
 	return release, true
