@@ -4,6 +4,7 @@ import {
 	manualPending,
 	recordExists,
 } from '../../repositories/__fakes__/domainFixtures'
+import type { OriginCaState } from '../originCa'
 import {
 	canToggleProxied,
 	certificateExpiresSoon,
@@ -13,6 +14,7 @@ import {
 	hasProvisioning,
 	isReachable,
 	manualRecords,
+	originCaNotice,
 	publicAddress,
 	replaceDomain,
 	sortDomains,
@@ -138,5 +140,66 @@ describe('reglas de la vista', () => {
 		])
 		const updated = replaceDomain(domains, makeDomain('z.tudominio.cl', { proxied: false }))
 		expect(updated[1]?.proxied).toBe(false)
+	})
+})
+
+// Los certificados de Cloudflare (Origin CA, contrato §3.7).
+describe('originCaNotice', () => {
+	const originCa = (overrides: Partial<OriginCaState> = {}): OriginCaState => ({
+		status: 'active',
+		errorCode: null,
+		error: null,
+		retryAt: null,
+		expiresAt: new Date('2027-01-19T12:00:00Z'),
+		...overrides,
+	})
+	const failure = {
+		errorCode: 'cloudflare' as const,
+		error: 'muelle no pudo renovar el certificado de Cloudflare…',
+		retryAt: new Date('2026-12-20T10:08:00Z'),
+	}
+
+	it('con la opción apagada (origin_ca null) no hay nada que avisar', () => {
+		expect(originCaNotice(makeDomain('api.tudominio.cl'))).toBeNull()
+	})
+
+	it('cada estado con su aviso; uno que se sirve, o que no califica, no avisa', () => {
+		const notice = (state: OriginCaState, proxied = true) =>
+			originCaNotice(makeDomain('api.tudominio.cl', { proxied, originCa: state }))
+
+		expect(notice(originCa())).toBeNull()
+		expect(notice(originCa({ status: 'not_eligible', expiresAt: null }))).toBeNull()
+		expect(notice(originCa({ status: 'issuing', expiresAt: null }))).toBe('issuing')
+		expect(notice(originCa({ status: 'failed', expiresAt: null, ...failure }))).toBe('failed')
+		// Una renovación que falló: el actual todavía sirve.
+		expect(notice(originCa(failure))).toBe('renew_failed')
+	})
+
+	it('DNS only: en muelle, o en Cloudflare con Proxied prendido en muelle (la nube gris del dashboard)', () => {
+		const dnsOnly = originCa({ status: 'dns_only', expiresAt: null })
+		const notice = (proxied: boolean) =>
+			originCaNotice(makeDomain('api.tudominio.cl', { proxied, originCa: dnsOnly }))
+
+		expect(notice(false)).toBe('dns_only')
+		expect(notice(true)).toBe('dns_only_in_cloudflare')
+	})
+
+	it('una renovación que falló con un código que el panel no conoce también avisa, con su error', () => {
+		const domain = makeDomain('api.tudominio.cl', {
+			originCa: originCa({ ...failure, errorCode: null }),
+		})
+		expect(originCaNotice(domain)).toBe('renew_failed')
+	})
+
+	it('hasProvisioning también cuenta un certificado de Cloudflare que se está emitiendo', () => {
+		const issuing = makeDomain('api.tudominio.cl', {
+			originCa: originCa({ status: 'issuing', expiresAt: null }),
+		})
+		expect(hasProvisioning([makeDomain('web.tudominio.cl'), issuing])).toBe(true)
+		const failed = makeDomain('api.tudominio.cl', {
+			originCa: originCa({ status: 'failed', expiresAt: null, ...failure }),
+		})
+		// Una falla espera su reintento (minutos u horas): no hace falta refrescar seguido.
+		expect(hasProvisioning([failed])).toBe(false)
 	})
 })

@@ -105,10 +105,51 @@ export function domainState(domain: AppDomain): DomainState {
 
 /**
  * Hay algo que se resuelve solo en el backend (muelle creando el registro o emitiendo el
- * certificado): la lista se refresca seguido hasta que termine.
+ * certificado, también el de Cloudflare): la lista se refresca seguido hasta que termine.
  */
 export function hasProvisioning(domains: readonly AppDomain[]): boolean {
-	return domains.some((domain) => domainState(domain) === 'provisioning')
+	return domains.some(
+		(domain) => domainState(domain) === 'provisioning' || domain.originCa?.status === 'issuing',
+	)
+}
+
+/**
+ * Lo que se dice del certificado de Cloudflare (Origin CA, contrato §3.7) debajo del dominio:
+ * - `issuing`: muelle lo está emitiendo (Let's Encrypt mientras tanto);
+ * - `failed`: la emisión falló (Let's Encrypt mientras tanto), con Reintentar;
+ * - `renew_failed`: falló una renovación y el actual todavía sirve, con Reintentar;
+ * - `dns_only`: Proxied está apagado en muelle;
+ * - `dns_only_in_cloudflare`: Proxied está prendido en muelle, pero en Cloudflare el
+ *   registro está en DNS only (lo cambiaron en el dashboard).
+ *
+ * null con la opción apagada, si se sirve sin problemas o si no califica. Se decide por el
+ * `status` (y por si hay un `error`), nunca por el texto.
+ */
+export type OriginCaNotice =
+	| 'issuing'
+	| 'failed'
+	| 'renew_failed'
+	| 'dns_only'
+	| 'dns_only_in_cloudflare'
+
+export function originCaNotice(
+	domain: Pick<AppDomain, 'proxied' | 'originCa'>,
+): OriginCaNotice | null {
+	const originCa = domain.originCa
+	if (!originCa) return null
+	switch (originCa.status) {
+		case 'issuing':
+			return 'issuing'
+		case 'failed':
+			return 'failed'
+		case 'active':
+			// Un código que el panel no conoce llega como null, pero con su `error`.
+			return originCa.errorCode !== null || originCa.error !== null ? 'renew_failed' : null
+		case 'dns_only':
+			return domain.proxied ? 'dns_only_in_cloudflare' : 'dns_only'
+		case 'not_eligible':
+			return null
+	}
 }
 
 /**

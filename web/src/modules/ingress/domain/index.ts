@@ -6,6 +6,7 @@ export type {
 	DomainChanges,
 	DomainState,
 	NewDomain,
+	OriginCaNotice,
 } from './entities/appDomain'
 export {
 	canToggleProxied,
@@ -18,6 +19,7 @@ export {
 	hasWaitingDns,
 	isReachable,
 	manualRecords,
+	originCaNotice,
 	publicAddress,
 	replaceDomain,
 	sortDomains,
