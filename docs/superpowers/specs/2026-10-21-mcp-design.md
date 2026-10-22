@@ -181,6 +181,7 @@ Claude Code ──HTTPS──► muelle-caddy
 - La espera de un deploy usa la suscripción del `Hub` que ya existe.
 - Binario: +2,2 MB medidos. Las páginas se cargan bajo demanda, así que el RSS en reposo casi no cambia.
 - **Hay que medirlo** (paso B15): la imagen con `-tags panel`, una base nueva y el VmRSS en reposo, contra la misma medida en `main`. La de la Fase 5 dio 14,3 MiB en `docker stats` y 25,7 MiB de VmRSS. Se acepta si sube a lo más 3 MiB y sigue bajo los 40 MB del spec §1.
+- Medido en el host (B15): el binario con `-tags panel` y los flags del Dockerfile pasa de 17,4 a 19,6 MB, y el VmRSS en reposo, de 29,6 a 30,9 MiB de media (+1,3 MiB). Falta la medida con `docker stats` dentro de la imagen: se toma la próxima vez que se construya.
 
 ---
 
@@ -1294,6 +1295,11 @@ Las dos líneas se juntan cuando los tests de las dos están en verde. El job `p
    - La investigación no pudo verificar cómo Claude Code detecta un servidor que solo habla stateless, ni si su prueba de 2026-07-28 encaja con la del go-sdk 1.8.0.
    - Lo cubre B16, con la salida documentada `MCP_PROTOCOL_NEGOTIATION=legacy`.
    - Si falla con legacy, el plan B es `Stateless: false` con `SessionTimeout`, que se mide de nuevo en RAM.
+   - **Verificado en parte (2026-10-22), con Claude Code 2.1.291** (`claude --bare -p` con `--mcp-config` y `--strict-mcp-config`, sin tocar su configuración) contra el `mcp.NewHandler` y el `tools.Kit` de esta rama, con dos herramientas falsas y las instrucciones reales:
+     - por defecto, Claude Code manda `server/discover` y después `tools/list`, los dos con `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method` y el `_meta` de SEP-2575; su log dice `"protocolEra":"modern","negotiatedProtocolVersion":"2026-07-28"`;
+     - con `MCP_PROTOCOL_NEGOTIATION=legacy`, manda `initialize` con 2025-11-25, `notifications/initialized` (202), un `GET` que recibe 405 y que tolera, y `tools/list`: `"negotiatedProtocolVersion":"2025-11-25"`;
+     - no manda `Origin`, y su `Accept` es `application/json, text/event-stream`.
+   - Lo que falta de B16 es interactivo y lo hace el dueño: `/mcp` con las herramientas y sus títulos, una pregunta real de diagnóstico contra un muelle de verdad, y la confirmación de una escritura aunque haya `allow mcp__muelle`.
 3. **El SDK cambia valores por defecto en versiones menores** (`MCPGODEBUG`). Va fijo en v1.8.0, y cada actualización es un PR con los tests de §11.
 4. **Migración 0007:**
    - una reconstrucción de tabla en caliente, con la secuencia de `AUTOINCREMENT` a mano;
@@ -1302,6 +1308,7 @@ Las dos líneas se juntan cuando los tests de las dos están en verde. El job `p
    - Claude Code deja vacías algunas variables con nombre de credencial, con una lista fija y no exhaustiva.
    - Si la lista suma `MUELLE_TOKEN` o un patrón `*_TOKEN`, el `.mcp.json` empieza a dar 401.
    - El README documenta `headersHelper` como alternativa. El panel podría usar otro nombre (`MUELLE_MCP_AUTH`); se decide en B16.
+   - Con Claude Code 2.1.291 (la prueba del riesgo 2), un `"Authorization": "Bearer ${MUELLE_TOKEN}"` en `--mcp-config`, con `MUELLE_TOKEN` en el entorno, llegó entero: el servidor de prueba solo aceptaba el token exacto, y respondió `server/discover` y `tools/list`. Por ahora `MUELLE_TOKEN` sirve; el riesgo sigue para versiones futuras.
 6. **Transcripciones.**
    - Todo lo que devuelve una herramienta (valores no secretos, logs enmascarados, un compose con literales) sale de muelle hacia la máquina del desarrollador y la API de Anthropic.
    - El enmascarado tiene los límites del contrato §2.5.
