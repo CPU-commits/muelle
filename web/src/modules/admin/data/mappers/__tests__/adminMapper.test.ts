@@ -24,6 +24,18 @@ const PHASE_3 = {
 	client_ip: '198.51.100.17',
 }
 
+// Un evento de `GET /audit` (contrato §4.2).
+const AUDIT_EVENT = {
+	id: 9,
+	actor_type: 'token',
+	actor_id: 3,
+	actor_name: 'github-actions',
+	action: 'env.patch',
+	target: 'app:auditfy/staging/api',
+	details: {},
+	at: '2026-10-10T19:36:53.770Z',
+}
+
 describe('adminMapper', () => {
 	it('GET /settings trae siempre todas las claves (contrato §4): sin una, no es del contrato', () => {
 		expect(settingsDtoSchema.safeParse(PHASE_3).success).toBe(true)
@@ -83,30 +95,54 @@ describe('adminMapper', () => {
 		expect(settingsPatchPayload({ cloudflareToken: '' })).toEqual({ cloudflare_token: '' })
 	})
 
-	it('un evento de auditoría pierde los details en el borde', () => {
+	it('un evento de auditoría pierde los details en el borde: solo pasa via', () => {
 		const dto = auditEventDtoSchema.parse({
-			id: 9,
-			actor_type: 'token',
-			actor_id: 3,
-			actor_name: 'github-actions',
-			action: 'env.patch',
-			target: 'app:auditfy/staging/api',
+			...AUDIT_EVENT,
 			details: { set: ['DATABASE_URL'] },
-			at: '2026-10-10T19:36:53.770Z',
 		})
 
-		expect(dto).not.toHaveProperty('details')
+		expect(dto.details).toEqual({})
 		expect(auditEventFromDto(dto)).toEqual({
 			id: 9,
 			actor: { kind: 'token', id: 3, name: 'github-actions' },
 			action: 'env.patch',
 			target: 'app:auditfy/staging/api',
+			viaMcp: false,
 			at: new Date('2026-10-10T19:36:53.770Z'),
 		})
 	})
 
+	it('"via": "mcp" es un evento que hizo un token con el servidor MCP (contrato §8.6)', () => {
+		const dto = auditEventDtoSchema.parse({
+			...AUDIT_EVENT,
+			action: 'deploy.create',
+			details: { deploy: 145, images: {}, trigger: 'api', via: 'mcp' },
+		})
+
+		expect(dto.details).toEqual({ via: 'mcp' })
+		expect(auditEventFromDto(dto).viaMcp).toBe(true)
+	})
+
+	it('otro via, o unos details sin un via de texto, no son del MCP ni rompen el evento', () => {
+		const viaMcp = (details: unknown) =>
+			auditEventFromDto(auditEventDtoSchema.parse({ ...AUDIT_EVENT, details })).viaMcp
+
+		// El de `muelle settings reset-panel-ips` (contrato §5.4).
+		expect(viaMcp({ panel_allowed_cidrs: [], via: 'cli' })).toBe(false)
+		expect(viaMcp({ via: 3 })).toBe(false)
+		expect(viaMcp(null)).toBe(false)
+		expect(viaMcp(['mcp'])).toBe(false)
+		expect(viaMcp(undefined)).toBe(false)
+	})
+
 	it('traduce cada tipo de actor, con el nombre copiado al escribir el evento (contrato §4.2)', () => {
-		const base = { id: 1, action: 'a', target: 't', at: '2026-10-10T12:00:00-03:00' }
+		const base = {
+			id: 1,
+			action: 'a',
+			target: 't',
+			details: {},
+			at: '2026-10-10T12:00:00-03:00',
+		}
 		const actor = (actor_type: string, actor_id: number | null, actor_name: string) =>
 			auditEventFromDto({ ...base, actor_type, actor_id, actor_name }).actor
 

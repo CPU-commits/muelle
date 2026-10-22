@@ -32,6 +32,7 @@ function event(id: number, actor: AuditEvent['actor']): AuditEvent {
 		actor,
 		action: 'env.patch',
 		target: 'app:auditfy/staging/api',
+		viaMcp: false,
 		at: new Date('2026-10-10T14:27:00Z'),
 	}
 }

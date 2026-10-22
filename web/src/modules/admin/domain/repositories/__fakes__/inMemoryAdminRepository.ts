@@ -115,6 +115,7 @@ export function fakeAuditEvents(
 			actor: { kind: 'user', id: 1, name: 'felipe' },
 			action: 'project.update',
 			target: `project:p${id}`,
+			viaMcp: false,
 			at: new Date(at.getTime() - index * 60_000),
 		}
 	})
