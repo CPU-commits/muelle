@@ -53,6 +53,8 @@ type Syncer struct {
 	internalCA bool
 	onFail     func()
 	log        *slog.Logger
+	// floor es la última hora que dio stamp, con mu.
+	floor time.Time
 
 	// lastGood es LastGoodBuild, con su propio mutex: el reconciliador de
 	// Origin CA lo lee sin esperar un Sync en curso.
@@ -83,14 +85,38 @@ func (s *Syncer) Enabled(p shared.ProxySettings) bool { return p.Enabled(s.defIm
 
 // LastGoodBuild es el momento en que empezó a leer la base el último Sync
 // cuyo POST /load salió bien (cero si no hubo uno desde que arrancó). Un
-// certificado de Origin CA retirado antes de ese momento ya no está en lo
-// que sirve Caddy, y se puede revocar (§6 del diseño de Origin CA). No sirve
-// la hora del fin: un Sync que leyó la base antes del retiro y terminó
-// después mandó una configuración que todavía lo trae.
+// certificado de Origin CA retirado (con Retiring) antes de ese momento ya
+// no está en lo que sirve Caddy, y se puede revocar (§6 del diseño de Origin
+// CA). No sirve la hora del fin: un Sync que leyó la base antes del retiro y
+// terminó después mandó una configuración que todavía lo trae.
 func (s *Syncer) LastGoodBuild() time.Time {
 	s.lastGoodMu.Lock()
 	defer s.lastGoodMu.Unlock()
 	return s.lastGood
+}
+
+// Retiring corre fn con el mutex de los Sync tomado: es para escribir el
+// retiro de un certificado de Origin CA con retired_at = at. Así ningún Sync
+// lee la base mientras se escribe: uno que lo leyó active terminó antes y
+// empezó a más tardar en at, y uno que empieza después ya no lo trae. at es
+// la hora de ahora, pero nunca anterior al comienzo de un Sync anterior,
+// aunque el reloj vuelva atrás. Devuelve el error de fn.
+func (s *Syncer) Retiring(fn func(at time.Time) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fn(s.stamp())
+}
+
+// stamp es la hora de ahora, o la última que dio si el reloj volvió atrás:
+// el comienzo de un Sync y la hora de un retiro nunca quedan al revés de
+// como pasaron. Con el mutex tomado.
+func (s *Syncer) stamp() time.Time {
+	now := s.clock.Now()
+	if now.Before(s.floor) {
+		now = s.floor
+	}
+	s.floor = now
+	return now
 }
 
 // Sync, con el mutex tomado y un plazo de 30 s: lee los ajustes (sin el
@@ -106,7 +132,7 @@ func (s *Syncer) Sync(ctx context.Context, force bool) error {
 	ctx, cancel := context.WithTimeout(ctx, syncTimeout)
 	defer cancel()
 
-	started := s.clock.Now()
+	started := s.stamp()
 	p, err := s.settings.ProxySettings(ctx)
 	if err != nil {
 		return s.fail(fmt.Errorf("leyendo los ajustes del proxy: %w", err))

@@ -386,3 +386,71 @@ func TestSyncLastGoodBuild(t *testing.T) {
 		t.Fatalf("deshabilitado: %s", got)
 	}
 }
+
+// Retiring corre fn con el mutex de los Sync tomado, con at: espera al Sync
+// en curso (que pudo leer el certificado active antes del retiro), y at
+// nunca es anterior al comienzo de un Sync anterior, aunque el reloj vuelva
+// atrás. Así un retiro de antes de LastGoodBuild ya no está en lo que sirve
+// Caddy (§6 del diseño de Origin CA).
+func TestSyncerRetiring(t *testing.T) {
+	f := newSyncFixture(t)
+	f.enable(t, nil)
+	loading, release := make(chan struct{}), make(chan struct{})
+	admin := adminFunc(func(ctx context.Context, cfg service.ProxyConfig, force bool) error {
+		if loading != nil {
+			close(loading)
+			<-release
+		}
+		return nil
+	})
+	s := NewSyncer(outservice.NewProxySettingsReader(f.db, f.cipher), f.repo, outservice.NewCatalogReader(f.db), OriginRepos{},
+		admin, f.state, f.clock, "", false, nil, slog.New(slog.DiscardHandler))
+	start := f.clock.Now()
+	synced := make(chan error, 1)
+	go func() { synced <- s.Sync(context.Background(), false) }()
+	<-loading
+	ran := make(chan time.Time, 1)
+	go func() {
+		_ = s.Retiring(func(at time.Time) error { ran <- at; return nil })
+	}()
+	select {
+	case <-ran:
+		t.Fatal("corrió con un Sync en curso")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if err := <-synced; err != nil {
+		t.Fatal(err)
+	}
+	if at := <-ran; at.Before(start) {
+		t.Fatalf("at = %s, antes del Sync (%s)", at, start)
+	}
+
+	// El reloj vuelve una hora atrás: at sigue sin ser anterior al último
+	// comienzo de un Sync, ni el comienzo del próximo anterior a at.
+	loading = nil
+	f.clock.Advance(time.Minute)
+	if err := s.Sync(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	last := s.LastGoodBuild()
+	f.clock.Advance(-time.Hour)
+	var at time.Time
+	if err := s.Retiring(func(a time.Time) error { at = a; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if at.Before(last) {
+		t.Fatalf("con el reloj atrás, at = %s, antes del Sync de %s", at, last)
+	}
+	if err := s.Sync(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.LastGoodBuild(); got.Before(at) {
+		t.Fatalf("con el reloj atrás, LastGoodBuild = %s, antes del retiro de %s", got, at)
+	}
+	// Un error de fn es el de Retiring.
+	boom := errors.New("boom")
+	if err := s.Retiring(func(time.Time) error { return boom }); !errors.Is(err, boom) {
+		t.Fatalf("error: %v", err)
+	}
+}
