@@ -259,7 +259,6 @@ func TestLoadRejectsInitPlaceholders(t *testing.T) {
 	}
 }
 
-// writeFile escribe content en un archivo nuevo del test y devuelve su ruta.
 // El token de MUELLE_INIT_CLOUDFLARE_TOKEN_FILE tiene la forma que piden
 // --cloudflare-token y PATCH /settings (contrato §5.2): de 20 a 512
 // caracteres ASCII visibles, en una sola línea y sin espacios (los de los
@@ -296,6 +295,7 @@ func TestLoadInitTokenShape(t *testing.T) {
 	}
 }
 
+// writeFile escribe content en un archivo nuevo del test y devuelve su ruta.
 func writeFile(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
