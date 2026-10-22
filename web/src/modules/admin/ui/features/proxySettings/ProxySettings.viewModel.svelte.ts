@@ -79,7 +79,9 @@ export interface PortsMove {
  * Cómo va muelle-caddy después de cambiar los puertos sin mudarse de origen (contrato §3.5):
  * se recrea con los puertos nuevos, quedó escuchando, no pudo (un puerto ocupado: el
  * `error` de `GET /proxy`, y muelle reintenta con los mismos puertos), o pasó el plazo sin
- * una respuesta que lo diga (`unknown`: `GET /proxy` falló o seguía diciendo `recreating`).
+ * una respuesta que lo diga (`unknown`: no llegó ninguna después del cambio, o el último
+ * pedido falló). Pasado el plazo, una respuesta que sigue diciendo `recreating` es
+ * `recreating`: muelle responde y todavía no terminó.
  */
 export type PortsRecreation =
 	| { readonly kind: 'recreating' }
@@ -377,7 +379,9 @@ export class ProxySettingsViewModel {
 	 * (este origen deja de responder) o sin el proxy de muelle (`disabled`): los puertos ya se
 	 * guardaron, esto es solo el seguimiento. Mientras `GET /proxy` no diga cómo terminó
 	 * (también si falla: el panel puede pasar por el mismo muelle-caddy que se recrea), dice
-	 * `recreating`, hasta `PORTS_WATCH_TIMEOUT_MS`; después, `unknown`.
+	 * `recreating`, hasta `PORTS_WATCH_TIMEOUT_MS`; después, `unknown` si no hubo una
+	 * respuesta desde el cambio o el último pedido falló, y `recreating` si muelle responde
+	 * que todavía recrea.
 	 */
 	get recreation(): PortsRecreation | null {
 		// Si se fue de esta dirección, el aviso de la nueva dice a dónde ir; si volvió atrás,
@@ -385,11 +389,17 @@ export class ProxySettingsViewModel {
 		if (!this.#watchingProxy || this.#leaving || this.#rollbackStatus) return null
 		const fresh = this.#freshProxy
 		if (this.#awaitingProxy) return { kind: 'recreating' }
-		// Pasó el plazo sin una respuesta de después del cambio, o la última seguía recreando.
+		// Pasó el plazo sin una respuesta de después del cambio.
 		if (fresh === undefined) return { kind: 'unknown' }
 		const notice = proxyNotice(fresh)
 		if (notice === null) return { kind: 'done' }
-		if (notice === 'recreating') return { kind: 'unknown' }
+		// Pasado el plazo, muelle sigue diciendo que recrea: mientras responda, es lo que pasa
+		// (se sigue preguntando). Si el último pedido falló, ya no se sabe.
+		if (notice === 'recreating') {
+			return this.#proxyStatus.status === 'error'
+				? { kind: 'unknown' }
+				: { kind: 'recreating' }
+		}
 		if (notice === 'disabled') return null
 		return { kind: 'failed', error: fresh.error }
 	}

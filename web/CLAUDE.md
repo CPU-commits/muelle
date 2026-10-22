@@ -633,8 +633,10 @@ lo manda, y el mock lo rechaza.
       `issuing`.
     - Si el panel sigue en el mismo origen (solo cambió el HTTP, o se entró por otra
       dirección que la de Caddy), dice "Recreando muelle-caddy…" y después si quedó
-      escuchando o el error; pasados los 2 min sin una respuesta que lo diga, que no se pudo
-      confirmar y que recargue en un momento (`recreation.kind === 'unknown'`).
+      escuchando o el error. Pasados los 2 min, si `GET /proxy` no respondió desde el cambio
+      o su último pedido falló, que no se pudo confirmar y que recargue en un momento
+      (`recreation.kind === 'unknown'`); si responde y todavía dice `recreating`, sigue en
+      "Recreando muelle-caddy…" (se sigue preguntando hasta que diga cómo terminó).
     - Si cambió el HTTPS y se entró por la dirección de Caddy, esa dirección deja de
       responder: el aviso lleva a la nueva, no salen más escrituras (`holdWrites`) y se
       sigue preguntando solo por si muelle vuelve atrás (la dirección vuelve a responder).

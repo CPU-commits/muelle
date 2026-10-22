@@ -772,6 +772,37 @@ describe('ProxySettingsViewModel', () => {
 		}
 	})
 
+	it('pasado el plazo, si GET /proxy responde y sigue diciendo "recreando", el aviso sigue en "recreando" y no pide recargar', async () => {
+		const vm = await mountViewModel()
+		await vi.waitFor(() => expect(ingress.getProxyStatus).toHaveBeenCalled())
+		vi.useFakeTimers({
+			toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+			shouldAdvanceTime: true,
+		})
+		try {
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus({ status: 'recreating' }))
+			vm.setField('httpPort', '8080')
+			mocks.updateProxyPorts.mockResolvedValueOnce(saved({ httpPort: 8080 }))
+			vm.askSavePorts()
+			await vm.savePorts()
+			await vi.waitFor(() =>
+				expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success'),
+			)
+
+			// muelle responde, y dice que todavía se recrea: no hay nada que recargar.
+			await vi.advanceTimersByTimeAsync(PORTS_WATCH_TIMEOUT_MS + PROXY_REFRESH_MS)
+			expect(client.getQueryState(ingressKeys.proxy)?.status).toBe('success')
+			expect(vm.recreation).toEqual({ kind: 'recreating' })
+
+			// Se sigue preguntando (muelle dice que se recrea) hasta que dice cómo terminó.
+			ingress.getProxyStatus.mockResolvedValue(proxyStatus())
+			await vi.advanceTimersByTimeAsync(PROXY_REFRESH_MS)
+			await vi.waitFor(() => expect(vm.recreation).toEqual({ kind: 'done' }))
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	it('un estado del proxy de antes del cambio (en el cache, de Dominios) no cuenta como "ya escucha"', async () => {
 		ingress.getProxyStatus.mockReturnValue(new Promise<ProxyStatus>(() => {}))
 		const vm = await mountViewModel()
