@@ -180,7 +180,7 @@ go test -tags integration -race -count=1 -timeout 40m ./...   # contra el Swarm 
 cd web && pnpm verify && pnpm test:e2e                        # el panel
 ```
 
-**Publicar una versión:** `git tag -a vX.Y.Z -m "muelle vX.Y.Z" && git push origin vX.Y.Z`. `release.yml` corre los tests y sube `ghcr.io/cpu-commits/muelle` y `muelle-caddy` (`linux/amd64`). Después, mueve `v0` para la action: `git tag -f v0 'vX.Y.Z^{}' && git push -f origin v0`. GitHub crea cada paquete nuevo como privado: si algún día se recrean, hay que volver a pasarlos a públicos (Package settings → Change visibility).
+**Publicar una versión:** `git tag -a vX.Y.Z -m "muelle vX.Y.Z" && git push origin vX.Y.Z`. `release.yml` corre los tests y sube `ghcr.io/cpu-commits/muelle` y `muelle-caddy` (`linux/amd64`). Después, mueve `v0` para la action: `git tag -f v0 'vX.Y.Z^{}' && git push -f origin v0`.
 
 ## Documentación
 
