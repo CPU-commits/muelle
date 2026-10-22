@@ -91,6 +91,7 @@ func output(s entity.Settings, clientIP string) dto.SettingsOutput {
 		Require2FA:         s.Require2FA,
 		CloudflareTokenSet: p.CloudflareToken != "",
 		CloudflareZones:    s.CloudflareZones,
+		CloudflareOriginCA: p.CloudflareOriginCA,
 		PublicIP:           p.PublicIP,
 		PublicIPv6:         p.PublicIPv6,
 		ACMEEmail:          p.ACMEEmail,
@@ -136,9 +137,18 @@ func NewPatchSettings(settings repository.SettingsRepository, totp service.TOTPS
 	return &PatchSettings{settings: settings, totp: totp, cipher: c, hook: hook, origin: origin, audit: rec, tx: tx}
 }
 
-// applyProxy valida los campos presentes y los aplica sobre p. Los errores
-// nombran el campo simple del cuerpo (nunca panel_allowed_cidrs[1]).
-func applyProxy(p shared.ProxySettings, in dto.PatchSettingsInput) (shared.ProxySettings, error) {
+// Los campos de PATCH /settings en que van los 422 de Cloudflare.
+const (
+	fieldOriginCA = "cloudflare_origin_ca"
+	fieldToken    = "cloudflare_token"
+)
+
+// applyProxy valida los campos presentes y los aplica sobre old. Los
+// errores nombran el campo simple del cuerpo (nunca panel_allowed_cidrs[1]).
+// Las reglas de cloudflare_origin_ca sin token van al final, después de la
+// forma del token.
+func applyProxy(old shared.ProxySettings, in dto.PatchSettingsInput) (shared.ProxySettings, error) {
+	p := old
 	if in.PublicIP != nil {
 		if *in.PublicIP != "" {
 			if err := validate.IPv4("public_ip", *in.PublicIP); err != nil {
@@ -193,13 +203,40 @@ func applyProxy(p shared.ProxySettings, in dto.PatchSettingsInput) (shared.Proxy
 	if in.CloudflareToken != nil {
 		if t := *in.CloudflareToken; t != "" {
 			if !validate.IsCloudflareToken(t) {
-				return p, validate.Errorf("cloudflare_token", "no parece un token de API de Cloudflare (de 20 a 512 caracteres visibles, sin espacios)")
+				return p, validate.Errorf(fieldToken, "no parece un token de API de Cloudflare (de 20 a 512 caracteres visibles, sin espacios)")
 			}
-			if err := validate.NoPlaceholders("cloudflare_token", t); err != nil {
+			if err := validate.NoPlaceholders(fieldToken, t); err != nil {
 				return p, err
 			}
 		}
 		p.CloudflareToken = *in.CloudflareToken
+	}
+	return applyOriginCA(old, p, in)
+}
+
+// Los 422 de cloudflare_origin_ca sin token (contrato §4.1).
+const (
+	msgOriginCANeedsToken  = "necesita el token de Cloudflare: configúralo antes de activarla"
+	msgOriginCARemoveToken = "sin token no se pueden usar los certificados de Cloudflare: mándala en false en el mismo cambio para quitar el token"
+)
+
+// applyOriginCA aplica cloudflare_origin_ca sobre p, con las reglas 1 y 1b
+// de §3.2 del diseño de Origin CA, que miran solo lo que cambia en este
+// PATCH (no lo guardado: una opción encendida sin token por un UPDATE a mano
+// no frena un PATCH de otra cosa):
+//  1. se enciende ahora y, con los valores resultantes, no hay token;
+//  2. se quita un token guardado y la opción queda encendida.
+func applyOriginCA(old, p shared.ProxySettings, in dto.PatchSettingsInput) (shared.ProxySettings, error) {
+	if in.CloudflareOriginCA != nil {
+		p.CloudflareOriginCA = *in.CloudflareOriginCA
+	}
+	turnedOn := p.CloudflareOriginCA && !old.CloudflareOriginCA
+	removed := old.CloudflareToken != "" && p.CloudflareToken == ""
+	switch {
+	case turnedOn && p.CloudflareToken == "":
+		return p, validate.Errorf(fieldOriginCA, "%s", msgOriginCANeedsToken)
+	case removed && p.CloudflareOriginCA:
+		return p, validate.Errorf(fieldOriginCA, "%s", msgOriginCARemoveToken)
 	}
 	return p, nil
 }
@@ -230,6 +267,11 @@ func locksOut(cidrs []string, clientIP string) bool {
 //     guarda devuelve service.ErrWouldLockOut, salvo con ConfirmLockout.
 //   - Un token de Cloudflare nuevo se verifica con el hook antes de guardar
 //     nada (cuántas zonas ve); "" lo borra.
+//   - Si cloudflare_origin_ca queda encendida y se enciende ahora o cambió el
+//     token, el hook comprueba el permiso de los certificados de Cloudflare
+//     (después de verificar el token), con el campo cloudflare_origin_ca si
+//     se enciende ahora y cloudflare_token si no. Apagarla nunca llama a
+//     Cloudflare.
 //   - Otros puertos del proxy se prueban con el hook antes de guardar nada:
 //     uno ocupado en el host no se guarda (muelle-caddy no arrancaría).
 //   - Todo se guarda en una transacción, y después, si cambió algún ajuste
@@ -263,6 +305,17 @@ func (u *PatchSettings) Execute(ctx context.Context, in dto.PatchSettingsInput) 
 	if tokenChanged && next.CloudflareToken != "" && u.hook != nil {
 		// Fuera de la transacción: es una llamada a Cloudflare.
 		if zones, err = u.hook.CheckCloudflareToken(ctx, next.CloudflareToken); err != nil {
+			return dto.SettingsOutput{}, err
+		}
+	}
+	turnedOn := next.CloudflareOriginCA && !old.Proxy.CloudflareOriginCA
+	if next.CloudflareOriginCA && (turnedOn || tokenChanged) && u.hook != nil {
+		field := fieldToken
+		if turnedOn {
+			field = fieldOriginCA
+		}
+		// También fuera: llama a Cloudflare.
+		if err := u.hook.CheckCloudflareOriginCA(ctx, next.CloudflareToken, field); err != nil {
 			return dto.SettingsOutput{}, err
 		}
 	}
@@ -355,6 +408,8 @@ func auditValue(p shared.ProxySettings, key string) any {
 		return p.HTTPSPort
 	case shared.SettingPanelAllowedCIDRs:
 		return p.PanelAllowedCIDRs
+	case shared.SettingCloudflareOriginCA:
+		return p.CloudflareOriginCA
 	}
 	return p.Encode()[key]
 }

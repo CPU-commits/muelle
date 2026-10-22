@@ -17,6 +17,9 @@ type SettingsOutput struct {
 	CloudflareTokenSet bool `json:"cloudflare_token_set"`
 	// CloudflareZones son las zonas que ve el token; null si no se sabe (o no hay token).
 	CloudflareZones *int `json:"cloudflare_zones"`
+	// CloudflareOriginCA: los certificados de Cloudflare (Origin CA) para
+	// los dominios con el proxy de Cloudflare (contrato §3.7). Nunca null.
+	CloudflareOriginCA bool `json:"cloudflare_origin_ca"`
 	// PublicIP y PublicIPv6: "" si no están configuradas (sin IPv6, sin registros AAAA).
 	PublicIP   string `json:"public_ip"`
 	PublicIPv6 string `json:"public_ipv6"`
@@ -44,6 +47,9 @@ type PatchSettingsInput struct {
 	Require2FA *bool `json:"require_2fa"`
 	// CloudflareToken: "" borra el token.
 	CloudflareToken *string `json:"cloudflare_token"`
+	// CloudflareOriginCA enciende o apaga los certificados de Cloudflare
+	// (contrato §4.1). Un valor que no es bool es 400 invalid_json.
+	CloudflareOriginCA *bool `json:"cloudflare_origin_ca"`
 	// PublicIP y PublicIPv6: "" las borra.
 	PublicIP          *string   `json:"public_ip"`
 	PublicIPv6        *string   `json:"public_ipv6"`
