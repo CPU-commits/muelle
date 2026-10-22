@@ -177,5 +177,6 @@
 	"deploy_dialog_digest_pin_title": "La imagen está fijada en un digest.",
 	"deploy_dialog_digest_pin_services_title": "Servicios fijados en un digest: {services}.",
 	"deploy_dialog_mixed_pin_services_title": "Servicios fijados por el rollback #{id}: {rollback}. Otros servicios fijados en un digest: {services}.",
-	"deploy_dialog_pinned_body": "Sin una imagen nueva se despliega ese digest de nuevo. Para usar otra imagen o un tag (como :staging), escríbelo aquí o cámbialo en la configuración."
+	"deploy_dialog_pinned_body": "Sin una imagen nueva se despliega ese digest de nuevo. Para usar otra imagen o un tag (como :staging), escríbelo aquí o cámbialo en la configuración.",
+	"deploy_dialog_pinned_services_body": "Sin imágenes nuevas se despliegan de nuevo esos digests. Para usar otra imagen o un tag (como :staging) en un servicio, escríbelo en su campo o cámbialo en la configuración."
 }

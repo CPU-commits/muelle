@@ -188,7 +188,8 @@ también. Por eso el diálogo de "Desplegar" avisa qué deja fijo en un digest e
 (`pinnedImages` de `domain/entities/deploy.ts`) y que para usar otra imagen o un tag hay
 que escribirla (o cambiarla en la configuración), con el mismo texto
 (`deploy_dialog_pinned_body`) para un digest de un rollback, de un override o puesto a
-propósito en la configuración. Sale de `requested_images` del deploy
+propósito en la configuración; con varios servicios fijados (una compose), el texto habla
+de esos digests (`deploy_dialog_pinned_services_body`). Sale de `requested_images` del deploy
 actual: un servicio está fijo si su ref pedida trae `@sha256:`. Nombra el rollback ("fijada
 por el rollback #144") solo si sigue en el historial y su imagen es la fijada; si salió del
 historial, o lo fijó un override o la configuración, dice que está fijada en un digest. Se

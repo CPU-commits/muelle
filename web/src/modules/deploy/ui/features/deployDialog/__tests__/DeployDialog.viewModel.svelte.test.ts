@@ -253,6 +253,58 @@ describe('DeployDialogViewModel', () => {
 		}
 	})
 
+	it('con varios servicios fijados en una compose, el texto bajo el aviso habla de esos digests', async () => {
+		const mixed = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({
+						kind: 'compose',
+						services: ['api', 'web', 'worker'],
+						pinned: {
+							rollback: { id: asDeployId(144), services: ['web'] },
+							others: ['api'],
+						},
+					}),
+				),
+		)
+		expect(mixed.vm.pinnedBody).toBe(m.deploy_dialog_pinned_services_body())
+
+		const byRollback = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({
+						kind: 'compose',
+						services: ['api', 'web', 'worker'],
+						pinned: {
+							rollback: { id: asDeployId(144), services: ['web', 'worker'] },
+							others: [],
+						},
+					}),
+				),
+		)
+		expect(byRollback.vm.pinnedBody).toBe(m.deploy_dialog_pinned_services_body())
+
+		// Uno solo fijado en la compose: el digest, en singular.
+		const one = await mountViewModel(
+			() =>
+				new DeployDialogViewModel(() =>
+					props({
+						kind: 'compose',
+						services: ['api', 'web', 'worker'],
+						pinned: { rollback: null, others: ['web'] },
+					}),
+				),
+		)
+		expect(one.vm.pinnedBody).toBe(m.deploy_dialog_pinned_body())
+
+		for (const locale of ['es', 'en'] as const) {
+			expect(m.deploy_dialog_pinned_services_body({}, { locale })).toMatch(/digests/)
+			expect(m.deploy_dialog_pinned_services_body({}, { locale })).not.toMatch(
+				/volver a seguir|again|rollback/i,
+			)
+		}
+	})
+
 	it('otro error va al banner del diálogo', async () => {
 		mocks.createDeploy.mockRejectedValue(new UnavailableError('caído', { reason: 'server' }))
 		const input = props()
