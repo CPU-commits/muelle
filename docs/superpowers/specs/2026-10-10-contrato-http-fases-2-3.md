@@ -1,6 +1,6 @@
 # muelle — Contrato de las Fases 2, 3 y 5
 
-> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos), 2026-10-17 (lo que pidió el panel, §7) y 2026-10-21 (los certificados de Cloudflare, §3.7) · Estado: aprobado para la etapa de contratos, e implementado en este árbol (Fases 2, 3 y 5). Los certificados de Cloudflare (§3.7 y lo que suman §1, §3.1–§3.5, §4, §6 y §7) están aprobados y todavía sin implementar.
+> Fecha: 2026-10-13 · Revisado: 2026-10-14 (revisión de la etapa de contratos), 2026-10-17 (lo que pidió el panel, §7) y 2026-10-21 (los certificados de Cloudflare, §3.7) · Estado: aprobado para la etapa de contratos, e implementado en este árbol (Fases 2, 3 y 5). Los certificados de Cloudflare (§3.7 y lo que suman §1, §3.1–§3.5, §4, §6 y §7) están aprobados e implementados en el backend; el panel los suma en su propia línea (§14 del diseño de Origin CA).
 > Complementa el diseño ([`2026-10-09-muelle-design.md`](2026-10-09-muelle-design.md)); las referencias `§N` apuntan a sus secciones. Donde este documento y el diseño difieren, manda este documento, y el diseño ya se actualizó.
 
 Las Fases 2 (deploy), 3 (ingress) y 5 (distribución) se implementan **en paralelo**, cada una en su rama y sin hablar con las otras. Este documento fija lo que comparten:
@@ -99,7 +99,7 @@ Los módulos no se importan (§4.1 regla 1): cada uno declara su interfaz en su 
 | catalog → deploy | `catalog/domain/service.AppRuntime`: `RemoveApp(ctx, p, s, a)` | `deploy.Module` (hecho: `docker stack rm`) | Al borrar una app. Fase 2: antes del `stack rm`, deja de aceptar deploys de la app por 2 min (`409 conflict`, lo que tarda catalog en borrar la fila), cancela el deploy en curso (`failed`: "la app se borró durante el deploy") y marca `failed` los `queued`. Si el `stack rm` falla, vuelve a aceptar deploys enseguida. Si el deploy en curso no se detiene en 15 s, no sigue (ni `queued` ni `stack rm`): vuelve a aceptar deploys y el `DELETE` de la app responde `409 conflict` ("un deploy de la app todavía no se detiene"), sin borrarla; se reintenta. Opcional |
 | deploy → secrets | `deploy/domain/service.EnvResolver`: `ResolveEnv(ctx, appID) (vars, secretValues, err)` | `secrets.Module` (hecho) | Las variables del stage con las de la app encima, y los valores secretos para enmascarar el log |
 | deploy → ingress | `deploy/domain/service.Ingress`: `EnsureStageNetwork`, `SyncRoutes(ctx) error` | `ingress.Module` (hecho) | §7 pasos 4 y 7 |
-| admin → ingress | `admin/domain/service.ProxyHook`: `CheckCloudflareToken`, `CheckCloudflareOriginCA(ctx, token, field)`, `CheckProxyPorts(ctx, old, next)`, `ProxySettingsChanged(ctx, old, next)` | `ingress.Module` (hecho, salvo `CheckCloudflareOriginCA`, §3.7) | Ver §3.5 |
+| admin → ingress | `admin/domain/service.ProxyHook`: `CheckCloudflareToken`, `CheckCloudflareOriginCA(ctx, token, field)`, `CheckProxyPorts(ctx, old, next)`, `ProxySettingsChanged(ctx, old, next)` | `ingress.Module` (hecho) | Ver §3.5 |
 | ingress → admin | `ingress.Deps.PortsRolledBack func()` (opcional) | `container.go`, con `admin.Module.InvalidatePanelOrigin` (hecho) | Al volver a los puertos anteriores del proxy, el origen del panel en caché se descarta (§3.5) |
 
 **Lecturas por SQL** (un adaptador en `infra/out/service` del que lee, que puede leer la tabla de otro módulo):
@@ -144,10 +144,10 @@ Un `docker stack deploy` cortado por el apagado se resuelve en el próximo arran
   - borra las redes con etiquetas de stage (`muelle.project`/`muelle.stage`) cuyo stage ya no existe. Solo las que se llaman `naming.Network` de esas etiquetas, y recién **la segunda vez seguida** que el job las ve huérfanas: catalog crea la red antes de guardar el stage, y así no se borra la de un stage que se está creando. Una red en uso queda para la próxima vez;
   - reenvía la configuración completa. Si acaba de crear muelle-caddy, espera a que su admin API responda;
   - con token, actualiza `cloudflare_zones` y el registro DNS del panel (§3.4, §3.6), y si cambió la zona del panel (y con ella su TLS), reenvía la configuración otra vez. Va al final: un Cloudflare lento no atrasa la configuración de los sitios.
-  - con los certificados de Cloudflare encendidos (§3.7, todavía sin implementar), despierta su reconciliación, sin esperarla: lee el `proxied` de los registros, emite, renueva y revoca.
+  - despierta la reconciliación de los certificados de Cloudflare (§3.7), sin esperarla: con la opción encendida lee el `proxied` de los registros, emite, renueva y revoca; con la opción apagada solo revoca los que quedaron retirados.
   - Un paso que falla no corta los que siguen.
 - El job `"certificados"`, cada hora (§3.1).
-- `ingress.Run` lleva los reintentos con backoff (1 s, 2 s… 60 s) de una configuración que Caddy no aceptó, las verificaciones de un dominio 30 s después de crearlo, adoptarlo o reintentarlo y la de los `pending` cada minuto (§3.1), la recreación de muelle-caddy que agenda `ProxySettingsChanged`, que vuelve a los puertos anteriores si los nuevos no arrancan (§3.5), y la reconciliación de los certificados de Cloudflare (§3.7, todavía sin implementar): una pasada a la vez, con un plazo de 5 min cada una.
+- `ingress.Run` lleva los reintentos con backoff (1 s, 2 s… 60 s) de una configuración que Caddy no aceptó, las verificaciones de un dominio 30 s después de crearlo, adoptarlo o reintentarlo y la de los `pending` cada minuto (§3.1), la recreación de muelle-caddy que agenda `ProxySettingsChanged`, que vuelve a los puertos anteriores si los nuevos no arrancan (§3.5), y la reconciliación de los certificados de Cloudflare (§3.7): una pasada a la vez, con un plazo de 5 min cada una.
 
 Un error de Docker al arrancar nunca detiene a muelle.
 
@@ -970,7 +970,7 @@ El panel, en `GET /proxy` (§3.3), con su registro en DNS only en Cloudflare:
 }
 ```
 
-## 4. Settings (`GET/PATCH /settings`) · sesión — ya implementado, salvo `cloudflare_origin_ca` (§3.7)
+## 4. Settings (`GET/PATCH /settings`) · sesión — ya implementado
 
 `GET` (y la respuesta de `PATCH`) trae **siempre** todas las claves, sin `omitempty`. El panel las trata como obligatorias: una respuesta sin alguna es un error de contrato.
 
@@ -995,7 +995,7 @@ El panel, en `GET /proxy` (§3.3), con su registro en DNS only en Cloudflare:
 |---|---|
 | `cloudflare_token_set` | Si hay token. **El token nunca vuelve** |
 | `cloudflare_zones` | Valor guardado (no se consulta a Cloudflare en cada `GET`); null si no se sabe o no hay token |
-| `cloudflare_origin_ca` | Bool, nunca null: los certificados de Cloudflare (Origin CA, §3.7, todavía sin implementar) para los dominios con el proxy. `false` por defecto. No hay un `MUELLE_INIT_*` para esto: se enciende en Ajustes |
+| `cloudflare_origin_ca` | Bool, nunca null: los certificados de Cloudflare (Origin CA, §3.7) para los dominios con el proxy. `false` por defecto. No hay un `MUELLE_INIT_*` para esto: se enciende en Ajustes |
 | `public_ip`, `public_ipv6`, `acme_email` | `""` si no están |
 | `panel_domain` | **Solo lectura**: `MUELLE_PANEL_DOMAIN` (lo que escribe install) o, si no está, el host de `MUELLE_PANEL_ORIGIN` si es un dominio, o `""` (una IP o `localhost`, en desarrollo). Se escribe en cada arranque |
 | `panel_allowed_cidrs` | Prefijos normalizados (`validate.CIDRs`). Nunca null; `[]` es cualquier IP |
