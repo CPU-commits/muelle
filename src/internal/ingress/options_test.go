@@ -25,7 +25,7 @@ func TestOptionsDefaults(t *testing.T) {
 	want := Timing{
 		RetryMin: time.Second, RetryMax: 60 * time.Second, RecreateDelay: 2 * time.Second,
 		FirstCheck: 30 * time.Second, PendingEvery: time.Minute, DomainOp: 30 * time.Second,
-		DomainRetry: 20 * time.Second, Hook: 2 * time.Minute,
+		DomainRetry: 20 * time.Second, Hook: 2 * time.Minute, OriginPass: 5 * time.Minute, OriginRevokeGrace: time.Minute,
 	}
 	if o.Timing != want {
 		t.Errorf("Timing: %+v", o.Timing)

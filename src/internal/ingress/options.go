@@ -53,6 +53,8 @@ type Timing struct {
 	DomainOp           time.Duration // 30 s: crear, editar, borrar, adoptar, EnsurePanelDNS y cada registro del hook (D6)
 	DomainRetry        time.Duration // 20 s: retry
 	Hook               time.Duration // 2 min: ProxySettingsChanged
+	OriginPass         time.Duration // 5 min: una pasada de los certificados de Cloudflare (Origin CA)
+	OriginRevokeGrace  time.Duration // 1 min: del retiro de un certificado de Origin CA a su revocación
 }
 
 // withDefaults completa los campos vacíos con los de producción.
@@ -73,5 +75,7 @@ func (o Options) withDefaults() Options {
 	t.DomainOp = cmp.Or(t.DomainOp, 30*time.Second)
 	t.DomainRetry = cmp.Or(t.DomainRetry, 20*time.Second)
 	t.Hook = cmp.Or(t.Hook, 2*time.Minute)
+	t.OriginPass = cmp.Or(t.OriginPass, 5*time.Minute)
+	t.OriginRevokeGrace = cmp.Or(t.OriginRevokeGrace, time.Minute)
 	return o
 }
