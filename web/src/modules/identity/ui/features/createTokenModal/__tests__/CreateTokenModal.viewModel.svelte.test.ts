@@ -108,6 +108,7 @@ describe('CreateTokenModalViewModel', () => {
 			name: 'ci',
 			project: 'auditfy',
 			stage: 'staging',
+			readOnly: false,
 			expiresOn: '2026-12-31',
 		})
 		expect(mocks.onCreated).toHaveBeenCalledWith(CREATED)

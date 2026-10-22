@@ -146,6 +146,8 @@ describe('tokens', () => {
 			name: 'claude-todo',
 			project: '*',
 			stage: '',
+			// "*" lo fuerza: no hay un token de escritura de todos los proyectos.
+			readOnly: false,
 			expiresOn: '',
 		})
 
@@ -206,13 +208,15 @@ describe('tokens', () => {
 			name: 'github-actions-aumi',
 			project: 'aumi-agents',
 			stage: 'staging',
+			readOnly: false,
 			expiresOn: '',
 		})
 
 		expect(created.secret).toMatch(/^mk_[\w-]{43}$/)
 		expect(created.token).toMatchObject({
 			name: 'github-actions-aumi',
-			scope: { project: 'aumi-agents', stage: 'staging' },
+			scope: { kind: 'project', project: 'aumi-agents', stage: 'staging' },
+			readOnly: false,
 			createdBy: { kind: 'user', username: 'felipe' },
 			lastUsedAt: null,
 			expiresAt: null,
@@ -220,6 +224,27 @@ describe('tokens', () => {
 		const tokens = await identityUseCases.listTokens()
 		expect(tokens.at(-1)?.id).toBe(created.token.id)
 		expect(JSON.stringify(adminDb.state.audit)).not.toContain(created.secret)
+	})
+
+	it('crea un token de solo lectura de un stage, y la lista lo dice', async () => {
+		const created = await identityUseCases.createToken({
+			name: 'claude-staging',
+			project: 'aumi-agents',
+			stage: 'staging',
+			readOnly: true,
+			expiresOn: '',
+		})
+
+		expect(created.token).toMatchObject({
+			scope: { kind: 'project', project: 'aumi-agents', stage: 'staging' },
+			readOnly: true,
+		})
+		const tokens = await identityUseCases.listTokens()
+		expect(tokens.at(-1)).toEqual(created.token)
+		expect(lastAudit()).toMatchObject({
+			action: 'token.create',
+			details: { project: 'aumi-agents', read_only: true, stage: 'staging' },
+		})
 	})
 
 	it('un 422 del backend llega al campo del formulario', async () => {
@@ -230,7 +255,13 @@ describe('tokens', () => {
 		)
 
 		const error = await identityUseCases
-			.createToken({ name: 'ci', project: 'auditfy', stage: '', expiresOn: '' })
+			.createToken({
+				name: 'ci',
+				project: 'auditfy',
+				stage: '',
+				readOnly: false,
+				expiresOn: '',
+			})
 			.catch((caught: unknown) => caught)
 
 		expect(error).toBeInstanceOf(ValidationError)
@@ -242,7 +273,13 @@ describe('tokens', () => {
 		server.use(http.post(api('/tokens'), () => apiError(404, 'not_found', 'no existe')))
 
 		await expect(
-			identityUseCases.createToken({ name: 'ci', project: 'x', stage: '', expiresOn: '' }),
+			identityUseCases.createToken({
+				name: 'ci',
+				project: 'x',
+				stage: '',
+				readOnly: false,
+				expiresOn: '',
+			}),
 		).rejects.toBeInstanceOf(TokenScopeNotFound)
 	})
 

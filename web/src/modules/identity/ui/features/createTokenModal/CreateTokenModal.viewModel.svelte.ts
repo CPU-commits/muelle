@@ -127,6 +127,7 @@ export class CreateTokenModalViewModel {
 			name: this.name,
 			project: this.project,
 			stage: this.stage,
+			readOnly: false,
 			expiresOn: this.expiresOn,
 		}
 		// Todos los campos mal se marcan a la vez, antes de mandar nada.
