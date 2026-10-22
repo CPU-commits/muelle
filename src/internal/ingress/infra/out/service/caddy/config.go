@@ -31,6 +31,11 @@ var clientIPHeaders = []string{"CF-Connecting-IP", "X-Forwarded-For"}
 // de Cloudflare, no los del host.
 var dnsResolvers = []string{"1.1.1.1:53", "1.0.0.1:53"}
 
+// originTag va en cada certificado de Origin CA de load_pem, y
+// originTag:<hostname> lo nombra: nadie los usa, sirven para reconocerlos
+// en GET /config/ (§7.2 del diseño de Origin CA).
+const originTag = "muelle_origin_ca"
+
 // Los structs del JSON de Caddy. El orden de los campos es el del JSON.
 
 type config struct {
@@ -58,6 +63,13 @@ type server struct {
 	ClientIPHeaders      []string       `json:"client_ip_headers"`
 	TrustedProxiesStrict int            `json:"trusted_proxies_strict"`
 	Routes               []route        `json:"routes"`
+	AutomaticHTTPS       *autoHTTPS     `json:"automatic_https,omitzero"`
+}
+
+// autoHTTPS: los hosts de skip_certificates no los maneja ACME (los de
+// Origin CA), pero siguen con el redirect a HTTPS.
+type autoHTTPS struct {
+	SkipCertificates []string `json:"skip_certificates"`
 }
 
 type trustedProxies struct {
@@ -110,7 +122,20 @@ type headerOps struct {
 }
 
 type tlsApp struct {
-	Automation automation `json:"automation"`
+	Certificates        *tlsCertificates `json:"certificates,omitzero"`
+	Automation          *automation      `json:"automation,omitzero"`
+	DisableOCSPStapling bool             `json:"disable_ocsp_stapling,omitzero"`
+}
+
+type tlsCertificates struct {
+	LoadPEM []pemPair `json:"load_pem"`
+}
+
+// pemPair es un certificado cargado: la hoja y su clave en PEM.
+type pemPair struct {
+	Certificate string   `json:"certificate"`
+	Key         string   `json:"key"`
+	Tags        []string `json:"tags"`
 }
 
 type automation struct {
@@ -160,19 +185,33 @@ type certificateAuthority struct {
 //     X-Real-IP; después las de los dominios, en el orden de cfg.Routes;
 //     todas terminal;
 //   - TLS en hasta dos políticas con subjects ordenados: cloudflare (DNS-01,
-//     solo con token) y http. Sin políticas no va apps.tls. Con InternalCA,
-//     los emisores son la CA interna de Caddy.
+//     solo con token) y http. Con InternalCA, los emisores son la CA interna
+//     de Caddy;
+//   - un host con un certificado de Origin CA (OriginCA, contrato §3.7) no
+//     va en ninguna política: su certificado va en
+//     apps.tls.certificates.load_pem (por hostname, con sus tags), el host en
+//     automatic_https.skip_certificates (ordenados) y, si hay alguno,
+//     apps.tls.disable_ocsp_stapling (Caddy no espera al OCSP al cargarlos);
+//   - sin políticas no va automation, y sin políticas ni certificados no va
+//     apps.tls.
 //
-// Si el email ACME o el token tienen { o }, devuelve
-// service.ErrPlaceholderInSettings sin armar nada: Caddy los expandiría
-// como placeholders. Se serializa con orden fijo (los golden dependen de eso).
+// Si el email ACME, el token o un certificado de Origin CA tienen { o },
+// devuelve service.ErrPlaceholderInSettings sin armar nada: Caddy los
+// expandiría como placeholders. Se serializa con orden fijo (los golden
+// dependen de eso).
 func Render(cfg service.ProxyConfig) ([]byte, error) {
 	if strings.ContainsAny(cfg.ACMEEmail, "{}") || strings.ContainsAny(cfg.CloudflareToken, "{}") {
 		return nil, service.ErrPlaceholderInSettings
 	}
 	hasToken := cfg.CloudflareToken != ""
-	var cfHosts, httpHosts []string
-	addHost := func(host string, tls entity.TLSMode) {
+	var cfHosts, httpHosts, skip []string
+	var pems []pemPair
+	addHost := func(host string, tls entity.TLSMode, origin *service.OriginPEM) {
+		if origin != nil {
+			skip = append(skip, host)
+			pems = append(pems, pemPair{Certificate: origin.CertPEM, Key: origin.KeyPEM, Tags: []string{originTag, originTag + ":" + host}})
+			return
+		}
 		if hasToken && tls == entity.TLSCloudflare {
 			cfHosts = append(cfHosts, host)
 		} else {
@@ -183,7 +222,7 @@ func Render(cfg service.ProxyConfig) ([]byte, error) {
 	routes := make([]route, 0, len(cfg.Routes)+1)
 	if p := cfg.Panel; p != nil {
 		routes = append(routes, panelRoute(p))
-		addHost(p.Hostname, p.TLS)
+		addHost(p.Hostname, p.TLS, p.OriginCA)
 	}
 	for _, r := range cfg.Routes {
 		routes = append(routes, route{
@@ -191,18 +230,28 @@ func Render(cfg service.ProxyConfig) ([]byte, error) {
 			Handle:   []any{reverseProxy{Handler: "reverse_proxy", Upstreams: []upstream{{Dial: r.Upstream}}}},
 			Terminal: true,
 		})
-		addHost(r.Hostname, r.TLS)
+		addHost(r.Hostname, r.TLS, r.OriginCA)
+	}
+	for _, p := range pems {
+		if strings.ContainsAny(p.Certificate, "{}") || strings.ContainsAny(p.Key, "{}") {
+			return nil, service.ErrPlaceholderInSettings
+		}
 	}
 
+	srv := server{
+		Listen:               []string{":443"},
+		TrustedProxies:       trustedProxies{Source: "static", Ranges: CloudflareRanges},
+		ClientIPHeaders:      clientIPHeaders,
+		TrustedProxiesStrict: 1,
+		Routes:               routes,
+	}
+	if len(skip) > 0 {
+		slices.Sort(skip)
+		srv.AutomaticHTTPS = &autoHTTPS{SkipCertificates: skip}
+	}
 	out := config{
 		Admin: adminConfig{Listen: naming.CaddyAdminListen},
-		Apps: appsConfig{HTTP: httpApp{Servers: map[string]server{serverName: {
-			Listen:               []string{":443"},
-			TrustedProxies:       trustedProxies{Source: "static", Ranges: CloudflareRanges},
-			ClientIPHeaders:      clientIPHeaders,
-			TrustedProxiesStrict: 1,
-			Routes:               routes,
-		}}}},
+		Apps:  appsConfig{HTTP: httpApp{Servers: map[string]server{serverName: srv}}},
 	}
 
 	var policies []policy
@@ -212,8 +261,17 @@ func Render(cfg service.ProxyConfig) ([]byte, error) {
 	if len(httpHosts) > 0 {
 		policies = append(policies, newPolicy(httpHosts, cfg, false))
 	}
+	var tls tlsApp
 	if len(policies) > 0 {
-		out.Apps.TLS = &tlsApp{Automation: automation{Policies: policies}}
+		tls.Automation = &automation{Policies: policies}
+	}
+	if len(pems) > 0 {
+		slices.SortFunc(pems, func(a, b pemPair) int { return strings.Compare(a.Tags[1], b.Tags[1]) })
+		tls.Certificates = &tlsCertificates{LoadPEM: pems}
+		tls.DisableOCSPStapling = true
+	}
+	if tls.Automation != nil || tls.Certificates != nil {
+		out.Apps.TLS = &tls
 	}
 	if cfg.InternalCA {
 		out.Apps.PKI = &pkiApp{CertificateAuthorities: map[string]certificateAuthority{"local": {InstallTrust: false}}}
