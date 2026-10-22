@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 )
 
@@ -43,6 +44,11 @@ type OriginCert struct {
 	RevokeFailures int
 	NextRevokeAt   *time.Time
 }
+
+// OriginKeyAAD liga la clave cifrada de un certificado a su fila
+// (origin_ca_certs:private_key:<id>, la lista canónica de
+// shared/infra/out/crypto).
+func OriginKeyAAD(id int64) string { return "origin_ca_certs:private_key:" + strconv.FormatInt(id, 10) }
 
 // redacted es c con la clave como "***" (si hay).
 func (c OriginCert) redacted() OriginCert {
