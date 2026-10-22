@@ -726,6 +726,11 @@ Ajustes · Tokens (`identity`), según el diseño del MCP
   es `422 project: …`, sin `read_only` es `422 read_only: …`, y un tipo equivocado es
   `400 invalid_json`. La base de ejemplo tiene un token de solo lectura (`claude-auditfy`) y
   uno de todos los proyectos (`claude-debug`).
+- La Auditoría (`admin`) lee de los `details` de `GET /audit` solo `via` (contrato §8.6): lo
+  demás Zod lo descarta, y unos details que no son un objeto con un `via` de texto quedan en
+  `{}` sin romper la página. `"via": "mcp"` es `AuditEvent.viaMcp`, y la fila dice "vía MCP"
+  junto a quién. La base de ejemplo del mock tiene un deploy por MCP (`extractor-ci`) en la
+  primera página.
 
 ### MSW
 
