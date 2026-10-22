@@ -63,7 +63,7 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 	log := slog.New(slog.NewTextHandler(sf.log, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	settings := outservice.NewProxySettingsReader(sf.db, sf.cipher)
 	catalog := outservice.NewCatalogReader(sf.db)
-	sf.syncer = NewSyncer(settings, sf.repo, catalog, caddy.NewAdmin(sf.caddy.Dial), sf.state, sf.clock,
+	sf.syncer = NewSyncer(settings, sf.repo, catalog, OriginRepos{}, caddy.NewAdmin(sf.caddy.Dial), sf.state, sf.clock,
 		defCaddyImage, false, func() { sf.fails.Add(1) }, log)
 	d := dockertest.New()
 	rt := caddy.NewRuntime(d, testCaddyNames, log)

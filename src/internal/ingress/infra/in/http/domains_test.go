@@ -71,7 +71,7 @@ func newDomainsFixture(t *testing.T) *domainsFixture {
 	repo := reposqlite.NewDomains(db)
 	state := usecases.NewProxyState()
 	state.Loaded(clk.Now())
-	syncer := usecases.NewSyncer(settings, repo, catalog, caddy.NewAdmin(admin.Dial), state, clk, "", false, nil, log)
+	syncer := usecases.NewSyncer(settings, repo, catalog, usecases.OriginRepos{}, caddy.NewAdmin(admin.Dial), state, clk, "", false, nil, log)
 	ops := &usecases.Ops{}
 	d := usecases.DomainDeps{
 		Repo: repo, Catalog: catalog, Settings: settings, DNS: cloudflare.New(f.cf.URL()), Syncer: syncer,

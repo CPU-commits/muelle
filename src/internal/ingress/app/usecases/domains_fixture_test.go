@@ -91,6 +91,7 @@ type ucFixture struct {
 	caddy  *caddytest.Admin
 	clock  *clock.Manual
 	repo   *reposqlite.Domains
+	origin OriginRepos
 	state  *ProxyState
 	syncer *Syncer
 	probe  *fakeProbe
@@ -121,12 +122,13 @@ func newUCFixture(t *testing.T) *ucFixture {
 		db: db, cipher: c, cf: cftest.New(t), caddy: caddytest.New(t),
 		clock: clock.NewManual(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)),
 		repo:  reposqlite.NewDomains(db), state: NewProxyState(), probe: &fakeProbe{def: invalidCert}, ops: &Ops{},
+		origin: OriginRepos{Certs: reposqlite.NewOriginCerts(db, c), Hosts: reposqlite.NewOriginHosts(db)},
 	}
 	f.cf.AddToken(dnsToken)
 	f.cf.AddZone("z1", "tudominio.cl")
 	settings := outservice.NewProxySettingsReader(db, c)
 	catalog := outservice.NewCatalogReader(db)
-	f.syncer = NewSyncer(settings, f.repo, catalog, caddy.NewAdmin(f.caddy.Dial), f.state, f.clock, "", false, nil, log)
+	f.syncer = NewSyncer(settings, f.repo, catalog, f.origin, caddy.NewAdmin(f.caddy.Dial), f.state, f.clock, "", false, nil, log)
 	f.certs = NewCertChecker(f.probe, f.repo, f.state, f.ops, f.clock, time.Second, time.Second, time.Second, log)
 	f.deps = DomainDeps{
 		Repo: f.repo, Catalog: catalog, Settings: settings, DNS: cloudflare.New(f.cf.URL()), Syncer: f.syncer,

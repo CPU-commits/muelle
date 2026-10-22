@@ -102,6 +102,7 @@ func New(d Deps) *Module {
 	catalog := outservice.NewCatalogReader(d.DB)
 	registries := outservice.NewRegistriesReader(d.DB, d.Cipher)
 	domains := reposqlite.NewDomains(d.DB)
+	origin := usecases.OriginRepos{Certs: reposqlite.NewOriginCerts(d.DB, d.Cipher), Hosts: reposqlite.NewOriginHosts(d.DB)}
 	runtime := caddy.NewRuntime(d.Docker, caddy.Names{
 		Container: o.CaddyContainer, PanelNetwork: o.PanelNetwork,
 		DataVolume: o.CaddyDataVolume, ConfigVolume: o.CaddyConfigVolume, AdminVolume: o.CaddyAdminVolume,
@@ -109,7 +110,7 @@ func New(d Deps) *Module {
 
 	m := &Module{state: usecases.NewProxyState()}
 	// Un Sync que falla despierta al Retrier, que reintenta con backoff.
-	m.syncer = usecases.NewSyncer(settings, domains, catalog, caddy.NewAdmin(o.CaddyAdminDial), m.state, d.Clock,
+	m.syncer = usecases.NewSyncer(settings, domains, catalog, origin, caddy.NewAdmin(o.CaddyAdminDial), m.state, d.Clock,
 		defImage, o.InternalCA, func() { m.retrier.Kick() }, d.Log)
 	m.retrier = usecases.NewRetrier(func(ctx context.Context) error { return m.syncer.Sync(ctx, false) },
 		o.Timing.RetryMin, o.Timing.RetryMax)

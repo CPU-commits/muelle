@@ -25,6 +25,17 @@ const (
 	msgSyncInternal     = "error interno armando la configuración"
 )
 
+// OriginRepos son las tablas de los certificados de Cloudflare Origin CA
+// (migración 0006). El cero (los dos nil) es "sin Origin CA": solo para los
+// tests que no lo usan.
+type OriginRepos struct {
+	Certs repository.OriginCerts
+	Hosts repository.OriginHosts
+}
+
+// set dice si están las dos tablas.
+func (r OriginRepos) set() bool { return r.Certs != nil && r.Hosts != nil }
+
 // Syncer arma la configuración completa de Caddy desde la base y la manda
 // (§8 del spec). Las escrituras a Caddy pasan por su mutex: un POST /load a
 // la vez, y la configuración se arma con el mutex tomado, así uno viejo
@@ -34,6 +45,7 @@ type Syncer struct {
 	settings   service.Settings
 	domains    repository.Domains
 	catalog    service.Catalog
+	origin     OriginRepos
 	admin      service.CaddyAdmin
 	state      *ProxyState
 	clock      clock.Clock
@@ -41,35 +53,56 @@ type Syncer struct {
 	internalCA bool
 	onFail     func()
 	log        *slog.Logger
+
+	// lastGood es LastGoodBuild, con su propio mutex: el reconciliador de
+	// Origin CA lo lee sin esperar un Sync en curso.
+	lastGoodMu sync.Mutex
+	lastGood   time.Time
 }
 
-// NewSyncer arma el Syncer. defImage es la imagen de Caddy de esta versión
-// (naming.CaddyImageFor), que decide si el proxy está habilitado; internalCA
-// pide la CA interna de Caddy (solo integración); onFail se llama después de
-// cada Sync que falla (los reintentos con backoff).
-func NewSyncer(settings service.Settings, domains repository.Domains, catalog service.Catalog, admin service.CaddyAdmin,
-	state *ProxyState, clk clock.Clock, defImage string, internalCA bool, onFail func(), log *slog.Logger) *Syncer {
+// NewSyncer arma el Syncer. origin son las tablas de Origin CA; defImage es
+// la imagen de Caddy de esta versión (naming.CaddyImageFor), que decide si
+// el proxy está habilitado; internalCA pide la CA interna de Caddy (solo
+// integración); onFail se llama después de cada Sync que falla (los
+// reintentos con backoff).
+func NewSyncer(settings service.Settings, domains repository.Domains, catalog service.Catalog, origin OriginRepos,
+	admin service.CaddyAdmin, state *ProxyState, clk clock.Clock, defImage string, internalCA bool, onFail func(),
+	log *slog.Logger) *Syncer {
 	if onFail == nil {
 		onFail = func() {}
 	}
 	return &Syncer{
-		settings: settings, domains: domains, catalog: catalog, admin: admin, state: state, clock: clk,
+		settings: settings, domains: domains, catalog: catalog, origin: origin, admin: admin, state: state, clock: clk,
 		defImage: defImage, internalCA: internalCA, onFail: onFail, log: log,
 	}
 }
 
+// LastGoodBuild es el momento en que empezó a leer la base el último Sync
+// cuyo POST /load salió bien (cero si no hubo uno desde que arrancó). Un
+// certificado de Origin CA retirado antes de ese momento ya no está en lo
+// que sirve Caddy, y se puede revocar (§6 del diseño de Origin CA). No sirve
+// la hora del fin: un Sync que leyó la base antes del retiro y terminó
+// después mandó una configuración que todavía lo trae.
+func (s *Syncer) LastGoodBuild() time.Time {
+	s.lastGoodMu.Lock()
+	defer s.lastGoodMu.Unlock()
+	return s.lastGood
+}
+
 // Sync, con el mutex tomado y un plazo de 30 s: lee los ajustes (sin el
 // proxy habilitado devuelve nil sin mandar nada, contrato §3.4), la zona del
-// panel, los dominios y las apps, arma la configuración (BuildProxyConfig) y
-// la manda. force recarga aunque Caddy ya tenga la misma. Un error queda en
-// el estado y en el log (nunca la configuración ni el token), llama a onFail
-// y se devuelve.
+// panel, los dominios, las apps y lo de Origin CA, arma la configuración
+// (BuildProxyConfig) y la manda. force recarga aunque Caddy ya tenga la
+// misma. Si sale bien, LastGoodBuild pasa a ser la hora de antes de leer.
+// Un error queda en el estado y en el log (nunca la configuración, el token
+// ni una clave), llama a onFail y se devuelve.
 func (s *Syncer) Sync(ctx context.Context, force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, syncTimeout)
 	defer cancel()
 
+	started := s.clock.Now()
 	p, err := s.settings.ProxySettings(ctx)
 	if err != nil {
 		return s.fail(fmt.Errorf("leyendo los ajustes del proxy: %w", err))
@@ -85,6 +118,9 @@ func (s *Syncer) Sync(ctx context.Context, force bool) error {
 		return s.fail(err)
 	}
 	s.state.Loaded(s.clock.Now())
+	s.lastGoodMu.Lock()
+	s.lastGood = started
+	s.lastGoodMu.Unlock()
 	return nil
 }
 
@@ -112,7 +148,9 @@ func syncStarting(ctx context.Context, s *Syncer, lo, hi time.Duration) error {
 	}
 }
 
-// build lee lo demás de la base y arma la configuración.
+// build lee lo demás de la base y arma la configuración. Lo de Origin CA
+// (los active con la clave descifrada y lo observado) se lee solo con la
+// opción en uso.
 func (s *Syncer) build(ctx context.Context, p shared.ProxySettings) (service.ProxyConfig, error) {
 	dns, err := s.settings.PanelDNS(ctx)
 	if err != nil {
@@ -126,7 +164,16 @@ func (s *Syncer) build(ctx context.Context, p shared.ProxySettings) (service.Pro
 	if err != nil {
 		return service.ProxyConfig{}, fmt.Errorf("leyendo las apps: %w", err)
 	}
-	return service.BuildProxyConfig(p, dns.ZoneID, domains, apps, s.internalCA, service.OriginInputs{}), nil
+	origin := service.OriginInputs{Now: s.clock.Now()}
+	if service.OriginOn(p, true) && s.origin.set() {
+		if origin.Certs, err = s.origin.Certs.ActiveWithKeys(ctx); err != nil {
+			return service.ProxyConfig{}, fmt.Errorf("leyendo los certificados de Origin CA: %w", err)
+		}
+		if origin.Hosts, err = s.origin.Hosts.All(ctx); err != nil {
+			return service.ProxyConfig{}, fmt.Errorf("leyendo lo observado en Cloudflare: %w", err)
+		}
+	}
+	return service.BuildProxyConfig(p, dns.ZoneID, domains, apps, s.internalCA, origin), nil
 }
 
 // fail deja el error en el estado y en el log, y llama a onFail.
