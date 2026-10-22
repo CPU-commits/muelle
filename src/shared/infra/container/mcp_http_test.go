@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -290,6 +291,21 @@ func TestMCPReadDeadline(t *testing.T) {
 	if err != nil || res.IsError || len(res.Content) != 1 || res.Content[0].(*sdk.TextContent).Text != `{"ok":"esperé"}` {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
+
+	// Lo mismo con get_deploy y wait_s: el deploy queda queued (los workers
+	// no corren), y la espera termina en timed_out, no con el ctx cancelado.
+	w := e.do("POST", "/api/v1/projects/p1/stages/s1/apps/a/deploys", map[string]any{}, e.s)
+	httptestutil.Expect(t, w, http.StatusAccepted)
+	id := httptestutil.Decode[map[string]any](t, w)["id"]
+	got, text := mcpCall(t, cs, "get_deploy", map[string]any{"project": "p1", "stage": "s1", "app": "a", "id": id, "wait_s": 2})
+	var out struct {
+		Status   string `json:"status"`
+		WaitedS  int    `json:"waited_s"`
+		TimedOut bool   `json:"timed_out"`
+	}
+	if err := json.Unmarshal([]byte(text), &out); got != "ok" || err != nil || out.Status != "queued" || !out.TimedOut || out.WaitedS != 2 {
+		t.Fatalf("get_deploy con wait_s: %s %s", got, text)
+	}
 }
 
 // sessionCookieHeader es el header Cookie de la sesión de e.
@@ -298,4 +314,60 @@ func sessionCookieHeader(t *testing.T, e *mcpEnv) string {
 	r := httptest.NewRequest("GET", "/", nil)
 	e.s(r)
 	return r.Header.Get("Cookie")
+}
+
+// De punta a punta (contrato §8.6): deploy y set_env con un token de
+// escritura dejan el deploy con el nombre del token y trigger api, y la
+// auditoría con el token como actor y "via": "mcp"; con un token de solo
+// lectura, deploy no existe.
+func TestMCPWritesEndToEnd(t *testing.T) {
+	e := newMCPEnv(t)
+	cs, err := e.connect(t, e.ps, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, text := mcpCall(t, cs, "deploy", map[string]any{"project": "p1", "stage": "s1", "app": "a"})
+	var q struct {
+		ID     int64  `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(text), &q); got != "ok" || err != nil || q.ID == 0 || q.Status != "queued" {
+		t.Fatalf("deploy: %s %s", got, text)
+	}
+	if got, text := mcpCall(t, cs, "set_env", map[string]any{"project": "p1", "stage": "s1", "app": "a",
+		"vars": map[string]string{"LOG_LEVEL": "debug"}}); got != "ok" || text != `{"set":["LOG_LEVEL"],"note":"Se aplican en el próximo deploy; get_app y list_apps dicen si quedaron cambios pendientes."}` {
+		t.Fatalf("set_env: %s %s", got, text)
+	}
+
+	w := e.do("GET", fmt.Sprintf("/api/v1/projects/p1/stages/s1/apps/a/deploys/%d", q.ID), nil, e.s)
+	httptestutil.Expect(t, w, http.StatusOK)
+	if d := httptestutil.Decode[map[string]any](t, w); d["actor_name"] != "ps" || d["trigger"] != "api" {
+		t.Errorf("el deploy: actor_name=%v trigger=%v", d["actor_name"], d["trigger"])
+	}
+
+	w = e.do("GET", "/api/v1/audit", nil, e.s)
+	httptestutil.Expect(t, w, http.StatusOK)
+	seen := map[string]bool{}
+	for _, ev := range httptestutil.Decode[[]map[string]any](t, w) {
+		action, _ := ev["action"].(string)
+		if ev["target"] != "app:p1/s1/a" || (action != "deploy.create" && action != "env.patch") || ev["actor_name"] != "ps" {
+			continue
+		}
+		details, _ := ev["details"].(map[string]any)
+		if ev["actor_type"] != "token" || details["via"] != "mcp" {
+			t.Errorf("%s: actor_type=%v details=%v", action, ev["actor_type"], details)
+		}
+		seen[action] = true
+	}
+	if !seen["deploy.create"] || !seen["env.patch"] {
+		t.Errorf("faltan eventos del token en la auditoría: %v", seen)
+	}
+
+	ro, err := e.connect(t, e.psl, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, text := mcpCall(t, ro, "deploy", map[string]any{"project": "p1", "stage": "s1", "app": "a"}); got != "unknown" {
+		t.Errorf("deploy con un token de solo lectura: %s %s", got, text)
+	}
 }
