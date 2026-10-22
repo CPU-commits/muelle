@@ -63,6 +63,7 @@ type originCA struct {
 	status    map[string]string          // zona → status, si no es active
 	omitPerms bool
 	issued    []*IssuedCert
+	now       func() time.Time
 }
 
 func newOriginCA(t testing.TB) originCA {
@@ -89,7 +90,16 @@ func newOriginCA(t testing.TB) originCA {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return originCA{root: root, rootKey: key, ssl: map[string]map[string]bool{}, status: map[string]string{}}
+	return originCA{root: root, rootKey: key, ssl: map[string]map[string]bool{}, status: map[string]string{}, now: time.Now}
+}
+
+// SetClock cambia la hora con que se firman los certificados (NotBefore)
+// y se revocan (revoked_at); por defecto, time.Now. La raíz vale de una hora
+// antes de New a diez años después.
+func (s *Server) SetClock(now func() time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.origin.now = now
 }
 
 // OriginRoot es la raíz de prueba que firma los certificados de Origin CA.
@@ -242,7 +252,7 @@ func (s *Server) createOriginCert(w http.ResponseWriter, r *http.Request, token 
 		fail(w, http.StatusInternalServerError, 1200, "Failed to sign certificate")
 		return
 	}
-	now := time.Now().UTC().Truncate(time.Second)
+	now := s.origin.now().UTC().Truncate(time.Second)
 	tmpl := &x509.Certificate{
 		SerialNumber: serial.Add(serial, big.NewInt(1000)),
 		Subject: pkix.Name{Organization: []string{"CloudFlare, Inc."}, OrganizationalUnit: []string{"CloudFlare Origin CA"},
@@ -290,5 +300,5 @@ func (s *Server) revokeOriginCert(w http.ResponseWriter, token, id string) {
 		return
 	}
 	c.Revoked = true
-	ok(w, map[string]string{"id": id, "revoked_at": time.Now().UTC().Format(time.RFC3339Nano)}, nil)
+	ok(w, map[string]string{"id": id, "revoked_at": s.origin.now().UTC().Format(time.RFC3339Nano)}, nil)
 }

@@ -221,3 +221,24 @@ func TestZonesPermissions(t *testing.T) {
 		t.Fatalf("sin el campo: %s", r.body)
 	}
 }
+
+// SetClock cambia la hora con que el Origin CA falso firma: los tests con un
+// reloj manual emiten certificados que valen en esa hora.
+func TestOriginCertClock(t *testing.T) {
+	s := originServer(t)
+	at := time.Date(2027, 3, 1, 12, 30, 0, 0, time.UTC)
+	s.SetClock(func() time.Time { return at })
+	r := call(t, s, "ssl", "POST", "/certificates", certBody(t, testCSR(t, "api.auditfy.cl"), 90, "api.auditfy.cl"))
+	var res certResult
+	if err := json.Unmarshal(r.env.Result, &res); err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode([]byte(res.Certificate))
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !leaf.NotBefore.Equal(at) || !leaf.NotAfter.Equal(at.Add(90*24*time.Hour)) {
+		t.Fatalf("de %s a %s", leaf.NotBefore, leaf.NotAfter)
+	}
+}
