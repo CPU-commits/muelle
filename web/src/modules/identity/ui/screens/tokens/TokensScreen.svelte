@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Attachment } from 'svelte/attachments'
+	import { page } from '$app/state'
 	import { m } from '@/shared/ui/i18n/paraglide/messages'
 	import {
 		Badge,
@@ -43,7 +44,8 @@
 	} from './styles.css'
 	import { type TokenRow, TokensViewModel } from './Tokens.viewModel.svelte.ts'
 
-	const vm = new TokensViewModel()
+	// El servidor MCP está en el origen en que se abrió el panel, con su puerto si lo tiene.
+	const vm = new TokensViewModel(() => page.url.origin)
 	const activeId = $props.id()
 	const expiredId = `${activeId}-expired`
 	const secretId = `${activeId}-secret`
@@ -120,7 +122,11 @@
 				/>
 				<CopyButton value={vm.created.secret} target={secretId} />
 			</div>
-			<pre class={snippet} aria-label={m.identity_tokens_snippet_label()}>{vm.snippet}</pre>
+			{#if vm.canDeploy}
+				<pre
+					class={snippet}
+					aria-label={m.identity_tokens_snippet_label()}>{vm.snippet}</pre>
+			{/if}
 			{#snippet footer()}
 				<Button size="sm" onclick={vm.dismissCreated}>{m.identity_tokens_done()}</Button>
 			{/snippet}
