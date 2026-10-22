@@ -2,7 +2,7 @@ import { delay, http, HttpResponse, type RequestHandler } from 'msw'
 import { api, apiError, invalid, noContent, notFound } from '../api'
 import { adminDb, type MockRegistry } from '../db/admin'
 import { authDb } from '../db/auth'
-import { ingressDb, MOCK_BUSY_PORT } from '../db/ingress'
+import { ingressDb, MOCK_BUSY_PORT, MOCK_ZONE } from '../db/ingress'
 import { requireSession, sessionUser } from '../session'
 
 // `/settings` y `/audit` (admin/infra/in/http), y lo que agregan las Fases 2 y 3 según el
@@ -11,7 +11,10 @@ import { requireSession, sessionUser } from '../session'
 //
 // Para probar las respuestas de Cloudflare con `pnpm dev:mock`, el token que se pega elige
 // la respuesta: con "rechazado" Cloudflare lo rechaza, con "sinzonas" no ve zonas (los dos
-// 422 en `cloudflare_token`) y con "caido" no responde (502 `cloudflare_unavailable`).
+// 422 en `cloudflare_token`) y con "caido" no responde (502 `cloudflare_unavailable`). Para
+// los certificados de Cloudflare (Origin CA, contrato §3.7 y §4.1), con "sin-ssl" le falta
+// el permiso Zone → SSL and Certificates → Edit (422 al encenderlos, o al cambiar el token
+// con ellos encendidos) y con "ssl-lento" Cloudflare no responde al comprobarlo (502).
 
 const MAX_AUDIT_LIMIT = 500
 const DEFAULT_AUDIT_LIMIT = 100
@@ -58,6 +61,7 @@ interface SettingsBody {
 	proxy_https_port?: unknown
 	panel_allowed_cidrs?: unknown
 	cloudflare_token?: unknown
+	cloudflare_origin_ca?: unknown
 	confirm_lockout?: unknown
 }
 
@@ -70,6 +74,7 @@ const SETTINGS_FIELDS = new Set([
 	'proxy_https_port',
 	'panel_allowed_cidrs',
 	'cloudflare_token',
+	'cloudflare_origin_ca',
 	'confirm_lockout',
 ])
 
@@ -109,6 +114,9 @@ function validateSettings(body: SettingsBody) {
 	}
 	if (body.confirm_lockout !== undefined && typeof body.confirm_lockout !== 'boolean') {
 		return apiError(400, 'invalid_json', 'confirm_lockout debe ser un booleano')
+	}
+	if (body.cloudflare_origin_ca !== undefined && typeof body.cloudflare_origin_ca !== 'boolean') {
+		return apiError(400, 'invalid_json', 'cloudflare_origin_ca debe ser un booleano')
 	}
 	if (body.public_ip !== undefined && !clearsOrMatches(body.public_ip, IPV4)) {
 		return invalid('public_ip', 'no es una IPv4 válida')
@@ -154,6 +162,69 @@ function validateSettings(body: SettingsBody) {
 	}
 	// Después de la forma, como el backend; el mensaje nunca trae el token.
 	if (hasPlaceholder(body.cloudflare_token)) return invalid('cloudflare_token', PLACEHOLDER)
+	return checkOriginCaNeedsToken(body)
+}
+
+/**
+ * Las dos reglas de `cloudflare_origin_ca` sin token (contrato §4.1), después de la forma del
+ * token: miran solo lo que cambia en este `PATCH`.
+ */
+function checkOriginCaNeedsToken(body: SettingsBody) {
+	const s = adminDb.state
+	const removesToken = body.cloudflare_token === ''
+	const tokenAfter = removesToken ? null : (body.cloudflare_token ?? s.cloudflareToken)
+	if (body.cloudflare_origin_ca === true && !s.cloudflareOriginCa && tokenAfter === null) {
+		return invalid(
+			'cloudflare_origin_ca',
+			'necesita el token de Cloudflare: configúralo antes de activarla',
+		)
+	}
+	// Sin un token guardado (encendida sin token, a mano), "" no quita nada.
+	if (
+		removesToken &&
+		s.cloudflareToken !== null &&
+		s.cloudflareOriginCa &&
+		body.cloudflare_origin_ca !== false
+	) {
+		return invalid(
+			'cloudflare_origin_ca',
+			'sin token no se pueden usar los certificados de Cloudflare: mándala en false en el mismo cambio para quitar el token',
+		)
+	}
+	return undefined
+}
+
+/**
+ * `CheckCloudflareOriginCA` (contrato §3.5 y §4.1): si la opción queda encendida, y se
+ * enciende en este `PATCH` o cambia el token, el token tiene que tener el permiso Zone → SSL
+ * and Certificates → Edit en sus zonas. El `422` va en `cloudflare_origin_ca` si se enciende
+ * acá, y si no en `cloudflare_token`. Apagarla nunca llama a Cloudflare.
+ */
+function checkOriginCaPermission(body: SettingsBody) {
+	const s = adminDb.state
+	const onAfter = body.cloudflare_origin_ca ?? s.cloudflareOriginCa
+	const turnsOn = body.cloudflare_origin_ca === true && !s.cloudflareOriginCa
+	const newToken =
+		typeof body.cloudflare_token === 'string' &&
+		body.cloudflare_token !== '' &&
+		body.cloudflare_token !== s.cloudflareToken
+			? body.cloudflare_token
+			: null
+	if (!onAfter || (!turnsOn && newToken === null)) return undefined
+	const token = newToken ?? s.cloudflareToken ?? ''
+	if (token.includes('ssl-lento')) {
+		return apiError(502, 'cloudflare_unavailable', 'Cloudflare no respondió')
+	}
+	if (token.includes('sin-ssl')) {
+		const field = turnsOn ? 'cloudflare_origin_ca' : 'cloudflare_token'
+		const end = turnsOn
+			? 'agrégalo al token en Cloudflare, o deja la opción apagada'
+			: 'agrégalo al token en Cloudflare, o apaga antes los certificados de Cloudflare'
+		return invalid(
+			field,
+			`el token no tiene el permiso Zone → SSL and Certificates → Edit en la zona ${MOCK_ZONE} (lo necesitan los certificados de Cloudflare): ${end}`,
+		)
+	}
 	return undefined
 }
 
@@ -219,12 +290,18 @@ function applySettings(body: SettingsBody): Record<string, unknown> {
 		s.cloudflareToken = body.cloudflare_token
 		s.cloudflareZones = MOCK_CLOUDFLARE_ZONES
 	}
+	// Mandar el valor que ya tiene no es un cambio: no va a la auditoría (contrato §4.1).
+	const originCaUnchanged = body.cloudflare_origin_ca === s.cloudflareOriginCa
+	if (typeof body.cloudflare_origin_ca === 'boolean' && !originCaUnchanged) {
+		s.cloudflareOriginCa = body.cloudflare_origin_ca
+	}
 	authDb.commit()
 	adminDb.commit()
 	// Lo que va a la auditoría: las claves y sus valores, el token solo como "set"/"removed".
 	return Object.fromEntries(
 		Object.entries(body)
 			.filter(([key]) => key !== 'confirm_lockout')
+			.filter(([key]) => key !== 'cloudflare_origin_ca' || !originCaUnchanged)
 			.map(([key, value]) =>
 				key === 'cloudflare_token' ? [key, value === '' ? 'removed' : 'set'] : [key, value],
 			),
@@ -348,6 +425,8 @@ export const adminHandlers: RequestHandler[] = [
 			const rejected = checkCloudflareToken(body.cloudflare_token)
 			if (rejected) return rejected
 		}
+		const withoutPermission = checkOriginCaPermission(body)
+		if (withoutPermission) return withoutPermission
 		const busy = checkProxyPorts(body)
 		if (busy) return busy
 		const portsChange =
@@ -358,7 +437,9 @@ export const adminHandlers: RequestHandler[] = [
 			http_port: adminDb.state.proxyHttpPort,
 			https_port: adminDb.state.proxyHttpsPort,
 		}
-		adminDb.record('settings.update', 'settings', applySettings(body))
+		const details = applySettings(body)
+		// Como el backend: sin nada que cambió, no hay evento.
+		if (Object.keys(details).length > 0) adminDb.record('settings.update', 'settings', details)
 		// El hook agenda la recreación de muelle-caddy si cambiaron los puertos (§3.5).
 		if (
 			before.http_port !== adminDb.state.proxyHttpPort ||
